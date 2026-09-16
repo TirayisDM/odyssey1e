@@ -8,7 +8,7 @@
 
 const { invoke } = window.__TAURI__.core;
 
-let state = { user: null, gameId: null, rolls: [] };
+let state = { user: null, gameId: null, characterId: null, sheet: null, rolls: [] };
 
 /* ---------- logging ---------- */
 
@@ -69,6 +69,9 @@ function paintUser() {
 
 function clearData() {
   state.gameId = null;
+  state.characterId = null;
+  state.sheet = null;
+  document.querySelector("#sheet-panel").hidden = true;
   state.rolls = [];
   document.querySelector("#games").innerHTML = "";
   document.querySelector("#characters").innerHTML = "";
@@ -118,7 +121,142 @@ async function loadCharacters() {
   if (!Array.isArray(chars)) return;
   for (const c of chars) {
     const mine = state.user && c.owner_uid === state.user.user_id;
-    ul.append(row(c.name, mine ? "mine" : "someone else's", null));
+    // Only your own character is selectable — the sheet editor writes,
+    // and the policies would refuse anyway. Better to not offer it.
+    ul.append(
+      row(
+        c.name,
+        mine ? "mine" : "someone else's",
+        mine ? () => selectCharacter(c.id) : null,
+        c.id === state.characterId
+      )
+    );
+  }
+}
+
+const ABILS = ["str", "dex", "con", "int", "wis", "cha"];
+
+async function selectCharacter(id) {
+  state.characterId = id;
+  await loadCharacters();
+  await loadSheet();
+}
+
+async function loadSheet() {
+  const panel = document.querySelector("#sheet-panel");
+  if (!state.characterId) { panel.hidden = true; return; }
+
+  const sheet = await call("get_sheet", { characterId: state.characterId });
+  if (!sheet) { panel.hidden = true; return; }
+  state.sheet = sheet;
+  panel.hidden = false;
+
+  const pb = Math.floor((sheet.level - 1) / 4) + 2;
+  document.querySelector("#sheet-who").textContent =
+    sheet.name + " · level " + sheet.level + " · PB +" + pb;
+  document.querySelector("#level").value = sheet.level;
+
+  // Abilities
+  const box = document.querySelector("#abilities");
+  box.innerHTML = "";
+  for (const code of ABILS) {
+    const a = sheet.abilities[code] || { score: 10, save_prof: false };
+    const mod = Math.floor((a.score - 10) / 2);
+
+    const el = document.createElement("div");
+    el.className = "abil";
+
+    const tag = document.createElement("b");
+    tag.textContent = code.toUpperCase();
+
+    const num = document.createElement("input");
+    num.type = "number"; num.min = 1; num.max = 30; num.value = a.score;
+
+    const m = document.createElement("span");
+    m.className = "mod";
+    m.textContent = (mod >= 0 ? "+" : "") + mod;
+
+    const lab = document.createElement("label");
+    const chk = document.createElement("input");
+    chk.type = "checkbox"; chk.checked = a.save_prof;
+    lab.append(chk, document.createTextNode("save"));
+
+    const save = async () => {
+      await call("set_ability", {
+        characterId: state.characterId,
+        ability: code,
+        score: Number(num.value),
+        saveProf: chk.checked,
+      });
+      await loadSheet();
+    };
+    num.addEventListener("change", save);
+    chk.addEventListener("change", save);
+
+    el.append(tag, num, m, lab);
+    box.append(el);
+  }
+
+  // Skills, with the bonus each one currently gives
+  const list = document.querySelector("#skills");
+  list.innerHTML = "";
+  for (const sk of sheet.skills) {
+    const prof = sheet.profs[sk.key] ?? 0;
+    const abilMod = Math.floor(((sheet.abilities[sk.ability]?.score ?? 10) - 10) / 2);
+    const bonus = abilMod + Math.floor(prof * pb);
+
+    const el = document.createElement("div");
+    el.className = "skillrow";
+
+    const nm = document.createElement("span");
+    nm.textContent = sk.name + " (" + sk.ability.toUpperCase() + ")";
+
+    const sel = document.createElement("select");
+    for (const [v, t] of [[0, "—"], [0.5, "half"], [1, "prof"], [2, "exp"]]) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t; o.selected = Number(prof) === v;
+      sel.append(o);
+    }
+    sel.addEventListener("change", async () => {
+      await call("set_skill_prof", {
+        characterId: state.characterId,
+        skillKey: sk.key,
+        prof: Number(sel.value),
+      });
+      await loadSheet();
+    });
+
+    const b = document.createElement("span");
+    b.className = "bonus";
+    b.textContent = (bonus >= 0 ? "+" : "") + bonus;
+
+    el.append(nm, sel, b);
+    list.append(el);
+  }
+
+  await updatePreview();
+}
+
+/// Show what the request would roll, before committing to it.
+async function updatePreview() {
+  const el = document.querySelector("#preview");
+  const req = val("#named-request");
+  if (!state.characterId || !req) {
+    el.textContent = "—";
+    el.classList.remove("live");
+    return;
+  }
+  try {
+    const r = await invoke("preview_request", {
+      characterId: state.characterId,
+      request: req,
+      mode: document.querySelector("#mode").value,
+    });
+    el.textContent = r.label + "  →  " + r.formula;
+    el.classList.add("live");
+  } catch (e) {
+    el.textContent = String(e);
+    el.classList.remove("live");
   }
 }
 
@@ -217,6 +355,30 @@ window.addEventListener("DOMContentLoaded", async () => {
       narrative: val("#patch-narr") || "The stone holds the truth.",
     });
     if (out) await loadRolls();
+  });
+
+  document.querySelector("#save-level").addEventListener("click", async () => {
+    if (!state.characterId) return log("set_level", "select a character first", true);
+    const ok = await call("set_level", {
+      characterId: state.characterId,
+      level: Number(val("#level")),
+    });
+    if (ok) await loadSheet();
+  });
+
+  // Preview updates as you type — the point is to see the modifier
+  // before you commit, not after.
+  document.querySelector("#named-request").addEventListener("input", updatePreview);
+  document.querySelector("#mode").addEventListener("change", updatePreview);
+
+  document.querySelector("#roll-named").addEventListener("click", async () => {
+    if (!state.characterId) return log("roll_named", "select a character first", true);
+    const r = await call("roll_named", {
+      characterId: state.characterId,
+      request: val("#named-request") || "insight",
+      mode: document.querySelector("#mode").value,
+    });
+    if (r) await loadRolls();
   });
 
   document.querySelector("#clear-log").addEventListener("click", () => {

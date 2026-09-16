@@ -45,3 +45,22 @@ button.tiny{padding:.1rem .45rem;font-size:11px;margin:0}
 .entry .val{color:var(--muted)}
 .entry.err .val{color:var(--bad)}
 .empty{color:var(--ok)}
+
+.abils{display:grid;grid-template-columns:repeat(2,1fr);gap:.3rem;margin-bottom:.6rem}
+.abil{display:flex;align-items:center;gap:.3rem;border:1px solid var(--line);
+      border-radius:4px;padding:.25rem .4rem}
+.abil b{width:2.1rem;font-size:11px;letter-spacing:.06em;color:var(--muted)}
+.abil input[type=number]{width:3.2rem;margin:0;padding:.18rem .3rem;text-align:center}
+.abil .mod{width:2rem;text-align:center;font:600 12px ui-monospace,Menlo,monospace}
+.abil label{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:.15rem}
+.abil input[type=checkbox]{margin:0;width:auto}
+.skillrow{display:flex;align-items:center;justify-content:space-between;gap:.4rem;
+          padding:.22rem .45rem;border:1px solid var(--line);border-radius:4px;margin-bottom:.2rem}
+.skillrow span{font:12px ui-monospace,Menlo,monospace}
+.skillrow select{width:auto;margin:0;padding:.1rem .25rem;font-size:11px;background:#0f1114;
+                 color:var(--fg);border:1px solid var(--line);border-radius:3px}
+.skillrow .bonus{color:var(--accent);font-weight:600;width:2.2rem;text-align:right}
+.preview{font:12px ui-monospace,Menlo,monospace;padding:.3rem 0 .5rem}
+.preview.live{color:var(--accent)}
+#mode{width:6rem;background:#0f1114;color:var(--fg);border:1px solid var(--line);
+      border-radius:4px;padding:.42rem;margin-bottom:.4rem}

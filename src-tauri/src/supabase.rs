@@ -267,3 +267,53 @@ pub fn rpc(token: &str, func: &str, body: &Value) -> Result<Value, String> {
     }
     serde_json::from_str(&text).map_err(|e| format!("bad JSON from Supabase: {}", e))
 }
+
+/// DELETE. Same refusal as rest_update: an unfiltered delete would take
+/// every row RLS allows, which is never what anyone meant.
+pub fn rest_delete(token: &str, path: &str, filter: &[(&str, &str)]) -> Result<(), String> {
+    if filter.is_empty() {
+        return Err("refusing to delete without a filter".to_string());
+    }
+    let resp = http()
+        .delete(rest_url(path))
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", token))
+        .query(filter)
+        .send()
+        .map_err(|e| format!("could not reach Supabase: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let text = resp.text().unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(error_message(status, &text));
+    }
+    Ok(())
+}
+
+/// INSERT ... ON CONFLICT DO UPDATE. `on_conflict` names the constraint
+/// columns, comma separated — PostgREST needs them spelled out because
+/// it cannot infer which unique index you meant.
+pub fn rest_upsert(
+    token: &str,
+    path: &str,
+    body: &Value,
+    on_conflict: &str,
+) -> Result<Value, String> {
+    let resp = http()
+        .post(rest_url(path))
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation,resolution=merge-duplicates")
+        .query(&[("on_conflict", on_conflict)])
+        .json(body)
+        .send()
+        .map_err(|e| format!("could not reach Supabase: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let text = resp.text().unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(error_message(status, &text));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("bad JSON from Supabase: {}", e))
+}

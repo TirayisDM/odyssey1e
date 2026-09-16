@@ -46,8 +46,28 @@
         <button id="create-char">Create character</button>
       </section>
 
+      <section id="sheet-panel" hidden>
+        <h2>Sheet <span id="sheet-who" class="muted"></span></h2>
+        <div class="row">
+          <input id="level" type="number" min="1" max="20" placeholder="level" />
+          <button id="save-level" class="ghost">Set level</button>
+        </div>
+        <div id="abilities" class="abils"></div>
+        <div id="skills" class="list"></div>
+      </section>
+
       <section>
         <h2>Rolls</h2>
+        <div class="row">
+          <input id="named-request" placeholder="insight, wis save, ath…" />
+          <select id="mode">
+            <option value="normal">Normal</option>
+            <option value="adv">Adv</option>
+            <option value="dis">Dis</option>
+          </select>
+        </div>
+        <div id="preview" class="preview muted">—</div>
+        <button id="roll-named">Roll</button>
         <input id="roll-request" placeholder="request, e.g. insight" />
         <input id="roll-formula" placeholder="formula, e.g. 2d20kh1+5 (blank = pending)" />
         <button id="create-roll">Insert roll</button>

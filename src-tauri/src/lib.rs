@@ -9,9 +9,11 @@
 //! thread pool, so the blocking HTTP in `supabase` is fine here and the
 //! code stays readable.
 
+mod character;
 mod dice;
 mod supabase;
 
+use character::{Resolved, Sheet};
 use dice::RollResult;
 use serde_json::{json, Value};
 use supabase::{AppState, Session};
@@ -234,6 +236,145 @@ fn patch_roll_narrative(
     )
 }
 
+/* ============================ CHARACTER SHEET ============================ */
+
+/// Everything the resolver needs, in one call: level, six abilities, the
+/// skill catalogue for this game, and which skills are proficient.
+#[tauri::command]
+fn get_sheet(state: State<AppState>, character_id: String) -> Result<Sheet, String> {
+    let token = state.token()?;
+    character::load_sheet(&token, &character_id)
+}
+
+#[tauri::command]
+fn set_level(state: State<AppState>, character_id: String, level: i64) -> Result<Value, String> {
+    if !(1..=20).contains(&level) {
+        return Err("level must be 1-20".to_string());
+    }
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "level": level }),
+    )
+}
+
+/// Upsert one ability. The row always exists — the database seeds six on
+/// character creation — so this is an update, not an insert.
+#[tauri::command]
+fn set_ability(
+    state: State<AppState>,
+    character_id: String,
+    ability: String,
+    score: i64,
+    save_prof: bool,
+) -> Result<Value, String> {
+    if !(1..=30).contains(&score) {
+        return Err("score must be 1-30".to_string());
+    }
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "character_abilities",
+        &[
+            ("character_id", &format!("eq.{}", character_id)),
+            ("ability", &format!("eq.{}", ability)),
+        ],
+        &json!({ "score": score, "save_prof": save_prof }),
+    )
+}
+
+/// Set a skill's proficiency multiplier. Zero deletes the row rather
+/// than storing it: an absent row already means untrained, and keeping
+/// both representations of the same fact invites them to disagree.
+#[tauri::command]
+fn set_skill_prof(
+    state: State<AppState>,
+    character_id: String,
+    skill_key: String,
+    prof: f64,
+) -> Result<Value, String> {
+    if ![0.0, 0.5, 1.0, 2.0].contains(&prof) {
+        return Err("prof must be 0, 0.5, 1 or 2".to_string());
+    }
+    let token = state.token()?;
+    let filter = [
+        ("character_id", format!("eq.{}", character_id)),
+        ("skill_key", format!("eq.{}", skill_key)),
+    ];
+    let filter: Vec<(&str, &str)> =
+        filter.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    if prof == 0.0 {
+        supabase::rest_delete(&token, "character_skills", &filter)?;
+        return Ok(json!([]));
+    }
+
+    supabase::rest_upsert(
+        &token,
+        "character_skills",
+        &json!({ "character_id": character_id, "skill_key": skill_key, "prof": prof }),
+        "character_id,skill_key",
+    )
+}
+
+/* ============================ NAMED ROLLS ============================ */
+
+/// What would this request roll, and why — without rolling it. Lets a UI
+/// show "Insight (WIS) +6" on the button before anyone commits.
+#[tauri::command]
+fn preview_request(
+    state: State<AppState>,
+    character_id: String,
+    request: String,
+    mode: String,
+) -> Result<Resolved, String> {
+    let token = state.token()?;
+    let sheet = character::load_sheet(&token, &character_id)?;
+    Ok(character::resolve_request(&sheet, &request, &mode))
+}
+
+/// The whole path: read the sheet, resolve the request into a formula,
+/// roll it here on the device, and log the finished result.
+///
+/// The insert records something that already happened. Nothing about the
+/// outcome depends on the network — if the write fails, the dice were
+/// still fair, and the row is the only thing lost.
+#[tauri::command]
+fn roll_named(
+    state: State<AppState>,
+    character_id: String,
+    request: String,
+    mode: String,
+) -> Result<Value, String> {
+    let session = state
+        .current()?
+        .ok_or_else(|| "not signed in".to_string())?;
+
+    let sheet = character::load_sheet(&session.access_token, &character_id)?;
+    let resolved = character::resolve_request(&sheet, &request, &mode);
+    let rolled = dice::roll_formula(&resolved.formula)?;
+
+    supabase::rest_insert(
+        &session.access_token,
+        "rolls",
+        &json!({
+            "game_id": sheet.game_id,
+            "character_id": sheet.character_id,
+            "owner_uid": session.user_id,
+            "request": request,
+            "label": resolved.label,
+            "mode": mode,
+            "formula": resolved.formula,
+            "detail": rolled.detail,
+            "total": rolled.total,
+            "natural_roll": rolled.natural,
+            "status": "resolved"
+        }),
+    )
+}
+
 /* ============================ ENTRY ============================ */
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -253,6 +394,12 @@ pub fn run() {
             list_characters,
             create_character,
             list_rolls,
+            get_sheet,
+            set_level,
+            set_ability,
+            set_skill_prof,
+            preview_request,
+            roll_named,
             roll_dice,
             create_roll,
             patch_roll_narrative,

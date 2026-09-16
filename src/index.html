@@ -1,39 +1,69 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="stylesheet" href="styles.css" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
-    <script type="module" src="/main.js" defer></script>
-  </head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>odyssey1e — access test rig</title>
+  <script type="module" src="/main.js" defer></script>
+</head>
+<body>
+<div class="app">
 
-  <body>
-    <main class="container">
-      <h1>Welcome to Tauri</h1>
+  <header>
+    <strong>odyssey1e</strong>
+    <span id="who" class="muted">not signed in</span>
+    <button id="signout" class="ghost" hidden>sign out</button>
+  </header>
 
-      <div class="row">
-        <a href="https://tauri.app" target="_blank">
-          <img src="/assets/tauri.svg" class="logo tauri" alt="Tauri logo" />
-        </a>
-        <a
-          href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"
-          target="_blank"
-        >
-          <img
-            src="/assets/javascript.svg"
-            class="logo vanilla"
-            alt="JavaScript logo"
-          />
-        </a>
-      </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
+  <div class="cols">
+    <div class="left">
 
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
-      </form>
-      <p id="greet-msg"></p>
-    </main>
-  </body>
+      <section id="auth-panel">
+        <h2>Account</h2>
+        <input id="email" type="email" placeholder="tirayis.dm+p1@gmail.com" autocomplete="off" />
+        <input id="password" type="password" placeholder="password" autocomplete="off" />
+        <input id="display" type="text" placeholder="display name (sign-up only)" autocomplete="off" />
+        <div class="row">
+          <button id="signin">Sign in</button>
+          <button id="signup" class="ghost">Sign up</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Games <button id="refresh-games" class="tiny ghost">refresh</button></h2>
+        <ul id="games" class="list"></ul>
+        <input id="game-name" placeholder="new game name" />
+        <button id="create-game">Create game</button>
+        <input id="join-code" placeholder="join code" />
+        <button id="join-game" class="ghost">Join by code</button>
+      </section>
+
+      <section>
+        <h2>Characters</h2>
+        <ul id="characters" class="list"></ul>
+        <input id="char-name" placeholder="character name" />
+        <button id="create-char">Create character</button>
+      </section>
+
+      <section>
+        <h2>Rolls</h2>
+        <input id="roll-request" placeholder="request, e.g. insight" />
+        <input id="roll-formula" placeholder="formula, e.g. 2d20kh1+5 (blank = pending)" />
+        <button id="create-roll">Insert roll</button>
+        <input id="patch-narr" placeholder="narrative to patch into newest roll" />
+        <button id="patch-roll" class="ghost">Patch narrative</button>
+        <ul id="rolls" class="list"></ul>
+      </section>
+
+    </div>
+
+    <div class="right">
+      <h2>Log <button id="clear-log" class="tiny ghost">clear</button></h2>
+      <div id="log"></div>
+    </div>
+  </div>
+
+</div>
+</body>
 </html>

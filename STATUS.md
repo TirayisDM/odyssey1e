@@ -219,6 +219,13 @@ fixing yet, but that is where the latency is if it ever matters.
 
 ## Loose ends
 
+- **Rotate `ROLLLOG_WEBHOOK_SECRET`** in the old Apps Script project's
+  Script Properties and in the AppSheet webhook body. The value was
+  visible in screenshots during a chat session, so treat it as public
+  until it has been changed in both places.
+- **Delete the throwaway Discord webhook** that was pasted into that
+  same session. It was never used, but the URL is in a transcript and a
+  Discord webhook URL is the whole credential.
 - Leaked password protection is off in Supabase auth. Turn it on before
   real players have passwords.
 - The old AppSheet system is still live and still has the outstanding

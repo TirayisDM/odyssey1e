@@ -1,6 +1,7 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17.** Read `README.md` first for how to run it; this
+**Written 2026-09-17, updated after 006 on the desktop.** Read `README.md`
+first for how to run it; this
 file is only where things stand and what comes next.
 
 ---
@@ -56,6 +57,8 @@ and not after.
 003 join code by trigger - fixes a bug 002 introduced
 004 dm reads own game - fixes an INSERT...RETURNING visibility bug
 005 character sheet - abilities, skill proficiency, skill catalogue
+006 reference data - narrative lines, dice sets and faces, character
+    dice junction, skill prompts, spells, techniques; 533 seed rows
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -87,6 +90,11 @@ both pass. Every reference table from 006 on hits this. (005)
 decodes a BOM-less file as Windows-1252, and an em dash becomes a smart
 quote, which PowerShell honours as a string delimiter. The parse error
 then points well past the actual damage.
+
+**Text ordering differs between Postgres and everything else.** The
+default collation sorts 'base' before 'Rodnar'; Python and C sort the
+other way. A checksum over ORDER BY text will not match a checksum
+computed elsewhere unless you `collate "C"`. Cost twenty minutes in 006.
 
 **Three SECURITY DEFINER advisor warnings are expected.**
 `is_game_member`, `is_game_dm`, `join_game` need `authenticated` to hold
@@ -120,16 +128,24 @@ for campaign-specific overrides.
 
 ## Pick up here
 
-**006 - the rest of the reference data.** ~700 rows sitting in
-`G:\My Drive\appsheet\Application Data.xlsx`, inventoried in
-`HANDOFF_rust_port.html`: 360 narrative lines, 80 dice faces across 4
-sets, 24 spellbook entries, 31 techniques, 34 skill prompts. All follow
-005's nullable-tenancy pattern.
+006 is applied and every seeded table was checksum-verified against the
+spreadsheet. Read the 006 header: spells and techniques were ported
+AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
+2d8+4), flagged BAKED in their column comments, and the Spellbook
+`Prepared` column was deliberately not ported. `characters.narrative_pack`
+(default 'base') picks a narrative pack. `character_dice` is the
+ActorDice junction, with a partial unique index enforcing one equipped
+set per character.
 
-Then, roughly in order:
+Nothing in Rust knows about the new tables yet. Roughly in order:
 
-1. Narrative lines wired in, so a roll card carries prose again
-2. Die art on the roll, snapshotted per the record principle
+1. Narrative lines wired in, so a roll card carries prose again - read
+   narrative_lines for (character.narrative_pack, request key), fall
+   back to 'base', pick one at random on the device, patch it onto
+   rolls.narrative after the insert (owner-update policy permits this)
+2. Die art on the roll - read the equipped set from character_dice,
+   look up dice_faces for the natural d20, snapshot image_url and
+   set_key onto the roll at insert, per the record principle
 3. The rules modules still unported: death saves, rests, spell slots,
    techniques with custom crit ranges - each isolated in its own Apps
    Script file, each wants its own Rust module with tests

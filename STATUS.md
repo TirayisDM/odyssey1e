@@ -1,7 +1,7 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after 006 on the desktop.** Read `README.md`
-first for how to run it; this
+**Written 2026-09-17, updated after the narrative wiring on the desktop.**
+Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
 ---
@@ -28,22 +28,37 @@ clone talks to the same database with no setup.
 
 Test accounts, all `tirayis.dm+<x>@gmail.com` with a password you set in
 the dashboard: `dm`, `p1`, `p2`, `p3`, `p4`. Display names are set.
-Existing data: one game `testdeck1` (code `Z2ZYSYVQ`), one character
-`Character1` owned by p1, a handful of rolls.
+Existing data: one game `testdeck1` (code `Z2ZYSYVQ`), two characters
+owned by p1, and a pile of rolls.
+
+`Character1` and `Character2` are deliberate twins - same level, same
+ability scores, same Insight proficiency. The only difference is
+`narrative_pack`: Character1 is on `Rodnar Shieldcrest`, Character2 on
+`base`. Roll the same Insight on each and the dice math is identical
+while the prose is not, which is the fastest way to see the pack
+precedence working. Delete Character2 if it is in the way; the cascade
+takes its abilities and skills with it.
 
 ---
 
 ## What works, end to end
 
 Auth, games, join-by-code, characters, rolls. The dice engine. The
-character sheet resolver.
+character sheet resolver. The narrative packs.
 
 Type `insight`, pick Advantage, hit Roll: the app reads the sheet, finds
 Insight keys off WIS, adds the ability modifier and the proficiency
 bonus derived from level, builds `2d20kh1+6`, rolls both d20s on the
-device, keeps the higher, and logs the result. Verified live.
+device, keeps the higher, picks a line of prose out of the character's
+pack, and logs all of it as one row. Verified live.
 
-**40 tests, zero warnings.** `cd src-tauri && cargo test`.
+The prose is the part the port was for. `Religion` typed in full,
+capitalised, resolves to key `rel`, finds the pack's Religion lines, and
+comes back with a line that names the character's god - while the same
+request on the base pack comes back in the neutral they/their voice.
+Same dice, same modifier, two narrators. Verified live on both packs.
+
+**53 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -96,6 +111,15 @@ default collation sorts 'base' before 'Rodnar'; Python and C sort the
 other way. A checksum over ORDER BY text will not match a checksum
 computed elsewhere unless you `collate "C"`. Cost twenty minutes in 006.
 
+**A PostgREST `in.(...)` value is not safe to interpolate.** A pack is
+named `Rodnar Shieldcrest`, with a space in it, and pack names are free
+text a DM can set. A value with a space, comma, parenthesis or quote in
+it has to be double-quoted in the list, with a backslash before any
+literal quote or backslash. Unquoted, the filter either matches nothing
+or silently means something else - and either way it looks like missing
+seed data rather than a bad query. `narrative::quoted()` does this; use
+it for every reference table that gets filtered by a name.
+
 **Three SECURITY DEFINER advisor warnings are expected.**
 `is_game_member`, `is_game_dm`, `join_game` need `authenticated` to hold
 EXECUTE or every policy fails closed. Do not "fix" them. Run the
@@ -118,8 +142,29 @@ one rule in two places drifts.
 crosses the network. The insert records something that already happened.
 
 **Never let a slow optional enrichment gate a fast required result.**
-Dice first, narrative patched in later. The owner-update policy on
-`rolls` exists to permit exactly that patch.
+The rule is about *slow*, and a canned line is not slow. The pack comes
+down with the sheet, so choosing a line is a local die roll and it goes
+into the insert body with the dice - the row is complete the first time
+anyone reads it. The owner-update policy on `rolls` still exists, and
+`patch_roll_narrative` is still there, for the AI-written narrative,
+which is the enrichment the rule was always about.
+
+**A pack wins whole, an override wins by line.** Two precedences, and
+confusing them is the bug. Inside a (pack, key), a game-scoped row
+shadows the global row with the *same seq* - a DM rewrites line 4 and
+keeps the other nine. Across packs, if the character's pack has any line
+for a key then `base` is not consulted for that key at all. Splicing a
+voiced line in beside a neutral one inside one key reads as two
+narrators, which is worse than having fewer lines.
+
+**Roll keys are engine vocabulary.** `rolls.request` is what the player
+typed; the key is what the engine resolved it to. `Insight`, `insight`
+and `ins` all land on `ins`. That vocabulary - skill keys, `wis_save`,
+`wis_check`, `custom`, and `attack`, `spell`, `death` when they arrive -
+is what `narrative_lines.key` and `skill_prompts.key` are written in, so
+it is the join between a request and both its prose and its future AI
+prompt. `resolve_request` emits the full vocabulary even where nothing
+is seeded for it, so a pack can grow a key without a Rust change.
 
 **Reference data is not tenanted** - global, with a nullable `game_id`
 for campaign-specific overrides.
@@ -128,31 +173,49 @@ for campaign-specific overrides.
 
 ## Pick up here
 
+**Be clear about what is and is not done.** The foundation is square:
+the access model, the dice, the sheet resolver, the prose. What AppSheet
+did that this does not do yet is *deliver*. `rolls.status` goes
+`pending -> resolved -> delivered` and nothing in this codebase moves a
+row to `delivered`. There is no die art, no death saves, no rests, no
+spell slots, no techniques, no session that survives a restart, and the
+UI is a test rig. The port is not nearly finished; the part that had to
+be right first is.
+
 006 is applied and every seeded table was checksum-verified against the
 spreadsheet. Read the 006 header: spells and techniques were ported
 AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
 2d8+4), flagged BAKED in their column comments, and the Spellbook
-`Prepared` column was deliberately not ported. `characters.narrative_pack`
-(default 'base') picks a narrative pack. `character_dice` is the
+`Prepared` column was deliberately not ported. `character_dice` is the
 ActorDice junction, with a partial unique index enforcing one equipped
-set per character.
+set per character. `narrative_lines` is wired in; the rest is not.
 
-Nothing in Rust knows about the new tables yet. Roughly in order:
+Roughly in order:
 
-1. Narrative lines wired in, so a roll card carries prose again - read
-   narrative_lines for (character.narrative_pack, request key), fall
-   back to 'base', pick one at random on the device, patch it onto
-   rolls.narrative after the insert (owner-update policy permits this)
-2. Die art on the roll - read the equipped set from character_dice,
+1. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
-   set_key onto the roll at insert, per the record principle
-3. The rules modules still unported: death saves, rests, spell slots,
+   set_key onto the roll at insert, per the record principle. This is
+   the closest sibling to what just landed; `narrative.rs` is the shape
+   to copy, down to caching it on the sheet.
+2. The rules modules still unported: death saves, rests, spell slots,
    techniques with custom crit ranges - each isolated in its own Apps
-   Script file, each wants its own Rust module with tests
+   Script file, each wants its own Rust module with tests. Each also
+   wants a `resolve_request` key, and the vocabulary already has room
+   for `death`, `spell` and `attack`.
+3. Delivery - whatever moves a resolved roll to `delivered` and puts it
+   in front of the table. This is the piece that closes the loop
+   AppSheet closed, and nothing else on this list matters as much.
 4. Session persistence (currently in memory - a restart signs you out;
-   fine on desktop, fatal on a phone)
+   fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
 5. A real phone-first UI. What exists is a desktop test rig.
 6. Android via `npm run tauri android init`. iOS needs a Mac.
+
+Two small things worth doing while they are cheap: `preview_request`
+calls `load_sheet`, so hovering a button reads the whole pack it has no
+use for - a `load_sheet_lite` would fix it, at the cost of two loaders
+that can drift. And `load_sheet` runs on every roll, so the pack read
+sits ahead of the dice; it is one small select and it has not been worth
+fixing yet, but that is where the latency is if it ever matters.
 
 ## Loose ends
 
@@ -169,6 +232,9 @@ Nothing in Rust knows about the new tables yet. Roughly in order:
 
 The Apps Script system it came from is in
 `G:\My Drive\appsheet\raw backup` - 17 `.js` files. `diceroller.js` and
-`characternarrative.js` are the ones still being ported from.
+`characternarrative.js` are the ones still being ported from. The
+NarrativePacks half of `characternarrative.js` is done and lives in
+`narrative.rs`; the AI-generated half is not, and the `skill_prompts`
+table seeded in 006 is what it will read.
 `HANDOFF_rust_port.html` and `ISSUES_appsheet_audit.html` live there and
 in the claude.ai project.

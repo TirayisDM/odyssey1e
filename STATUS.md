@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the narrative wiring on the desktop.**
+**Written 2026-09-17, updated after the inventory schema on the laptop.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -74,10 +74,33 @@ and not after.
 005 character sheet - abilities, skill proficiency, skill catalogue
 006 reference data - narrative lines, dice sets and faces, character
     dice junction, skill prompts, spells, techniques; 533 seed rows
+007 technique item keys - techniques stop naming their weapon in prose
+008 items - the item catalogue, character_items, and the two
+    proficiency arrays on characters; 13 seed rows
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
 mistakes with the reasoning written out.
+
+**007 and 008 are schema only. No Rust reads either table yet.** 007
+replaced `techniques.weapon` - free text holding a display name like
+'light hammer (thrown)' - with `item_key` plus `mode`. A display name is
+not an identifier, and that one string was carrying two facts: which
+item, and which attack mode. The light hammer has different technique
+lists for melee and thrown, 7 and 6.
+
+008 seeds `items` from the Foundry export in the `_RAW` tab of
+`Application Data.xlsx`, the same source the AppSheet Inventory and
+Attacks tabs were generated from. Facts only - `1d6`, never `1d6+2`.
+The old Attacks tab stored to-hit and damage with the character's
+modifiers already folded in, which is exactly why its own header told
+you to reseed after every level-up.
+
+Item keys are load-bearing and unprotected: `techniques.item_key`
+points at `mace_of_the_deep_song`, `light_hammer` and `heavy_crossbow`
+by value, with no FK to catch a typo. The check that matters is that
+every distinct `techniques.item_key` resolves to a real item - it does
+today, all 31 rows, and `equipment.rs` should assert it.
 
 ---
 
@@ -100,6 +123,35 @@ pattern (global rows with `game_id IS NULL`, overrides with it set)
 needs a surrogate id plus two *partial* unique indexes - `NULL != NULL`
 in a unique constraint, so without the partial index two global rows
 both pass. Every reference table from 006 on hits this. (005)
+
+**A partial unique index cannot back a foreign key.** The consequence
+of the trap above, and the reason every cross-reference between
+reference tables is by key VALUE, not by FK: `dice_faces.set_key`,
+`character_skills.skill_key`, and now `techniques.item_key` and
+`character_items.item_key`. An FK on the surrogate id would work
+mechanically and defeat the point - it would bind the row to either the
+global item or one campaign's override, when the whole purpose of the
+key is that it resolves to whichever the reader is entitled to see. The
+cost is that nothing catches a typo, so the integrity check has to live
+in Rust. (007, 008)
+
+**Foundry spells armor two ways, and neither the data nor the database
+will tell you.** The item subtype is `light`/`medium`/`heavy`/`shield`;
+the character's `armorProf` is `lgt`/`med`/`hvy`/`shl`. So
+`'medium' in ['lgt','med','shl']` is false while Rodnar is in fact
+proficient in medium armor - no exception, no null, just a wrong
+answer. It cost a bad seed generator that quietly emitted Scale Mail as
+ordinary equipment with no AC and no armor category, which is valid SQL
+and passes every constraint. 008 normalizes to the prof spelling in the
+seed and the check constraint admits only that spelling, so the two
+vocabularies meet once and the database speaks one dialect after.
+
+The weapon side is deliberately NOT normalized: `weapon_class` keeps
+`simpleM`/`martialR` because the M/R suffix decides melee or ranged and
+drives the default ability, so that match is a `sim`/`mar` PREFIX test
+instead. Two vocabularies, two different reconciliations, each stated
+in its column comment. This asymmetry is the most likely thing to trip
+the next person. (008)
 
 **A `.ps1` must be pure ASCII** or saved with a BOM. PowerShell 5.1
 decodes a BOM-less file as Windows-1252, and an em dash becomes a smart
@@ -190,25 +242,58 @@ AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
 ActorDice junction, with a partial unique index enforcing one equipped
 set per character. `narrative_lines` is wired in; the rest is not.
 
+**The equipment chain is in flight.** 007 and 008 put the schema in
+place; items 1-3 below finish it. Nothing is half-applied - the
+migrations are complete and consistent - but no Rust reads them, so the
+app behaves exactly as it did before them.
+
 Roughly in order:
 
-1. Die art on the roll - read the equipped set from character_dice,
+1. `dice.rs` crit and fumble thresholds. The engine hardcodes natural
+   20 and natural 1 for both the bold marking and the crit rule.
+   Techniques do not agree: Deepsong Echo crits on 18, Crystal
+   Resonance fumbles on 1-3, Heavy Smash on 1-2. `natural` is already
+   exposed on the result so DECIDING a crit can live above the engine,
+   but the marking and the doubled damage dice cannot. Small,
+   self-contained, and nothing above it is correct until it is done.
+   House dice need no work - the parser already takes any denomination,
+   so 1d7 and 1d14 work today.
+2. `equipment.rs` - load a character's equipped items onto the sheet
+   (cache it there, the way `narrative.rs` caches the pack), derive
+   proficiency, and generate attack modes from `properties`. Two rules
+   to get right: proficiency is explicit override first, else match
+   `weapon_class` by its sim/mar prefix against `weapon_profs`; and
+   `thr` grants a second mode, which is why the light hammer has two
+   technique lists. Also the place to assert every
+   `techniques.item_key` resolves, and to enforce one equipped armor,
+   which the schema cannot state.
+3. The `attack` key in `resolve_request`. Base weapon attack, then a
+   technique lookup that replaces the damage dice and the thresholds,
+   gated by `min_level`. Snapshot the result onto the roll per the
+   record principle. `skill_prompts` already has its `attack` row
+   seeded. Parity fixture: `WeaponsAttacks.js` plus `_RAW` produce the
+   four known-good Attacks rows - the same trick the dice engine used
+   against `diceroller.js`. One caveat, the fixture has a bug: the
+   Mace's reach is 8 in `_RAW`, but the activity carries
+   `range.value: '5'` with `override: False` and the old script uses it
+   anyway. Display only, does not touch to-hit or damage.
+4. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
-   set_key onto the roll at insert, per the record principle. This is
-   the closest sibling to what just landed; `narrative.rs` is the shape
-   to copy, down to caching it on the sheet.
-2. The rules modules still unported: death saves, rests, spell slots,
-   techniques with custom crit ranges - each isolated in its own Apps
-   Script file, each wants its own Rust module with tests. Each also
-   wants a `resolve_request` key, and the vocabulary already has room
-   for `death`, `spell` and `attack`.
-3. Delivery - whatever moves a resolved roll to `delivered` and puts it
+   set_key onto the roll at insert, per the record principle.
+   `narrative.rs` is the shape to copy, down to caching it on the sheet.
+5. The rules modules still unported: death saves, rests, spell slots -
+   each isolated in its own Apps Script file, each wants its own Rust
+   module with tests. Each also wants a `resolve_request` key, and the
+   vocabulary already has room for `death` and `spell`.
+6. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
-4. Session persistence (currently in memory - a restart signs you out;
+   **It has now been deferred twice.** Note that and decide
+   deliberately rather than by drift.
+7. Session persistence (currently in memory - a restart signs you out;
    fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
-5. A real phone-first UI. What exists is a desktop test rig.
-6. Android via `npm run tauri android init`. iOS needs a Mac.
+8. A real phone-first UI. What exists is a desktop test rig.
+9. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no
@@ -245,3 +330,22 @@ NarrativePacks half of `characternarrative.js` is done and lives in
 table seeded in 006 is what it will read.
 `HANDOFF_rust_port.html` and `ISSUES_appsheet_audit.html` live there and
 in the claude.ai project.
+
+`WeaponsAttacks.js` is the one to read before item 3 above. It is the
+whole attack derivation - ability by mode, finesse picking the better of
+STR and DEX, proficiency from explicit flag then weapon class - and it
+is also the cautionary tale, since everything it computes it then wrote
+into a spreadsheet tab that went stale on every level-up.
+
+**`G:\My Drive\appsheet\Application Data.xlsx` is the data behind all of
+it**, 22 tabs. `_RAW` holds the Foundry character export as JSON, split
+across 8 cells to fit the 50k-per-cell limit - reassemble by joining the
+cells over 1000 characters. That export is the honest source: unbaked
+`1d6`, `properties`, `baseItem`, `weaponProf`, `armorProf`. The
+`Inventory` tab is the same 13 items flattened, and `Attacks` is the 4
+derived rows. Prefer `_RAW` over either; the other two have the
+character's modifiers already folded in.
+
+The generator that produced the 008 seed from `_RAW` was a throwaway
+and is gone. Regenerating it is 20 lines of Python, but remember the
+armor spelling trap above or it will emit Scale Mail as equipment.

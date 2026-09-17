@@ -23,6 +23,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::dice::d20_formula;
+use crate::narrative;
 use crate::supabase;
 
 /* ============================ THE SHEET ============================ */
@@ -55,6 +56,12 @@ pub struct Sheet {
     pub skills: Vec<SkillDef>,
     /// Skill key -> proficiency multiplier. Absent means untrained.
     pub profs: HashMap<String, f64>,
+    /// Which narrative_lines pack voices this character's roll cards.
+    pub narrative_pack: String,
+    /// Roll key -> the lines available for it, pack precedence and game
+    /// overrides already resolved. Read once with the sheet so choosing
+    /// a line at roll time costs nothing — see narrative.rs.
+    pub narratives: HashMap<String, Vec<String>>,
 }
 
 impl Sheet {
@@ -105,6 +112,17 @@ pub struct Resolved {
     /// The modifier that went into it, so a UI can explain the number
     /// instead of just showing it.
     pub modifier: i64,
+    /// THE ROLL KIND, in engine vocabulary: a skill key ("ins"),
+    /// "wis_save", "wis_check", or "custom" for a raw formula. Not the
+    /// request the player typed — "Insight", "insight" and "ins" all
+    /// resolve to the same key.
+    ///
+    /// This is the vocabulary narrative_lines.key and skill_prompts.key
+    /// are written in, so it is what a narrative lookup and, later, an
+    /// AI prompt seed are found by. The full vocabulary is emitted here
+    /// even where no lines are seeded for it yet: a pack that grows a
+    /// "wis_save" key then works without a Rust change.
+    pub key: String,
 }
 
 /// Long and short ability names, both accepted. Ported from ABIL_NAMES.
@@ -139,6 +157,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
                 label: format!("{} Save", code.to_uppercase()),
                 formula: d20_formula(m, mode),
                 modifier: m,
+                key: format!("{}_save", code),
             };
         }
     }
@@ -150,6 +169,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
             label: format!("{} ({})", s.name, s.ability.to_uppercase()),
             formula: d20_formula(m, mode),
             modifier: m,
+            key: s.key.clone(),
         };
     }
 
@@ -161,6 +181,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
             label: format!("{} Check", code.to_uppercase()),
             formula: d20_formula(m, mode),
             modifier: m,
+            key: format!("{}_check", code),
         };
     }
 
@@ -170,6 +191,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
         label: request.trim().to_string(),
         formula: t,
         modifier: 0,
+        key: "custom".to_string(),
     }
 }
 
@@ -183,7 +205,8 @@ fn as_str(v: &Value, key: &str) -> String {
     v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
 }
 
-/// Read everything resolve_request needs, in four queries.
+/// Read everything resolve_request needs, plus the narrative pack, in
+/// five queries.
 ///
 /// Could be one query with PostgREST embedding, but four explicit reads
 /// are easier to debug when a policy denies one of them — an embedded
@@ -194,7 +217,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         token,
         "characters",
         &[
-            ("select", "id,game_id,name,level"),
+            ("select", "id,game_id,name,level,narrative_pack"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -290,6 +313,16 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         }
     }
 
+    // The pack, and base underneath it. An empty column reads as base
+    // rather than as a pack with no lines, so a row written before 006
+    // added the default still narrates.
+    let mut narrative_pack = as_str(c, "narrative_pack");
+    if narrative_pack.trim().is_empty() {
+        narrative_pack = narrative::BASE_PACK.to_string();
+    }
+    let line_rows = narrative::load_lines(token, &game_id, &narrative_pack)?;
+    let narratives = narrative::resolve_lines(&line_rows, &narrative_pack);
+
     Ok(Sheet {
         character_id: as_str(c, "id"),
         game_id,
@@ -298,6 +331,8 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         abilities,
         skills,
         profs,
+        narrative_pack,
+        narratives,
     })
 }
 
@@ -339,6 +374,11 @@ mod tests {
             abilities,
             skills,
             profs,
+            // Resolution is arithmetic and string matching; the prose
+            // rides along on the sheet but has no part in it. The
+            // lines themselves are tested in narrative.rs.
+            narrative_pack: narrative::BASE_PACK.into(),
+            narratives: HashMap::new(),
         }
     }
 
@@ -475,6 +515,21 @@ mod tests {
         let r = resolve_request(&rodnar(), "  INSIGHT  ", "normal");
         assert_eq!(r.label, "Insight (WIS)");
         assert_eq!(r.formula, "1d20+6");
+    }
+
+    #[test]
+    fn the_key_is_engine_vocabulary_not_what_was_typed() {
+        // narrative_lines.key and skill_prompts.key are written in this
+        // vocabulary. Every spelling of a request must land on one key
+        // or a pack would have to carry a line per synonym.
+        for req in ["insight", "Insight", "ins", "  INSIGHT  "] {
+            assert_eq!(resolve_request(&rodnar(), req, "normal").key, "ins", "{}", req);
+        }
+        assert_eq!(resolve_request(&rodnar(), "wis save", "normal").key, "wis_save");
+        assert_eq!(resolve_request(&rodnar(), "wisdom save", "normal").key, "wis_save");
+        assert_eq!(resolve_request(&rodnar(), "str check", "normal").key, "str_check");
+        assert_eq!(resolve_request(&rodnar(), "wis", "normal").key, "wis_check");
+        assert_eq!(resolve_request(&rodnar(), "2d6+3", "normal").key, "custom");
     }
 
     #[test]

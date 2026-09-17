@@ -11,10 +11,11 @@
 
 mod character;
 mod dice;
+mod narrative;
 mod supabase;
 
 use character::{Resolved, Sheet};
-use dice::RollResult;
+use dice::{RandomRoller, RollResult};
 use serde_json::{json, Value};
 use supabase::{AppState, Session};
 use tauri::State;
@@ -336,11 +337,19 @@ fn preview_request(
 }
 
 /// The whole path: read the sheet, resolve the request into a formula,
-/// roll it here on the device, and log the finished result.
+/// roll it here on the device, pick the line that narrates it, and log
+/// the finished result.
 ///
 /// The insert records something that already happened. Nothing about the
 /// outcome depends on the network — if the write fails, the dice were
 /// still fair, and the row is the only thing lost.
+///
+/// The narrative goes in with the dice rather than being patched on
+/// afterwards, and that does not contradict "never let a slow optional
+/// enrichment gate a fast required result": a canned line is neither
+/// slow nor remote. The pack came down with the sheet, so choosing one
+/// is a local die roll. The patch path stays for the AI-written
+/// narrative, which is the enrichment that rule is actually about.
 #[tauri::command]
 fn roll_named(
     state: State<AppState>,
@@ -355,6 +364,9 @@ fn roll_named(
     let sheet = character::load_sheet(&session.access_token, &character_id)?;
     let resolved = character::resolve_request(&sheet, &request, &mode);
     let rolled = dice::roll_formula(&resolved.formula)?;
+    // None for a key no pack has written yet. The column is nullable and
+    // the card reads fine without prose, so that is not an error.
+    let line = narrative::pick(&sheet.narratives, &resolved.key, &mut RandomRoller);
 
     supabase::rest_insert(
         &session.access_token,
@@ -370,6 +382,7 @@ fn roll_named(
             "detail": rolled.detail,
             "total": rolled.total,
             "natural_roll": rolled.natural,
+            "narrative": line,
             "status": "resolved"
         }),
     )

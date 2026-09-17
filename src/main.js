@@ -94,6 +94,42 @@ function row(label, tag, onClick, selected) {
   return li;
 }
 
+// A roll card. Three lines, top to bottom: who did what, what the dice
+// said, and the prose that narrates it. The narrative is chosen on the
+// device and written into the row at insert, so it is already there the
+// first time the log is read — nothing here waits for it or polls.
+function rollCard(r) {
+  const li = document.createElement("li");
+  li.className = "flat card";
+
+  const head = document.createElement("div");
+  head.className = "head";
+  const who = document.createElement("span");
+  who.textContent = (r.character_name || "Someone") + " · " + (r.label || r.request);
+  const tag = document.createElement("span");
+  tag.className = "tag";
+  tag.textContent = r.status;
+  head.append(who, tag);
+
+  const dice = document.createElement("div");
+  dice.className = "dice";
+  dice.textContent =
+    r.total === null || r.total === undefined
+      ? r.detail || "—"
+      : (r.detail ? r.detail + "  =  " : "") + r.total;
+
+  li.append(head, dice);
+
+  if (r.narrative) {
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    prose.textContent = r.narrative;
+    li.append(prose);
+  }
+
+  return li;
+}
+
 async function loadGames() {
   const games = await call("list_games");
   const ul = document.querySelector("#games");
@@ -267,13 +303,7 @@ async function loadRolls() {
   const rolls = await call("list_rolls", { gameId: state.gameId });
   state.rolls = Array.isArray(rolls) ? rolls : [];
   for (const r of state.rolls) {
-    ul.append(
-      row(
-        r.character_name + " · " + r.request,
-        r.status + (r.narrative ? " · narrated" : ""),
-        null
-      )
-    );
+    ul.append(rollCard(r));
   }
 }
 

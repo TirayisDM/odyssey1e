@@ -61,6 +61,14 @@ pub struct Sheet {
     /// Roll key -> the lines available for it, pack precedence and game
     /// overrides already resolved. Read once with the sheet so choosing
     /// a line at roll time costs nothing — see narrative.rs.
+    ///
+    /// NOT SENT TO THE FRONTEND. A full pack is 180 lines, and the
+    /// webview has no use for any of them — roll_named picks the line on
+    /// this side and the chosen one travels on the roll row. Serializing
+    /// it would put ~20KB of prose through the IPC boundary on every
+    /// get_sheet. `default` keeps Deserialize working, since skipping a
+    /// field on the way out says nothing about the way in.
+    #[serde(skip_serializing, default)]
     pub narratives: HashMap<String, Vec<String>>,
 }
 

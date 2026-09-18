@@ -95,11 +95,16 @@ function row(label, tag, onClick, selected) {
   return li;
 }
 
-// A roll card. Three lines, top to bottom: who did what, what the dice
-// said, and the prose that narrates it. The narrative is chosen on the
-// device and written into the row at insert, so it is already there the
-// first time the log is read — nothing here waits for it or polls.
-function rollCard(r) {
+// An ACTION card — one swing, however many rolls it took.
+//
+// A to-hit and its damage are one thing that happened, so they get one
+// card. Rendering them as two rows would be the same mistake 012 exists
+// to fix: nothing could say which damage belonged to which swing.
+//
+// Takes the action's rolls, to-hit first. The verdict and the prose come
+// off the roll that was judged; the damage line sits underneath.
+function rollCard(rolls) {
+  const r = rolls[0];
   const li = document.createElement("li");
   li.className = "flat card";
 
@@ -112,14 +117,20 @@ function rollCard(r) {
   tag.textContent = r.status;
   head.append(who, tag);
 
-  const dice = document.createElement("div");
-  dice.className = "dice";
-  dice.textContent =
-    r.total === null || r.total === undefined
-      ? r.detail || "—"
-      : (r.detail ? r.detail + "  =  " : "") + r.total;
+  li.append(head);
 
-  li.append(head, dice);
+  for (const part of rolls) {
+    const dice = document.createElement("div");
+    dice.className = "dice";
+    const numbers =
+      part.total === null || part.total === undefined
+        ? part.detail || "—"
+        : (part.detail ? part.detail + "  =  " : "") + part.total;
+    // The damage line says so; the to-hit needs no prefix because the
+    // card header already named the swing.
+    dice.textContent = part.role === "damage" ? "dmg  " + numbers : numbers;
+    li.append(dice);
+  }
 
   // The verdict, when the roll had a target. Absent is NOT failure —
   // an untargeted roll simply was not judged, so it says nothing.
@@ -187,6 +198,7 @@ async function selectGame(id) {
 async function loadTargets() {
   const pick = document.querySelector("#target-pick");
   state.targets = [];
+  state.encounterId = null;
   pick.innerHTML =
     '<option value="">no target</option><option value="manual">type a number…</option>';
   // Repopulating resets the selection to "no target", so the hand-typed
@@ -197,6 +209,7 @@ async function loadTargets() {
 
   const encounters = await call("list_encounters", { gameId: state.gameId });
   const active = (encounters || []).find((e) => e.status === "active");
+  state.encounterId = active ? active.id : null;
   if (!active) return;
 
   const targets = await call("list_targets", { encounterId: active.id });
@@ -497,8 +510,33 @@ async function loadRolls() {
   if (!state.gameId) return;
   const rolls = await call("list_rolls", { gameId: state.gameId });
   state.rolls = Array.isArray(rolls) ? rolls : [];
+
+  // Group by action, preserving the newest-first order the query gave
+  // us. A roll written before 012 has no action_id and stands alone,
+  // which is the third legal state the schema allows for.
+  const groups = [];
+  const byAction = new Map();
   for (const r of state.rolls) {
-    ul.append(rollCard(r));
+    if (!r.action_id) {
+      groups.push([r]);
+      continue;
+    }
+    const seen = byAction.get(r.action_id);
+    if (seen) {
+      seen.push(r);
+    } else {
+      const g = [r];
+      byAction.set(r.action_id, g);
+      groups.push(g);
+    }
+  }
+
+  // Damage reads under its to-hit, never above it. The two land in the
+  // same insert so created_at cannot be relied on to order them.
+  const order = { to_hit: 0, check: 0, damage: 1 };
+  for (const g of groups) {
+    g.sort((a, b) => (order[a.role] ?? 0) - (order[b.role] ?? 0));
+    ul.append(rollCard(g));
   }
 }
 
@@ -629,6 +667,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       targetValue: target ? target.value : null,
       targetKind: target ? target.kind : null,
       targetLabel: target ? target.label : null,
+      // Which encounter this happened in, so the action can be found
+      // again by scene rather than only by time.
+      encounterId: state.encounterId || null,
     });
     if (r) await loadRolls();
   });

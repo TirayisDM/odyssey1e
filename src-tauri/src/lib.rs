@@ -158,7 +158,7 @@ fn list_rolls(state: State<AppState>, game_id: String) -> Result<Value, String> 
                 "select",
                 "id,created_at,character_name,roller_name,label,request,detail,total,\
                  natural_roll,status,narrative,\
-                 target_value,target_kind,target_label,success,reason,margin,face_outcome",
+                 target_value,target_kind,target_label,success,reason,margin,face_outcome,                 action_id,role",
             ),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "created_at.desc"),
@@ -455,6 +455,7 @@ fn roll_named(
     target_value: Option<i64>,
     target_kind: Option<String>,
     target_label: Option<String>,
+    encounter_id: Option<String>,
 ) -> Result<Value, String> {
     let session = state
         .current()?
@@ -475,45 +476,141 @@ fn roll_named(
         Some(a) => dice::Thresholds::new(a.crit_min, a.fumble_max)?,
         None => dice::Thresholds::STANDARD,
     };
-    let rolled = dice::roll_formula_as(&resolved.formula, thresholds)?;
-    // None for a key no pack has written yet. The column is nullable and
-    // the card reads fine without prose, so that is not an error.
+
+    // THE WHOLE SWING RESOLVES HERE, before anything crosses the
+    // network. To-hit, the verdict, and the damage it earned are all
+    // worked out on the device, so the write below records something
+    // that already happened rather than asking for it to happen.
+    let first = dice::roll_formula_as(&resolved.formula, thresholds)?;
+    let verdict = target
+        .as_ref()
+        .map(|t| resolution::resolve(first.total, first.outcome, t));
     let line = narrative::pick(&sheet.narratives, &resolved.key, &mut RandomRoller);
 
-    let mut body = json!({
+    let role = if resolved.attack.is_some() { "to_hit" } else { "check" };
+    let mut rolls = vec![roll_row(
+        &sheet,
+        &session,
+        &request,
+        &resolved.label,
+        &mode,
+        &resolved.formula,
+        &first,
+        Some(thresholds),
+        line,
+        target.as_ref(),
+        verdict.as_ref(),
+        role,
+    )];
+
+    // Damage, when the swing earned one. A crit doubles the DICE and
+    // leaves the modifier alone — 1d6+1 becomes 2d6+1, never 2d6+2.
+    if let Some(a) = &resolved.attack {
+        if attack::rolls_damage(verdict.as_ref().map(|v| v.success)) {
+            let crit = first.outcome == Some(dice::Outcome::Crit);
+            let formula = if crit {
+                dice::double_dice(&a.damage)?
+            } else {
+                a.damage.clone()
+            };
+            let rolled = dice::roll_formula(&formula)?;
+            let label = if crit {
+                format!("{} damage (crit)", a.weapon_name)
+            } else {
+                format!("{} damage", a.weapon_name)
+            };
+            rolls.push(roll_row(
+                &sheet,
+                &session,
+                &request,
+                &label,
+                "normal",
+                &formula,
+                &rolled,
+                // Damage is not a d20 and carries no crit range of its
+                // own. Thresholds here would be a pair nothing judged.
+                None,
+                None,
+                None,
+                None,
+                "damage",
+            ));
+        }
+    }
+
+    // One call. The action and every roll under it land together or not
+    // at all — see 012. A goblin that took damage from a swing that does
+    // not exist is the failure this prevents.
+    supabase::rpc(
+        &session.access_token,
+        "write_action",
+        &json!({
+            "p_action": {
+                "game_id": sheet.game_id,
+                "character_id": sheet.character_id,
+                "encounter_id": encounter_id,
+                "request": request,
+                "label": resolved.label,
+                "key": resolved.key,
+            },
+            "p_rolls": rolls,
+        }),
+    )
+}
+
+/// One roll row, ready for `write_action`.
+///
+/// character_name and roller_name are left out on purpose — the
+/// snapshot trigger fills them, so a client cannot forget or fake them.
+#[allow(clippy::too_many_arguments)]
+fn roll_row(
+    sheet: &Sheet,
+    session: &Session,
+    request: &str,
+    label: &str,
+    mode: &str,
+    formula: &str,
+    rolled: &RollResult,
+    thresholds: Option<dice::Thresholds>,
+    narrative: Option<String>,
+    target: Option<&Target>,
+    verdict: Option<&resolution::Resolution>,
+    role: &str,
+) -> Value {
+    let mut row = json!({
         "game_id": sheet.game_id,
         "character_id": sheet.character_id,
         "owner_uid": session.user_id,
         "request": request,
-        "label": resolved.label,
+        "label": label,
         "mode": mode,
-        "formula": resolved.formula,
+        "formula": formula,
         "detail": rolled.detail,
         "total": rolled.total,
         "natural_roll": rolled.natural,
         "face_outcome": rolled.outcome,
-        "narrative": line,
-        "status": "resolved"
+        "narrative": narrative,
+        "status": "resolved",
+        "role": role,
     });
 
     // The thresholds go on the row only when a face was actually judged,
     // matching the column comments: null means no d20, not 20 and 1.
-    if rolled.natural.is_some() {
-        body["crit_min"] = json!(thresholds.crit_min);
-        body["fumble_max"] = json!(thresholds.fumble_max);
+    if let (Some(t), Some(_)) = (thresholds, rolled.natural) {
+        row["crit_min"] = json!(t.crit_min);
+        row["fumble_max"] = json!(t.fumble_max);
     }
 
-    if let Some(t) = &target {
-        let verdict = resolution::resolve(rolled.total, rolled.outcome, t);
-        body["target_value"] = json!(t.value);
-        body["target_kind"] = json!(t.kind.as_str());
-        body["target_label"] = json!(t.label);
-        body["success"] = json!(verdict.success);
-        body["reason"] = json!(verdict.reason.as_str());
-        body["margin"] = json!(verdict.margin);
+    if let (Some(t), Some(v)) = (target, verdict) {
+        row["target_value"] = json!(t.value);
+        row["target_kind"] = json!(t.kind.as_str());
+        row["target_label"] = json!(t.label);
+        row["success"] = json!(v.success);
+        row["reason"] = json!(v.reason.as_str());
+        row["margin"] = json!(v.margin);
     }
 
-    supabase::rest_insert(&session.access_token, "rolls", &body)
+    row
 }
 
 /// Both target inputs or neither.

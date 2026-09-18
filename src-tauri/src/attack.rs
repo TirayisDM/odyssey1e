@@ -238,6 +238,20 @@ pub fn label(a: &Attack) -> String {
     }
 }
 
+/// Does this swing roll damage?
+///
+/// No target means nobody can say whether it connected, so the damage is
+/// rolled and the table decides - which is exactly what the old system
+/// did, because it never knew an AC and posted attack and damage
+/// together regardless.
+///
+/// With a target the dice have already decided, so a miss rolls nothing.
+/// That is the difference knowing the AC buys: a missed swing stops
+/// producing a damage figure nobody should read.
+pub fn rolls_damage(success: Option<bool>) -> bool {
+    success.unwrap_or(true)
+}
+
 /* ============================ LOADING ============================ */
 
 fn mode_from(s: &str) -> Option<Mode> {
@@ -506,6 +520,21 @@ mod tests {
         assert_eq!(a.crit_min, 20);
         assert_eq!(a.fumble_max, 1);
         assert!(a.technique.is_none());
+    }
+
+    /* ---------------- whether damage is rolled ---------------------- */
+
+    #[test]
+    fn a_hit_rolls_damage_and_a_miss_does_not() {
+        assert!(rolls_damage(Some(true)));
+        assert!(!rolls_damage(Some(false)));
+    }
+
+    #[test]
+    fn no_target_rolls_damage_because_nobody_can_say_otherwise() {
+        // The old system's behaviour, and the honest one: with no AC to
+        // check against, the damage is rolled and the table decides.
+        assert!(rolls_damage(None));
     }
 
     /* ---------------- matching -------------------------------------- */

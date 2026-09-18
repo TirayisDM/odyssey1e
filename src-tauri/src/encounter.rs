@@ -54,6 +54,19 @@ pub struct Target {
     /// Where the number came from, in words, so a DM can see why a
     /// goblin is 15 and Rodnar is 16 without opening the database.
     pub source: String,
+    /// The character behind this actor, when there is one.
+    ///
+    /// A CHARACTER'S HIT POINTS BELONG TO THE CHARACTER, not to one
+    /// appearance in one encounter, so damage to a player is recorded
+    /// against this and follows them between fights. An NPC instance
+    /// has no character and its damage is recorded against the actor
+    /// row, which is what lets two goblins off one statblock bleed
+    /// separately.
+    pub character_id: Option<String>,
+    /// Hit points now, and at full. None for a challenge, and for an
+    /// actor whose source never had a maximum set.
+    pub hp_current: Option<i64>,
+    pub hp_max: Option<i64>,
 }
 
 /* ============================ RULES ============================ */
@@ -118,7 +131,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         &[
             (
                 "select",
-                "id,character_id,npc_key,label,ac_override,initiative",
+                "id,character_id,npc_key,label,ac_override,hp_override,initiative",
             ),
             ("encounter_id", &format!("eq.{}", encounter_id)),
             ("active", "is.true"),
@@ -147,13 +160,14 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         .collect();
 
     let mut npc_ac: HashMap<String, i64> = HashMap::new();
+    let mut npc_hp: HashMap<String, i64> = HashMap::new();
     if !npc_keys.is_empty() {
         let quoted_keys: Vec<String> = npc_keys.iter().map(|k| quoted(k)).collect();
         let rows = supabase::rest_get(
             token,
             "npcs",
             &[
-                ("select", "key,game_id,name,ac"),
+                ("select", "key,game_id,name,ac,hp_max"),
                 ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
                 ("key", &format!("in.({})", quoted_keys.join(","))),
             ],
@@ -164,8 +178,10 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
             let key = as_str(r, "key");
             let scoped = as_opt_str(r, "game_id").is_some();
             let ac = r.get("ac").and_then(|x| x.as_i64()).unwrap_or(10);
+            let hp = r.get("hp_max").and_then(|x| x.as_i64()).unwrap_or(1);
             if scoped || !npc_ac.contains_key(&key) {
-                npc_ac.insert(key, ac);
+                npc_ac.insert(key.clone(), ac);
+                npc_hp.insert(key, hp);
             }
         }
     }
@@ -178,19 +194,46 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         .into_iter()
         .collect();
 
-    let char_ac = if char_ids.is_empty() {
+    let char_stats = if char_ids.is_empty() {
         HashMap::new()
     } else {
-        batch_character_ac(token, &game_id, &char_ids)?
+        batch_character_stats(token, &game_id, &char_ids)?
     };
+
+    // Every hit point ever lost or regained by anyone in this encounter,
+    // in one request. Current HP is the maximum plus the sum of the
+    // deltas - see 013. A subject with no events is at full health,
+    // which is the right answer and needs no row to say so.
+    let actor_ids: Vec<String> = actor_rows.iter().map(|r| as_str(r, "id")).collect();
+    let deltas = load_hp_deltas(token, &actor_ids, &char_ids)?;
 
     // --- assemble ---
     let mut out = Vec::new();
 
     for r in &actor_rows {
         let label = as_str(r, "label");
-        let npc = as_opt_str(r, "npc_key").and_then(|k| npc_ac.get(&k).copied());
-        let pc = as_opt_str(r, "character_id").and_then(|c| char_ac.get(&c).copied());
+        let npc_key = as_opt_str(r, "npc_key");
+        let character_id = as_opt_str(r, "character_id");
+        let npc = npc_key.as_ref().and_then(|k| npc_ac.get(k).copied());
+        let pc = character_id.as_ref().and_then(|c| char_stats.get(c).map(|s| s.0));
+
+        // An override on the actor wins, then the source's own maximum.
+        let hp_max = r
+            .get("hp_override")
+            .and_then(|x| x.as_i64())
+            .or_else(|| npc_key.as_ref().and_then(|k| npc_hp.get(k).copied()))
+            .or_else(|| {
+                character_id
+                    .as_ref()
+                    .and_then(|c| char_stats.get(c).and_then(|s| s.1))
+            });
+
+        // Keyed the way the damage is recorded: a character by their
+        // character_id wherever they appear, an NPC by this instance.
+        let spent = match &character_id {
+            Some(c) => deltas.get(c).copied().unwrap_or(0),
+            None => deltas.get(&as_str(r, "id")).copied().unwrap_or(0),
+        };
 
         match resolve_ac(r.get("ac_override").and_then(|x| x.as_i64()), npc, pc) {
             Some((value, source)) => out.push(Target {
@@ -200,6 +243,9 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
                 label,
                 value,
                 source,
+                character_id,
+                hp_current: hp_max.map(|m| m + spent),
+                hp_max,
             }),
             // Skipped rather than shown at a made-up number. An actor
             // with no resolvable AC is a data fault, and a target nobody
@@ -220,6 +266,10 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
                 Some(k) => format!("DM-set, suggests {}", k),
                 None => "DM-set".to_string(),
             },
+            // A lock has no hit points and no character behind it.
+            character_id: None,
+            hp_current: None,
+            hp_max: None,
         });
     }
 
@@ -232,18 +282,61 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
 /// The arithmetic is `equipment::armor_class`, the same function the
 /// sheet uses, so a character's AC cannot read one number on their own
 /// sheet and another in the DM's target list.
-fn batch_character_ac(
+/// Every hit point delta recorded against anyone in the encounter,
+/// summed per subject.
+///
+/// One request for both kinds of subject. The key is the actor id for an
+/// NPC instance and the character id for a player, matching how the
+/// events are written - see Target::character_id.
+fn load_hp_deltas(
+    token: &str,
+    actor_ids: &[String],
+    char_ids: &[String],
+) -> Result<HashMap<String, i64>, String> {
+    if actor_ids.is_empty() && char_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut clauses: Vec<String> = Vec::new();
+    if !actor_ids.is_empty() {
+        clauses.push(format!("actor_id.in.({})", actor_ids.join(",")));
+    }
+    if !char_ids.is_empty() {
+        clauses.push(format!("character_id.in.({})", char_ids.join(",")));
+    }
+
+    let rows = supabase::rest_get(
+        token,
+        "hp_events",
+        &[
+            ("select", "character_id,actor_id,delta"),
+            ("or", &format!("({})", clauses.join(","))),
+        ],
+    )?;
+
+    let mut out: HashMap<String, i64> = HashMap::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let key = as_opt_str(r, "character_id").or_else(|| as_opt_str(r, "actor_id"));
+        if let Some(k) = key {
+            *out.entry(k).or_insert(0) += r.get("delta").and_then(|x| x.as_i64()).unwrap_or(0);
+        }
+    }
+    Ok(out)
+}
+
+/// Every enrolled character's AC and hit point maximum, in three
+/// requests rather than three per character.
+fn batch_character_stats(
     token: &str,
     game_id: &str,
     char_ids: &[String],
-) -> Result<HashMap<String, i64>, String> {
+) -> Result<HashMap<String, (i64, Option<i64>)>, String> {
     let list = char_ids.join(",");
 
     let chars = supabase::rest_get(
         token,
         "characters",
         &[
-            ("select", "id,ac_mode,ac_override"),
+            ("select", "id,ac_mode,ac_override,hp_max"),
             ("id", &format!("in.({})", list)),
         ],
     )?;
@@ -315,11 +408,14 @@ fn batch_character_ac(
         let items: Vec<&Item> = worn.get(&id).map(|v| v.iter().collect()).unwrap_or_default();
         out.insert(
             id.clone(),
-            equipment::armor_class(
-                dex.get(&id).copied().unwrap_or(0),
-                &items,
-                AcMode::parse(&as_str(r, "ac_mode")),
-                r.get("ac_override").and_then(|x| x.as_i64()),
+            (
+                equipment::armor_class(
+                    dex.get(&id).copied().unwrap_or(0),
+                    &items,
+                    AcMode::parse(&as_str(r, "ac_mode")),
+                    r.get("ac_override").and_then(|x| x.as_i64()),
+                ),
+                r.get("hp_max").and_then(|x| x.as_i64()),
             ),
         );
     }

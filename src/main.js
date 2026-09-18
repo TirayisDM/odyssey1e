@@ -95,6 +95,39 @@ function row(label, tag, onClick, selected) {
   return li;
 }
 
+// The engine's detail string is markdown, inherited from the Discord
+// embeds the original posted: **20** for a natural, ~~5~~ for a die the
+// keep threw away. dice.rs reproduces it exactly and should keep doing
+// so — that string is parity-locked against diceroller.js.
+//
+// So the rendering happens HERE. Printing it raw put literal asterisks
+// on every crit and fumble. Built as nodes rather than innerHTML: the
+// string is engine-generated today, and it stays that way whatever ends
+// up inside a label tomorrow.
+function renderDetail(text) {
+  const out = [];
+  // One pass, both markers. The capture groups alternate so the split
+  // yields plain, bold, plain, struck, plain...
+  const parts = String(text).split(/(\*\*[^*]+\*\*|~~[^~]+~~)/g);
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.startsWith("**") && part.endsWith("**")) {
+      const b = document.createElement("strong");
+      b.className = "nat";
+      b.textContent = part.slice(2, -2);
+      out.push(b);
+    } else if (part.startsWith("~~") && part.endsWith("~~")) {
+      const d = document.createElement("s");
+      d.className = "dropped";
+      d.textContent = part.slice(2, -2);
+      out.push(d);
+    } else {
+      out.push(document.createTextNode(part));
+    }
+  }
+  return out;
+}
+
 // An ACTION card — one swing, however many rolls it took.
 //
 // A to-hit and its damage are one thing that happened, so they get one
@@ -128,7 +161,7 @@ function rollCard(rolls) {
         : (part.detail ? part.detail + "  =  " : "") + part.total;
     // The damage line says so; the to-hit needs no prefix because the
     // card header already named the swing.
-    dice.textContent = part.role === "damage" ? "dmg  " + numbers : numbers;
+    dice.append(...renderDetail(part.role === "damage" ? "dmg  " + numbers : numbers));
     li.append(dice);
   }
 
@@ -197,6 +230,10 @@ async function selectGame(id) {
 // half-filled target is impossible.
 async function loadTargets() {
   const pick = document.querySelector("#target-pick");
+  // Refreshing after a roll rebuilds this list so the hit points move,
+  // which would otherwise drop the selection and make the player
+  // re-pick the goblin between every swing.
+  const wasPicked = pick.value;
   state.targets = [];
   state.encounterId = null;
   pick.innerHTML =
@@ -224,8 +261,19 @@ async function loadTargets() {
     for (const t of group) {
       const o = document.createElement("option");
       o.value = t.id;
+      // Hit points where the thing has any, so the goblin visibly drops
+      // as it takes damage. A lock has none and says nothing.
+      // Nothing is shown below zero. The event log keeps the honest
+      // total — three hits for fourteen on a seven hit point goblin is
+      // what happened — but a dropdown reading -7/7 hp is nonsense.
+      const hp =
+        t.hp_current === null || t.hp_current === undefined
+          ? ""
+          : t.hp_current <= 0
+            ? " · down"
+            : " · " + t.hp_current + "/" + t.hp_max + " hp";
       o.textContent =
-        t.label + " · " + t.target_kind.toUpperCase() + " " + t.value;
+        t.label + " · " + t.target_kind.toUpperCase() + " " + t.value + hp;
       // Why this number is this number, on hover. Same instinct as the
       // proficiency badges: never show a figure with no account of it.
       o.title = t.source;
@@ -233,6 +281,25 @@ async function loadTargets() {
     }
     pick.append(og);
   }
+
+  // Back to whatever was aimed at, if it is still in the encounter.
+  if (wasPicked && [...pick.options].some((o) => o.value === wasPicked)) {
+    pick.value = wasPicked;
+  }
+}
+
+// This character's row in the active encounter, if they are enrolled.
+//
+// actions.actor_id is the performer as a participant, which is not the
+// same question as whose sheet it was — and it is what an experience
+// system would count. Derived from the target list rather than queried,
+// because that list already carries every actor's character_id.
+function performerActorId() {
+  if (!state.characterId) return null;
+  const mine = (state.targets || []).find(
+    (t) => t.row === "actor" && t.character_id === state.characterId
+  );
+  return mine ? mine.id : null;
 }
 
 async function loadCharacters() {
@@ -657,7 +724,17 @@ window.addEventListener("DOMContentLoaded", async () => {
     } else if (picked) {
       const t = (state.targets || []).find((x) => x.id === picked);
       if (!t) return log("roll_named", "that target is no longer in the encounter", true);
-      target = { value: t.value, kind: t.target_kind, label: t.label };
+      target = {
+        value: t.value,
+        kind: t.target_kind,
+        label: t.label,
+        // The link half. The three above are the snapshot half, which is
+        // what the roll keeps; these are how the damage finds its way to
+        // the right goblin.
+        id: t.id,
+        row: t.row,
+        characterId: t.character_id || null,
+      };
     }
 
     const r = await call("roll_named", {
@@ -670,8 +747,20 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Which encounter this happened in, so the action can be found
       // again by scene rather than only by time.
       encounterId: state.encounterId || null,
+      targetId: target ? target.id || null : null,
+      targetRow: target ? target.row || null : null,
+      targetCharacterId: target ? target.characterId || null : null,
+      // Who swung, as a participant. Found from the target list, which
+      // already knows which actor row belongs to this character, so it
+      // costs no extra query.
+      actorId: performerActorId(),
     });
-    if (r) await loadRolls();
+    if (r) {
+      await loadRolls();
+      // Damage just landed, so the target list is stale — the goblin has
+      // fewer hit points than the dropdown is showing.
+      await loadTargets();
+    }
   });
 
   // The integrity check no foreign key can do. An empty list is the

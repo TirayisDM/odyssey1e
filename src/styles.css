@@ -68,6 +68,10 @@ button.tiny{padding:.1rem .45rem;font-size:11px;margin:0}
 .card .verdict{font:600 11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.02em}
 .card .verdict.hit{color:#7ddc9a}
 .card .verdict.miss{color:#e08a8a}
+/* The engine's markdown, rendered rather than printed: a natural on a
+   d20 is bolded, a die the keep discarded is struck through. */
+.card .dice .nat{color:var(--fg);font-weight:700}
+.card .dice .dropped{color:var(--muted);opacity:.6}
 .card .prose{color:var(--muted);font:italic 12px/1.45 Georgia,"Times New Roman",serif}
 #log{flex:1;overflow-y:auto;background:#0f1114;border:1px solid var(--line);
      border-radius:4px;padding:.6rem;

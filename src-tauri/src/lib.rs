@@ -456,6 +456,15 @@ fn roll_named(
     target_kind: Option<String>,
     target_label: Option<String>,
     encounter_id: Option<String>,
+    // The link half of the target, beside the snapshot half above. See
+    // 013: the snapshot is the record and never changes, this is how the
+    // thing to take hit points off gets found.
+    target_id: Option<String>,
+    target_row: Option<String>,
+    target_character_id: Option<String>,
+    // WHO SWUNG, as a participant. Not the same question as which sheet
+    // it was, and what an experience system would eventually count.
+    actor_id: Option<String>,
 ) -> Result<Value, String> {
     let session = state
         .current()?
@@ -487,6 +496,10 @@ fn roll_named(
         .map(|t| resolution::resolve(first.total, first.outcome, t));
     let line = narrative::pick(&sheet.narratives, &resolved.key, &mut RandomRoller);
 
+    // Set by the damage branch below, and the signal that anything has
+    // hit points to lose.
+    let mut damage_total: Option<i64> = None;
+
     let role = if resolved.attack.is_some() { "to_hit" } else { "check" };
     let mut rolls = vec![roll_row(
         &sheet,
@@ -514,6 +527,7 @@ fn roll_named(
                 a.damage.clone()
             };
             let rolled = dice::roll_formula(&formula)?;
+            damage_total = Some(rolled.total);
             let label = if crit {
                 format!("{} damage (crit)", a.weapon_name)
             } else {
@@ -538,9 +552,42 @@ fn roll_named(
         }
     }
 
-    // One call. The action and every roll under it land together or not
-    // at all — see 012. A goblin that took damage from a swing that does
-    // not exist is the failure this prevents.
+    // The hit points this cost, when it cost any. Damage that was not
+    // aimed at an actor lands nowhere on purpose: a swing at a typed
+    // number has nothing in the world to take it.
+    let hp = damage_total.and_then(|total| {
+        if target_row.as_deref() != Some("actor") {
+            return None;
+        }
+        let actor = target_id.as_ref()?;
+        // XOR, per 013. A character's hit points belong to the character
+        // and follow them between encounters; an NPC instance's belong
+        // to the instance, which is what lets two goblins off one
+        // statblock bleed separately.
+        let (character_id, actor_id) = match &target_character_id {
+            Some(c) => (Some(c.clone()), None),
+            None => (None, Some(actor.clone())),
+        };
+        Some(json!({
+            "game_id": sheet.game_id,
+            "character_id": character_id,
+            "actor_id": actor_id,
+            // SIGNED. Damage is negative; current HP is the maximum plus
+            // the sum of these.
+            "delta": -total,
+        }))
+    });
+
+    let (target_actor_id, target_challenge_id) = match target_row.as_deref() {
+        Some("actor") => (target_id.clone(), None),
+        Some("challenge") => (None, target_id.clone()),
+        _ => (None, None),
+    };
+
+    // One call. The action, every roll under it, and the hit points it
+    // cost land together or not at all — see 012 and 014. A goblin that
+    // took damage from a swing that does not exist is the failure this
+    // prevents.
     supabase::rpc(
         &session.access_token,
         "write_action",
@@ -549,11 +596,15 @@ fn roll_named(
                 "game_id": sheet.game_id,
                 "character_id": sheet.character_id,
                 "encounter_id": encounter_id,
+                "actor_id": actor_id,
+                "target_actor_id": target_actor_id,
+                "target_challenge_id": target_challenge_id,
                 "request": request,
                 "label": resolved.label,
                 "key": resolved.key,
             },
             "p_rolls": rolls,
+            "p_hp": hp,
         }),
     )
 }

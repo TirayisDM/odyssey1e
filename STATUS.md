@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after character vitals on the laptop.**
+**Written 2026-09-17, updated after encounters and the attack key.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -95,7 +95,22 @@ for Character1 - computed from Scale Mail's 14 plus DEX +2 under the
 armour's cap of 2, never from the export's flat field. Character2 wears
 nothing and reads AC 12.
 
-**126 tests, zero warnings.** `cd src-tauri && cargo test`.
+Encounters supply the target instead of a keyboard. One dropdown lists
+the active encounter's actors and challenges with their figures -
+`Goblin 1 · AC 15`, `Rodnar · AC 16`, `The iron lock · DC 15` - and
+picking one supplies value, kind and label together, so a half-filled
+target is impossible. Hand-typing survives for when there is no
+encounter.
+
+And a weapon is a roll. `mace of the deep song` resolves to `1d20+4`
+with damage `1d6+1`, and the preview says WHY: `STR +1, prof +3`, or
+`NOT proficient` on the Heavy Crossbow, whose +1 would otherwise read
+as a bug. `heavy smash` swaps the damage dice and the thresholds and
+leaves to-hit alone; `crystal resonance` at level 5 declines outright
+rather than quietly rolling the plain weapon. Verified live against
+Goblin 1.
+
+**148 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -118,6 +133,8 @@ and not after.
     whether it got there
 010 character vitals - HP, death saves, exhaustion, size, and the two
     columns AC is computed FROM
+011 encounters - encounters, the npc statblock catalogue, actors and
+    challenges; the things a roll can be aimed at
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -430,39 +447,42 @@ for what was settled, and "Combat" for the shape of what follows.
 
 Roughly in order:
 
-1. The `attack` key in `resolve_request`. Nothing blocks it now: the
-   thresholds are in `dice.rs`, the loadout is on the sheet, and a roll
-   can carry a target. It should pass one for an attack - the AC comes
-   from a typed number until encounters supply it from a button. Base
-   weapon attack, then a
-   technique lookup that replaces the damage dice and the thresholds,
-   gated by `min_level`. Snapshot the result onto the roll per the
-   record principle. `skill_prompts` already has its `attack` row
-   seeded. `Thresholds`, `roll_formula_as` and `double_dice` are
-   waiting in `dice.rs`, annotated dead_code, for exactly this caller.
-   Parity fixture: `WeaponsAttacks.js` plus `_RAW` produce the four
-   known-good Attacks rows - the same trick the dice engine used
-   against `diceroller.js`. One caveat, the fixture has a bug: the
-   Mace's reach is 8 in `_RAW`, but the activity carries
-   `range.value: '5'` with `override: False` and the old script uses it
-   anyway. Display only, does not touch to-hit or damage.
-2. Die art on the roll - read the equipped set from character_dice,
+1. THE ACTION. An attack is two rolls - to-hit, then damage - and
+   nothing owns both of them. `attack.rs` works out the damage formula
+   and hands it over; rolling it, and grouping the pair, is the next
+   decision and the one everything else waits on. Auto-applying damage
+   forces it: without a parent, "that should not have hit" has nothing
+   to undo, and a narrator handed two disconnected rolls writes two
+   disconnected sentences. `double_dice` is waiting in `dice.rs` for
+   the crit case.
+2. The roll-to-target link. `rolls` snapshots target_label and
+   target_value but has no reference to the actor or challenge it came
+   from, so the derived challenge status cannot be computed and "has
+   this lock been picked?" cannot be asked. Follow the precedent
+   `rolls` already sets with character_id beside character_name: the
+   link for querying, the snapshot so history cannot be rewritten.
+3. HP events. A hit should take HP off, as an event log rather than a
+   mutable number - undo is deleting a row, a DM correction is the same
+   shape as damage, and the goblin at 3 can always explain itself.
+   Characters have hp_max from 010 and NPCs from 011; neither has a
+   single point of damage recorded against it.
+4. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
    set_key onto the roll at insert, per the record principle.
    `narrative.rs` is the shape to copy, down to caching it on the sheet.
-3. The rules modules still unported: death saves, rests, spell slots -
+5. The rules modules still unported: death saves, rests, spell slots -
    each isolated in its own Apps Script file, each wants its own Rust
    module with tests. Each also wants a `resolve_request` key, and the
    vocabulary already has room for `death` and `spell`.
-4. Delivery - whatever moves a resolved roll to `delivered` and puts it
+6. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-5. Session persistence (currently in memory - a restart signs you out;
+7. Session persistence (currently in memory - a restart signs you out;
    fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
-6. A real phone-first UI. What exists is a desktop test rig.
-7. Android via `npm run tauri android init`. iOS needs a Mac.
+8. A real phone-first UI. What exists is a desktop test rig.
+9. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

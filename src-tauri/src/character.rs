@@ -23,7 +23,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::dice::d20_formula;
-use crate::equipment::{self, Equipped};
+use crate::equipment::{self, Owned};
 use crate::narrative;
 use crate::supabase;
 
@@ -82,7 +82,7 @@ pub struct Sheet {
     /// What is equipped right now, with proficiency and attack modes
     /// already derived. Unlike `narratives` this one IS sent out — a
     /// loadout is a handful of rows and a sheet screen wants it.
-    pub loadout: Vec<Equipped>,
+    pub loadout: Vec<Owned>,
 }
 
 impl Sheet {
@@ -236,20 +236,22 @@ fn as_strings(v: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Read everything resolve_request needs, plus the narrative pack and
-/// the equipped loadout, in seven queries.
-///
-/// Seven is more than this wants to be. It runs on every roll, and the
-/// two equipment reads sit ahead of the dice with the pack read. None of
-/// them is slow individually and none has been worth splitting yet — but
-/// this is the count to watch, and `preview_request` pays all of it for
-/// a hover.
-///
-/// Could be one query with PostgREST embedding, but four explicit reads
-/// are easier to debug when a policy denies one of them — an embedded
-/// join that silently returns fewer rows looks like missing data rather
-/// than a permission problem.
-pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
+/// The character row itself. Everything downstream needs the game and
+/// the proficiencies before it can do anything, and a screen that wants
+/// only the inventory should not have to buy the pack and the skill
+/// catalogue to get them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub character_id: String,
+    pub game_id: String,
+    pub name: String,
+    pub level: i64,
+    pub narrative_pack: String,
+    pub weapon_profs: Vec<String>,
+    pub armor_profs: Vec<String>,
+}
+
+pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> {
     let chars = supabase::rest_get(
         token,
         "characters",
@@ -266,7 +268,40 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         .and_then(|a| a.first())
         .ok_or_else(|| "character not found, or not visible to you".to_string())?;
 
-    let game_id = as_str(c, "game_id");
+    // An empty pack column reads as base rather than as a pack with no
+    // lines, so a row written before 006 added the default still narrates.
+    let mut narrative_pack = as_str(c, "narrative_pack");
+    if narrative_pack.trim().is_empty() {
+        narrative_pack = narrative::BASE_PACK.to_string();
+    }
+
+    Ok(Profile {
+        character_id: as_str(c, "id"),
+        game_id: as_str(c, "game_id"),
+        name: as_str(c, "name"),
+        level: as_i64(c, "level", 1),
+        narrative_pack,
+        weapon_profs: as_strings(c, "weapon_profs"),
+        armor_profs: as_strings(c, "armor_profs"),
+    })
+}
+
+/// Read everything resolve_request needs, plus the narrative pack and
+/// the equipped loadout, in seven queries.
+///
+/// Seven is more than this wants to be. It runs on every roll, and the
+/// two equipment reads sit ahead of the dice with the pack read. None of
+/// them is slow individually and none has been worth splitting yet — but
+/// this is the count to watch, and `preview_request` pays all of it for
+/// a hover.
+///
+/// Could be one query with PostgREST embedding, but four explicit reads
+/// are easier to debug when a policy denies one of them — an embedded
+/// join that silently returns fewer rows looks like missing data rather
+/// than a permission problem.
+pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
+    let profile = load_profile(token, character_id)?;
+    let game_id = profile.game_id.clone();
 
     let abil_rows = supabase::rest_get(
         token,
@@ -353,38 +388,30 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         }
     }
 
-    // The pack, and base underneath it. An empty column reads as base
-    // rather than as a pack with no lines, so a row written before 006
-    // added the default still narrates.
-    let mut narrative_pack = as_str(c, "narrative_pack");
-    if narrative_pack.trim().is_empty() {
-        narrative_pack = narrative::BASE_PACK.to_string();
-    }
-    let line_rows = narrative::load_lines(token, &game_id, &narrative_pack)?;
-    let narratives = narrative::resolve_lines(&line_rows, &narrative_pack);
+    let line_rows = narrative::load_lines(token, &game_id, &profile.narrative_pack)?;
+    let narratives = narrative::resolve_lines(&line_rows, &profile.narrative_pack);
 
-    let weapon_profs = as_strings(c, "weapon_profs");
-    let armor_profs = as_strings(c, "armor_profs");
     let loadout = equipment::load_loadout(
         token,
         character_id,
         &game_id,
-        &weapon_profs,
-        &armor_profs,
+        &profile.weapon_profs,
+        &profile.armor_profs,
+        true,
     )?;
 
     Ok(Sheet {
-        character_id: as_str(c, "id"),
+        character_id: profile.character_id,
         game_id,
-        name: as_str(c, "name"),
-        level: as_i64(c, "level", 1),
+        name: profile.name,
+        level: profile.level,
         abilities,
         skills,
         profs,
-        narrative_pack,
+        narrative_pack: profile.narrative_pack,
         narratives,
-        weapon_profs,
-        armor_profs,
+        weapon_profs: profile.weapon_profs,
+        armor_profs: profile.armor_profs,
         loadout,
     })
 }

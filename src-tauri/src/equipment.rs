@@ -82,12 +82,19 @@ pub struct Item {
     pub armor_category: Option<String>,
 }
 
-/// One equipped thing: the catalogue row plus this character's state for
-/// it, with the derived answers already worked out.
+/// One thing a character has: the catalogue row plus their state for it,
+/// with the derived answers already worked out.
+///
+/// Named for ownership rather than for being equipped, because the same
+/// shape serves both reads — the sheet's loadout, which is equipped only,
+/// and an inventory screen, which is everything.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Equipped {
+pub struct Owned {
     pub item: Item,
     pub quantity: i64,
+    /// In hand or worn. Always true in a sheet loadout; meaningful in a
+    /// full inventory read.
+    pub equipped: bool,
     pub attuned: bool,
     /// TRI-STATE, straight off the column. See `is_proficient`.
     pub proficient_override: Option<bool>,
@@ -213,7 +220,7 @@ pub fn is_proficient(
 /// the rule actually lives, so it has to be called on the way IN, not
 /// just noticed on the way out.
 ///
-/// Takes items rather than `Equipped` because the rule reads nothing
+/// Takes items rather than `Owned` because the rule reads nothing
 /// else: the caller that matters is the equip path, which is checking a
 /// state that does not exist yet and has no derived fields to offer.
 pub fn check_one_armor(equipped: &[&Item]) -> Result<(), String> {
@@ -349,8 +356,13 @@ fn collapse_overrides(rows: &[Value]) -> Vec<Item> {
     out
 }
 
-/// What this character has equipped, with proficiency and modes already
-/// derived.
+/// What this character has, with proficiency and modes already derived.
+///
+/// `equipped_only` is the difference between the two callers. The sheet
+/// passes true, because what is in a backpack cannot change an attack and
+/// the sheet is read on every roll. An inventory screen passes false and
+/// pays for the whole list, which is the different query for a different
+/// page the module header promises.
 ///
 /// Two requests, not one embedded join: an embedded join that a policy
 /// trims looks like missing data instead of a permission problem. Same
@@ -361,22 +373,26 @@ pub fn load_loadout(
     game_id: &str,
     weapon_profs: &[String],
     armor_profs: &[String],
-) -> Result<Vec<Equipped>, String> {
-    let owned = supabase::rest_get(
-        token,
-        "character_items",
-        &[
-            (
-                "select",
-                "item_key,quantity,attuned,proficient_override,uses_spent,uses_max",
-            ),
-            ("character_id", &format!("eq.{}", character_id)),
-            ("equipped", "is.true"),
-        ],
-    )?;
+    equipped_only: bool,
+) -> Result<Vec<Owned>, String> {
+    let mut query: Vec<(&str, String)> = vec![
+        (
+            "select",
+            "item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max"
+                .to_string(),
+        ),
+        ("character_id", format!("eq.{}", character_id)),
+        ("order", "acquired_at.asc".to_string()),
+    ];
+    if equipped_only {
+        query.push(("equipped", "is.true".to_string()));
+    }
+    let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    let owned = supabase::rest_get(token, "character_items", &query)?;
     let owned = owned.as_array().cloned().unwrap_or_default();
-    // No equipped items means no second request. An empty in.() list is
-    // not valid PostgREST, so this guard is load-bearing, not tidiness.
+    // Nothing owned means no second request. An empty in.() list is not
+    // valid PostgREST, so this guard is load-bearing, not tidiness.
     if owned.is_empty() {
         return Ok(Vec::new());
     }
@@ -409,10 +425,11 @@ pub fn load_loadout(
         };
 
         let proficient_override = r.get("proficient_override").and_then(|x| x.as_bool());
-        out.push(Equipped {
+        out.push(Owned {
             proficient: is_proficient(&item, proficient_override, weapon_profs, armor_profs),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
+            equipped: r.get("equipped").and_then(|x| x.as_bool()).unwrap_or(false),
             attuned: r.get("attuned").and_then(|x| x.as_bool()).unwrap_or(false),
             proficient_override,
             uses_spent: r.get("uses_spent").and_then(|x| x.as_i64()).unwrap_or(0),

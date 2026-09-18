@@ -323,6 +323,30 @@ fn set_skill_prof(
 
 /* ============================ EQUIPMENT ============================ */
 
+/// Everything this character owns, equipped or not, with proficiency and
+/// attack modes already derived.
+///
+/// Separate from the sheet's `loadout` on purpose. The sheet carries what
+/// is EQUIPPED, because that is all an attack can depend on and the sheet
+/// is read on every roll. A screen wants the whole list, and pays three
+/// queries for it rather than the seven load_sheet costs.
+#[tauri::command]
+fn list_inventory(
+    state: State<AppState>,
+    character_id: String,
+) -> Result<Vec<equipment::Owned>, String> {
+    let token = state.token()?;
+    let p = character::load_profile(&token, &character_id)?;
+    equipment::load_loadout(
+        &token,
+        &character_id,
+        &p.game_id,
+        &p.weapon_profs,
+        &p.armor_profs,
+        false,
+    )
+}
+
 /// Equip or unequip one item.
 ///
 /// This exists so the one-armor rule is ENFORCED rather than merely
@@ -477,6 +501,7 @@ pub fn run() {
             set_level,
             set_ability,
             set_skill_prof,
+            list_inventory,
             set_item_equipped,
             check_item_keys,
             preview_request,

@@ -72,6 +72,7 @@ function clearData() {
   state.characterId = null;
   state.sheet = null;
   document.querySelector("#sheet-panel").hidden = true;
+  document.querySelector("#equipment-panel").hidden = true;
   state.rolls = [];
   document.querySelector("#games").innerHTML = "";
   document.querySelector("#characters").innerHTML = "";
@@ -271,6 +272,106 @@ async function loadSheet() {
   }
 
   await updatePreview();
+  await loadInventory();
+}
+
+// The equipment panel.
+//
+// Every derived answer on a row comes from the engine. Nothing here
+// recomputes proficiency or modes in JavaScript — that is the rule
+// living in two places, which is the thing the port exists to stop. What
+// the panel adds is the EVIDENCE: the character's proficiencies at the
+// top and each item's class beside it, so a "not prof" can be read
+// rather than taken on trust.
+async function loadInventory() {
+  const panel = document.querySelector("#equipment-panel");
+  const list = document.querySelector("#inventory");
+  if (!state.characterId) { panel.hidden = true; return; }
+
+  const items = await call("list_inventory", { characterId: state.characterId });
+  panel.hidden = false;
+  list.innerHTML = "";
+
+  const sheet = state.sheet || {};
+  document.querySelector("#equip-profs").textContent =
+    "trained: weapons " + ((sheet.weapon_profs || []).join(", ") || "none") +
+    " · armor " + ((sheet.armor_profs || []).join(", ") || "none");
+
+  if (!Array.isArray(items) || items.length === 0) {
+    const li = document.createElement("li");
+    li.className = "flat muted";
+    li.textContent = "carrying nothing";
+    list.append(li);
+    return;
+  }
+
+  for (const it of items) {
+    list.append(inventoryRow(it));
+  }
+}
+
+function inventoryRow(it) {
+  const li = document.createElement("li");
+  li.className = "flat item" + (it.equipped ? " on" : "");
+
+  // Equip toggle. The one-armor rule is enforced in Rust, so a refusal
+  // arrives as an error in the log and the checkbox snaps back.
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = it.equipped;
+  box.title = "equipped";
+  box.addEventListener("change", async () => {
+    await call("set_item_equipped", {
+      characterId: state.characterId,
+      itemKey: it.item.key,
+      equipped: box.checked,
+    });
+    await loadSheet();
+  });
+
+  const name = document.createElement("span");
+  name.className = "nm";
+  name.textContent = it.item.name + (it.quantity > 1 ? " ×" + it.quantity : "");
+
+  // Toggle and name on one line, the engine's verdicts on the next. The
+  // left column is narrow and chips wrap badly beside a flexible name.
+  const head = document.createElement("div");
+  head.className = "head";
+  head.append(box, name);
+
+  const tags = document.createElement("span");
+  tags.className = "tags";
+
+  // What the engine classified it as — the evidence behind the verdict.
+  const cls = it.item.weapon_class || it.item.armor_category;
+  if (cls) tags.append(chip(cls, "cls"));
+
+  for (const m of it.modes) tags.append(chip(m, "mode"));
+
+  if (it.item.kind === "weapon" || it.item.kind === "armor") {
+    // "flagged" means the source answered explicitly and the engine did
+    // not derive anything; the tri-state column is the whole reason
+    // those two cases must not look alike.
+    const why = it.proficient_override === null ? "derived" : "flagged";
+    tags.append(chip((it.proficient ? "proficient" : "not proficient") + " · " + why,
+                     it.proficient ? "yes" : "no"));
+  }
+
+  if (it.attuned) tags.append(chip("attuned", "att"));
+  if (it.uses_max !== null && it.uses_max !== undefined) {
+    tags.append(chip((it.uses_max - it.uses_spent) + "/" + it.uses_max + " charges", "use"));
+  }
+
+  li.append(head);
+  if (tags.childElementCount > 0) li.append(tags);
+  return li;
+}
+
+function chip(text, kind) {
+  const s = document.createElement("span");
+  s.className = "chip " + kind;
+  s.textContent = text;
+  return s;
 }
 
 /// Show what the request would roll, before committing to it.
@@ -409,6 +510,17 @@ window.addEventListener("DOMContentLoaded", async () => {
       mode: document.querySelector("#mode").value,
     });
     if (r) await loadRolls();
+  });
+
+  // The integrity check no foreign key can do. An empty list is the
+  // passing answer, and the log says so out loud rather than rendering
+  // as nothing — same convention as a zero-row RLS result.
+  document.querySelector("#check-keys").addEventListener("click", async () => {
+    if (!state.gameId) return log("check_item_keys", "select a game first", true);
+    const faults = await call("check_item_keys", { gameId: state.gameId });
+    if (Array.isArray(faults) && faults.length === 0) {
+      log("check_item_keys", "every technique item_key and mode resolves", false);
+    }
   });
 
   document.querySelector("#clear-log").addEventListener("click", () => {

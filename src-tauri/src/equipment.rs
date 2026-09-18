@@ -437,13 +437,13 @@ fn item_from_row(r: &Value) -> Item {
     }
 }
 
-const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
+pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
 damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap";
 
 /// Global rows plus this game's overrides, collapsed so an override
 /// replaces the global row sharing its key. Same two-pass shape as the
 /// skill catalogue in character.rs, and for the same reason.
-fn collapse_overrides(rows: &[Value]) -> Vec<Item> {
+pub(crate) fn collapse_overrides(rows: &[Value]) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::new();
     for pass in [true, false] {
         for r in rows {

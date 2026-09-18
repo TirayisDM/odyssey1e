@@ -174,6 +174,52 @@ async function selectGame(id) {
   await loadGames();
   await loadCharacters();
   await loadRolls();
+  await loadTargets();
+}
+
+// The active encounter's actors and challenges, as things to aim at.
+//
+// An actor's AC is resolved in Rust, not here — a character's is
+// computed from what they are wearing by the same function their own
+// sheet uses, so the two cannot disagree. The option carries the
+// number so picking one supplies value, kind and label together and a
+// half-filled target is impossible.
+async function loadTargets() {
+  const pick = document.querySelector("#target-pick");
+  state.targets = [];
+  pick.innerHTML =
+    '<option value="">no target</option><option value="manual">type a number…</option>';
+  // Repopulating resets the selection to "no target", so the hand-typed
+  // fields have to go back into hiding with it — otherwise switching
+  // game leaves them on screen next to a select that says no target.
+  document.querySelector("#manual-target").hidden = true;
+  if (!state.gameId) return;
+
+  const encounters = await call("list_encounters", { gameId: state.gameId });
+  const active = (encounters || []).find((e) => e.status === "active");
+  if (!active) return;
+
+  const targets = await call("list_targets", { encounterId: active.id });
+  state.targets = targets || [];
+  if (!state.targets.length) return;
+
+  for (const kind of ["actor", "challenge"]) {
+    const group = state.targets.filter((t) => t.row === kind);
+    if (!group.length) continue;
+    const og = document.createElement("optgroup");
+    og.label = kind === "actor" ? active.name : "Challenges";
+    for (const t of group) {
+      const o = document.createElement("option");
+      o.value = t.id;
+      o.textContent =
+        t.label + " · " + t.target_kind.toUpperCase() + " " + t.value;
+      // Why this number is this number, on hover. Same instinct as the
+      // proficiency badges: never show a figure with no account of it.
+      o.title = t.source;
+      og.append(o);
+    }
+    pick.append(og);
+  }
 }
 
 async function loadCharacters() {
@@ -535,25 +581,39 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.querySelector("#named-request").addEventListener("input", updatePreview);
   document.querySelector("#mode").addEventListener("change", updatePreview);
 
+  // The hand-typed fields only exist for the case with no encounter to
+  // pick from, so they stay out of the way until asked for.
+  document.querySelector("#target-pick").addEventListener("change", (e) => {
+    document.querySelector("#manual-target").hidden = e.target.value !== "manual";
+  });
+
   document.querySelector("#roll-named").addEventListener("click", async () => {
     if (!state.characterId) return log("roll_named", "select a character first", true);
-    // A blank kind means no target at all. The value only travels
-    // alongside a kind — half a target is refused in Rust rather than
+    // Three cases: nothing picked, a real target off the encounter, or
+    // a hand-typed one. Half a target is refused in Rust rather than
     // guessed at, so there is no point assembling one here.
-    const kind = document.querySelector("#target-kind").value;
-    const raw = val("#target-value");
-    if (kind && raw === "")
-      return log("roll_named", "pick a number to beat, or choose no target", true);
-    if (!kind && raw !== "")
-      return log("roll_named", "choose DC or AC for that number", true);
+    const picked = document.querySelector("#target-pick").value;
+    let target = null;
+
+    if (picked === "manual") {
+      const kind = document.querySelector("#target-kind").value;
+      const raw = val("#target-value");
+      if (raw === "")
+        return log("roll_named", "type a number to beat, or choose no target", true);
+      target = { value: Number(raw), kind, label: val("#target-label") || null };
+    } else if (picked) {
+      const t = (state.targets || []).find((x) => x.id === picked);
+      if (!t) return log("roll_named", "that target is no longer in the encounter", true);
+      target = { value: t.value, kind: t.target_kind, label: t.label };
+    }
 
     const r = await call("roll_named", {
       characterId: state.characterId,
       request: val("#named-request") || "insight",
       mode: document.querySelector("#mode").value,
-      targetValue: kind ? Number(raw) : null,
-      targetKind: kind || null,
-      targetLabel: kind ? val("#target-label") || null : null,
+      targetValue: target ? target.value : null,
+      targetKind: target ? target.kind : null,
+      targetLabel: target ? target.label : null,
     });
     if (r) await loadRolls();
   });

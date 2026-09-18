@@ -72,11 +72,18 @@
             <option value="dis">Dis</option>
           </select>
         </div>
-        <!-- Optional. Blank means the roll has no target and is not
-             judged, which is not the same as failing it. -->
+        <!-- Optional. "no target" means the roll is not judged at
+             all, which is not the same as failing it. The list is the
+             active encounter's actors and challenges; typing a number
+             by hand still works when there is no encounter. -->
         <div class="row">
-          <select id="target-kind">
+          <select id="target-pick">
             <option value="">no target</option>
+            <option value="manual">type a number…</option>
+          </select>
+        </div>
+        <div class="row" id="manual-target" hidden>
+          <select id="target-kind">
             <option value="dc">vs DC</option>
             <option value="ac">vs AC</option>
           </select>

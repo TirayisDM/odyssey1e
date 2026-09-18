@@ -11,6 +11,7 @@
 
 mod character;
 mod dice;
+mod encounter;
 mod equipment;
 mod narrative;
 mod resolution;
@@ -536,6 +537,41 @@ fn parse_target(
     }
 }
 
+/* ============================ ENCOUNTERS ============================ */
+
+/// The encounters in a game, newest first. `active` is the one in front
+/// of the table; at most one per game, enforced by a partial unique
+/// index rather than by hope.
+#[tauri::command]
+fn list_encounters(state: State<AppState>, game_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_get(
+        &token,
+        "encounters",
+        &[
+            ("select", "id,name,status,created_at"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("order", "created_at.desc"),
+        ],
+    )
+}
+
+/// Everything in an encounter a roll can be aimed at: actors with their
+/// resolved AC, challenges with their DC, in one list.
+///
+/// The AC is worked out per actor rather than read off a column - see
+/// encounter.rs. A character's is computed from what they are wearing by
+/// the same function their own sheet uses, so the DM's target list and
+/// the player's sheet cannot disagree about what it takes to hit them.
+#[tauri::command]
+fn list_targets(
+    state: State<AppState>,
+    encounter_id: String,
+) -> Result<Vec<encounter::Target>, String> {
+    let token = state.token()?;
+    encounter::load_targets(&token, &encounter_id)
+}
+
 /* ============================ ENTRY ============================ */
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -555,6 +591,8 @@ pub fn run() {
             list_characters,
             create_character,
             list_rolls,
+            list_encounters,
+            list_targets,
             get_sheet,
             set_level,
             set_ability,

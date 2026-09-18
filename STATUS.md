@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after targets and outcomes on the laptop.**
+**Written 2026-09-17, updated after character vitals on the laptop.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -90,7 +90,12 @@ it; the same 20 against a DC does not, which is rules as written.
 Leaving the target blank behaves exactly as before and writes no
 verdict at all. Verified live on Character1.
 
-**113 tests, zero warnings.** `cd src-tauri && cargo test`.
+And a character can now be hit. The sheet header reads `AC 16 · HP 74`
+for Character1 - computed from Scale Mail's 14 plus DEX +2 under the
+armour's cap of 2, never from the export's flat field. Character2 wears
+nothing and reads AC 12.
+
+**126 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -111,6 +116,8 @@ and not after.
     proficiency arrays on characters; 13 seed rows
 009 roll targets - a roll carries what it was trying to beat, and
     whether it got there
+010 character vitals - HP, death saves, exhaustion, size, and the two
+    columns AC is computed FROM
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -172,6 +179,32 @@ global item or one campaign's override, when the whole purpose of the
 key is that it resolves to whichever the reader is entitled to see. The
 cost is that nothing catches a typo, so the integrity check has to live
 in Rust. (007, 008)
+
+**The export's AC is not the character's AC.** `attributes.ac` reads
+`{"calc": "default", "flat": 14}`, and the spreadsheet has an AC_Flat
+column dutifully saying 14. Fourteen is not Rodnar's armour class.
+`calc: "default"` means Foundry COMPUTES from equipped armour; `flat`
+is consulted only when calc is `"flat"`, so 14 is a leftover in a field
+nobody reads. The real answer is `base_ac + min(DEX, dex_cap)` - 15 on
+the export's DEX of 13, 16 for Character1 whose DEX is 14. Copying
+AC_Flat in would have had every attack on him resolve one short,
+forever, with nothing anywhere to suggest it.
+`rodnar_is_fifteen_not_the_fourteen_in_the_export` fails loudly if
+anyone wires that field up. Same species as the baked Attacks tab: a
+number that looks authoritative and is a leftover. (010)
+
+**A shield is not a second suit of armour**, and `kind = 'armor'` alone
+cannot tell them apart. `check_one_armor` counted both, so mail plus a
+shield - the most ordinary loadout in the game - came back refused as
+"two armors". Two separate limits now, because body armour SETS the AC
+while a shield ADDS to it, and `armor_category = 'shl'` is the only
+thing distinguishing them. Found by writing the AC rule, not by anyone
+hitting it. (010)
+
+**A `dex_cap` of NULL is not a cap of zero.** Light armour has no cap
+and passes the whole modifier; heavy armour is `Some(0)` and passes
+none. Reading NULL as zero costs a rogue their entire DEX bonus and
+looks like nothing. (010)
 
 **Foundry spells armor two ways, and neither the data nor the database
 will tell you.** The item subtype is `light`/`medium`/`heavy`/`shield`;

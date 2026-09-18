@@ -9,6 +9,7 @@
 //! thread pool, so the blocking HTTP in `supabase` is fine here and the
 //! code stays readable.
 
+mod attack;
 mod character;
 mod dice;
 mod encounter;
@@ -466,7 +467,14 @@ fn roll_named(
 
     let sheet = character::load_sheet(&session.access_token, &character_id)?;
     let resolved = character::resolve_request(&sheet, &request, &mode);
-    let thresholds = dice::Thresholds::STANDARD;
+
+    // A technique brings its own crit and fumble range; everything else
+    // uses 20 and 1. Thresholds::new refuses a pair whose ranges meet,
+    // so a bad technique row fails here rather than deciding a roll.
+    let thresholds = match &resolved.attack {
+        Some(a) => dice::Thresholds::new(a.crit_min, a.fumble_max)?,
+        None => dice::Thresholds::STANDARD,
+    };
     let rolled = dice::roll_formula_as(&resolved.formula, thresholds)?;
     // None for a key no pack has written yet. The column is nullable and
     // the card reads fine without prose, so that is not an error.

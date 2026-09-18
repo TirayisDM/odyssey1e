@@ -468,7 +468,22 @@ async function updatePreview() {
       request: req,
       mode: document.querySelector("#mode").value,
     });
-    el.textContent = r.label + "  →  " + r.formula;
+    // An attack shows its damage and, when it applies, the reason its
+    // to-hit is lower than the character might expect. A number with no
+    // account of itself is the thing this app keeps refusing to show.
+    let line = r.label + "  →  " + r.formula;
+    if (r.attack) {
+      line += "   dmg " + r.attack.damage;
+      line += r.attack.proficient
+        ? "   " + r.attack.ability.toUpperCase() + " +" + r.attack.ability_mod +
+          ", prof +" + r.attack.proficiency_bonus
+        : "   " + r.attack.ability.toUpperCase() + " +" + r.attack.ability_mod +
+          ", NOT proficient";
+      if (r.attack.crit_min !== 20 || r.attack.fumble_max !== 1) {
+        line += "   crit " + r.attack.crit_min + "+, fumble " + r.attack.fumble_max + "-";
+      }
+    }
+    el.textContent = line;
     el.classList.add("live");
   } catch (e) {
     el.textContent = String(e);

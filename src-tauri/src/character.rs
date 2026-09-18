@@ -83,6 +83,14 @@ pub struct Sheet {
     /// already derived. Unlike `narratives` this one IS sent out — a
     /// loadout is a handful of rows and a sheet screen wants it.
     pub loadout: Vec<Owned>,
+    /// The house techniques the EQUIPPED weapons offer, level gate and
+    /// all. Read once with the sheet for the same reason the narrative
+    /// pack is: choosing one at roll time should cost nothing.
+    ///
+    /// Skipped both ways in serde - the webview has no use for them yet,
+    /// and a technique picker can have them when it exists.
+    #[serde(skip)]
+    pub techniques: Vec<crate::attack::Technique>,
     /// HP, death saves, exhaustion, size. 010.
     pub vitals: Vitals,
     /// DERIVED, NEVER STORED. What it takes to hit this character,
@@ -151,6 +159,14 @@ pub struct Resolved {
     /// even where no lines are seeded for it yet: a pack that grows a
     /// "wis_save" key then works without a Rust change.
     pub key: String,
+    /// Present only for an attack, and carrying its own evidence: which
+    /// ability was used, whether the proficiency bonus was applied, the
+    /// damage formula, and the crit range in force.
+    ///
+    /// A to-hit of +1 where another weapon gives +5 reads as a bug
+    /// unless the card can say the character is untrained with it, which
+    /// is the same requirement the equipment panel already meets.
+    pub attack: Option<crate::attack::Attack>,
 }
 
 /// Long and short ability names, both accepted. Ported from ABIL_NAMES.
@@ -175,6 +191,31 @@ fn ability_code(s: &str) -> Option<&'static str> {
 pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
     let t = request.trim().to_lowercase();
 
+    // AN ATTACK FIRST. A weapon or technique name is the most specific
+    // thing a request can be, and none of them collide with a skill or
+    // an ability. Declining is cheap and silent, so the skills below are
+    // reached exactly as before for everything that is not a swing.
+    if let Some(a) = crate::attack::resolve(
+        request,
+        &sheet.loadout,
+        &sheet.techniques,
+        sheet.level,
+        sheet.proficiency_bonus(),
+        sheet.ability_mod("str"),
+        sheet.ability_mod("dex"),
+    ) {
+        return Resolved {
+            label: crate::attack::label(&a),
+            formula: d20_formula(a.to_hit, mode),
+            modifier: a.to_hit,
+            // One key for every weapon and technique. skill_prompts
+            // already has its `attack` row seeded, and narrative_lines
+            // can grow one without a Rust change.
+            key: "attack".to_string(),
+            attack: Some(a),
+        };
+    }
+
     // "<ability> save" / "wis save" / "wisdom save"
     if let Some(stem) = t.strip_suffix(" save") {
         if let Some(code) = ability_code(stem) {
@@ -186,6 +227,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
                 formula: d20_formula(m, mode),
                 modifier: m,
                 key: format!("{}_save", code),
+                attack: None,
             };
         }
     }
@@ -198,6 +240,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
             formula: d20_formula(m, mode),
             modifier: m,
             key: s.key.clone(),
+            attack: None,
         };
     }
 
@@ -210,6 +253,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
             formula: d20_formula(m, mode),
             modifier: m,
             key: format!("{}_check", code),
+            attack: None,
         };
     }
 
@@ -220,6 +264,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
         formula: t,
         modifier: 0,
         key: "custom".to_string(),
+        attack: None,
     }
 }
 
@@ -478,6 +523,15 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // Computed here rather than stored, from the loadout that was just
     // read. DEX is the live modifier, so a stat change moves AC the same
     // turn rather than at the next reseed.
+    // Only the weapons: armour and gear have no techniques, and asking
+    // for their keys would widen the query for nothing.
+    let weapon_keys: Vec<String> = loadout
+        .iter()
+        .filter(|o| o.item.kind == "weapon")
+        .map(|o| o.item.key.clone())
+        .collect();
+    let techniques = crate::attack::load_techniques(token, &game_id, &weapon_keys)?;
+
     let worn: Vec<&equipment::Item> = loadout.iter().map(|o| &o.item).collect();
     let armor_class = equipment::armor_class(
         ability_mod_of(&abilities, "dex"),
@@ -500,6 +554,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         armor_profs: profile.armor_profs,
         vitals: profile.vitals,
         armor_class,
+        techniques,
         loadout,
     })
 }
@@ -554,6 +609,7 @@ mod tests {
             weapon_profs: vec!["sim".into()],
             armor_profs: vec!["lgt".into(), "med".into(), "shl".into()],
             loadout: Vec::new(),
+            techniques: Vec::new(),
             vitals: Vitals {
                 hp_max: Some(74),
                 hp_temp: 0,

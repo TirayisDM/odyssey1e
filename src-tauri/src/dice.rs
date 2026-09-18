@@ -79,6 +79,107 @@ pub struct RollResult {
     /// The raw d20 face — Some ONLY when exactly one d20 term was
     /// rolled. Crit and fumble detection depend on that.
     pub natural: Option<i64>,
+    /// The verdict on `natural` under the thresholds this roll used.
+    ///
+    /// Some exactly when `natural` is Some. A damage roll has no d20 and
+    /// therefore no verdict, which is NOT the same as a normal one —
+    /// hence Option rather than defaulting to Normal.
+    pub outcome: Option<Outcome>,
+}
+
+/// What a raw d20 face came to mean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Outcome {
+    Crit,
+    Fumble,
+    Normal,
+}
+
+/// A crit and fumble range — the house rule system, not a 5e constant.
+///
+/// Standard play is 20 and 1, and that is the default here. The
+/// techniques table has never agreed: Deepsong Echo crits on 18, Crystal
+/// Resonance fumbles on 1-3, Heavy Smash on 1-2, and a `fumble_max` of 0
+/// means a technique cannot fumble at all. Those are per-technique
+/// columns in 006 with check constraints on them, and this struct is the
+/// engine-side counterpart of those constraints. Expect more of them,
+/// not fewer — this is a system the campaign keeps extending.
+///
+/// CONSTRUCTED, NOT ASSEMBLED. The fields are public to read but `new`
+/// is the only way to build a non-standard pair, and it enforces the two
+/// bounds the database enforces plus the one the database cannot
+/// express: the ranges must not meet. A check constraint can say
+/// `crit_min between 2 and 20` per column, but it cannot say that this
+/// column must exceed that one. If `fumble_max` ever reached `crit_min`,
+/// a single face would be both a crit and a fumble and whichever test
+/// ran first would win, silently, forever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Thresholds {
+    /// A natural at or above this is a crit. 20 is standard; 18 and 19
+    /// widen the range.
+    pub crit_min: i64,
+    /// A natural at or below this is a fumble. 1 is standard; 0 means
+    /// cannot fumble; 2 and 3 widen the range.
+    pub fumble_max: i64,
+}
+
+impl Thresholds {
+    /// Natural 20 crits, natural 1 fumbles. What everything that is not
+    /// a technique uses, and what keeps this engine's rendered output
+    /// byte-identical to the port it came from.
+    pub const STANDARD: Thresholds = Thresholds { crit_min: 20, fumble_max: 1 };
+
+    /// Bounds match the check constraints on `techniques.crit_min` and
+    /// `techniques.fumble_max`, so a row the database accepts is a pair
+    /// this accepts, and vice versa. Keep them in step.
+    ///
+    /// Not called outside tests yet: the caller is the attack resolver,
+    /// which reads a technique's two columns and builds a pair from
+    /// them. Annotated rather than deleted for the same reason
+    /// `d20_formula` is - it is finished and tested, and the alternative
+    /// is writing it again in a fortnight.
+    #[allow(dead_code)]
+    pub fn new(crit_min: i64, fumble_max: i64) -> Result<Self, String> {
+        if !(2..=20).contains(&crit_min) {
+            return Err(format!("crit_min must be 2..=20, got {}", crit_min));
+        }
+        if !(0..=19).contains(&fumble_max) {
+            return Err(format!("fumble_max must be 0..=19, got {}", fumble_max));
+        }
+        if fumble_max >= crit_min {
+            return Err(format!(
+                "fumble and crit ranges overlap: fumble_max {} >= crit_min {}",
+                fumble_max, crit_min
+            ));
+        }
+        Ok(Thresholds { crit_min, fumble_max })
+    }
+
+    /// What a raw d20 face means here. Crit is tested first, but `new`
+    /// has already guaranteed the ranges cannot both match.
+    pub fn verdict(&self, natural: i64) -> Outcome {
+        if natural >= self.crit_min {
+            Outcome::Crit
+        } else if natural <= self.fumble_max {
+            Outcome::Fumble
+        } else {
+            Outcome::Normal
+        }
+    }
+
+    /// Whether a face is bolded in the detail string. Marking is the
+    /// display half of the same rule, so it reads these thresholds
+    /// rather than carrying a second hardcoded copy of 20 and 1.
+    fn is_marked(&self, face: i64) -> bool {
+        !matches!(self.verdict(face), Outcome::Normal)
+    }
+}
+
+impl Default for Thresholds {
+    fn default() -> Self {
+        Thresholds::STANDARD
+    }
 }
 
 /// One parsed dice term: NdM with an optional keep.
@@ -154,11 +255,26 @@ fn parse_dice_term(term: &str) -> Option<DiceTerm> {
     Some(DiceTerm { count, faces, keep })
 }
 
+/// Roll under standard 20/1 thresholds. What every caller that is not
+/// resolving a technique wants.
 pub fn roll_formula(formula: &str) -> Result<RollResult, String> {
-    roll_formula_with(formula, &mut RandomRoller)
+    roll_formula_with(formula, &mut RandomRoller, Thresholds::STANDARD)
 }
 
-pub fn roll_formula_with<R: Roller>(formula: &str, rng: &mut R) -> Result<RollResult, String> {
+/// Roll under a technique's own crit and fumble range.
+///
+/// Not called yet - the attack key is what calls it. See
+/// `Thresholds::new`.
+#[allow(dead_code)]
+pub fn roll_formula_as(formula: &str, thresholds: Thresholds) -> Result<RollResult, String> {
+    roll_formula_with(formula, &mut RandomRoller, thresholds)
+}
+
+pub fn roll_formula_with<R: Roller>(
+    formula: &str,
+    rng: &mut R,
+    thresholds: Thresholds,
+) -> Result<RollResult, String> {
     let clean: String = formula
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -246,7 +362,7 @@ pub fn roll_formula_with<R: Roller>(formula: &str, rng: &mut R) -> Result<RollRe
 
                     if !kept_here {
                         format!("~~{}~~", v)
-                    } else if d.faces == 20 && (v == 20 || v == 1) {
+                    } else if d.faces == 20 && thresholds.is_marked(v) {
                         format!("**{}**", v)
                     } else {
                         v.to_string()
@@ -281,11 +397,82 @@ pub fn roll_formula_with<R: Roller>(formula: &str, rng: &mut R) -> Result<RollRe
         natural = None;
     }
 
+    // The verdict rides with the face it was reached from, so a caller
+    // can never pair one roll's natural with another roll's thresholds.
+    let outcome = natural.map(|n| thresholds.verdict(n));
+
     Ok(RollResult {
         detail: parts.join("  "), // two spaces, as in the original
         total,
         natural,
+        outcome,
     })
+}
+
+/// Double the DICE in a damage formula, leaving flat modifiers alone.
+///
+/// "1d6+2" becomes "2d6+2", never "2d6+4" — a crit doubles dice, and the
+/// ability modifier is still added once. Ported from the CritDamage
+/// column of the Attacks tab, which built `(n * 2) + 'd' + den + flat`.
+///
+/// Lives here because it is formula parsing and rendering, which is this
+/// module's job, and because the attack resolver should not be writing a
+/// second dice parser to do it.
+///
+/// REFUSES A KEEP TERM. Damage formulas do not have them, and doubling
+/// the pool of "4d6kh3" would quietly change what the formula means
+/// rather than doubling its dice.
+///
+/// Not called yet - the attack resolver applies it when `Outcome::Crit`
+/// comes back. See `Thresholds::new`.
+#[allow(dead_code)]
+pub fn double_dice(formula: &str) -> Result<String, String> {
+    let clean: String = formula
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase();
+
+    if clean.is_empty() {
+        return Err("Empty formula".to_string());
+    }
+
+    let spaced = clean.replace('-', "+-");
+    let terms: Vec<&str> = spaced.split('+').filter(|t| !t.is_empty()).collect();
+
+    let mut out = String::new();
+    for raw in terms {
+        let (neg, term) = match raw.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, raw),
+        };
+
+        if term.is_empty() {
+            return Err(format!("Bad term: \"{}\"", raw));
+        }
+
+        let rendered = if let Some(d) = parse_dice_term(term) {
+            if d.keep.is_some() {
+                return Err(format!("Cannot double a keep term: \"{}\"", term));
+            }
+            format!("{}d{}", d.count * 2, d.faces)
+        } else if term.bytes().all(|c| c.is_ascii_digit()) {
+            term.to_string()
+        } else {
+            return Err(format!("Bad term: \"{}\"", term));
+        };
+
+        if out.is_empty() {
+            if neg {
+                out.push('-');
+            }
+        } else {
+            out.push(if neg { '-' } else { '+' });
+        }
+        out.push_str(&rendered);
+    }
+
+    Ok(out)
 }
 
 /// Build the d20 formula for a named roll. Ported from d20Formula().
@@ -315,10 +502,22 @@ mod tests {
     use super::*;
 
     fn roll(formula: &str, dice: &[i64]) -> RollResult {
+        roll_as(formula, dice, Thresholds::STANDARD)
+    }
+
+    fn roll_as(formula: &str, dice: &[i64], thresholds: Thresholds) -> RollResult {
         let mut r = SequenceRoller::new(dice);
-        let out = roll_formula_with(formula, &mut r).expect("should parse");
+        let out = roll_formula_with(formula, &mut r, thresholds).expect("should parse");
         assert!(r.exhausted(), "test supplied more dice than the formula rolled");
         out
+    }
+
+    /// The techniques that actually exist, by their real numbers.
+    fn deepsong_echo() -> Thresholds {
+        Thresholds::new(18, 1).unwrap()
+    }
+    fn crystal_resonance() -> Thresholds {
+        Thresholds::new(20, 3).unwrap()
     }
 
     #[test]
@@ -448,15 +647,15 @@ mod tests {
 
     #[test]
     fn empty_formula_is_an_error() {
-        assert!(roll_formula_with("", &mut SequenceRoller::new(&[])).is_err());
-        assert!(roll_formula_with("   ", &mut SequenceRoller::new(&[])).is_err());
+        assert!(roll_formula_with("", &mut SequenceRoller::new(&[]), Thresholds::STANDARD).is_err());
+        assert!(roll_formula_with("   ", &mut SequenceRoller::new(&[]), Thresholds::STANDARD).is_err());
     }
 
     #[test]
     fn oversized_rolls_are_refused() {
-        let e = roll_formula_with("101d6", &mut SequenceRoller::new(&[])).unwrap_err();
+        let e = roll_formula_with("101d6", &mut SequenceRoller::new(&[]), Thresholds::STANDARD).unwrap_err();
         assert!(e.contains("too large"), "got: {}", e);
-        let e = roll_formula_with("1d1001", &mut SequenceRoller::new(&[])).unwrap_err();
+        let e = roll_formula_with("1d1001", &mut SequenceRoller::new(&[]), Thresholds::STANDARD).unwrap_err();
         assert!(e.contains("too large"), "got: {}", e);
     }
 
@@ -464,7 +663,7 @@ mod tests {
     fn garbage_terms_are_refused() {
         for bad in ["2x5", "d", "1d20kx2", "abc", "2d6kh3x"] {
             assert!(
-                roll_formula_with(bad, &mut SequenceRoller::new(&[1, 1, 1, 1])).is_err(),
+                roll_formula_with(bad, &mut SequenceRoller::new(&[1, 1, 1, 1]), Thresholds::STANDARD).is_err(),
                 "{} should not parse",
                 bad
             );
@@ -488,7 +687,7 @@ mod tests {
             for m in [-3i64, 0, 5] {
                 let f = d20_formula(m, mode);
                 let mut r = SequenceRoller::new(&[10, 10]);
-                roll_formula_with(&f, &mut r)
+                roll_formula_with(&f, &mut r, Thresholds::STANDARD)
                     .unwrap_or_else(|e| panic!("{} failed to parse: {}", f, e));
             }
         }
@@ -505,5 +704,191 @@ mod tests {
             let v = r.roll(6);
             assert!((1..=6).contains(&v), "d6 out of range: {}", v);
         }
+    }
+
+    /* ---------------- thresholds: the house rule system ------------- */
+
+    #[test]
+    fn standard_is_twenty_and_one() {
+        assert_eq!(Thresholds::STANDARD.crit_min, 20);
+        assert_eq!(Thresholds::STANDARD.fumble_max, 1);
+        assert_eq!(Thresholds::default(), Thresholds::STANDARD);
+    }
+
+    #[test]
+    fn a_widened_crit_range_calls_eighteen_a_crit() {
+        let t = deepsong_echo();
+        assert_eq!(t.verdict(18), Outcome::Crit);
+        assert_eq!(t.verdict(19), Outcome::Crit);
+        assert_eq!(t.verdict(20), Outcome::Crit);
+        assert_eq!(t.verdict(17), Outcome::Normal);
+    }
+
+    #[test]
+    fn a_widened_fumble_range_calls_three_a_fumble() {
+        let t = crystal_resonance();
+        assert_eq!(t.verdict(1), Outcome::Fumble);
+        assert_eq!(t.verdict(3), Outcome::Fumble);
+        assert_eq!(t.verdict(4), Outcome::Normal);
+    }
+
+    #[test]
+    fn fumble_max_zero_means_it_cannot_fumble() {
+        let t = Thresholds::new(20, 0).unwrap();
+        assert_eq!(t.verdict(1), Outcome::Normal);
+        assert_eq!(t.verdict(20), Outcome::Crit);
+    }
+
+    #[test]
+    fn the_bounds_match_the_check_constraints() {
+        // techniques.crit_min is `between 2 and 20`
+        assert!(Thresholds::new(1, 0).is_err());
+        assert!(Thresholds::new(21, 1).is_err());
+        assert!(Thresholds::new(2, 0).is_ok());
+        assert!(Thresholds::new(20, 1).is_ok());
+        // techniques.fumble_max is `between 0 and 19`
+        assert!(Thresholds::new(20, -1).is_err());
+        assert!(Thresholds::new(20, 20).is_err());
+    }
+
+    #[test]
+    fn overlapping_ranges_are_refused() {
+        // The rule a per-column check constraint cannot express: a face
+        // that is both a crit and a fumble.
+        assert!(Thresholds::new(18, 18).is_err());
+        assert!(Thresholds::new(18, 19).is_err());
+        assert!(Thresholds::new(18, 17).is_ok());
+    }
+
+    #[test]
+    fn a_refused_pair_says_which_bound_it_broke() {
+        let e = Thresholds::new(18, 18).unwrap_err();
+        assert!(e.contains("overlap"), "unhelpful error: {}", e);
+        let e = Thresholds::new(1, 0).unwrap_err();
+        assert!(e.contains("crit_min"), "unhelpful error: {}", e);
+    }
+
+    /* ---------------- thresholds applied to a roll ------------------ */
+
+    #[test]
+    fn standard_thresholds_render_exactly_as_before() {
+        // Parity: the bold marking now reads Thresholds, and under the
+        // standard pair it must produce the identical string.
+        assert_eq!(roll("1d20+4", &[20]).detail, "1d20 [**20**]  +4");
+        assert_eq!(roll("1d20+4", &[1]).detail, "1d20 [**1**]  +4");
+        assert_eq!(roll("1d20+4", &[19]).detail, "1d20 [19]  +4");
+    }
+
+    #[test]
+    fn a_widened_crit_is_bolded_too() {
+        let r = roll_as("1d20+7", &[18], deepsong_echo());
+        assert_eq!(r.detail, "1d20 [**18**]  +7");
+        assert_eq!(r.outcome, Some(Outcome::Crit));
+    }
+
+    #[test]
+    fn the_same_face_is_ordinary_under_standard_thresholds() {
+        let r = roll("1d20+7", &[18]);
+        assert_eq!(r.detail, "1d20 [18]  +7");
+        assert_eq!(r.outcome, Some(Outcome::Normal));
+    }
+
+    #[test]
+    fn a_widened_fumble_is_bolded_and_reported() {
+        let r = roll_as("1d20+5", &[3], crystal_resonance());
+        assert_eq!(r.detail, "1d20 [**3**]  +5");
+        assert_eq!(r.outcome, Some(Outcome::Fumble));
+    }
+
+    #[test]
+    fn advantage_keeps_the_higher_and_judges_only_that_one() {
+        // The dropped die is struck through and takes no part in the
+        // verdict, even when it would have been a fumble.
+        let r = roll_as("2d20kh1+7", &[1, 18], deepsong_echo());
+        assert_eq!(r.natural, Some(18));
+        assert_eq!(r.outcome, Some(Outcome::Crit));
+        assert!(r.detail.contains("~~1~~"), "dropped die not struck: {}", r.detail);
+    }
+
+    #[test]
+    fn a_damage_roll_has_no_verdict_at_all() {
+        // Not Normal - there was no d20, so nothing was judged.
+        let r = roll("1d6+2", &[4]);
+        assert_eq!(r.natural, None);
+        assert_eq!(r.outcome, None);
+    }
+
+    #[test]
+    fn two_d20_terms_yield_no_verdict() {
+        let r = roll("1d20+1d20", &[20, 20]);
+        assert_eq!(r.natural, None);
+        assert_eq!(r.outcome, None);
+    }
+
+    #[test]
+    fn house_dice_roll_and_are_never_judged() {
+        // 1d7 and 1d14 exist in the techniques table. They parse, they
+        // roll, and they are not d20s so they carry no verdict.
+        let r = roll_as("1d7", &[7], deepsong_echo());
+        assert_eq!(r.total, 7);
+        assert_eq!(r.outcome, None);
+        let r = roll_as("1d14", &[14], deepsong_echo());
+        assert_eq!(r.total, 14);
+        assert_eq!(r.outcome, None);
+    }
+
+    /* ---------------- doubling damage on a crit --------------------- */
+
+    #[test]
+    fn doubling_doubles_dice_and_leaves_the_modifier_alone() {
+        assert_eq!(double_dice("1d6+2").unwrap(), "2d6+2");
+        assert_eq!(double_dice("1d10+1").unwrap(), "2d10+1");
+    }
+
+    #[test]
+    fn doubling_matches_the_attacks_tab_crit_column() {
+        // The four rows the old seeder produced, damage -> CritDamage.
+        assert_eq!(double_dice("1d6+2").unwrap(), "2d6+2");
+        assert_eq!(double_dice("1d4+2").unwrap(), "2d4+2");
+        assert_eq!(double_dice("1d10+1").unwrap(), "2d10+1");
+    }
+
+    #[test]
+    fn doubling_handles_house_dice_and_multi_dice_techniques() {
+        assert_eq!(double_dice("1d14").unwrap(), "2d14");
+        assert_eq!(double_dice("1d7").unwrap(), "2d7");
+        assert_eq!(double_dice("3d6").unwrap(), "6d6");
+        assert_eq!(double_dice("3d10").unwrap(), "6d10");
+    }
+
+    #[test]
+    fn a_bare_d_doubles_to_two() {
+        assert_eq!(double_dice("d6").unwrap(), "2d6");
+    }
+
+    #[test]
+    fn a_negative_modifier_survives_doubling() {
+        assert_eq!(double_dice("1d6-1").unwrap(), "2d6-1");
+    }
+
+    #[test]
+    fn doubling_refuses_a_keep_term_rather_than_changing_its_meaning() {
+        let e = double_dice("4d6kh3").unwrap_err();
+        assert!(e.contains("keep"), "unhelpful error: {}", e);
+    }
+
+    #[test]
+    fn doubling_refuses_garbage_and_empty() {
+        assert!(double_dice("mace of the deep song").is_err());
+        assert!(double_dice("").is_err());
+    }
+
+    #[test]
+    fn a_doubled_formula_is_still_rollable() {
+        // The output has to feed straight back into the engine.
+        let doubled = double_dice("1d6+2").unwrap();
+        let r = roll(&doubled, &[3, 5]);
+        assert_eq!(r.total, 10);
+        assert_eq!(r.detail, "2d6 [3, 5]  +2");
     }
 }

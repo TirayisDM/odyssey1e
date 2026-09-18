@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the crit thresholds on the laptop.**
+**Written 2026-09-17, updated after targets and outcomes on the laptop.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -82,7 +82,15 @@ engine marks and judges all of those correctly, and `double_dice` turns
 rolls render byte-identically to before, which is pinned by a test.
 Nothing calls it yet; the attack key is the caller.
 
-**99 tests, zero warnings.** `cd src-tauri && cargo test`.
+And a roll can now be given a target. `insight` against DC 15, or
+against AC 15 labelled Goblin 1, comes back HIT or MISS with the margin
+and the reason on the card. A natural 20 against an AC reads "hit on a
+natural 20" even where the total fell short, because the face decided
+it; the same 20 against a DC does not, which is rules as written.
+Leaving the target blank behaves exactly as before and writes no
+verdict at all. Verified live on Character1.
+
+**113 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -101,6 +109,8 @@ and not after.
 007 technique item keys - techniques stop naming their weapon in prose
 008 items - the item catalogue, character_items, and the two
     proficiency arrays on characters; 13 seed rows
+009 roll targets - a roll carries what it was trying to beat, and
+    whether it got there
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -258,64 +268,92 @@ for campaign-specific overrides.
 
 ---
 
-## Targets and outcomes - OPEN, decide before building the attack
+## Targets and outcomes - SETTLED AND BUILT (009, resolution.rs)
 
-**Today a roll ends at a number and a human decides what it meant.**
-That is the AppSheet shape: the app says `1d20 [14] +5 = 19` and the
-table works out whether 19 beat anything. Everything in this codebase
-assumes it - `rolls.status` goes `pending -> resolved -> delivered`
-where `resolved` means only that dice were rolled, not that anything
-was settled.
+A roll used to end at a number and leave a human to decide what it
+meant. It can now carry a target, and when it does the engine says
+whether it was met. Verified live: a natural 20 reading `auto_hit` at
+margin 11, an ordinary hit, and a miss at margin -7.
 
-The direction being taken is that the system should know the target and
-say whether the roll met it, so the result is a decided outcome rather
-than arithmetic handed back to the player.
+**One concept, not two.** An attack targets an AC, a check or save
+targets a DC, and both are `d20 + modifier` against a number.
+`target_kind` records which, because exactly one rule cares.
 
-**An attack and a challenge are the same shape.** An attack targets an
-opponent's AC, a check or save targets a DC, and mechanically both are
-`d20 + modifier` against a number. One concept - a target - covers both,
-and building two would be a mistake.
+**Two verdicts, different axes.** The FACE verdict - crit, fumble,
+normal - comes off the raw d20 against the thresholds in force, and
+`dice.rs` decides it. The MARGIN verdict comes off the total against
+the target. They disagree often: a natural 20 hits an AC it never
+reached, a natural 1 misses one it cleared. Combining them wrongly
+gives correct arithmetic and wrong rules, and it is invisible in the
+output because the number looks right. `resolution.rs` is the only
+place they meet.
 
-**There are TWO verdicts and they are orthogonal.** This is where the
-bugs will be. The face verdict is crit/fumble, decided by the raw d20
-against the technique's thresholds; `dice.rs` already returns it as
-`Outcome`. The margin verdict is hit/miss, decided by the total against
-the target. They are not the same axis: a natural 20 hits regardless of
-AC, a natural 1 misses regardless, and by strict 5e neither of those
-applies to an ability check at all. Whatever rule combines them must be
-written down in one place and tested, not inferred at each call site.
+**The auto rule is AC-only.** Rules as written: a natural 20 on an
+ability check is a 20 and can still fail. `TargetKind::auto_decides` is
+the single line to change if the campaign wants naturals to decide
+checks too - still an open house-rule question, but the code is ready
+either way and a test asserts the two kinds genuinely differ.
 
-**The target is optional and must stay optional.** A damage roll has no
-target. A DM asking for a raw d20 has no target. Nullable is the honest
-shape, and "no target" must not collapse into "failed".
+**The target is visible.** An ordinary column under the existing roll
+policies. A visible target means the dice decided; a hidden one means
+the DM decided, and this is being built so the dice decide. The UI need
+not put it in lights; nothing works to hide it.
 
-**Margin is worth keeping.** `total - target` is the difference between
-scraping a success and demolishing it, and it is the single most useful
-thing a narrative generator can be handed.
+**Absent is not failure.** `success` is NULL for a roll with no target,
+and every roll written before 009 reads that way. A damage roll is not
+a failed anything.
 
-**Questions not yet answered.** Where the target comes from - a DM types
-a DC, a spell carries a save DC, an opponent has an AC, and there is no
-monster or NPC model in this codebase at all. Whether an opposed check
-(one roll against another roll) is in scope. Whether the roll row stores
-the target and outcome, which the record principle says it should, and
-which means a migration.
+**`reason` is stored, not just computed.** auto_hit / auto_miss / met /
+missed, so a card can say "hit on a natural 20" rather than leaving
+someone to work out how 12 beat an 18. It surfaced as a dead_code
+warning - the compiler pointing out that WHY had been worked out and
+thrown away. Same traceability the equipment panel gives proficiency,
+and what a narrator needs handed to it rather than inferred.
 
-**The grouping problem.** An attack is naturally more than one roll -
-to-hit, then damage, and a technique may add a rider. Narration should
-cover the ACTION, not each roll separately, and right now one row is one
-roll with nothing above it. Whatever owns "these three rolls were one
-swing" does not exist yet, and delivery probably belongs to that thing
-rather than to a roll.
+**Snapshots, not links.** `target_label` holds 'Goblin 1',
+`target_value` holds the number. Delete that goblin or edit its AC
+mid-fight and last night's rolls must not change their minds.
 
-**Why it matters more than it looks.** The canned prose in
-`narrative_lines` is picked by die face alone, so it can only ever
-narrate the throw. A generator handed a resolved outcome - what was
-attempted, against what, by how much, and whether it crit - can narrate
-the RESULT. That is the difference between flavour text and an account
-of what happened, and `skill_prompts` was seeded for it.
+---
 
-**Do not build item 1 until this is settled.** A roll row written
-without a target cannot be told later that it had one.
+## Combat - DECIDED, NOT BUILT
+
+The shape agreed, so the next sessions are not re-deriving it.
+
+**The DM supplies NPCs; an encounter lists them; a player picks a
+target with a button.** Theater of the mind - no positions, no ranges,
+no movement. The combatant list is just a list, which strips out most
+of what makes combat systems horrible.
+
+**Statblock catalogue plus per-encounter instances**, which is
+`items` + `character_items` again: the goblin's stats authored once,
+'Goblin 1', 'Goblin 2', 'Goblin 3' as three instances pointing at it.
+Same catalogue-plus-junction, keyed by value. Nothing new to invent.
+
+**A hit takes HP off automatically.** That makes this a combat tracker,
+not a roll logger, and it has a consequence: one swing is a to-hit roll
+plus a damage roll plus an HP change, so the ACTION has to exist as a
+thing that owns its parts. Otherwise "that shouldn't have hit" has
+nothing to undo. The action is also the unit a narrator wants handed to
+it - those two needs turn out to be the same need.
+
+**HP as an event log, not a mutable number.** Not `hp = hp - 7` but a
+row saying Goblin 1, -7, from this damage roll. Current HP is the sum.
+Undo is deleting a row. A DM correction or a heal is the same shape,
+another row, not a special case. And it can always answer WHY the
+goblin is at 3, which a bare number never can. Same instinct as `rolls`
+itself, which is already an event log.
+
+**Player characters have no HP in the schema at all.** `characters`
+has level, name, portrait, narrative pack - nothing else. The Character
+tab carries HP_Current, HP_MaxOverride and HP_Temp, none of it ported.
+The moment a goblin swings back that is needed, so it belongs in the
+same migration as combatant HP.
+
+Staging, each step usable on its own: the attack key with a typed
+target (playable now - 009 is in); then encounters and combatants, so
+the number comes from a button instead of a keyboard; then HP events,
+so the hit lands; then the action grouping and the narrator on top.
 
 ---
 
@@ -353,17 +391,17 @@ of printing it; the attack path should carry enough to say WHY - the
 ability used, the proficiency bonus applied or withheld, and the fact
 that it was withheld. Traceable is the requirement, not decorative.
 
-**AN OPEN DESIGN QUESTION, TO SETTLE BEFORE ITEM 1 IS BUILT: rolls have
-no target.** Every roll today ends at a number and leaves a human to
-decide whether it beat anything. That is the AppSheet shape, and it is
-the wrong shape for where this is going. See "Targets and outcomes"
-under Architecture decisions - the attack key should not be built until
-that is settled, because a roll that does not know its target cannot
-later be told it had one without rewriting the row.
+**That question is now answered.** 009 and `resolution.rs` are in, and
+the attack key is no longer blocked - see "Targets and outcomes" above
+for what was settled, and "Combat" for the shape of what follows.
 
 Roughly in order:
 
-1. The `attack` key in `resolve_request`. Base weapon attack, then a
+1. The `attack` key in `resolve_request`. Nothing blocks it now: the
+   thresholds are in `dice.rs`, the loadout is on the sheet, and a roll
+   can carry a target. It should pass one for an attack - the AC comes
+   from a typed number until encounters supply it from a button. Base
+   weapon attack, then a
    technique lookup that replaces the damage dice and the thresholds,
    gated by `min_level`. Snapshot the result onto the roll per the
    record principle. `skill_prompts` already has its `attack` row

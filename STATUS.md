@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the equipment panel on the desktop.**
+**Written 2026-09-17, updated after the crit thresholds on the laptop.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -74,7 +74,15 @@ and comes back NOT proficient, which is the case that silently moves
 to-hit. Nothing on that panel is computed in JavaScript - it shows the
 engine's answer and the evidence behind it.
 
-**76 tests, zero warnings.** `cd src-tauri && cargo test`.
+The dice engine now takes a crit and fumble range per roll instead of
+assuming 20 and 1. Deepsong Echo crits on 18, Crystal Resonance fumbles
+on 1-3, and a technique with `fumble_max` 0 cannot fumble at all - the
+engine marks and judges all of those correctly, and `double_dice` turns
+`1d6+2` into `2d6+2` for a crit without touching the modifier. Standard
+rolls render byte-identically to before, which is pinned by a test.
+Nothing calls it yet; the attack key is the caller.
+
+**99 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -250,6 +258,67 @@ for campaign-specific overrides.
 
 ---
 
+## Targets and outcomes - OPEN, decide before building the attack
+
+**Today a roll ends at a number and a human decides what it meant.**
+That is the AppSheet shape: the app says `1d20 [14] +5 = 19` and the
+table works out whether 19 beat anything. Everything in this codebase
+assumes it - `rolls.status` goes `pending -> resolved -> delivered`
+where `resolved` means only that dice were rolled, not that anything
+was settled.
+
+The direction being taken is that the system should know the target and
+say whether the roll met it, so the result is a decided outcome rather
+than arithmetic handed back to the player.
+
+**An attack and a challenge are the same shape.** An attack targets an
+opponent's AC, a check or save targets a DC, and mechanically both are
+`d20 + modifier` against a number. One concept - a target - covers both,
+and building two would be a mistake.
+
+**There are TWO verdicts and they are orthogonal.** This is where the
+bugs will be. The face verdict is crit/fumble, decided by the raw d20
+against the technique's thresholds; `dice.rs` already returns it as
+`Outcome`. The margin verdict is hit/miss, decided by the total against
+the target. They are not the same axis: a natural 20 hits regardless of
+AC, a natural 1 misses regardless, and by strict 5e neither of those
+applies to an ability check at all. Whatever rule combines them must be
+written down in one place and tested, not inferred at each call site.
+
+**The target is optional and must stay optional.** A damage roll has no
+target. A DM asking for a raw d20 has no target. Nullable is the honest
+shape, and "no target" must not collapse into "failed".
+
+**Margin is worth keeping.** `total - target` is the difference between
+scraping a success and demolishing it, and it is the single most useful
+thing a narrative generator can be handed.
+
+**Questions not yet answered.** Where the target comes from - a DM types
+a DC, a spell carries a save DC, an opponent has an AC, and there is no
+monster or NPC model in this codebase at all. Whether an opposed check
+(one roll against another roll) is in scope. Whether the roll row stores
+the target and outcome, which the record principle says it should, and
+which means a migration.
+
+**The grouping problem.** An attack is naturally more than one roll -
+to-hit, then damage, and a technique may add a rider. Narration should
+cover the ACTION, not each roll separately, and right now one row is one
+roll with nothing above it. Whatever owns "these three rolls were one
+swing" does not exist yet, and delivery probably belongs to that thing
+rather than to a roll.
+
+**Why it matters more than it looks.** The canned prose in
+`narrative_lines` is picked by die face alone, so it can only ever
+narrate the throw. A generator handed a resolved outcome - what was
+attempted, against what, by how much, and whether it crit - can narrate
+the RESULT. That is the difference between flavour text and an account
+of what happened, and `skill_prompts` was seeded for it.
+
+**Do not build item 1 until this is settled.** A roll row written
+without a target cannot be told later that it had one.
+
+---
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square:
@@ -269,50 +338,60 @@ AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
 ActorDice junction, with a partial unique index enforcing one equipped
 set per character. `narrative_lines` is wired in; the rest is not.
 
-**The equipment chain is half finished.** 007 and 008 put the schema in
-place and `equipment.rs` now reads it: proficiency, attack modes, the
-one-armor rule and the key integrity check are done and tested. What
-remains of the chain is the crit thresholds and the attack itself,
-items 1 and 2 below.
+**The equipment chain is one step from done.** 007 and 008 put the
+schema in place, `equipment.rs` reads it - proficiency, attack modes,
+the one-armor rule, the key integrity check - and `dice.rs` now carries
+variable crit and fumble thresholds. Only the attack itself remains,
+item 1 below.
+
+**A DECISION TAKEN, NOT YET BUILT: proficiency must be visible, not
+just felt.** The Heavy Crossbow comes back at +1 where the Mace comes
+back at +5, and the difference is entirely whether the character is
+trained. A player who cannot see that reads it as the app being wrong.
+`Resolved.modifier` already exists so a UI can explain a number instead
+of printing it; the attack path should carry enough to say WHY - the
+ability used, the proficiency bonus applied or withheld, and the fact
+that it was withheld. Traceable is the requirement, not decorative.
+
+**AN OPEN DESIGN QUESTION, TO SETTLE BEFORE ITEM 1 IS BUILT: rolls have
+no target.** Every roll today ends at a number and leaves a human to
+decide whether it beat anything. That is the AppSheet shape, and it is
+the wrong shape for where this is going. See "Targets and outcomes"
+under Architecture decisions - the attack key should not be built until
+that is settled, because a roll that does not know its target cannot
+later be told it had one without rewriting the row.
 
 Roughly in order:
 
-1. `dice.rs` crit and fumble thresholds. The engine hardcodes natural
-   20 and natural 1 for both the bold marking and the crit rule.
-   Techniques do not agree: Deepsong Echo crits on 18, Crystal
-   Resonance fumbles on 1-3, Heavy Smash on 1-2. `natural` is already
-   exposed on the result so DECIDING a crit can live above the engine,
-   but the marking and the doubled damage dice cannot. Small,
-   self-contained, and nothing above it is correct until it is done.
-   House dice need no work - the parser already takes any denomination,
-   so 1d7 and 1d14 work today.
-2. The `attack` key in `resolve_request`. Base weapon attack, then a
+1. The `attack` key in `resolve_request`. Base weapon attack, then a
    technique lookup that replaces the damage dice and the thresholds,
    gated by `min_level`. Snapshot the result onto the roll per the
    record principle. `skill_prompts` already has its `attack` row
-   seeded. Parity fixture: `WeaponsAttacks.js` plus `_RAW` produce the
-   four known-good Attacks rows - the same trick the dice engine used
+   seeded. `Thresholds`, `roll_formula_as` and `double_dice` are
+   waiting in `dice.rs`, annotated dead_code, for exactly this caller.
+   Parity fixture: `WeaponsAttacks.js` plus `_RAW` produce the four
+   known-good Attacks rows - the same trick the dice engine used
    against `diceroller.js`. One caveat, the fixture has a bug: the
    Mace's reach is 8 in `_RAW`, but the activity carries
    `range.value: '5'` with `override: False` and the old script uses it
    anyway. Display only, does not touch to-hit or damage.
-3. Die art on the roll - read the equipped set from character_dice,
+2. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
    set_key onto the roll at insert, per the record principle.
    `narrative.rs` is the shape to copy, down to caching it on the sheet.
-4. The rules modules still unported: death saves, rests, spell slots -
+3. The rules modules still unported: death saves, rests, spell slots -
    each isolated in its own Apps Script file, each wants its own Rust
    module with tests. Each also wants a `resolve_request` key, and the
    vocabulary already has room for `death` and `spell`.
-5. Delivery - whatever moves a resolved roll to `delivered` and puts it
+4. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-6. Session persistence (currently in memory - a restart signs you out;
+5. Session persistence (currently in memory - a restart signs you out;
    fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
-7. A real phone-first UI. What exists is a desktop test rig.
-8. Android via `npm run tauri android init`. iOS needs a Mac.
+6. A real phone-first UI. What exists is a desktop test rig.
+7. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

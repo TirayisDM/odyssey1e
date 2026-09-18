@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after encounters and the attack key.**
+**Written 2026-09-17, updated after the action.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -110,7 +110,16 @@ leaves to-hit alone; `crystal resonance` at level 5 declines outright
 rather than quietly rolling the plain weapon. Verified live against
 Goblin 1.
 
-**148 tests, zero warnings.** `cd src-tauri && cargo test`.
+And a swing is one thing. `heavy smash` against Goblin 1 writes an
+action owning two rolls - `1d20+4` and `dmg 1d8+1` - on one card, in a
+single call that lands both or neither. A miss rolls no damage at all;
+an attack with no target does, because with no AC to check nobody can
+say it failed to connect. A natural 1 reads "missed on a natural 1",
+and a total of exactly 15 against AC 15 reads "exactly". Every roll
+belongs to an action now, including a miss: it happened, and it spends
+an initiative slot the same as a hit.
+
+**150 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -135,6 +144,8 @@ and not after.
     columns AC is computed FROM
 011 encounters - encounters, the npc statblock catalogue, actors and
     challenges; the things a roll can be aimed at
+012 actions - one swing is one thing: an action owns its rolls, and
+    write_action lands all of them or none
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -447,42 +458,45 @@ for what was settled, and "Combat" for the shape of what follows.
 
 Roughly in order:
 
-1. THE ACTION. An attack is two rolls - to-hit, then damage - and
-   nothing owns both of them. `attack.rs` works out the damage formula
-   and hands it over; rolling it, and grouping the pair, is the next
-   decision and the one everything else waits on. Auto-applying damage
-   forces it: without a parent, "that should not have hit" has nothing
-   to undo, and a narrator handed two disconnected rolls writes two
-   disconnected sentences. `double_dice` is waiting in `dice.rs` for
-   the crit case.
-2. The roll-to-target link. `rolls` snapshots target_label and
-   target_value but has no reference to the actor or challenge it came
-   from, so the derived challenge status cannot be computed and "has
-   this lock been picked?" cannot be asked. Follow the precedent
-   `rolls` already sets with character_id beside character_name: the
-   link for querying, the snapshot so history cannot be rewritten.
-3. HP events. A hit should take HP off, as an event log rather than a
-   mutable number - undo is deleting a row, a DM correction is the same
-   shape as damage, and the goblin at 3 can always explain itself.
+1. THE LINKS, then HP events - in that order, because the second
+   needs the first. An action snapshots `Goblin 1` and `AC 15` on its
+   to-hit roll but holds no reference to the actor, so "take 3 off
+   Goblin 1" cannot identify which goblin, and the iron lock's derived
+   status cannot be computed. The precedent is already set by
+   `character_id` sitting beside `character_name`: the link for
+   querying, the snapshot so history cannot be rewritten.
+
+   The link belongs on the ACTION rather than the roll. The action is
+   what was aimed at something; the roll is what was judged against a
+   number. Keeping them apart means the damage roll, which has no
+   target of its own, can still find the goblin it was for.
+
+   It also wants the PERFORMER as an actor, not only as a character.
+   Tallying successes per actor is what an eventual experience and
+   advancement system counts, and an NPC swinging back is an action by
+   an actor with no character behind it at all.
+2. HP events. A hit takes HP off, as an event log rather than a mutable
+   number - undo is deleting a row, a DM correction or a heal is the
+   same shape as damage, and the goblin at 3 can always explain itself.
    Characters have hp_max from 010 and NPCs from 011; neither has a
    single point of damage recorded against it.
-4. Die art on the roll - read the equipped set from character_dice,
+3. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
    set_key onto the roll at insert, per the record principle.
    `narrative.rs` is the shape to copy, down to caching it on the sheet.
-5. The rules modules still unported: death saves, rests, spell slots -
+4. The rules modules still unported: death saves, rests, spell slots -
    each isolated in its own Apps Script file, each wants its own Rust
    module with tests. Each also wants a `resolve_request` key, and the
    vocabulary already has room for `death` and `spell`.
-6. Delivery - whatever moves a resolved roll to `delivered` and puts it
+5. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-7. Session persistence (currently in memory - a restart signs you out;
+6. Session persistence (currently in memory - a restart signs you out;
    fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
-8. A real phone-first UI. What exists is a desktop test rig.
-9. Android via `npm run tauri android init`. iOS needs a Mac.
+7. A real phone-first UI. What exists is a desktop test rig.
+8. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

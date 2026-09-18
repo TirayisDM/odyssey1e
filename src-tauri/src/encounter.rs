@@ -33,6 +33,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+use crate::death::{self, Condition};
 use crate::equipment::{self, AcMode, Item};
 use crate::narrative::quoted;
 use crate::supabase;
@@ -67,6 +68,13 @@ pub struct Target {
     /// actor whose source never had a maximum set.
     pub hp_current: Option<i64>,
     pub hp_max: Option<i64>,
+    /// conscious, down, stable or dead. Derived from hit points and the
+    /// two death save counters rather than stored - see death.rs. None
+    /// for a challenge, which cannot be knocked out.
+    pub condition: Option<Condition>,
+    /// Death saves so far, for a card that wants to show the tally.
+    pub death_successes: i64,
+    pub death_failures: i64,
 }
 
 /* ============================ RULES ============================ */
@@ -131,7 +139,8 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         &[
             (
                 "select",
-                "id,character_id,npc_key,label,ac_override,hp_override,initiative",
+                "id,character_id,npc_key,label,ac_override,hp_override,initiative,\
+                 death_successes,death_failures,dead",
             ),
             ("encounter_id", &format!("eq.{}", encounter_id)),
             ("active", "is.true"),
@@ -215,7 +224,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         let npc_key = as_opt_str(r, "npc_key");
         let character_id = as_opt_str(r, "character_id");
         let npc = npc_key.as_ref().and_then(|k| npc_ac.get(k).copied());
-        let pc = character_id.as_ref().and_then(|c| char_stats.get(c).map(|s| s.0));
+        let pc = character_id.as_ref().and_then(|c| char_stats.get(c).map(|s| s.ac));
 
         // An override on the actor wins, then the source's own maximum.
         let hp_max = r
@@ -225,7 +234,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
             .or_else(|| {
                 character_id
                     .as_ref()
-                    .and_then(|c| char_stats.get(c).and_then(|s| s.1))
+                    .and_then(|c| char_stats.get(c).and_then(|s| s.hp_max))
             });
 
         // Keyed the way the damage is recorded: a character by their
@@ -234,6 +243,26 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
             Some(c) => deltas.get(c).copied().unwrap_or(0),
             None => deltas.get(&as_str(r, "id")).copied().unwrap_or(0),
         };
+        let hp_current = hp_max.map(|m| m + spent);
+
+        // The death saves live where the hit points do: a character
+        // keeps theirs on their own row wherever they appear, an NPC
+        // instance keeps its own so two goblins die separately.
+        let (successes, failures, flagged) = match &character_id {
+            Some(c) => match char_stats.get(c) {
+                Some(st) => (st.successes, st.failures, st.dead),
+                None => (0, 0, false),
+            },
+            None => (
+                r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0),
+                r.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0),
+                r.get("dead").and_then(|x| x.as_bool()).unwrap_or(false),
+            ),
+        };
+
+        // Unconscious, and therefore worth nothing to hit. HOUSE RULE -
+        // see death.rs; 5e keeps the armour class and grants advantage.
+        let condition = death::condition(hp_current.unwrap_or(1), successes, failures, flagged);
 
         match resolve_ac(r.get("ac_override").and_then(|x| x.as_i64()), npc, pc) {
             Some((value, source)) => out.push(Target {
@@ -241,11 +270,17 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
                 row: "actor",
                 target_kind: "ac",
                 label,
-                value,
-                source,
+                value: death::effective_ac(value, condition),
+                source: match death::label_suffix(condition) {
+                    Some(word) => format!("{} · {}, so AC 0", source, word),
+                    None => source,
+                },
                 character_id,
-                hp_current: hp_max.map(|m| m + spent),
+                hp_current,
                 hp_max,
+                condition: Some(condition),
+                death_successes: successes,
+                death_failures: failures,
             }),
             // Skipped rather than shown at a made-up number. An actor
             // with no resolvable AC is a data fault, and a target nobody
@@ -270,6 +305,9 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
             character_id: None,
             hp_current: None,
             hp_max: None,
+            condition: None,
+            death_successes: 0,
+            death_failures: 0,
         });
     }
 
@@ -282,6 +320,111 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
 /// The arithmetic is `equipment::armor_class`, the same function the
 /// sheet uses, so a character's AC cannot read one number on their own
 /// sheet and another in the DM's target list.
+/// One actor's live state, read fresh at the moment it decides
+/// something.
+///
+/// The frontend already has all of this from the target list, and it is
+/// NOT trusted for it. Whether a hit kills outright, and whether it
+/// costs a death save, are rules with a body on the end of them; they
+/// get read from the database rather than taken from a dropdown that
+/// may be seconds stale.
+#[derive(Debug, Clone)]
+pub struct ActorVitals {
+    pub character_id: Option<String>,
+    pub hp_max: Option<i64>,
+    pub hp_current: i64,
+    pub successes: i64,
+    pub failures: i64,
+    pub dead: bool,
+}
+
+/// Read one actor's hit points and dying state.
+pub fn load_actor_vitals(token: &str, actor_id: &str) -> Result<Option<ActorVitals>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "encounter_actors",
+        &[
+            (
+                "select",
+                "id,character_id,npc_key,hp_override,death_successes,death_failures,dead",
+            ),
+            ("id", &format!("eq.{}", actor_id)),
+        ],
+    )?;
+    let r = match rows.as_array().and_then(|a| a.first()) {
+        Some(r) => r.clone(),
+        None => return Ok(None),
+    };
+
+    let character_id = as_opt_str(&r, "character_id");
+    let mut hp_max = r.get("hp_override").and_then(|x| x.as_i64());
+    let mut successes = r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0);
+    let mut failures = r.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0);
+    let mut dead = r.get("dead").and_then(|x| x.as_bool()).unwrap_or(false);
+
+    // A character keeps their maximum and their death saves on their own
+    // row, wherever they happen to be standing. An NPC instance keeps
+    // both here, which is what lets two goblins die separately.
+    if let Some(c) = &character_id {
+        let chars = supabase::rest_get(
+            token,
+            "characters",
+            &[
+                ("select", "hp_max,death_successes,death_failures,dead"),
+                ("id", &format!("eq.{}", c)),
+            ],
+        )?;
+        if let Some(cr) = chars.as_array().and_then(|a| a.first()) {
+            hp_max = hp_max.or_else(|| cr.get("hp_max").and_then(|x| x.as_i64()));
+            successes = cr.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0);
+            failures = cr.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0);
+            dead = cr.get("dead").and_then(|x| x.as_bool()).unwrap_or(false);
+        }
+    } else if let Some(k) = as_opt_str(&r, "npc_key") {
+        let npcs = supabase::rest_get(
+            token,
+            "npcs",
+            &[
+                ("select", "key,game_id,hp_max"),
+                ("key", &format!("eq.{}", k)),
+            ],
+        )?;
+        if hp_max.is_none() {
+            // A game override shadows the global statblock; taking the
+            // last row read is enough when there is at most one of each.
+            for nr in npcs.as_array().unwrap_or(&Vec::new()) {
+                hp_max = nr.get("hp_max").and_then(|x| x.as_i64()).or(hp_max);
+            }
+        }
+    }
+
+    let key = character_id.clone().unwrap_or_else(|| actor_id.to_string());
+    let deltas = load_hp_deltas(
+        token,
+        &[actor_id.to_string()],
+        &character_id.clone().into_iter().collect::<Vec<_>>(),
+    )?;
+    let spent = deltas.get(&key).copied().unwrap_or(0);
+
+    Ok(Some(ActorVitals {
+        character_id,
+        hp_max,
+        hp_current: hp_max.unwrap_or(0) + spent,
+        successes,
+        failures,
+        dead,
+    }))
+}
+
+/// A character's numbers, gathered once for the whole encounter.
+struct CharStats {
+    ac: i64,
+    hp_max: Option<i64>,
+    successes: i64,
+    failures: i64,
+    dead: bool,
+}
+
 /// Every hit point delta recorded against anyone in the encounter,
 /// summed per subject.
 ///
@@ -329,14 +472,14 @@ fn batch_character_stats(
     token: &str,
     game_id: &str,
     char_ids: &[String],
-) -> Result<HashMap<String, (i64, Option<i64>)>, String> {
+) -> Result<HashMap<String, CharStats>, String> {
     let list = char_ids.join(",");
 
     let chars = supabase::rest_get(
         token,
         "characters",
         &[
-            ("select", "id,ac_mode,ac_override,hp_max"),
+            ("select", "id,ac_mode,ac_override,hp_max,death_successes,death_failures,dead"),
             ("id", &format!("in.({})", list)),
         ],
     )?;
@@ -408,15 +551,18 @@ fn batch_character_stats(
         let items: Vec<&Item> = worn.get(&id).map(|v| v.iter().collect()).unwrap_or_default();
         out.insert(
             id.clone(),
-            (
-                equipment::armor_class(
+            CharStats {
+                ac: equipment::armor_class(
                     dex.get(&id).copied().unwrap_or(0),
                     &items,
                     AcMode::parse(&as_str(r, "ac_mode")),
                     r.get("ac_override").and_then(|x| x.as_i64()),
                 ),
-                r.get("hp_max").and_then(|x| x.as_i64()),
-            ),
+                hp_max: r.get("hp_max").and_then(|x| x.as_i64()),
+                successes: r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0),
+                failures: r.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0),
+                dead: r.get("dead").and_then(|x| x.as_bool()).unwrap_or(false),
+            },
         );
     }
     Ok(out)

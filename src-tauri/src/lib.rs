@@ -11,6 +11,7 @@
 
 mod attack;
 mod character;
+mod death;
 mod dice;
 mod encounter;
 mod equipment;
@@ -552,6 +553,54 @@ fn roll_named(
         }
     }
 
+    // WHAT THE DAMAGE DID, read fresh rather than taken from the client.
+    // Whether a hit kills outright, and whether it costs a death save,
+    // are rules with a body on the end of them - the dropdown's copy of
+    // the goblin's hit points may be seconds stale.
+    let mut vitals_update: Option<Value> = None;
+    if let (Some(total), Some("actor"), Some(actor)) =
+        (damage_total, target_row.as_deref(), target_id.as_deref())
+    {
+        if let Some(v) = encounter::load_actor_vitals(&session.access_token, actor)? {
+            let was = death::condition(v.hp_current, v.successes, v.failures, v.dead);
+            // Damage never earns a death save SUCCESS, so successes
+            // ride along unchanged - only failures and death move.
+            let successes = v.successes;
+            let mut failures = v.failures;
+            let mut dead = v.dead;
+
+            if was.is_conscious() {
+                // Overflow past the hit point maximum kills outright,
+                // with no saves to make. Goblin 1 at seven hit points
+                // taking fourteen is exactly that case.
+                let after = v.hp_current - total;
+                if after <= 0 {
+                    if let Some(max) = v.hp_max {
+                        if death::massive_damage_kills(-after, max) {
+                            dead = true;
+                        }
+                    }
+                }
+            } else {
+                // Hitting someone already down is not free: a failure,
+                // and two on a crit. This is the cost of letting a
+                // downed creature stay in the target list.
+                let crit = first.outcome == Some(dice::Outcome::Crit);
+                failures = (failures + death::failures_from_being_hit(crit)).min(3);
+            }
+
+            if failures != v.failures || dead != v.dead {
+                vitals_update = Some(vitals_payload(
+                    &v.character_id,
+                    actor,
+                    successes,
+                    failures,
+                    dead,
+                ));
+            }
+        }
+    }
+
     // The hit points this cost, when it cost any. Damage that was not
     // aimed at an actor lands nowhere on purpose: a swing at a typed
     // number has nothing in the world to take it.
@@ -605,6 +654,133 @@ fn roll_named(
             },
             "p_rolls": rolls,
             "p_hp": hp,
+            "p_vitals": vitals_update,
+        }),
+    )
+}
+
+/// Where a death save tally is written: a character keeps theirs on
+/// their own row wherever they are standing, an NPC instance keeps its
+/// own so two goblins off one statblock die separately. The same split
+/// that decides where hit points are recorded.
+fn vitals_payload(
+    character_id: &Option<String>,
+    actor_id: &str,
+    successes: i64,
+    failures: i64,
+    dead: bool,
+) -> Value {
+    match character_id {
+        Some(c) => json!({
+            "character_id": c,
+            "death_successes": successes,
+            "death_failures": failures,
+            "dead": dead,
+        }),
+        None => json!({
+            "actor_id": actor_id,
+            "death_successes": successes,
+            "death_failures": failures,
+            "dead": dead,
+        }),
+    }
+}
+
+/// One death saving throw, for whoever is dying.
+///
+/// No modifier applies, so this is a bare d20 and the rule reads the
+/// FACE rather than a total - see death.rs. It is an action like any
+/// other: every roll gets one, and this one is a creature spending its
+/// turn on staying alive.
+///
+/// ON DEMAND RATHER THAN AUTOMATIC, because a dying creature saves on
+/// its own turn and turn order does not exist yet.
+/// `encounter_actors.initiative` has been waiting unread since 011 for
+/// exactly this. The rule that decides the outcome is the same either
+/// way; only what fires it changes.
+#[tauri::command]
+fn death_save(
+    state: State<AppState>,
+    game_id: String,
+    actor_id: String,
+    encounter_id: Option<String>,
+) -> Result<Value, String> {
+    let session = state
+        .current()?
+        .ok_or_else(|| "not signed in".to_string())?;
+
+    let v = encounter::load_actor_vitals(&session.access_token, &actor_id)?
+        .ok_or_else(|| "that actor is not in the encounter".to_string())?;
+
+    let was = death::condition(v.hp_current, v.successes, v.failures, v.dead);
+    if was.is_conscious() {
+        return Err("only something that is down rolls death saves".to_string());
+    }
+    if was == death::Condition::Dead {
+        return Err("it is already dead".to_string());
+    }
+
+    let rolled = dice::roll_formula("1d20")?;
+    let face = rolled.natural.unwrap_or(rolled.total);
+    let outcome = death::save(face);
+
+    let (successes, failures) = if outcome.clears_counters {
+        (0, 0)
+    } else {
+        (
+            (v.successes + outcome.successes).min(3),
+            (v.failures + outcome.failures).min(3),
+        )
+    };
+
+    // A natural 20 brings them back on one hit point, which is an
+    // hp_event like any other rather than a special case.
+    let hp = if outcome.hp_regain > 0 {
+        Some(match &v.character_id {
+            Some(c) => json!({
+                "game_id": game_id, "character_id": c, "actor_id": null,
+                "delta": outcome.hp_regain, "note": "death save: natural 20",
+            }),
+            None => json!({
+                "game_id": game_id, "character_id": null, "actor_id": actor_id,
+                "delta": outcome.hp_regain, "note": "death save: natural 20",
+            }),
+        })
+    } else {
+        None
+    };
+
+    let roll = json!({
+        "game_id": game_id,
+        "character_id": v.character_id,
+        "owner_uid": session.user_id,
+        "role": "check",
+        "request": "death save",
+        "label": "Death Save",
+        "mode": "normal",
+        "formula": "1d20",
+        "detail": rolled.detail,
+        "total": rolled.total,
+        "natural_roll": rolled.natural,
+        "status": "resolved",
+    });
+
+    supabase::rpc(
+        &session.access_token,
+        "write_action",
+        &json!({
+            "p_action": {
+                "game_id": game_id,
+                "character_id": v.character_id,
+                "encounter_id": encounter_id,
+                "actor_id": actor_id,
+                "request": "death save",
+                "label": "Death Save",
+                "key": "death",
+            },
+            "p_rolls": [roll],
+            "p_hp": hp,
+            "p_vitals": vitals_payload(&v.character_id, &actor_id, successes, failures, false),
         }),
     )
 }
@@ -749,6 +925,7 @@ pub fn run() {
             list_rolls,
             list_encounters,
             list_targets,
+            death_save,
             get_sheet,
             set_level,
             set_ability,

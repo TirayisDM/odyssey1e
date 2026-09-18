@@ -81,6 +81,9 @@
             <option value="">no target</option>
             <option value="manual">type a number…</option>
           </select>
+          <!-- Only for something that is down. A dying creature saves on
+               its own turn; until initiative exists, that is this. -->
+          <button id="death-save" class="ghost" hidden>death save</button>
         </div>
         <div class="row" id="manual-target" hidden>
           <select id="target-kind">

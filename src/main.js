@@ -36,6 +36,32 @@ function log(cmd, value, isError) {
   logEl().prepend(el);
 }
 
+// A button that WRITES is not allowed to be re-entrant.
+//
+// Every roll is a fresh set of dice and a fresh row, so a second
+// dispatch is not a harmless duplicate — it is a second swing nobody
+// took. The death save is worse: two saves from one click, and a
+// natural 1 among them is two failures toward dead.
+//
+// Disabling for the duration makes it impossible from this side, and a
+// second dispatch that arrives while the first is in flight is dropped
+// rather than queued.
+function guarded(selector, fn) {
+  const el = document.querySelector(selector);
+  let busy = false;
+  el.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
+    el.disabled = true;
+    try {
+      await fn();
+    } finally {
+      busy = false;
+      el.disabled = false;
+    }
+  });
+}
+
 // Every command goes through here so nothing can fail silently.
 async function call(cmd, args) {
   try {
@@ -263,17 +289,23 @@ async function loadTargets() {
       o.value = t.id;
       // Hit points where the thing has any, so the goblin visibly drops
       // as it takes damage. A lock has none and says nothing.
-      // Nothing is shown below zero. The event log keeps the honest
-      // total — three hits for fourteen on a seven hit point goblin is
-      // what happened — but a dropdown reading -7/7 hp is nonsense.
+      // Down, stable or dead reads on the name, where it belongs —
+      // "Goblin 1 — down". Hit points only while they are still worth
+      // counting: the event log keeps the honest total, but a dropdown
+      // reading -7/7 hp is nonsense.
+      const cond =
+        t.condition && t.condition !== "conscious" ? " — " + t.condition : "";
       const hp =
-        t.hp_current === null || t.hp_current === undefined
+        t.hp_current === null || t.hp_current === undefined || t.hp_current <= 0
           ? ""
-          : t.hp_current <= 0
-            ? " · down"
-            : " · " + t.hp_current + "/" + t.hp_max + " hp";
+          : " · " + t.hp_current + "/" + t.hp_max + " hp";
+      // The tally, so a player can see how close it is either way.
+      const saves =
+        t.condition === "down" && (t.death_successes || t.death_failures)
+          ? " · " + t.death_successes + "✓ " + t.death_failures + "✗"
+          : "";
       o.textContent =
-        t.label + " · " + t.target_kind.toUpperCase() + " " + t.value + hp;
+        t.label + cond + " · " + t.target_kind.toUpperCase() + " " + t.value + hp + saves;
       // Why this number is this number, on hover. Same instinct as the
       // proficiency badges: never show a figure with no account of it.
       o.title = t.source;
@@ -286,6 +318,15 @@ async function loadTargets() {
   if (wasPicked && [...pick.options].some((o) => o.value === wasPicked)) {
     pick.value = wasPicked;
   }
+  paintDeathSave();
+}
+
+// The death save button belongs to whatever is selected and dying.
+// Nothing that is conscious, stable or already dead has one to roll.
+function paintDeathSave() {
+  const picked = document.querySelector("#target-pick").value;
+  const t = (state.targets || []).find((x) => x.id === picked);
+  document.querySelector("#death-save").hidden = !(t && t.condition === "down");
 }
 
 // This character's row in the active encounter, if they are enrolled.
@@ -705,9 +746,27 @@ window.addEventListener("DOMContentLoaded", async () => {
   // pick from, so they stay out of the way until asked for.
   document.querySelector("#target-pick").addEventListener("change", (e) => {
     document.querySelector("#manual-target").hidden = e.target.value !== "manual";
+    paintDeathSave();
   });
 
-  document.querySelector("#roll-named").addEventListener("click", async () => {
+  // One death saving throw for whatever is selected and dying.
+  guarded("#death-save", async () => {
+    const picked = document.querySelector("#target-pick").value;
+    const t = (state.targets || []).find((x) => x.id === picked);
+    if (!t) return log("death_save", "pick something that is down first", true);
+    const r = await call("death_save", {
+      gameId: state.gameId,
+      actorId: t.id,
+      encounterId: state.encounterId || null,
+    });
+    if (r) {
+      await loadRolls();
+      await loadTargets();
+      paintDeathSave();
+    }
+  });
+
+  guarded("#roll-named", async () => {
     if (!state.characterId) return log("roll_named", "select a character first", true);
     // Three cases: nothing picked, a real target off the encounter, or
     // a hand-typed one. Half a target is refused in Rust rather than

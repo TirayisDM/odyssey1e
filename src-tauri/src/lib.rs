@@ -13,10 +13,12 @@ mod character;
 mod dice;
 mod equipment;
 mod narrative;
+mod resolution;
 mod supabase;
 
 use character::{Resolved, Sheet};
 use dice::{RandomRoller, RollResult};
+use resolution::{Target, TargetKind};
 use serde_json::{json, Value};
 use supabase::{AppState, Session};
 use tauri::State;
@@ -152,7 +154,9 @@ fn list_rolls(state: State<AppState>, game_id: String) -> Result<Value, String> 
         &[
             (
                 "select",
-                "id,created_at,character_name,roller_name,label,request,detail,total,natural_roll,status,narrative",
+                "id,created_at,character_name,roller_name,label,request,detail,total,\
+                 natural_roll,status,narrative,\
+                 target_value,target_kind,target_label,success,reason,margin,face_outcome",
             ),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "created_at.desc"),
@@ -446,36 +450,90 @@ fn roll_named(
     character_id: String,
     request: String,
     mode: String,
+    target_value: Option<i64>,
+    target_kind: Option<String>,
+    target_label: Option<String>,
 ) -> Result<Value, String> {
     let session = state
         .current()?
         .ok_or_else(|| "not signed in".to_string())?;
 
+    // Refused before any dice are thrown: a half-supplied target is a
+    // caller bug, and rolling first would leave a resolved row that
+    // cannot record what it was for.
+    let target = parse_target(target_value, target_kind, target_label)?;
+
     let sheet = character::load_sheet(&session.access_token, &character_id)?;
     let resolved = character::resolve_request(&sheet, &request, &mode);
-    let rolled = dice::roll_formula(&resolved.formula)?;
+    let thresholds = dice::Thresholds::STANDARD;
+    let rolled = dice::roll_formula_as(&resolved.formula, thresholds)?;
     // None for a key no pack has written yet. The column is nullable and
     // the card reads fine without prose, so that is not an error.
     let line = narrative::pick(&sheet.narratives, &resolved.key, &mut RandomRoller);
 
-    supabase::rest_insert(
-        &session.access_token,
-        "rolls",
-        &json!({
-            "game_id": sheet.game_id,
-            "character_id": sheet.character_id,
-            "owner_uid": session.user_id,
-            "request": request,
-            "label": resolved.label,
-            "mode": mode,
-            "formula": resolved.formula,
-            "detail": rolled.detail,
-            "total": rolled.total,
-            "natural_roll": rolled.natural,
-            "narrative": line,
-            "status": "resolved"
-        }),
-    )
+    let mut body = json!({
+        "game_id": sheet.game_id,
+        "character_id": sheet.character_id,
+        "owner_uid": session.user_id,
+        "request": request,
+        "label": resolved.label,
+        "mode": mode,
+        "formula": resolved.formula,
+        "detail": rolled.detail,
+        "total": rolled.total,
+        "natural_roll": rolled.natural,
+        "face_outcome": rolled.outcome,
+        "narrative": line,
+        "status": "resolved"
+    });
+
+    // The thresholds go on the row only when a face was actually judged,
+    // matching the column comments: null means no d20, not 20 and 1.
+    if rolled.natural.is_some() {
+        body["crit_min"] = json!(thresholds.crit_min);
+        body["fumble_max"] = json!(thresholds.fumble_max);
+    }
+
+    if let Some(t) = &target {
+        let verdict = resolution::resolve(rolled.total, rolled.outcome, t);
+        body["target_value"] = json!(t.value);
+        body["target_kind"] = json!(t.kind.as_str());
+        body["target_label"] = json!(t.label);
+        body["success"] = json!(verdict.success);
+        body["reason"] = json!(verdict.reason.as_str());
+        body["margin"] = json!(verdict.margin);
+    }
+
+    supabase::rest_insert(&session.access_token, "rolls", &body)
+}
+
+/// Both target inputs or neither.
+///
+/// A value with no kind cannot be resolved - the auto-hit rule needs to
+/// know whether it is an AC or a DC - and silently treating it as one or
+/// the other would decide a roll on a guess. Half a target is refused
+/// rather than defaulted.
+fn parse_target(
+    value: Option<i64>,
+    kind: Option<String>,
+    label: Option<String>,
+) -> Result<Option<Target>, String> {
+    match (value, kind.as_deref().map(str::trim).filter(|k| !k.is_empty())) {
+        (None, None) => Ok(None),
+        (Some(v), Some(k)) => {
+            let kind = TargetKind::parse(k)
+                .ok_or_else(|| format!("target kind must be ac or dc, got \"{}\"", k))?;
+            Ok(Some(Target {
+                value: v,
+                kind,
+                label: label
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty()),
+            }))
+        }
+        (Some(_), None) => Err("a target value needs a kind: ac or dc".to_string()),
+        (None, Some(_)) => Err("a target kind needs a value to beat".to_string()),
+    }
 }
 
 /* ============================ ENTRY ============================ */

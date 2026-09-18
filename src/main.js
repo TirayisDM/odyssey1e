@@ -121,6 +121,32 @@ function rollCard(r) {
 
   li.append(head, dice);
 
+  // The verdict, when the roll had a target. Absent is NOT failure —
+  // an untargeted roll simply was not judged, so it says nothing.
+  //
+  // The reason is spelled out rather than left implied: "hit on a
+  // natural 20" beats making someone work out how a total of 12 beat
+  // an 18, and the same goes for a fumble that cleared the number.
+  if (r.success !== null && r.success !== undefined) {
+    const verdict = document.createElement("div");
+    verdict.className = "verdict " + (r.success ? "hit" : "miss");
+
+    const vs = r.target_label
+      ? `${r.target_label} (${String(r.target_kind).toUpperCase()} ${r.target_value})`
+      : `${String(r.target_kind).toUpperCase()} ${r.target_value}`;
+
+    const by =
+      r.reason === "auto_hit" ? "hit on a natural " + r.natural_roll
+      : r.reason === "auto_miss" ? "missed on a natural " + r.natural_roll
+      : r.margin === 0 ? "exactly"
+      : r.margin > 0 ? "by " + r.margin
+      : "by " + Math.abs(r.margin);
+
+    verdict.textContent =
+      (r.success ? "HIT" : "MISS") + " vs " + vs + " — " + by;
+    li.append(verdict);
+  }
+
   if (r.narrative) {
     const prose = document.createElement("div");
     prose.className = "prose";
@@ -504,10 +530,23 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.querySelector("#roll-named").addEventListener("click", async () => {
     if (!state.characterId) return log("roll_named", "select a character first", true);
+    // A blank kind means no target at all. The value only travels
+    // alongside a kind — half a target is refused in Rust rather than
+    // guessed at, so there is no point assembling one here.
+    const kind = document.querySelector("#target-kind").value;
+    const raw = val("#target-value");
+    if (kind && raw === "")
+      return log("roll_named", "pick a number to beat, or choose no target", true);
+    if (!kind && raw !== "")
+      return log("roll_named", "choose DC or AC for that number", true);
+
     const r = await call("roll_named", {
       characterId: state.characterId,
       request: val("#named-request") || "insight",
       mode: document.querySelector("#mode").value,
+      targetValue: kind ? Number(raw) : null,
+      targetKind: kind || null,
+      targetLabel: kind ? val("#target-label") || null : null,
     });
     if (r) await loadRolls();
   });

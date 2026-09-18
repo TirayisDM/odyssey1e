@@ -72,6 +72,17 @@
             <option value="dis">Dis</option>
           </select>
         </div>
+        <!-- Optional. Blank means the roll has no target and is not
+             judged, which is not the same as failing it. -->
+        <div class="row">
+          <select id="target-kind">
+            <option value="">no target</option>
+            <option value="dc">vs DC</option>
+            <option value="ac">vs AC</option>
+          </select>
+          <input id="target-value" type="number" placeholder="15" />
+          <input id="target-label" placeholder="Goblin 1 (optional)" />
+        </div>
         <div id="preview" class="preview muted">—</div>
         <button id="roll-named">Roll</button>
         <input id="roll-request" placeholder="request, e.g. insight" />

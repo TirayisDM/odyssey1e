@@ -11,6 +11,7 @@
 
 mod character;
 mod dice;
+mod equipment;
 mod narrative;
 mod supabase;
 
@@ -320,6 +321,71 @@ fn set_skill_prof(
     )
 }
 
+/* ============================ EQUIPMENT ============================ */
+
+/// Equip or unequip one item.
+///
+/// This exists so the one-armor rule is ENFORCED rather than merely
+/// described. `character_items.equipped` is deliberately unconstrained —
+/// several weapons may be held at once — and the one-armor rule cannot
+/// live in a partial index because deciding it needs `items.kind` from
+/// another table. 008's comment says the rule lives in equipment.rs, and
+/// a rule that only runs on the way out is a lint, not a rule.
+///
+/// The check reads the loadout as it would be AFTER the change, so it
+/// refuses the second breastplate instead of reporting it afterwards.
+#[tauri::command]
+fn set_item_equipped(
+    state: State<AppState>,
+    character_id: String,
+    item_key: String,
+    equipped: bool,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    if equipped {
+        let sheet = character::load_sheet(&token, &character_id)?;
+        let incoming = equipment::load_item(&token, &sheet.game_id, &item_key)?
+            .ok_or_else(|| format!("no item with key '{}'", item_key))?;
+
+        // Only an armor can break the rule, so nothing else pays for
+        // the check. Re-equipping something already worn is not a
+        // second armor, hence filtering the incoming key out first.
+        if incoming.kind == "armor" {
+            let mut after: Vec<&equipment::Item> = sheet
+                .loadout
+                .iter()
+                .map(|e| &e.item)
+                .filter(|i| i.key != item_key)
+                .collect();
+            after.push(&incoming);
+            equipment::check_one_armor(&after)?;
+        }
+    }
+
+    supabase::rest_upsert(
+        &token,
+        "character_items",
+        &json!({
+            "character_id": character_id,
+            "item_key": item_key,
+            "equipped": equipped
+        }),
+        "character_id,item_key",
+    )
+}
+
+/// Every `techniques.item_key` that resolves to no item.
+///
+/// There is no FK behind that reference and there cannot be — a partial
+/// unique index cannot back one — so this is the only thing that will
+/// ever notice a typo. An empty list is the passing answer.
+#[tauri::command]
+fn check_item_keys(state: State<AppState>, game_id: String) -> Result<Vec<String>, String> {
+    let token = state.token()?;
+    equipment::check_item_keys(&token, &game_id)
+}
+
 /* ============================ NAMED ROLLS ============================ */
 
 /// What would this request roll, and why — without rolling it. Lets a UI
@@ -411,6 +477,8 @@ pub fn run() {
             set_level,
             set_ability,
             set_skill_prof,
+            set_item_equipped,
+            check_item_keys,
             preview_request,
             roll_named,
             roll_dice,

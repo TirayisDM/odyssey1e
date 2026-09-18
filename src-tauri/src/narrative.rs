@@ -131,7 +131,12 @@ pub fn pick<R: Roller>(
 /// 'Rodnar Shieldcrest', with a space in it — so nothing may be
 /// interpolated raw. A quoted value escapes a literal quote or
 /// backslash with a backslash, which is what PostgREST's parser expects.
-fn quoted(v: &str) -> String {
+///
+/// Shared, not private: STATUS.md names this as the helper to use for
+/// every reference table filtered by a name, and equipment.rs filters
+/// items by key with it. An escaping rule copied into a second module
+/// is an escaping rule that will diverge.
+pub fn quoted(v: &str) -> String {
     let mut s = String::with_capacity(v.len() + 2);
     s.push('"');
     for c in v.chars() {

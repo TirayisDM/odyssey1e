@@ -23,6 +23,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::dice::d20_formula;
+use crate::equipment::{self, Equipped};
 use crate::narrative;
 use crate::supabase;
 
@@ -70,6 +71,18 @@ pub struct Sheet {
     /// field on the way out says nothing about the way in.
     #[serde(skip_serializing, default)]
     pub narratives: HashMap<String, Vec<String>>,
+    /// Foundry `traits.weaponProf.value`: `sim`, `mar`, or a bare
+    /// baseItem granting one weapon. Empty by default, because a wrong
+    /// proficiency is worse than an absent one — it moves to-hit and
+    /// says nothing.
+    pub weapon_profs: Vec<String>,
+    /// Foundry `traits.armorProf.value`: lgt med hvy shl, the same
+    /// spelling 008 normalizes `items.armor_category` to.
+    pub armor_profs: Vec<String>,
+    /// What is equipped right now, with proficiency and attack modes
+    /// already derived. Unlike `narratives` this one IS sent out — a
+    /// loadout is a handful of rows and a sheet screen wants it.
+    pub loadout: Vec<Equipped>,
 }
 
 impl Sheet {
@@ -213,8 +226,24 @@ fn as_str(v: &Value, key: &str) -> String {
     v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
 }
 
-/// Read everything resolve_request needs, plus the narrative pack, in
-/// five queries.
+/// A Postgres text[] arrives as a JSON array. Absent reads as empty,
+/// which is the right default for a proficiency list: claiming none is
+/// safe, claiming one that was not granted is not.
+fn as_strings(v: &Value, key: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Read everything resolve_request needs, plus the narrative pack and
+/// the equipped loadout, in seven queries.
+///
+/// Seven is more than this wants to be. It runs on every roll, and the
+/// two equipment reads sit ahead of the dice with the pack read. None of
+/// them is slow individually and none has been worth splitting yet — but
+/// this is the count to watch, and `preview_request` pays all of it for
+/// a hover.
 ///
 /// Could be one query with PostgREST embedding, but four explicit reads
 /// are easier to debug when a policy denies one of them — an embedded
@@ -225,7 +254,10 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         token,
         "characters",
         &[
-            ("select", "id,game_id,name,level,narrative_pack"),
+            (
+                "select",
+                "id,game_id,name,level,narrative_pack,weapon_profs,armor_profs",
+            ),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -331,6 +363,16 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     let line_rows = narrative::load_lines(token, &game_id, &narrative_pack)?;
     let narratives = narrative::resolve_lines(&line_rows, &narrative_pack);
 
+    let weapon_profs = as_strings(c, "weapon_profs");
+    let armor_profs = as_strings(c, "armor_profs");
+    let loadout = equipment::load_loadout(
+        token,
+        character_id,
+        &game_id,
+        &weapon_profs,
+        &armor_profs,
+    )?;
+
     Ok(Sheet {
         character_id: as_str(c, "id"),
         game_id,
@@ -341,6 +383,9 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         profs,
         narrative_pack,
         narratives,
+        weapon_profs,
+        armor_profs,
+        loadout,
     })
 }
 
@@ -387,6 +432,13 @@ mod tests {
             // lines themselves are tested in narrative.rs.
             narrative_pack: narrative::BASE_PACK.into(),
             narratives: HashMap::new(),
+            // Rodnar's, from the 008 backfill. Resolution does not read
+            // them yet - the attack key is the next job - but the sheet
+            // carries them and the fixture should not lie about it. The
+            // rules that DO read them are tested in equipment.rs.
+            weapon_profs: vec!["sim".into()],
+            armor_profs: vec!["lgt".into(), "med".into(), "shl".into()],
+            loadout: Vec::new(),
         }
     }
 

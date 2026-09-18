@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the inventory schema on the laptop.**
+**Written 2026-09-17, updated after the equipment panel on the desktop.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -39,6 +39,13 @@ while the prose is not, which is the fastest way to see the pack
 precedence working. Delete Character2 if it is in the way; the cascade
 takes its abilities and skills with it.
 
+Character1 also carries an inventory now - the thirteen rows off the
+Inventory tab of `Application Data.xlsx`, cross-checked against the
+Foundry export in `_RAW`. Two items are equipped, Scale Mail and the
+Mace; the Light Hammer and the Heavy Crossbow are carried, not held; the
+Ember is attuned at 6 of 7 charges. Character2 carries nothing, which
+makes it the empty-inventory case for free.
+
 ---
 
 ## What works, end to end
@@ -58,7 +65,16 @@ comes back with a line that names the character's god - while the same
 request on the base pack comes back in the neutral they/their voice.
 Same dice, same modifier, two narrators. Verified live on both packs.
 
-**53 tests, zero warnings.** `cd src-tauri && cargo test`.
+Equipment reads as it should too, and the panel is the fastest way to
+see it. Character1 carries the thirteen rows off the Inventory tab. The
+Mace is proficient because the source flagged it; the Light Hammer is
+proficient because it matches `sim` and shows both melee and thrown; the
+Heavy Crossbow is `martialR` against a character trained only in `sim`
+and comes back NOT proficient, which is the case that silently moves
+to-hit. Nothing on that panel is computed in JavaScript - it shows the
+engine's answer and the evidence behind it.
+
+**76 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -82,7 +98,7 @@ All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
 mistakes with the reasoning written out.
 
-**007 and 008 are schema only. No Rust reads either table yet.** 007
+**007 and 008 are read by `equipment.rs` now.** 007
 replaced `techniques.weapon` - free text holding a display name like
 'light hammer (thrown)' - with `item_key` plus `mode`. A display name is
 not an identifier, and that one string was carrying two facts: which
@@ -98,9 +114,13 @@ you to reseed after every level-up.
 
 Item keys are load-bearing and unprotected: `techniques.item_key`
 points at `mace_of_the_deep_song`, `light_hammer` and `heavy_crossbow`
-by value, with no FK to catch a typo. The check that matters is that
-every distinct `techniques.item_key` resolves to a real item - it does
-today, all 31 rows, and `equipment.rs` should assert it.
+by value, with no FK to catch a typo. `check_item_keys` asserts it, and
+also the stronger pair check - that every (item_key, mode) the
+techniques table uses is a mode the engine actually generates for that
+weapon. A key typo points at nothing; a mode mismatch points at a REAL
+weapon and is simply never offered, which is worse to find. Both pass
+today: 31 rows, four pairs, the light hammer splitting 7 melee and 6
+thrown. The `check keys` button on the equipment panel runs it.
 
 ---
 
@@ -152,6 +172,13 @@ drives the default ability, so that match is a `sim`/`mar` PREFIX test
 instead. Two vocabularies, two different reconciliations, each stated
 in its column comment. This asymmetry is the most likely thing to trip
 the next person. (008)
+
+**`flex:none` does not undo `width:100%`.** `styles.css` makes every
+input full width, which is right for the stacked forms and wrong for a
+checkbox in a row. `flex: none` is `0 0 auto`, and an `auto` basis reads
+the width - so the checkbox stayed 525px wide and crushed the item name
+into five wrapped lines. `width:auto` is the fix, as `.abil` already
+does it. Worth knowing because it looks like a flex bug and is not.
 
 **A `.ps1` must be pure ASCII** or saved with a BOM. PowerShell 5.1
 decodes a BOM-less file as Windows-1252, and an em dash becomes a smart
@@ -242,10 +269,11 @@ AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
 ActorDice junction, with a partial unique index enforcing one equipped
 set per character. `narrative_lines` is wired in; the rest is not.
 
-**The equipment chain is in flight.** 007 and 008 put the schema in
-place; items 1-3 below finish it. Nothing is half-applied - the
-migrations are complete and consistent - but no Rust reads them, so the
-app behaves exactly as it did before them.
+**The equipment chain is half finished.** 007 and 008 put the schema in
+place and `equipment.rs` now reads it: proficiency, attack modes, the
+one-armor rule and the key integrity check are done and tested. What
+remains of the chain is the crit thresholds and the attack itself,
+items 1 and 2 below.
 
 Roughly in order:
 
@@ -258,16 +286,7 @@ Roughly in order:
    self-contained, and nothing above it is correct until it is done.
    House dice need no work - the parser already takes any denomination,
    so 1d7 and 1d14 work today.
-2. `equipment.rs` - load a character's equipped items onto the sheet
-   (cache it there, the way `narrative.rs` caches the pack), derive
-   proficiency, and generate attack modes from `properties`. Two rules
-   to get right: proficiency is explicit override first, else match
-   `weapon_class` by its sim/mar prefix against `weapon_profs`; and
-   `thr` grants a second mode, which is why the light hammer has two
-   technique lists. Also the place to assert every
-   `techniques.item_key` resolves, and to enforce one equipped armor,
-   which the schema cannot state.
-3. The `attack` key in `resolve_request`. Base weapon attack, then a
+2. The `attack` key in `resolve_request`. Base weapon attack, then a
    technique lookup that replaces the damage dice and the thresholds,
    gated by `min_level`. Snapshot the result onto the roll per the
    record principle. `skill_prompts` already has its `attack` row
@@ -277,23 +296,23 @@ Roughly in order:
    Mace's reach is 8 in `_RAW`, but the activity carries
    `range.value: '5'` with `override: False` and the old script uses it
    anyway. Display only, does not touch to-hit or damage.
-4. Die art on the roll - read the equipped set from character_dice,
+3. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
    set_key onto the roll at insert, per the record principle.
    `narrative.rs` is the shape to copy, down to caching it on the sheet.
-5. The rules modules still unported: death saves, rests, spell slots -
+4. The rules modules still unported: death saves, rests, spell slots -
    each isolated in its own Apps Script file, each wants its own Rust
    module with tests. Each also wants a `resolve_request` key, and the
    vocabulary already has room for `death` and `spell`.
-6. Delivery - whatever moves a resolved roll to `delivered` and puts it
+5. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-7. Session persistence (currently in memory - a restart signs you out;
+6. Session persistence (currently in memory - a restart signs you out;
    fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
-8. A real phone-first UI. What exists is a desktop test rig.
-9. Android via `npm run tauri android init`. iOS needs a Mac.
+7. A real phone-first UI. What exists is a desktop test rig.
+8. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

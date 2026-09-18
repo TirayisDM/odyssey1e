@@ -83,6 +83,16 @@ pub struct Sheet {
     /// already derived. Unlike `narratives` this one IS sent out — a
     /// loadout is a handful of rows and a sheet screen wants it.
     pub loadout: Vec<Owned>,
+    /// HP, death saves, exhaustion, size. 010.
+    pub vitals: Vitals,
+    /// DERIVED, NEVER STORED. What it takes to hit this character,
+    /// computed from the loadout every time the sheet is read.
+    ///
+    /// The export's `flat: 14` is not this number and must not be
+    /// mistaken for it — Rodnar computes to 15. Storing an AC would put
+    /// it one equipment change away from being wrong, which is the
+    /// mistake the Attacks tab made with to-hit.
+    pub armor_class: i64,
 }
 
 impl Sheet {
@@ -96,10 +106,7 @@ impl Sheet {
     /// truncates toward zero and JS's Math.floor does not, so a score of
     /// 7 must give -2 and not -1.
     pub fn ability_mod(&self, code: &str) -> i64 {
-        match self.abilities.get(code) {
-            Some(a) => (a.score - 10).div_euclid(2),
-            None => 0,
-        }
+        ability_mod_of(&self.abilities, code)
     }
 
     pub fn save_prof(&self, code: &str) -> bool {
@@ -249,6 +256,32 @@ pub struct Profile {
     pub narrative_pack: String,
     pub weapon_profs: Vec<String>,
     pub armor_profs: Vec<String>,
+    pub vitals: Vitals,
+}
+
+/// What it takes to hit this character, and what it can take. 010.
+///
+/// `armor_class` is NOT in here, because it is not a stored fact - it is
+/// computed from the loadout and lives on the Sheet, which is the only
+/// place that knows what is worn.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Vitals {
+    /// None means never set: a character that cannot yet be meaningfully
+    /// attacked. Not zero, which would mean dead.
+    pub hp_max: Option<i64>,
+    pub hp_temp: i64,
+    pub hp_temp_max: i64,
+    /// `default` computes AC from what is worn; `flat` takes the
+    /// override. See equipment::AcMode.
+    pub ac_mode: String,
+    /// The flat AC, and ONLY under ac_mode 'flat'. The export carries 14
+    /// for a character whose real AC is 15 - see 010's header.
+    pub ac_override: Option<i64>,
+    pub death_successes: i64,
+    pub death_failures: i64,
+    pub exhaustion: i64,
+    pub inspiration: bool,
+    pub size: Option<String>,
 }
 
 pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> {
@@ -258,7 +291,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         &[
             (
                 "select",
-                "id,game_id,name,level,narrative_pack,weapon_profs,armor_profs",
+                "id,game_id,name,level,narrative_pack,weapon_profs,armor_profs,                 hp_max,hp_temp,hp_temp_max,ac_mode,ac_override,                 death_successes,death_failures,exhaustion,inspiration,size",
             ),
             ("id", &format!("eq.{}", character_id)),
         ],
@@ -283,7 +316,49 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         narrative_pack,
         weapon_profs: as_strings(c, "weapon_profs"),
         armor_profs: as_strings(c, "armor_profs"),
+        vitals: Vitals {
+            // Absent rather than defaulted: a character with no hp_max
+            // has never had one set, which is not the same as being on
+            // zero hit points.
+            hp_max: c.get("hp_max").and_then(|x| x.as_i64()),
+            hp_temp: as_i64(c, "hp_temp", 0),
+            hp_temp_max: as_i64(c, "hp_temp_max", 0),
+            ac_mode: {
+                let m = as_str(c, "ac_mode");
+                if m.trim().is_empty() { "default".to_string() } else { m }
+            },
+            ac_override: c.get("ac_override").and_then(|x| x.as_i64()),
+            death_successes: as_i64(c, "death_successes", 0),
+            death_failures: as_i64(c, "death_failures", 0),
+            exhaustion: as_i64(c, "exhaustion", 0),
+            inspiration: c
+                .get("inspiration")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false),
+            size: as_opt_str_char(c, "size"),
+        },
     })
+}
+
+/// A column that is genuinely absent rather than empty. `size` is NULL
+/// for every character that predates 010, and "" would be a size.
+fn as_opt_str_char(v: &Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// The ability modifier, before a Sheet exists to ask.
+///
+/// `Sheet::ability_mod` is the same arithmetic against the same map, but
+/// AC has to be computed while the Sheet is still being assembled. One
+/// expression in two places would drift, so the method delegates here.
+fn ability_mod_of(abilities: &HashMap<String, Ability>, code: &str) -> i64 {
+    match abilities.get(code) {
+        Some(a) => (a.score - 10).div_euclid(2),
+        None => 0,
+    }
 }
 
 /// Read everything resolve_request needs, plus the narrative pack and
@@ -400,6 +475,17 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         true,
     )?;
 
+    // Computed here rather than stored, from the loadout that was just
+    // read. DEX is the live modifier, so a stat change moves AC the same
+    // turn rather than at the next reseed.
+    let worn: Vec<&equipment::Item> = loadout.iter().map(|o| &o.item).collect();
+    let armor_class = equipment::armor_class(
+        ability_mod_of(&abilities, "dex"),
+        &worn,
+        equipment::AcMode::parse(&profile.vitals.ac_mode),
+        profile.vitals.ac_override,
+    );
+
     Ok(Sheet {
         character_id: profile.character_id,
         game_id,
@@ -412,6 +498,8 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         narratives,
         weapon_profs: profile.weapon_profs,
         armor_profs: profile.armor_profs,
+        vitals: profile.vitals,
+        armor_class,
         loadout,
     })
 }
@@ -466,6 +554,25 @@ mod tests {
             weapon_profs: vec!["sim".into()],
             armor_profs: vec!["lgt".into(), "med".into(), "shl".into()],
             loadout: Vec::new(),
+            vitals: Vitals {
+                hp_max: Some(74),
+                hp_temp: 0,
+                hp_temp_max: 0,
+                ac_mode: "default".into(),
+                // The export's flat value, carried so the fixture stays
+                // faithful to the source. It is NOT his AC, and nothing
+                // reads it while the mode is 'default'.
+                ac_override: Some(14),
+                death_successes: 0,
+                death_failures: 0,
+                exhaustion: 0,
+                inspiration: false,
+                size: Some("med".into()),
+            },
+            // Empty loadout, so 10 + DEX(+2). The armoured answer, and
+            // the fact that it is 15 rather than the export's 14, are
+            // tested where the rule lives in equipment.rs.
+            armor_class: 12,
         }
     }
 

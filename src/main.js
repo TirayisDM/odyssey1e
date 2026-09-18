@@ -215,8 +215,15 @@ async function loadSheet() {
   panel.hidden = false;
 
   const pb = Math.floor((sheet.level - 1) / 4) + 2;
+
+  // AC is the engine's computed number, never the export's flat field —
+  // Rodnar's export says 14 and nobody should ever see a 14 here. HP is
+  // the max only; current HP will be max less the damage events once
+  // those exist, so there is deliberately nothing to show yet.
+  const hp = sheet.vitals && sheet.vitals.hp_max ? " · HP " + sheet.vitals.hp_max : "";
   document.querySelector("#sheet-who").textContent =
-    sheet.name + " · level " + sheet.level + " · PB +" + pb;
+    sheet.name + " · level " + sheet.level + " · PB +" + pb +
+    " · AC " + sheet.armor_class + hp;
   document.querySelector("#level").value = sheet.level;
 
   // Abilities

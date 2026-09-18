@@ -80,6 +80,14 @@ pub struct Item {
     pub range_value: Option<i64>,
     pub range_long: Option<i64>,
     pub armor_category: Option<String>,
+    /// Armour only. For body armour this is the AC it sets; for a
+    /// shield it is the bonus it adds. The two are not the same
+    /// quantity and `armor_class` keeps them apart.
+    pub base_ac: Option<i64>,
+    /// The most DEX this armour lets through. None is no cap, which is
+    /// light armour; Some(0) is heavy armour allowing none. The
+    /// difference matters and NULL must not be read as zero.
+    pub dex_cap: Option<i64>,
 }
 
 /// One thing a character has: the catalogue row plus their state for it,
@@ -226,7 +234,7 @@ pub fn is_proficient(
 pub fn check_one_armor(equipped: &[&Item]) -> Result<(), String> {
     let worn: Vec<&str> = equipped
         .iter()
-        .filter(|i| i.kind == "armor")
+        .filter(|i| is_body_armor(i))
         .map(|i| i.name.as_str())
         .collect();
 
@@ -237,7 +245,102 @@ pub fn check_one_armor(equipped: &[&Item]) -> Result<(), String> {
             worn.join(", ")
         ));
     }
+
+    // A SHIELD IS NOT A SECOND SUIT OF ARMOUR. Both carry kind 'armor'
+    // because both are worn and both move AC, but mail AND a shield is
+    // the ordinary case, not a conflict - counting them together
+    // refused a legal loadout. Two separate limits, one each.
+    let shields: Vec<&str> = equipped
+        .iter()
+        .filter(|i| is_shield(i))
+        .map(|i| i.name.as_str())
+        .collect();
+
+    if shields.len() > 1 {
+        return Err(format!(
+            "only one shield may be equipped at a time; found {}: {}",
+            shields.len(),
+            shields.join(", ")
+        ));
+    }
+
     Ok(())
+}
+
+fn is_shield(item: &Item) -> bool {
+    item.kind == "armor" && item.armor_category.as_deref() == Some("shl")
+}
+
+fn is_body_armor(item: &Item) -> bool {
+    item.kind == "armor" && !is_shield(item)
+}
+
+/// How AC is arrived at. Mirrors `characters.ac_mode` and the export's
+/// `attributes.ac.calc`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcMode {
+    /// Compute it from what is worn. The ordinary case.
+    Default,
+    /// Take the flat value and ignore the wardrobe - a monster, or an
+    /// effect that sets AC outright.
+    Flat,
+}
+
+impl AcMode {
+    pub fn parse(s: &str) -> AcMode {
+        match s.trim().to_lowercase().as_str() {
+            "flat" => AcMode::Flat,
+            // Anything else computes. An unrecognised mode computing is
+            // a better failure than one returning a number nobody can
+            // account for.
+            _ => AcMode::Default,
+        }
+    }
+}
+
+/// What it takes to hit this character.
+///
+/// THE EXPORT'S `flat` FIELD IS NOT THE ANSWER. Rodnar's export reads
+/// `{"calc": "default", "flat": 14}` and his AC is 15 - Scale Mail's 14
+/// plus a DEX of +1 under a cap of 2. `flat` is consulted only when the
+/// mode says so; reading it otherwise is wrong by one, permanently,
+/// with nothing to show for it. 010's header has the whole story.
+///
+/// Body armour SETS the number, a shield ADDS to it, and both are kind
+/// 'armor' - the difference is `armor_category = 'shl'`.
+///
+/// A `dex_cap` of None means no cap, which is light armour. Some(0) is
+/// heavy armour admitting none. Reading None as zero would quietly cost
+/// a rogue their entire modifier.
+pub fn armor_class(dex_mod: i64, equipped: &[&Item], mode: AcMode, flat: Option<i64>) -> i64 {
+    if mode == AcMode::Flat {
+        // characters_flat_ac_has_a_value_check means a flat mode cannot
+        // exist without its number, so the fallback is unreachable
+        // through the app. Computing unarmoured beats panicking if some
+        // other path ever reaches it.
+        return flat.unwrap_or(10 + dex_mod);
+    }
+
+    let base = match equipped.iter().find(|i| is_body_armor(i)) {
+        Some(armor) => {
+            let allowed = match armor.dex_cap {
+                None => dex_mod,
+                Some(cap) => dex_mod.min(cap),
+            };
+            // An armour row with no base_ac is a data fault; 10 is the
+            // unarmoured floor and keeps the number sane.
+            armor.base_ac.unwrap_or(10) + allowed
+        }
+        None => 10 + dex_mod,
+    };
+
+    let shield: i64 = equipped
+        .iter()
+        .filter(|i| is_shield(i))
+        .map(|i| i.base_ac.unwrap_or(0))
+        .sum();
+
+    base + shield
 }
 
 /// Every distinct technique item_key that resolves to no item.
@@ -329,11 +432,13 @@ fn item_from_row(r: &Value) -> Item {
         range_value: r.get("range_value").and_then(|x| x.as_i64()),
         range_long: r.get("range_long").and_then(|x| x.as_i64()),
         armor_category: as_opt_str(r, "armor_category"),
+        base_ac: r.get("base_ac").and_then(|x| x.as_i64()),
+        dex_cap: r.get("dex_cap").and_then(|x| x.as_i64()),
     }
 }
 
 const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
-damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category";
+damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap";
 
 /// Global rows plus this game's overrides, collapsed so an override
 /// replaces the global row sharing its key. Same two-pass shape as the
@@ -532,6 +637,8 @@ mod tests {
             range_value: None,
             range_long: None,
             armor_category: None,
+            base_ac: None,
+            dex_cap: None,
         }
     }
 
@@ -550,6 +657,8 @@ mod tests {
             range_value: Some(20),
             range_long: Some(60),
             armor_category: None,
+            base_ac: None,
+            dex_cap: None,
         }
     }
 
@@ -568,6 +677,8 @@ mod tests {
             range_value: Some(100),
             range_long: Some(400),
             armor_category: None,
+            base_ac: None,
+            dex_cap: None,
         }
     }
 
@@ -586,6 +697,8 @@ mod tests {
             range_value: None,
             range_long: None,
             armor_category: Some("med".into()),
+            base_ac: Some(14),
+            dex_cap: Some(2),
         }
     }
 
@@ -604,6 +717,8 @@ mod tests {
             range_value: None,
             range_long: None,
             armor_category: None,
+            base_ac: None,
+            dex_cap: None,
         }
     }
 
@@ -750,6 +865,8 @@ mod tests {
             key: "chain_mail".into(),
             name: "Chain Mail".into(),
             armor_category: Some("hvy".into()),
+            base_ac: Some(18),
+            dex_cap: Some(0),
             ..scale_mail()
         };
 
@@ -865,5 +982,180 @@ mod tests {
         let b = collapse_overrides(&[override_row, global]);
         assert_eq!(a[0].name, "Everburning Lamp");
         assert_eq!(b[0].name, "Everburning Lamp");
+    }
+
+    /* ---------------- armour class ---------------------------------- */
+
+    fn shield() -> Item {
+        // Foundry stores a shield's BONUS in the same armor.value slot
+        // body armour uses for its base. Same column, different meaning.
+        Item {
+            key: "shield".into(),
+            name: "Shield".into(),
+            kind: "armor".into(),
+            base_item: Some("shield".into()),
+            weapon_class: None,
+            damage_number: None,
+            damage_denomination: None,
+            damage_types: vec![],
+            properties: vec![],
+            range_reach: None,
+            range_value: None,
+            range_long: None,
+            armor_category: Some("shl".into()),
+            base_ac: Some(2),
+            dex_cap: None,
+        }
+    }
+
+    fn leather() -> Item {
+        // Light armour: no DEX cap at all, which is NOT a cap of zero.
+        Item {
+            key: "leather_armor".into(),
+            name: "Leather Armor".into(),
+            kind: "armor".into(),
+            base_item: Some("leather".into()),
+            weapon_class: None,
+            damage_number: None,
+            damage_denomination: None,
+            damage_types: vec![],
+            properties: vec![],
+            range_reach: None,
+            range_value: None,
+            range_long: None,
+            armor_category: Some("lgt".into()),
+            base_ac: Some(11),
+            dex_cap: None,
+        }
+    }
+
+    fn plate() -> Item {
+        Item {
+            key: "plate_armor".into(),
+            name: "Plate Armor".into(),
+            kind: "armor".into(),
+            base_item: Some("plate".into()),
+            weapon_class: None,
+            damage_number: None,
+            damage_denomination: None,
+            damage_types: vec![],
+            properties: vec![],
+            range_reach: None,
+            range_value: None,
+            range_long: None,
+            armor_category: Some("hvy".into()),
+            base_ac: Some(18),
+            dex_cap: Some(0),
+        }
+    }
+
+    #[test]
+    fn rodnar_is_fifteen_not_the_fourteen_in_the_export() {
+        // THE test. His export says {"calc":"default","flat":14} and the
+        // spreadsheet has an AC_Flat column of 14. His AC is 15: Scale
+        // Mail's 14 plus a DEX of +1 under a cap of 2. If this ever
+        // returns 14, the flat field has been read when it should not
+        // have been, and every attack on him is wrong by one.
+        let mail = scale_mail();
+        let ac = armor_class(1, &[&mail], AcMode::Default, Some(14));
+        assert_eq!(ac, 15);
+    }
+
+    #[test]
+    fn the_flat_field_is_ignored_unless_the_mode_says_otherwise() {
+        let mail = scale_mail();
+        assert_eq!(armor_class(1, &[&mail], AcMode::Default, Some(99)), 15);
+        assert_eq!(armor_class(1, &[&mail], AcMode::Flat, Some(99)), 99);
+    }
+
+    #[test]
+    fn unarmoured_is_ten_plus_dex() {
+        assert_eq!(armor_class(3, &[], AcMode::Default, None), 13);
+        assert_eq!(armor_class(0, &[], AcMode::Default, None), 10);
+    }
+
+    #[test]
+    fn a_dex_cap_limits_but_does_not_replace() {
+        let mail = scale_mail(); // base 14, cap 2
+        assert_eq!(armor_class(0, &[&mail], AcMode::Default, None), 14);
+        assert_eq!(armor_class(2, &[&mail], AcMode::Default, None), 16);
+        assert_eq!(armor_class(5, &[&mail], AcMode::Default, None), 16);
+    }
+
+    #[test]
+    fn no_cap_is_not_a_cap_of_zero() {
+        // Light armour lets the whole modifier through. Reading NULL as
+        // zero would quietly cost a rogue four points of AC.
+        let l = leather();
+        assert_eq!(armor_class(4, &[&l], AcMode::Default, None), 15);
+        let p = plate();
+        assert_eq!(armor_class(4, &[&p], AcMode::Default, None), 18);
+    }
+
+    #[test]
+    fn a_dex_penalty_still_applies_under_a_cap() {
+        // min(-1, 2) is -1. A cap is a ceiling, not a floor.
+        let mail = scale_mail();
+        assert_eq!(armor_class(-1, &[&mail], AcMode::Default, None), 13);
+    }
+
+    #[test]
+    fn a_shield_adds_to_armour_rather_than_replacing_it() {
+        let mail = scale_mail();
+        let sh = shield();
+        assert_eq!(armor_class(1, &[&mail, &sh], AcMode::Default, None), 17);
+    }
+
+    #[test]
+    fn a_shield_alone_adds_to_the_unarmoured_floor() {
+        let sh = shield();
+        assert_eq!(armor_class(2, &[&sh], AcMode::Default, None), 14);
+    }
+
+    #[test]
+    fn weapons_and_gear_do_not_move_ac() {
+        let mace = mace();
+        let r = rations();
+        let mail = scale_mail();
+        assert_eq!(armor_class(1, &[&mace, &r, &mail], AcMode::Default, None), 15);
+    }
+
+    /* ---------------- a shield is not a second armour ---------------- */
+
+    #[test]
+    fn armour_and_a_shield_together_are_legal() {
+        // The bug this fixes: both carry kind 'armor', so counting them
+        // together refused the most ordinary loadout in the game.
+        let mail = scale_mail();
+        let sh = shield();
+        assert!(check_one_armor(&[&mail, &sh]).is_ok());
+    }
+
+    #[test]
+    fn two_shields_are_refused_and_both_are_named() {
+        let a = shield();
+        let mut b = shield();
+        b.key = "shield_2".into();
+        b.name = "Buckler".into();
+        let e = check_one_armor(&[&a, &b]).unwrap_err();
+        assert!(e.contains("shield"), "wrong error: {}", e);
+        assert!(e.contains("Buckler"), "second shield not named: {}", e);
+    }
+
+    #[test]
+    fn two_body_armours_are_still_refused_with_a_shield_present() {
+        let mail = scale_mail();
+        let p = plate();
+        let sh = shield();
+        assert!(check_one_armor(&[&mail, &p, &sh]).is_err());
+    }
+
+    #[test]
+    fn ac_mode_parses_the_column_vocabulary() {
+        assert_eq!(AcMode::parse("flat"), AcMode::Flat);
+        assert_eq!(AcMode::parse("default"), AcMode::Default);
+        assert_eq!(AcMode::parse(" FLAT "), AcMode::Flat);
+        // Anything unrecognised computes rather than inventing a number.
+        assert_eq!(AcMode::parse("natural"), AcMode::Default);
     }
 }

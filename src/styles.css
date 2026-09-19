@@ -58,6 +58,16 @@ button.tiny{padding:.1rem .45rem;font-size:11px;margin:0}
 .chip.no{color:var(--bad);border-color:var(--bad)}
 .chip.att,.chip.use{color:var(--accent)}
 
+/* The DM panel. A sub-heading between its three jobs, because enrolling,
+   authoring a challenge and writing a statblock are different questions
+   that happen to share a screen. */
+.sub{font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+     color:var(--muted);margin:.7rem 0 .3rem}
+#dm-panel .list li button{margin:0}
+input.narrow{width:5rem;flex:none}
+select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
+       color:var(--fg);border:1px solid var(--line);border-radius:4px;font-size:13px}
+
 /* A roll card stacks instead of sitting on one line: name and status,
    then the dice, then the prose. */
 .list li.card{flex-direction:column;align-items:stretch;gap:.22rem;padding:.45rem .5rem}

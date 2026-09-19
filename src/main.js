@@ -8,7 +8,21 @@
 
 const { invoke } = window.__TAURI__.core;
 
-let state = { user: null, gameId: null, characterId: null, sheet: null, rolls: [] };
+// TWO ENCOUNTER IDS, ON PURPOSE.
+//
+// `encounterId` is the ACTIVE encounter, owned by loadTargets: what the
+// players can aim at, and what a roll is attributed to. `dmEncounterId`
+// is whichever encounter the DM has open for editing, which is often a
+// draft nobody can see yet.
+//
+// They were one variable for about ten minutes. Selecting a draft to
+// enrol into, then refreshing the target list, silently snapped the
+// DM's selection back to the active encounter — and a roll taken in
+// between would have been attributed to the wrong one.
+let state = {
+  user: null, gameId: null, characterId: null, sheet: null, rolls: [],
+  games: [], encounterId: null, dmEncounterId: null,
+};
 
 /* ---------- logging ---------- */
 
@@ -97,8 +111,14 @@ function clearData() {
   state.gameId = null;
   state.characterId = null;
   state.sheet = null;
+  state.games = [];
+  state.encounterId = null;
+  state.dmEncounterId = null;
   document.querySelector("#sheet-panel").hidden = true;
   document.querySelector("#equipment-panel").hidden = true;
+  // Signing out as the DM must not leave the DM panel on screen for
+  // whoever signs in next.
+  document.querySelector("#dm-panel").hidden = true;
   state.rolls = [];
   document.querySelector("#games").innerHTML = "";
   document.querySelector("#characters").innerHTML = "";
@@ -232,6 +252,7 @@ async function loadGames() {
   const ul = document.querySelector("#games");
   ul.innerHTML = "";
   if (!Array.isArray(games)) return;
+  state.games = games;
   for (const g of games) {
     ul.append(
       row(g.name, g.join_code, () => selectGame(g.id), g.id === state.gameId)
@@ -239,12 +260,26 @@ async function loadGames() {
   }
 }
 
+// Am I the DM of the game I am looking at?
+//
+// This decides whether to OFFER the DM side, and nothing more. The
+// access rule itself lives in 011's policies and is enforced by
+// Postgres; a second copy here would be a second place for it to be
+// wrong. If this is somehow wrong, the worst case is a panel whose
+// buttons come back "only the DM of this game can ...".
+function amDM() {
+  const g = (state.games || []).find((x) => x.id === state.gameId);
+  return !!g && !!state.user && g.dm_uid === state.user.user_id;
+}
+
 async function selectGame(id) {
   state.gameId = id;
+  state.dmEncounterId = null;
   await loadGames();
   await loadCharacters();
   await loadRolls();
   await loadTargets();
+  await loadDM();
 }
 
 // The active encounter's actors and challenges, as things to aim at.
@@ -574,6 +609,176 @@ function chip(text, kind) {
   return s;
 }
 
+/* ---------- the DM side ---------- */
+
+// Everything an encounter needs was authored in SQL until now. The
+// policies have been in place since 011; this is the screen that was
+// missing.
+//
+// Shown only to the DM of the selected game — see amDM(). That is a
+// courtesy, not a guard: every one of these commands is refused by
+// Postgres for anyone else, and the panel would simply fill the log with
+// "only the DM of this game can ...".
+async function loadDM() {
+  const panel = document.querySelector("#dm-panel");
+  if (!state.gameId || !amDM()) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  document.querySelector("#dm-who").textContent = "you run this game";
+
+  const encounters = await call("list_encounters", { gameId: state.gameId });
+  const ul = document.querySelector("#encounters");
+  ul.innerHTML = "";
+  for (const e of encounters || []) {
+    const li = row(e.name, e.status, () => selectEncounter(e.id), e.id === state.dmEncounterId);
+    // The id rides on the element so selecting can re-mark the list
+    // without refetching it. Rebuilding on every click would work and
+    // would also throw away the DM's scroll position mid-setup.
+    li.dataset.encId = e.id;
+    // draft -> active -> ended, as a button rather than a dropdown: the
+    // next state is nearly always the obvious one.
+    const next = e.status === "draft" ? "active" : e.status === "active" ? "ended" : "draft";
+    const b = document.createElement("button");
+    b.className = "tiny ghost";
+    b.textContent = "→ " + next;
+    b.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      await call("set_encounter_status", { encounterId: e.id, status: next });
+      await loadDM();
+      await loadTargets();
+    });
+    li.append(b);
+    ul.append(li);
+  }
+
+  await loadStatblockPicker();
+  await loadSkillPicker();
+  await selectEncounter(state.dmEncounterId);
+}
+
+async function selectEncounter(id) {
+  state.dmEncounterId = id;
+
+  // Show which one is being edited. The list is built by loadDM and not
+  // rebuilt on a click, so the highlight has to be moved here or it
+  // never moves at all.
+  for (const li of document.querySelectorAll("#encounters li")) {
+    li.classList.toggle("sel", !!id && li.dataset.encId === id);
+  }
+
+  const detail = document.querySelector("#enc-detail");
+  detail.hidden = !id;
+  if (!id) return;
+
+  const roster = await call("list_roster", { encounterId: id });
+  const rl = document.querySelector("#roster");
+  rl.innerHTML = "";
+  for (const a of roster || []) {
+    const li = document.createElement("li");
+    li.className = "flat item" + (a.active ? " on" : "");
+
+    const head = document.createElement("div");
+    head.className = "head";
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = a.label;
+    head.append(nm);
+
+    // Deactivate rather than delete for anything that has rolled: the
+    // rolls point at it. Delete is for a mis-click during setup, and the
+    // foreign keys refuse it when it is not.
+    const tog = document.createElement("button");
+    tog.className = "tiny ghost";
+    tog.textContent = a.active ? "hide" : "show";
+    tog.addEventListener("click", async () => {
+      await call("set_actor_active", { actorId: a.id, active: !a.active });
+      await selectEncounter(id);
+      await loadTargets();
+    });
+    const del = document.createElement("button");
+    del.className = "tiny ghost";
+    del.textContent = "remove";
+    del.addEventListener("click", async () => {
+      await call("remove_actor", { actorId: a.id });
+      await selectEncounter(id);
+      await loadTargets();
+    });
+    head.append(tog, del);
+    li.append(head);
+
+    const tags = document.createElement("span");
+    tags.className = "tags";
+    if (a.npc_key) tags.append(chip(a.npc_key, "cls"));
+    if (a.character_id) tags.append(chip("character", "cls"));
+    // name_base set means 018 named it rather than a person.
+    if (a.name_base) tags.append(chip("auto-named", "use"));
+    if (a.dead) tags.append(chip("dead", "no"));
+    else if (a.death_failures > 0 || a.death_successes > 0)
+      tags.append(chip(a.death_successes + "/" + a.death_failures + " saves", "no"));
+    if (tags.childElementCount) li.append(tags);
+
+    rl.append(li);
+  }
+
+  const challenges = await call("list_challenges", { encounterId: id });
+  const cl = document.querySelector("#challenges");
+  cl.innerHTML = "";
+  for (const c of challenges || []) {
+    const li = row(c.label, "DC " + c.dc + (c.skill_key ? " · " + c.skill_key : ""), null);
+    const tog = document.createElement("button");
+    tog.className = "tiny ghost";
+    tog.textContent = c.active ? "hide" : "show";
+    tog.addEventListener("click", async () => {
+      await call("set_challenge_active", { challengeId: c.id, active: !c.active });
+      await selectEncounter(id);
+      await loadTargets();
+    });
+    li.append(tog);
+    cl.append(li);
+  }
+}
+
+// What can be enrolled: every statblock, then every character in the
+// game. One picker, because enrolment is one question.
+async function loadStatblockPicker() {
+  const sel = document.querySelector("#enrol-what");
+  sel.innerHTML = "";
+  const npcs = await call("list_npcs", { gameId: state.gameId });
+  for (const n of npcs || []) {
+    const o = document.createElement("option");
+    o.value = "npc:" + n.key;
+    const bits = [n.species, n.class].filter(Boolean).join(" ");
+    o.textContent = n.name + " · AC " + n.ac + " · " + n.hp_max + "hp" +
+      (bits && bits !== n.name ? " · " + bits : "");
+    sel.append(o);
+  }
+  const chars = await call("list_characters", { gameId: state.gameId });
+  for (const c of chars || []) {
+    const o = document.createElement("option");
+    o.value = "chr:" + c.id;
+    o.textContent = c.name + " · character";
+    sel.append(o);
+  }
+}
+
+async function loadSkillPicker() {
+  const sel = document.querySelector("#chal-skill");
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "no suggested skill";
+  sel.append(none);
+  const skills = await call("list_skill_keys", { gameId: state.gameId });
+  for (const s of skills || []) {
+    const o = document.createElement("option");
+    o.value = s.key;
+    o.textContent = s.name + " (" + s.ability.toUpperCase() + ")";
+    sel.append(o);
+  }
+}
+
 /// Show what the request would roll, before committing to it.
 async function updatePreview() {
   const el = document.querySelector("#preview");
@@ -830,6 +1035,71 @@ window.addEventListener("DOMContentLoaded", async () => {
     const faults = await call("check_item_keys", { gameId: state.gameId });
     if (Array.isArray(faults) && faults.length === 0) {
       log("check_item_keys", "every technique item_key and mode resolves", false);
+    }
+  });
+
+  /* ---------- the DM side ---------- */
+  // All writes, so all guarded: a double-click on Enrol is a second
+  // goblin nobody asked for, and 018 will dutifully number it.
+
+  guarded("#create-encounter", async () => {
+    if (!state.gameId) return log("create_encounter", "select a game first", true);
+    const r = await call("create_encounter", {
+      gameId: state.gameId,
+      name: val("#enc-name"),
+    });
+    if (r) document.querySelector("#enc-name").value = "";
+    await loadDM();
+  });
+
+  guarded("#enrol", async () => {
+    if (!state.dmEncounterId) return log("enrol_actor", "select an encounter first", true);
+    const pick = document.querySelector("#enrol-what").value;
+    const isNpc = pick.startsWith("npc:");
+    const r = await call("enrol_actor", {
+      encounterId: state.dmEncounterId,
+      npcKey: isNpc ? pick.slice(4) : null,
+      characterId: isNpc ? null : pick.slice(4),
+      // Blank on purpose is the normal case: 018 names it.
+      label: val("#enrol-name") || null,
+    });
+    if (r) document.querySelector("#enrol-name").value = "";
+    await selectEncounter(state.dmEncounterId);
+    await loadTargets();
+  });
+
+  guarded("#add-challenge", async () => {
+    if (!state.dmEncounterId) return log("add_challenge", "select an encounter first", true);
+    const r = await call("add_challenge", {
+      encounterId: state.dmEncounterId,
+      label: val("#chal-label"),
+      dc: Number(val("#chal-dc") || 0),
+      skillKey: document.querySelector("#chal-skill").value || null,
+    });
+    if (r) {
+      document.querySelector("#chal-label").value = "";
+      document.querySelector("#chal-dc").value = "";
+    }
+    await selectEncounter(state.dmEncounterId);
+    await loadTargets();
+  });
+
+  guarded("#create-npc", async () => {
+    if (!state.gameId) return log("create_npc", "select a game first", true);
+    const r = await call("create_npc", {
+      gameId: state.gameId,
+      key: val("#npc-key"),
+      name: val("#npc-name"),
+      ac: Number(val("#npc-ac") || 0),
+      hpMax: Number(val("#npc-hp") || 0),
+      species: val("#npc-species") || null,
+      class: val("#npc-class") || null,
+    });
+    if (r) {
+      for (const id of ["#npc-key", "#npc-name", "#npc-species", "#npc-class", "#npc-ac", "#npc-hp"]) {
+        document.querySelector(id).value = "";
+      }
+      await loadStatblockPicker();
     }
   });
 

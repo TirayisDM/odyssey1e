@@ -77,7 +77,13 @@ fn list_games(state: State<AppState>) -> Result<Value, String> {
     supabase::rest_get(
         &token,
         "games",
-        &[("select", "id,name,join_code,is_open,created_at"), ("order", "created_at.desc")],
+        // dm_uid so the frontend can tell whether to offer the DM side.
+        // Not an access check — 011's policies are the access check, and
+        // this only decides whether to show a panel that would refuse.
+        &[
+            ("select", "id,name,join_code,is_open,dm_uid,created_at"),
+            ("order", "created_at.desc"),
+        ],
     )
 }
 
@@ -943,6 +949,20 @@ pub fn run() {
             list_rolls,
             list_encounters,
             list_targets,
+            // The DM side. Eleven commands, none of them in this file —
+            // see commands/mod.rs for why that is the point.
+            commands::dm::list_npcs,
+            commands::dm::create_npc,
+            commands::dm::create_encounter,
+            commands::dm::set_encounter_status,
+            commands::dm::enrol_actor,
+            commands::dm::remove_actor,
+            commands::dm::set_actor_active,
+            commands::dm::add_challenge,
+            commands::dm::set_challenge_active,
+            commands::dm::list_roster,
+            commands::dm::list_challenges,
+            commands::dm::list_skill_keys,
             death_save,
             get_sheet,
             set_level,

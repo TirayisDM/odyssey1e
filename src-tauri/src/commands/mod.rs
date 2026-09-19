@@ -51,14 +51,15 @@
 //!   probably not until initiative forces a change to it anyway.
 //!
 //!   NEW MATERIAL LANDS HERE FROM NOW ON, no migration required:
-//!   initiative.rs        rolling for it, reading turn order        (item 1)
 //!   dm.rs                create encounter, enrol actor, add
-//!                        challenge, write a statblock              (item 2)
+//!                        challenge, write a statblock     (item 2) DONE
+//!   initiative.rs        rolling for it, reading turn order        (item 1)
 //!   challenges.rs        whether the iron lock has been picked     (item 3)
 //!
-//!   Those three are the next things on the list in STATUS.md, and none
-//!   of them has a reason to be written into lib.rs first and moved
-//!   afterwards.
+//!   dm.rs was the first real tenant and it never touched lib.rs, which
+//!   is the whole point: eleven commands of new surface and the crate
+//!   root grew by eleven lines of registration. The other two are next
+//!   on the list in STATUS.md and land the same way.
 //!
 //! WHAT DOES NOT LIVE HERE
 //!   `run()` and the `generate_handler!` list stay in `lib.rs`. One
@@ -69,6 +70,7 @@
 use crate::supabase::{AppState, Session};
 use tauri::State;
 
+pub mod dm;
 pub mod session;
 
 /// Everything a command needs from the session, resolved once.

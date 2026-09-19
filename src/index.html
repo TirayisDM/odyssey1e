@@ -62,6 +62,48 @@
         <ul id="inventory" class="list"></ul>
       </section>
 
+      <section id="dm-panel" hidden>
+        <h2>DM <span id="dm-who" class="muted"></span></h2>
+
+        <div class="row">
+          <input id="enc-name" placeholder="new encounter name" />
+          <button id="create-encounter" class="ghost">Create</button>
+        </div>
+        <ul id="encounters" class="list"></ul>
+
+        <div id="enc-detail" hidden>
+          <div class="sub">Enrol</div>
+          <select id="enrol-what"></select>
+          <input id="enrol-name" placeholder="name (blank = auto, e.g. Goblin 0003)" />
+          <button id="enrol">Enrol</button>
+          <ul id="roster" class="list"></ul>
+
+          <div class="sub">Challenge</div>
+          <div class="row">
+            <input id="chal-label" placeholder="the iron lock" />
+            <input id="chal-dc" type="number" min="1" placeholder="DC" class="narrow" />
+          </div>
+          <select id="chal-skill"></select>
+          <button id="add-challenge" class="ghost">Add challenge</button>
+          <ul id="challenges" class="list"></ul>
+
+          <div class="sub">Statblock</div>
+          <div class="row">
+            <input id="npc-name" placeholder="name, e.g. Goblin Archer" />
+            <input id="npc-key" placeholder="key" />
+          </div>
+          <div class="row">
+            <input id="npc-species" placeholder="species (optional)" />
+            <input id="npc-class" placeholder="class (optional)" />
+          </div>
+          <div class="row">
+            <input id="npc-ac" type="number" min="0" placeholder="AC" />
+            <input id="npc-hp" type="number" min="1" placeholder="HP" />
+          </div>
+          <button id="create-npc" class="ghost">Write statblock</button>
+        </div>
+      </section>
+
       <section>
         <h2>Rolls</h2>
         <div class="row">

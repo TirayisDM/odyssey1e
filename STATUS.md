@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the action.**
+**Written 2026-09-17, updated after HP, dying and death saves.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -119,7 +119,18 @@ and a total of exactly 15 against AC 15 reads "exactly". Every roll
 belongs to an action now, including a miss: it happened, and it spends
 an initiative slot the same as a hit.
 
-**150 tests, zero warnings.** `cd src-tauri && cargo test`.
+And the hit lands. Three Heavy Smash hits on Goblin 1 for 9, 3 and 2
+took it from 7 hit points to down, each event traceable to the dice that
+produced it, while Goblin 2 sat untouched at 7/7 - two instances off one
+statblock bleed separately. A miss writes no event at all.
+
+Dropping to zero does not kill. It makes a creature unconscious and
+dying at AC 0, still targetable, and three death saves settle it either
+way. The target list reads `Goblin 1 - down` with the tally beside it,
+and a button rolls the save until initiative exists to fire it
+automatically.
+
+**168 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -146,6 +157,13 @@ and not after.
     challenges; the things a roll can be aimed at
 012 actions - one swing is one thing: an action owns its rolls, and
     write_action lands all of them or none
+013 hp events - the links from an action to what it aimed at and who
+    swung, and hit points as a log rather than a number
+014 write_action hp - the writer attaches the damage event, because the
+    damage roll's id cannot be known by the caller
+015 dying - zero is unconscious, not dead; death saves for NPCs too
+016 actor death saves - a members policy plus a trigger, after an
+    RLS-blocked UPDATE turned out to fail silently
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -196,6 +214,31 @@ pattern (global rows with `game_id IS NULL`, overrides with it set)
 needs a surrogate id plus two *partial* unique indexes - `NULL != NULL`
 in a unique constraint, so without the partial index two global rows
 both pass. Every reference table from 006 on hits this. (005)
+
+**AN RLS-BLOCKED `UPDATE` SUCCEEDS AND DOES NOTHING.** This is the
+worst one on the list, because it is silent. A row a policy hides is a
+row that IS NOT THERE for an UPDATE: the statement matches zero rows,
+affects zero rows, and returns without error. A blocked INSERT raises
+and rolls the transaction back; a blocked UPDATE just shrugs.
+
+`write_action` returned an action id having quietly dropped half of what
+it was asked to record - two death saves were rolled on Goblin 1, a 10
+and a natural 1, and its counters stayed on zero. Nothing anywhere said
+so. The cause was `encounter_actors` having only a dm-updates policy
+while the roll came from a player.
+
+Any write that MUST land needs either a policy that admits the caller or
+a check that it actually happened. Do not assume a successful statement
+changed anything. (016)
+
+**A write button that can fire twice will fire twice.** Every click was
+writing two actions with two sets of dice - two swings nobody took, and
+on a death save, two saves from one press with a natural 1 among them
+worth two failures toward dead. A roll is not idempotent: a duplicate is
+not a harmless repeat, it is a second event. Write buttons are guarded
+now, disabled for the duration with a second dispatch dropped rather
+than queued. The source of the second dispatch was never proven, only
+made impossible from the UI side - if it reappears, it is deeper.
 
 **A partial unique index cannot back a foreign key.** The consequence
 of the trap above, and the reason every cross-reference between
@@ -282,6 +325,32 @@ it for every reference table that gets filtered by a name.
 `is_game_member`, `is_game_dm`, `join_game` need `authenticated` to hold
 EXECUTE or every policy fails closed. Do not "fix" them. Run the
 advisor after every DDL change anyway.
+
+---
+
+## House rules, marked so nobody takes them for 5e
+
+Two live in `death.rs`, both deliberate:
+
+**NPCs roll death saves.** By the book a monster simply dies at zero. A
+goblin here bleeds out like anyone else, which is why
+`encounter_actors` carries the same two counters `characters` has had
+since 010.
+
+**An unconscious creature has AC 0.** The book keeps its armour class
+and grants attackers advantage, with melee hits inside five feet landing
+as crits. Flat zero is simpler and reads plainly at the table.
+
+Everything else in there is 5e and was deliberately not invented: ten or
+better succeeds, a natural 1 is two failures, a natural 20 restores one
+hit point and clears the tally, three either way settles it, being hit
+while down costs a failure and two on a crit, and overflow damage
+meeting the hit point maximum kills outright.
+
+One more, in `resolution.rs`: a natural 20 does NOT carry an ability
+check, only an attack. That is rules as written, and
+`TargetKind::auto_decides` is the single line to change if the campaign
+ever disagrees.
 
 ---
 
@@ -377,44 +446,48 @@ mid-fight and last night's rolls must not change their minds.
 
 ---
 
-## Combat - DECIDED, NOT BUILT
+## Combat - BUILT, except the turn
 
-The shape agreed, so the next sessions are not re-deriving it.
+The loop runs end to end. A DM enrols a goblin, a player picks it from
+a list, names a weapon or technique, and the app rolls to-hit, decides
+hit or miss against the real AC, rolls damage on a hit, doubles the
+dice on a crit, takes the hit points off, and writes all of it as one
+thing that can be undone in one stroke.
 
-**The DM supplies NPCs; an encounter lists them; a player picks a
-target with a button.** Theater of the mind - no positions, no ranges,
-no movement. The combatant list is just a list, which strips out most
-of what makes combat systems horrible.
+What was decided and held up:
 
-**Statblock catalogue plus per-encounter instances**, which is
-`items` + `character_items` again: the goblin's stats authored once,
-'Goblin 1', 'Goblin 2', 'Goblin 3' as three instances pointing at it.
-Same catalogue-plus-junction, keyed by value. Nothing new to invent.
+**Theater of the mind.** No positions, no ranges, no movement. The
+combatant list is just a list, which strips out most of what makes
+combat systems horrible.
 
-**A hit takes HP off automatically.** That makes this a combat tracker,
-not a roll logger, and it has a consequence: one swing is a to-hit roll
-plus a damage roll plus an HP change, so the ACTION has to exist as a
-thing that owns its parts. Otherwise "that shouldn't have hit" has
-nothing to undo. The action is also the unit a narrator wants handed to
-it - those two needs turn out to be the same need.
+**Statblock catalogue plus per-encounter instances**, which is `items`
+plus `character_items` again. One goblin row, three instances, each
+bleeding separately.
 
-**HP as an event log, not a mutable number.** Not `hp = hp - 7` but a
-row saying Goblin 1, -7, from this damage roll. Current HP is the sum.
-Undo is deleting a row. A DM correction or a heal is the same shape,
-another row, not a special case. And it can always answer WHY the
-goblin is at 3, which a bare number never can. Same instinct as `rolls`
-itself, which is already an event log.
+**A hit takes HP off automatically**, which is what forced the action
+into existence: one swing is a to-hit plus a damage roll plus an HP
+change, and without a parent, "that should not have hit" has nothing to
+undo. The action turned out to be the unit a narrator wants handed to
+it as well - the same need twice.
 
-**Player characters have no HP in the schema at all.** `characters`
-has level, name, portrait, narrative pack - nothing else. The Character
-tab carries HP_Current, HP_MaxOverride and HP_Temp, none of it ported.
-The moment a goblin swings back that is needed, so it belongs in the
-same migration as combatant HP.
+**HP as an event log.** Undo is deleting a row, a heal is damage with
+the sign flipped, a DM correction is another row with a note, and the
+goblin at 3 can say why.
 
-Staging, each step usable on its own: the attack key with a typed
-target (playable now - 009 is in); then encounters and combatants, so
-the number comes from a button instead of a keyboard; then HP events,
-so the hit lands; then the action grouping and the narrator on top.
+**Dropping to zero is unconscious, not dead.** Three death saves settle
+it. AC 0 while down, and hitting something already down costs it a
+failure rather than hit points.
+
+WHAT IS STILL MISSING, and it is two things rather than a list:
+
+**The turn.** `encounter_actors.initiative` is a column nothing reads. Death saves
+happen on a button because there is no turn for them to happen on, and
+that is the only place the current build departs from the rule as
+written.
+
+**The DM side.** Encounters, actors, challenges and statblocks are all
+authored by hand in SQL. Every policy for doing it from the app is
+already in place; what is missing is the screen.
 
 ---
 
@@ -458,45 +531,41 @@ for what was settled, and "Combat" for the shape of what follows.
 
 Roughly in order:
 
-1. THE LINKS, then HP events - in that order, because the second
-   needs the first. An action snapshots `Goblin 1` and `AC 15` on its
-   to-hit roll but holds no reference to the actor, so "take 3 off
-   Goblin 1" cannot identify which goblin, and the iron lock's derived
-   status cannot be computed. The precedent is already set by
-   `character_id` sitting beside `character_name`: the link for
-   querying, the snapshot so history cannot be rewritten.
-
-   The link belongs on the ACTION rather than the roll. The action is
-   what was aimed at something; the roll is what was judged against a
-   number. Keeping them apart means the damage roll, which has no
-   target of its own, can still find the goblin it was for.
-
-   It also wants the PERFORMER as an actor, not only as a character.
-   Tallying successes per actor is what an eventual experience and
-   advancement system counts, and an NPC swinging back is an action by
-   an actor with no character behind it at all.
-2. HP events. A hit takes HP off, as an event log rather than a mutable
-   number - undo is deleting a row, a DM correction or a heal is the
-   same shape as damage, and the goblin at 3 can always explain itself.
-   Characters have hp_max from 010 and NPCs from 011; neither has a
-   single point of damage recorded against it.
-3. Die art on the roll - read the equipped set from character_dice,
+1. INITIATIVE, and with it the turn. `encounter_actors.initiative`
+   has been a column since 011 and nothing has read it yet. It is what
+   turns "roll a death save" from a button into something that happens
+   on a creature's own turn, which is how the rule is actually written.
+   Enrolment should prompt the players to roll for it. A miss spends a
+   slot exactly as a hit does, which is why every roll became an action.
+2. THE DM SIDE. Everything an encounter needs is authored by hand in SQL
+   right now - there is no way to create an encounter, enrol an actor,
+   add a challenge or write a statblock from the app. The policies are
+   already in place for all of it; what is missing is the screen. This
+   is the largest gap between what the schema supports and what anyone
+   can do.
+3. The roll-to-challenge payoff. `actions.target_challenge_id` is
+   written and nothing reads it, so the iron lock still cannot say
+   whether it has been picked. The derivation is a query away: a
+   successful action pointing at the challenge, later than its
+   `reset_at`. See 011's comment on that column.
+4. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
    set_key onto the roll at insert, per the record principle.
    `narrative.rs` is the shape to copy, down to caching it on the sheet.
-4. The rules modules still unported: death saves, rests, spell slots -
+5. The rules modules still unported: rests, spell slots - death saves
+   landed with 015 -
    each isolated in its own Apps Script file, each wants its own Rust
    module with tests. Each also wants a `resolve_request` key, and the
    vocabulary already has room for `death` and `spell`.
-5. Delivery - whatever moves a resolved roll to `delivered` and puts it
+6. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-6. Session persistence (currently in memory - a restart signs you out;
+7. Session persistence (currently in memory - a restart signs you out;
    fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
-7. A real phone-first UI. What exists is a desktop test rig.
-8. Android via `npm run tauri android init`. iOS needs a Mac.
+8. A real phone-first UI. What exists is a desktop test rig.
+9. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

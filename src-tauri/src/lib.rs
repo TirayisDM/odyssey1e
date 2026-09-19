@@ -761,6 +761,14 @@ fn death_save(
     let roll = json!({
         "game_id": game_id,
         "character_id": v.character_id,
+        // WHOSE death save this was. For a character the 001 trigger
+        // derives this from character_id and does it better than we
+        // could; for an NPC there is no character row to derive from and
+        // it falls through to the 'Someone' default, which leaves the
+        // log unable to say which goblin was dying. The trigger only
+        // fills a name that arrived null, blank or 'Someone', so handing
+        // it the instance label here is not fighting it.
+        "character_name": if v.character_id.is_none() { Some(v.label.clone()) } else { None },
         "owner_uid": session.user_id,
         "role": "check",
         "request": "death save",

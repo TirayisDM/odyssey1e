@@ -331,6 +331,12 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
 #[derive(Debug, Clone)]
 pub struct ActorVitals {
     pub character_id: Option<String>,
+    /// What this instance is called — "Goblin 1". Carried because a roll
+    /// has to snapshot WHOSE action it was, and for an NPC there is no
+    /// character row for the 001 trigger to derive that name from: it
+    /// falls through to 'Someone' and the log permanently cannot say
+    /// which goblin was dying.
+    pub label: String,
     pub hp_max: Option<i64>,
     pub hp_current: i64,
     pub successes: i64,
@@ -346,7 +352,7 @@ pub fn load_actor_vitals(token: &str, actor_id: &str) -> Result<Option<ActorVita
         &[
             (
                 "select",
-                "id,character_id,npc_key,hp_override,death_successes,death_failures,dead",
+                "id,character_id,npc_key,label,hp_override,death_successes,death_failures,dead",
             ),
             ("id", &format!("eq.{}", actor_id)),
         ],
@@ -408,6 +414,7 @@ pub fn load_actor_vitals(token: &str, actor_id: &str) -> Result<Option<ActorVita
 
     Ok(Some(ActorVitals {
         character_id,
+        label: as_opt_str(&r, "label").unwrap_or_default(),
         hp_max,
         hp_current: hp_max.unwrap_or(0) + spent,
         successes,

@@ -8,9 +8,20 @@
 //! Commands are deliberately NOT async — Tauri runs sync commands on a
 //! thread pool, so the blocking HTTP in `supabase` is fine here and the
 //! code stays readable.
+//!
+//! THIS FILE IS BEING BRANCHED. Both statements above are still true and
+//! the file is 944 lines anyway, because "thin" describes each command
+//! and not how many of them belong together. `commands/` is where the
+//! surface is moving; `commands/mod.rs` carries the map of which group
+//! goes where and in what order, and it is the thing to read before
+//! adding to this file. New material goes there rather than here.
+//!
+//! What stays: `run()` and the `generate_handler!` list. One registry in
+//! the crate root is what you read to find out what the app can do.
 
 mod attack;
 mod character;
+mod commands;
 mod death;
 mod dice;
 mod encounter;
@@ -52,11 +63,8 @@ fn sign_out(state: State<AppState>) -> Result<(), String> {
     state.set(None)
 }
 
-/// Who am I, or null. Lets the frontend render without guessing.
-#[tauri::command]
-fn me(state: State<AppState>) -> Result<Option<Session>, String> {
-    state.current()
-}
+// `me` now lives in commands/session.rs. It moved on its own, as the
+// exemplar for the branch described at the top of this file.
 
 /* ============================ GAMES ============================ */
 
@@ -915,7 +923,9 @@ pub fn run() {
             sign_up,
             sign_in,
             sign_out,
-            me,
+            // A path registers exactly like a bare name, and the command
+            // is still "me" on the wire. See commands/mod.rs.
+            commands::session::me,
             list_games,
             create_game,
             join_game,

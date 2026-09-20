@@ -77,15 +77,26 @@ function guarded(selector, fn) {
 }
 
 // Every command goes through here so nothing can fail silently.
-async function call(cmd, args) {
+//
+// tryCall hands back WHY it failed; call throws that away and returns
+// null, which is all most callers want. The DM panel wants the reason,
+// because a refusal there is usually the DM being told something true
+// about the game — "another encounter is already active" — rather than
+// something being broken.
+async function tryCall(cmd, args) {
   try {
     const out = await invoke(cmd, args || {});
     log(cmd, out, false);
-    return out;
+    return { ok: true, value: out };
   } catch (e) {
     log(cmd, e, true);
-    return null;
+    return { ok: false, error: String(e) };
   }
+}
+
+async function call(cmd, args) {
+  const r = await tryCall(cmd, args);
+  return r.ok ? r.value : null;
 }
 
 /* ---------- session ---------- */
@@ -611,6 +622,20 @@ function chip(text, kind) {
 
 /* ---------- the DM side ---------- */
 
+// Say it where the DM is looking.
+//
+// The log pane carries every call and its raw result, which is the right
+// tool for reading what happened and the wrong one for noticing that
+// something did not. A refused click looked identical to a click that
+// did nothing at all — the explanation was there, on the other side of
+// the screen, in a list the DM was not watching.
+function dmSay(text, isError) {
+  const el = document.querySelector("#dm-msg");
+  el.textContent = text || "";
+  el.className = "dm-msg" + (isError ? " err" : "");
+  el.hidden = !text;
+}
+
 // Everything an encounter needs was authored in SQL until now. The
 // policies have been in place since 011; this is the screen that was
 // missing.
@@ -645,7 +670,16 @@ async function loadDM() {
     b.textContent = "→ " + next;
     b.addEventListener("click", async (ev) => {
       ev.stopPropagation();
-      await call("set_encounter_status", { encounterId: e.id, status: next });
+      dmSay("");
+      const r = await tryCall("set_encounter_status", {
+        encounterId: e.id,
+        status: next,
+      });
+      // "Only one active per game" is not an error the DM caused by
+      // clicking wrong — it is the rule, and the next move is obvious
+      // once it is said out loud.
+      if (!r.ok) dmSay(r.error, true);
+      else dmSay(e.name + " is now " + next);
       await loadDM();
       await loadTargets();
     });
@@ -1062,11 +1096,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   guarded("#create-encounter", async () => {
     if (!state.gameId) return log("create_encounter", "select a game first", true);
-    const r = await call("create_encounter", {
+    dmSay("");
+    const r = await tryCall("create_encounter", {
       gameId: state.gameId,
       name: val("#enc-name"),
     });
-    if (r) document.querySelector("#enc-name").value = "";
+    if (r.ok) document.querySelector("#enc-name").value = "";
+    else dmSay(r.error, true);
     await loadDM();
   });
 
@@ -1074,27 +1110,31 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!state.dmEncounterId) return log("enrol_actor", "select an encounter first", true);
     const pick = document.querySelector("#enrol-what").value;
     const isNpc = pick.startsWith("npc:");
-    const r = await call("enrol_actor", {
+    dmSay("");
+    const r = await tryCall("enrol_actor", {
       encounterId: state.dmEncounterId,
       npcKey: isNpc ? pick.slice(4) : null,
       characterId: isNpc ? null : pick.slice(4),
       // Blank on purpose is the normal case: 018 names it.
       label: val("#enrol-name") || null,
     });
-    if (r) document.querySelector("#enrol-name").value = "";
+    if (r.ok) document.querySelector("#enrol-name").value = "";
+    else dmSay(r.error, true);
     await selectEncounter(state.dmEncounterId);
     await loadTargets();
   });
 
   guarded("#add-challenge", async () => {
     if (!state.dmEncounterId) return log("add_challenge", "select an encounter first", true);
-    const r = await call("add_challenge", {
+    dmSay("");
+    const r = await tryCall("add_challenge", {
       encounterId: state.dmEncounterId,
       label: val("#chal-label"),
       dc: Number(val("#chal-dc") || 0),
       skillKey: document.querySelector("#chal-skill").value || null,
     });
-    if (r) {
+    if (!r.ok) dmSay(r.error, true);
+    if (r.ok) {
       document.querySelector("#chal-label").value = "";
       document.querySelector("#chal-dc").value = "";
     }
@@ -1104,7 +1144,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   guarded("#create-npc", async () => {
     if (!state.gameId) return log("create_npc", "select a game first", true);
-    const r = await call("create_npc", {
+    dmSay("");
+    const r = await tryCall("create_npc", {
       gameId: state.gameId,
       key: val("#npc-key"),
       name: val("#npc-name"),
@@ -1113,11 +1154,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       species: val("#npc-species") || null,
       class: val("#npc-class") || null,
     });
-    if (r) {
+    if (r.ok) {
       for (const id of ["#npc-key", "#npc-name", "#npc-species", "#npc-class", "#npc-ac", "#npc-hp"]) {
         document.querySelector(id).value = "";
       }
       await loadStatblockPicker();
+      dmSay("statblock written");
+    } else {
+      dmSay(r.error, true);
     }
   });
 

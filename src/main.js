@@ -654,6 +654,9 @@ async function loadDM() {
   document.querySelector("#dm-who").textContent = "you run this game";
 
   const encounters = await call("list_encounters", { gameId: state.gameId });
+  // Kept so selectEncounter can say WHICH encounter is being edited
+  // without refetching the list to find out its name and status.
+  state.encounters = encounters || [];
   const ul = document.querySelector("#encounters");
   ul.innerHTML = "";
   for (const e of encounters || []) {
@@ -723,6 +726,28 @@ async function selectEncounter(id) {
   const detail = document.querySelector("#enc-detail");
   detail.hidden = !id;
   if (!id) return;
+
+  // SAY WHICH ENCOUNTER THIS IS, AND WHETHER ANYONE CAN SEE IT.
+  //
+  // The panel edits whatever is SELECTED; the players' target list
+  // follows whatever is ACTIVE. Those are different encounters more
+  // often than not, and the only cue was an outline on a row and a word
+  // in small grey text — which was not enough to stop a goblin and two
+  // challenges being built into an ended encounter, where nobody could
+  // reach them. The form now says so at the point of use.
+  const e = (state.encounters || []).find((x) => x.id === id);
+  const banner = document.querySelector("#enc-editing");
+  if (e) {
+    const note =
+      e.status === "active" ? "in front of the table"
+      : e.status === "draft" ? "players cannot see this yet"
+      : "players cannot see this";
+    banner.textContent = "editing: " + e.name + " — " + e.status + " · " + note;
+    banner.className = "editing" + (e.status === "active" ? " live" : "");
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
 
   const roster = await call("list_roster", { encounterId: id });
   const rl = document.querySelector("#roster");

@@ -69,6 +69,14 @@ button.tiny{padding:.1rem .45rem;font-size:11px;margin:0}
         padding:.35rem .5rem;margin-bottom:.4rem;border-radius:4px;
         border:1px solid var(--line);color:var(--muted)}
 .dm-msg.err{color:var(--bad);border-color:var(--bad)}
+/* Which encounter is being edited, and whether the table can see it.
+   Muted by default because an unseen encounter is the normal state for
+   building one; accent when it is live, because editing in front of the
+   players is the case worth noticing. */
+.editing{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;
+         padding:.3rem .5rem;margin:.6rem 0 .1rem;border-radius:4px;
+         border:1px dashed var(--line);color:var(--muted)}
+.editing.live{border-style:solid;border-color:var(--accent);color:var(--accent)}
 #dm-panel .list li button{margin:0}
 input.narrow{width:5rem;flex:none}
 select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;

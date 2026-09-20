@@ -21,7 +21,7 @@ const { invoke } = window.__TAURI__.core;
 // between would have been attributed to the wrong one.
 let state = {
   user: null, gameId: null, characterId: null, sheet: null, rolls: [],
-  games: [], encounterId: null, dmEncounterId: null,
+  games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
 
 /* ---------- logging ---------- */
@@ -750,6 +750,16 @@ async function selectEncounter(id) {
   }
 
   const roster = await call("list_roster", { encounterId: id });
+
+  // Targets for THIS encounter, not the active one.
+  //
+  // state.targets belongs to loadTargets and follows whatever is live,
+  // which is usually not what the DM has open. A goblin in a draft
+  // attacks the people in that draft. Making this a second list rather
+  // than reusing the first is the same lesson dmEncounterId taught.
+  const dmTargets = await call("list_targets", { encounterId: id });
+  state.dmTargets = Array.isArray(dmTargets) ? dmTargets : [];
+
   const rl = document.querySelector("#roster");
   rl.innerHTML = "";
   for (const a of roster || []) {
@@ -796,6 +806,13 @@ async function selectEncounter(id) {
       tags.append(chip(a.death_successes + "/" + a.death_failures + " saves", "no"));
     if (tags.childElementCount) li.append(tags);
 
+    // A monster acts. Characters do not get buttons here — their player
+    // rolls for them from the sheet, which is the whole point of a
+    // player having one.
+    if (a.npc_key && a.active && !a.dead) {
+      li.append(await attackRow(a, id));
+    }
+
     rl.append(li);
   }
 
@@ -815,6 +832,95 @@ async function selectEncounter(id) {
     li.append(tog);
     cl.append(li);
   }
+}
+
+// One row of attack buttons and a target, for one monster.
+//
+// The buttons are DERIVED, not configured: list_npc_attacks reads the
+// statblock's loadout and offers one per weapon per mode, so a handaxe
+// gives Handaxe and Handaxe (Thrown) because it is `thr`. Nothing here
+// knows what a handaxe is.
+//
+// Every button is guarded against a second click for the same reason
+// the roll buttons are: a duplicate is not a harmless repeat, it is a
+// swing nobody took.
+async function attackRow(actor, encounterId) {
+  const wrap = document.createElement("div");
+  wrap.className = "attacks";
+
+  const attacks = await call("list_npc_attacks", { actorId: actor.id });
+  if (!Array.isArray(attacks) || !attacks.length) {
+    const none = document.createElement("span");
+    none.className = "chip";
+    none.textContent = "no weapon";
+    wrap.append(none);
+    return wrap;
+  }
+
+  // Everything in this encounter except the monster itself — a goblin
+  // swinging at a goblin is legal and sometimes the point, but swinging
+  // at itself is not.
+  const pick = document.createElement("select");
+  for (const t of state.dmTargets) {
+    if (t.id === actor.id) continue;
+    const o = document.createElement("option");
+    o.value = JSON.stringify({
+      id: t.id, row: t.row, kind: t.target_kind,
+      value: t.value, label: t.label, characterId: t.character_id,
+    });
+    o.textContent =
+      t.label + " · " + String(t.target_kind).toUpperCase() + " " + t.value +
+      (t.hp_current !== null && t.hp_current !== undefined
+        ? " · " + t.hp_current + "/" + t.hp_max + "hp" : "");
+    pick.append(o);
+  }
+  if (!pick.childElementCount) {
+    const o = document.createElement("option");
+    o.textContent = "nothing to attack";
+    pick.append(o);
+    pick.disabled = true;
+  }
+  wrap.append(pick);
+
+  for (const atk of attacks) {
+    const b = document.createElement("button");
+    b.className = "tiny";
+    b.textContent = atk.request;
+    if (atk.proficient === false) b.title = "not proficient — no proficiency bonus";
+    let busy = false;
+    b.addEventListener("click", async () => {
+      if (busy || pick.disabled) return;
+      busy = true;
+      b.disabled = true;
+      try {
+        const t = JSON.parse(pick.value);
+        dmSay("");
+        const r = await tryCall("npc_attack", {
+          actorId: actor.id,
+          request: atk.request,
+          mode: "normal",
+          targetValue: t.value,
+          targetKind: t.kind,
+          targetLabel: t.label,
+          encounterId,
+          targetId: t.id,
+          targetRow: t.row,
+          targetCharacterId: t.characterId || null,
+        });
+        if (!r.ok) dmSay(r.error, true);
+        else dmSay(actor.label + " attacks " + t.label);
+        await loadRolls();
+        await loadTargets();
+        await selectEncounter(encounterId);
+      } finally {
+        busy = false;
+        b.disabled = false;
+      }
+    });
+    wrap.append(b);
+  }
+
+  return wrap;
 }
 
 // What can be enrolled: every statblock, then every character in the

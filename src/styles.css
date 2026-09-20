@@ -125,3 +125,9 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .preview.live{color:var(--accent)}
 #mode{width:6rem;background:#0f1114;color:var(--fg);border:1px solid var(--line);
       border-radius:4px;padding:.42rem;margin-bottom:.4rem}
+
+/* A monster's attack row: who to hit, then how. Buttons are derived
+   from the statblock's weapons, one per mode. */
+.attacks{display:flex;gap:.25rem;flex-wrap:wrap;align-items:center;margin-top:.15rem}
+.attacks select{width:auto;flex:1;min-width:9rem;margin:0;padding:.18rem .3rem;font-size:11px}
+.attacks button.tiny{margin:0}

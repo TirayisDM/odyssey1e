@@ -655,6 +655,24 @@ async function loadDM() {
 
   await loadStatblockPicker();
   await loadSkillPicker();
+
+  // Open on something rather than on nothing.
+  //
+  // Everything below the encounter list belongs to a selected encounter,
+  // so with none selected the panel looks like it only creates them —
+  // there is no visible hint that Enrol is one click away. The active
+  // encounter is what the table is looking at, so it is the right guess;
+  // failing that, the newest, which is what a DM who just hit Create is
+  // about to fill.
+  //
+  // An explicit selection is never overridden: this only fires when
+  // nothing is chosen, or when what was chosen has gone.
+  const list = encounters || [];
+  const stillThere = list.some((e) => e.id === state.dmEncounterId);
+  if (!stillThere) {
+    const active = list.find((e) => e.status === "active");
+    state.dmEncounterId = (active || list[0] || {}).id || null;
+  }
   await selectEncounter(state.dmEncounterId);
 }
 

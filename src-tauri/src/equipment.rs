@@ -546,6 +546,102 @@ pub fn load_loadout(
     Ok(out)
 }
 
+/// What a STATBLOCK carries, in the same shape a character's loadout
+/// takes, so everything downstream is unaware which it got.
+///
+/// Two differences from `load_loadout`, both stated in 019:
+///
+///   The kit belongs to the statblock, not the instance. Every goblin
+///   off one row carries the same axe, the same way every goblin has the
+///   same AC. An instance that differs is a different statblock.
+///
+///   NULL PROFICIENCY READS AS TRUE. On a character it means "derive
+///   from training"; a monster has no training model, and a goblin is
+///   proficient with the axe its statblock hands it. The override column
+///   exists for the exception, and FALSE still means false.
+pub fn load_npc_loadout(
+    token: &str,
+    npc_key: &str,
+    game_id: &str,
+    equipped_only: bool,
+) -> Result<Vec<Owned>, String> {
+    let mut query: Vec<(&str, String)> = vec![
+        (
+            "select",
+            "npc_key,item_key,game_id,quantity,equipped,proficient_override".to_string(),
+        ),
+        ("npc_key", format!("eq.{}", quoted(npc_key).trim_matches('"'))),
+        (
+            "or",
+            format!("(game_id.is.null,game_id.eq.{})", game_id),
+        ),
+    ];
+    if equipped_only {
+        query.push(("equipped", "is.true".to_string()));
+    }
+    let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    let carried = supabase::rest_get(token, "npc_items", &query)?;
+    let carried = carried.as_array().cloned().unwrap_or_default();
+    if carried.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // A game-scoped kit row shadows the global one for the same item,
+    // the same precedence every reference table here uses.
+    let mut best: Vec<Value> = Vec::new();
+    for r in &carried {
+        let key = as_str(r, "item_key");
+        let scoped = r.get("game_id").map(|g| !g.is_null()).unwrap_or(false);
+        match best.iter_mut().find(|b| as_str(b, "item_key") == key) {
+            Some(existing) => {
+                let existing_scoped =
+                    existing.get("game_id").map(|g| !g.is_null()).unwrap_or(false);
+                if scoped && !existing_scoped {
+                    *existing = r.clone();
+                }
+            }
+            None => best.push(r.clone()),
+        }
+    }
+
+    let keys: Vec<String> = best.iter().map(|r| quoted(&as_str(r, "item_key"))).collect();
+    let item_rows = supabase::rest_get(
+        token,
+        "items",
+        &[
+            ("select", ITEM_COLUMNS),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("key", &format!("in.({})", keys.join(","))),
+        ],
+    )?;
+    let catalogue = collapse_overrides(item_rows.as_array().unwrap_or(&Vec::new()));
+
+    let mut out = Vec::new();
+    for r in &best {
+        let key = as_str(r, "item_key");
+        let item = match catalogue.iter().find(|i| i.key == key) {
+            Some(i) => i.clone(),
+            // Same fault check_item_keys reports, and the same answer:
+            // a blank weapon is worse than an absent one.
+            None => continue,
+        };
+        let proficient_override = r.get("proficient_override").and_then(|x| x.as_bool());
+        out.push(Owned {
+            proficient: proficient_override.unwrap_or(true),
+            modes: modes(&item),
+            quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
+            equipped: r.get("equipped").and_then(|x| x.as_bool()).unwrap_or(true),
+            attuned: false,
+            proficient_override,
+            uses_spent: 0,
+            uses_max: None,
+            item,
+        });
+    }
+    Ok(out)
+}
+
 /// One catalogue row by key, with this game's override applied, or None
 /// if no such item is visible. Used by the equip path, which has to know
 /// what kind of thing it is being asked to equip before it can tell

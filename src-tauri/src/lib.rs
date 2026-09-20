@@ -484,14 +484,76 @@ fn roll_named(
     let session = state
         .current()?
         .ok_or_else(|| "not signed in".to_string())?;
+    let sheet = character::load_sheet(&session.access_token, &character_id)?;
+    swing(
+        &session,
+        &sheet,
+        Swing {
+            request,
+            mode,
+            target_value,
+            target_kind,
+            target_label,
+            encounter_id,
+            target_id,
+            target_row,
+            target_character_id,
+            actor_id,
+        },
+    )
+}
+
+/// What a swing is aimed at and under what conditions — everything that
+/// varies between one roll and the next, once the sheet is known.
+///
+/// A struct rather than ten more arguments, because `swing` is the one
+/// place a character and a monster meet and it should be readable at the
+/// call site from either side.
+pub(crate) struct Swing {
+    pub request: String,
+    pub mode: String,
+    pub target_value: Option<i64>,
+    pub target_kind: Option<String>,
+    pub target_label: Option<String>,
+    pub encounter_id: Option<String>,
+    pub target_id: Option<String>,
+    pub target_row: Option<String>,
+    pub target_character_id: Option<String>,
+    pub actor_id: Option<String>,
+}
+
+/// ONE ATTACK PATH, for whoever is holding the weapon.
+///
+/// This was the back half of `roll_named` and is now reachable with any
+/// sheet, which is what lets a goblin swing without a second
+/// implementation. 019 took the heavier of the two options for NPC
+/// attacks precisely so this function would not have to grow a monster
+/// branch: a statblock arrives here with scores, a proficiency bonus and
+/// a loadout, exactly as a character does, and every rule below applies
+/// without knowing which it got.
+///
+/// The only thing that differs is `sheet.character_id`, which is None
+/// for a monster — see `roll_row`.
+pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value, String> {
+    let Swing {
+        request,
+        mode,
+        target_value,
+        target_kind,
+        target_label,
+        encounter_id,
+        target_id,
+        target_row,
+        target_character_id,
+        actor_id,
+    } = s;
 
     // Refused before any dice are thrown: a half-supplied target is a
     // caller bug, and rolling first would leave a resolved row that
     // cannot record what it was for.
     let target = parse_target(target_value, target_kind, target_label)?;
 
-    let sheet = character::load_sheet(&session.access_token, &character_id)?;
-    let resolved = character::resolve_request(&sheet, &request, &mode);
+    let resolved = character::resolve_request(sheet, &request, &mode);
 
     // A technique brings its own crit and fumble range; everything else
     // uses 20 and 1. Thresholds::new refuses a pair whose ranges meet,
@@ -517,8 +579,8 @@ fn roll_named(
 
     let role = if resolved.attack.is_some() { "to_hit" } else { "check" };
     let mut rolls = vec![roll_row(
-        &sheet,
-        &session,
+        sheet,
+        session,
         &request,
         &resolved.label,
         &mode,
@@ -549,8 +611,8 @@ fn roll_named(
                 format!("{} damage", a.weapon_name)
             };
             rolls.push(roll_row(
-                &sheet,
-                &session,
+                sheet,
+                session,
                 &request,
                 &label,
                 "normal",
@@ -829,6 +891,18 @@ fn roll_row(
     let mut row = json!({
         "game_id": sheet.game_id,
         "character_id": sheet.character_id,
+        // WHOSE ACTION THIS WAS, when nothing can derive it.
+        //
+        // The 001 trigger reads the name off character_id and does it
+        // better than we could. A monster has no character row, so it
+        // falls through to the 'Someone' default and the log stops being
+        // able to say which goblin swung. The sheet's name IS the
+        // actor's label in that case — the same fix 421d08c made for
+        // death saves, now covering every roll a monster makes.
+        "character_name": match &sheet.character_id {
+            Some(_) => None,
+            None => Some(sheet.name.clone()),
+        },
         "owner_uid": session.user_id,
         "request": request,
         "label": label,
@@ -963,6 +1037,10 @@ pub fn run() {
             commands::dm::list_roster,
             commands::dm::list_challenges,
             commands::dm::list_skill_keys,
+            // A monster acts. Both go through the same `swing` a
+            // character's attack does — see 019.
+            commands::dm::list_npc_attacks,
+            commands::dm::npc_attack,
             death_save,
             get_sheet,
             set_level,

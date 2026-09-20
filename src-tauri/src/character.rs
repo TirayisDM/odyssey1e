@@ -45,10 +45,22 @@ pub struct SkillDef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
-    pub character_id: String,
+    /// NONE FOR A MONSTER. A goblin rolls from a sheet like everyone
+    /// else — scores, a proficiency bonus, a loadout — but it is not a
+    /// character and has no row in `characters`. `rolls.character_id` is
+    /// nullable for exactly this, and the label travels in
+    /// `character_name` instead, the same way 421d08c fixed death saves.
+    pub character_id: Option<String>,
     pub game_id: String,
+    /// Whose sheet this is: the character's name, or the actor's label
+    /// for an NPC instance — "Goblin 0001".
     pub name: String,
     pub level: i64,
+    /// STATED rather than derived, for a monster. A character computes
+    /// this from level because levelling is the rule that moves it; a
+    /// statblock simply has one. None means derive — see
+    /// `proficiency_bonus`.
+    pub prof_bonus: Option<i64>,
     /// Ability code -> score and save proficiency. Always six entries;
     /// the database seeds them on character creation.
     pub abilities: HashMap<String, Ability>,
@@ -106,8 +118,17 @@ pub struct Sheet {
 impl Sheet {
     /// floor((level-1)/4)+2. Computed here rather than stored, so the
     /// rule lives in exactly one place.
+    ///
+    /// Unless the sheet states one. A monster's proficiency bonus comes
+    /// off its statblock and has nothing to do with class levels, so a
+    /// stated value wins — that is not an exception to "rules live in
+    /// Rust", it is a different fact. The level formula is still the
+    /// only place the LEVELLING rule is written down.
     pub fn proficiency_bonus(&self) -> i64 {
-        ((self.level - 1) / 4) + 2
+        match self.prof_bonus {
+            Some(b) => b,
+            None => ((self.level - 1) / 4) + 2,
+        }
     }
 
     /// floor((score-10)/2). div_euclid, not plain division: Rust
@@ -541,10 +562,12 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     );
 
     Ok(Sheet {
-        character_id: profile.character_id,
+        character_id: Some(profile.character_id),
         game_id,
         name: profile.name,
         level: profile.level,
+        // A character derives it from level; only a statblock states one.
+        prof_bonus: None,
         abilities,
         skills,
         profs,
@@ -590,8 +613,9 @@ mod tests {
         profs.insert("ste".into(), 0.5);
 
         Sheet {
-            character_id: "c1".into(),
+            character_id: Some("c1".into()),
             game_id: "g1".into(),
+            prof_bonus: None,
             name: "Rodnar Shieldcrest".into(),
             level: 5,
             abilities,

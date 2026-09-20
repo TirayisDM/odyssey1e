@@ -371,3 +371,102 @@ pub fn list_skill_keys(state: State<AppState>, game_id: String) -> Result<Value,
         ],
     )
 }
+
+/* ============================ A MONSTER ACTS ============================ */
+
+/// What this NPC can attack with, as the roster's buttons.
+///
+/// Derived from the statblock's loadout rather than listed anywhere: a
+/// weapon offers one entry per mode it has, so a handaxe - `thr`, so
+/// melee and thrown - offers two. The `request` is the same string a
+/// player would type, which is why the same resolver answers both.
+#[tauri::command]
+pub fn list_npc_attacks(state: State<AppState>, actor_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    let sheet = match crate::encounter::load_npc_sheet(&token, &actor_id)? {
+        Some(s) => s,
+        // A character actor has a real sheet and its own controls.
+        None => return Ok(json!([])),
+    };
+
+    let mut out = Vec::new();
+    for owned in &sheet.loadout {
+        if owned.item.kind != "weapon" {
+            continue;
+        }
+        for mode in &owned.modes {
+            out.push(json!({
+                "request": crate::attack::weapon_request_name(&owned.item.name, *mode),
+                "weapon": owned.item.name,
+                "mode": mode.as_str(),
+                "proficient": owned.proficient,
+            }));
+        }
+    }
+
+    // Techniques the statblock's weapons offer, gated by the level 019
+    // gave it. Same list a character would get, same gate.
+    for t in &sheet.techniques {
+        if t.min_level <= sheet.level {
+            out.push(json!({
+                "request": t.roll_name,
+                "weapon": t.name,
+                "mode": t.mode.as_str(),
+                "technique": true,
+            }));
+        }
+    }
+
+    Ok(json!(out))
+}
+
+/// A monster swings.
+///
+/// The entire body of this is `swing`, the same function `roll_named`
+/// calls. 019 chose scores and real gear over a table of stored numbers
+/// precisely so this command could be four lines and no rule could ever
+/// differ between a goblin's attack and Rodnar's.
+///
+/// `actor_id` is both who swung and the sheet to build - unlike
+/// roll_named, where the sheet is a character and the actor is a
+/// separate question.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn npc_attack(
+    state: State<AppState>,
+    actor_id: String,
+    request: String,
+    mode: String,
+    target_value: Option<i64>,
+    target_kind: Option<String>,
+    target_label: Option<String>,
+    encounter_id: Option<String>,
+    target_id: Option<String>,
+    target_row: Option<String>,
+    target_character_id: Option<String>,
+) -> Result<Value, String> {
+    let session = state
+        .current()?
+        .ok_or_else(|| "not signed in".to_string())?;
+
+    let sheet = crate::encounter::load_npc_sheet(&session.access_token, &actor_id)?
+        .ok_or_else(|| "that actor is not an NPC, or is not visible to you".to_string())?;
+
+    crate::swing(
+        &session,
+        &sheet,
+        crate::Swing {
+            request,
+            mode,
+            target_value,
+            target_kind,
+            target_label,
+            encounter_id,
+            target_id,
+            target_row,
+            target_character_id,
+            actor_id: Some(actor_id),
+        },
+    )
+    .map_err(|e| denied(e, "roll for an NPC"))
+}

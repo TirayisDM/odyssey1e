@@ -33,6 +33,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+use crate::attack;
+use crate::character::{Ability, Sheet, Vitals};
 use crate::death::{self, Condition};
 use crate::equipment::{self, AcMode, Item};
 use crate::narrative::quoted;
@@ -628,4 +630,165 @@ mod tests {
             assert!(!why.trim().is_empty(), "a number arrived with no account of itself");
         }
     }
+}
+
+/* ======================== A MONSTER'S SHEET ======================== */
+
+/// Build a `Sheet` for an NPC instance, so a goblin can swing through
+/// the same code a character does.
+///
+/// THIS IS THE WHOLE POINT OF 019. The cheap way to let a monster attack
+/// was a table of stored numbers - "+4 to hit, 1d6+2" - which is how a
+/// printed statblock reads and what 011 already did for `npcs.ac`. That
+/// would have meant two attack paths in the engine forever, and the
+/// first rule that differed between them would have been a bug nobody
+/// could see. Instead the statblock carries scores and real items, and
+/// this assembles them into the shape the existing path already takes.
+///
+/// What is deliberately empty: skills, skill proficiencies, and the
+/// narrative pack. A monster has no skill list yet and no prose written
+/// for it, and an empty map is the honest way to say so - `pick` returns
+/// None and the card ships without a line, exactly as it does for a key
+/// no pack covers.
+///
+/// Returns None when the actor is not an NPC - a character actor already
+/// has a real sheet, and handing back a fake one would be a lie the
+/// caller could not detect.
+pub fn load_npc_sheet(token: &str, actor_id: &str) -> Result<Option<Sheet>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "encounter_actors",
+        &[
+            (
+                "select",
+                "id,encounter_id,character_id,npc_key,label,ac_override,hp_override",
+            ),
+            ("id", &format!("eq.{}", actor_id)),
+        ],
+    )?;
+    let a = match rows.as_array().and_then(|x| x.first()) {
+        Some(r) => r.clone(),
+        None => return Ok(None),
+    };
+    let npc_key = match as_opt_str(&a, "npc_key") {
+        Some(k) => k,
+        // A character actor. Not ours to fake.
+        None => return Ok(None),
+    };
+
+    // The encounter names the game, and the game scopes every catalogue
+    // read below.
+    let enc = supabase::rest_get(
+        token,
+        "encounters",
+        &[
+            ("select", "id,game_id"),
+            ("id", &format!("eq.{}", as_str(&a, "encounter_id"))),
+        ],
+    )?;
+    let game_id = match enc.as_array().and_then(|x| x.first()) {
+        Some(e) => as_str(e, "game_id"),
+        None => return Ok(None),
+    };
+
+    let npcs = supabase::rest_get(
+        token,
+        "npcs",
+        &[
+            (
+                "select",
+                "key,game_id,name,ac,hp_max,size,str,dex,con,intl,wis,cha,prof_bonus,level",
+            ),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("key", &format!("in.({})", quoted(&npc_key))),
+        ],
+    )?;
+    // A game-scoped statblock shadows the global one sharing its key.
+    let mut block: Option<Value> = None;
+    for r in npcs.as_array().unwrap_or(&Vec::new()) {
+        let scoped = r.get("game_id").map(|g| !g.is_null()).unwrap_or(false);
+        if block.is_none() || scoped {
+            block = Some(r.clone());
+        }
+    }
+    let block = match block {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+
+    // 019 stores INTELLIGENCE as `intl` because `int` is reserved in
+    // SQL. The engine calls it "int" like every other ability, and the
+    // translation happens here and nowhere else.
+    let mut abilities = HashMap::new();
+    for (code, column) in [
+        ("str", "str"),
+        ("dex", "dex"),
+        ("con", "con"),
+        ("int", "intl"),
+        ("wis", "wis"),
+        ("cha", "cha"),
+    ] {
+        abilities.insert(
+            code.to_string(),
+            Ability {
+                score: block.get(column).and_then(|x| x.as_i64()).unwrap_or(10),
+                // A monster's saving throw proficiencies are not modelled.
+                save_prof: false,
+            },
+        );
+    }
+
+    let loadout = equipment::load_npc_loadout(token, &npc_key, &game_id, true)?;
+    let item_keys: Vec<String> = loadout.iter().map(|o| o.item.key.clone()).collect();
+    let techniques = if item_keys.is_empty() {
+        Vec::new()
+    } else {
+        attack::load_techniques(token, &game_id, &item_keys)?
+    };
+
+    // An NPC's AC is STORED - 011 settled that, and nothing here
+    // recomputes it from armour the goblin is not wearing. The instance
+    // override wins, then the statblock.
+    let ac = a
+        .get("ac_override")
+        .and_then(|x| x.as_i64())
+        .or_else(|| block.get("ac").and_then(|x| x.as_i64()))
+        .unwrap_or(10);
+    let hp_max = a
+        .get("hp_override")
+        .and_then(|x| x.as_i64())
+        .or_else(|| block.get("hp_max").and_then(|x| x.as_i64()));
+
+    Ok(Some(Sheet {
+        // No character row. The label travels in character_name instead.
+        character_id: None,
+        game_id,
+        name: as_str(&a, "label"),
+        level: block.get("level").and_then(|x| x.as_i64()).unwrap_or(1),
+        prof_bonus: Some(block.get("prof_bonus").and_then(|x| x.as_i64()).unwrap_or(2)),
+        abilities,
+        skills: Vec::new(),
+        profs: HashMap::new(),
+        narrative_pack: String::new(),
+        narratives: HashMap::new(),
+        // Proficiency comes off npc_items, which reads NULL as true, so
+        // there is no training list to consult. See 019.
+        weapon_profs: Vec::new(),
+        armor_profs: Vec::new(),
+        loadout,
+        techniques,
+        vitals: Vitals {
+            hp_max,
+            hp_temp: 0,
+            hp_temp_max: 0,
+            ac_mode: "flat".to_string(),
+            ac_override: Some(ac),
+            death_successes: 0,
+            death_failures: 0,
+            exhaustion: 0,
+            inspiration: false,
+            size: as_opt_str(&block, "size"),
+        },
+        armor_class: ac,
+    }))
 }

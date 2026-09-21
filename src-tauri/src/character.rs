@@ -325,6 +325,10 @@ fn as_strings(v: &Value, key: &str) -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
     pub character_id: String,
+    /// NULL means derive from level. A statblock states one; a player
+    /// character does not have one to state. See 022.
+    pub prof_bonus: Option<i64>,
+    pub is_npc: bool,
     pub game_id: String,
     pub name: String,
     pub level: i64,
@@ -385,6 +389,8 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
 
     Ok(Profile {
         character_id: as_str(c, "id"),
+        prof_bonus: c.get("prof_bonus").and_then(|x| x.as_i64()),
+        is_npc: c.get("is_npc").and_then(|x| x.as_bool()).unwrap_or(false),
         game_id: as_str(c, "game_id"),
         name: as_str(c, "name"),
         level: as_i64(c, "level", 1),
@@ -575,8 +581,10 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         game_id,
         name: profile.name,
         level: profile.level,
-        // A character derives it from level; only a statblock states one.
-        prof_bonus: None,
+        // NULL for a player character, so `proficiency_bonus` falls back
+        // to the level formula. An instance off a statblock carries the
+        // stated value - see 022.
+        prof_bonus: profile.prof_bonus,
         abilities,
         skills,
         profs,

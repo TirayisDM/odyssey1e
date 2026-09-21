@@ -133,6 +133,11 @@ fn list_characters(state: State<AppState>, game_id: String) -> Result<Value, Str
         &[
             ("select", "id,name,token_name,owner_uid,is_active"),
             ("game_id", &format!("eq.{}", game_id)),
+            // PEOPLE ONLY. Since 022 a monster is a character too, and
+            // without this a player's list fills with goblins. is_npc is
+            // a label rather than a structure - it changes no rule, it
+            // decides which list you are looking at.
+            ("is_npc", "is.false"),
             ("order", "name.asc"),
         ],
     )
@@ -668,7 +673,6 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
             if failures != v.failures || dead != v.dead {
                 vitals_update = Some(vitals_payload(
                     &v.character_id,
-                    actor,
                     successes,
                     failures,
                     dead,
@@ -735,31 +739,25 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
     )
 }
 
-/// Where a death save tally is written: a character keeps theirs on
-/// their own row wherever they are standing, an NPC instance keeps its
-/// own so two goblins off one statblock die separately. The same split
-/// that decides where hit points are recorded.
+/// Where a death save tally is written.
+///
+/// ONE PLACE SINCE 022. This used to choose between a character row and
+/// an actor row, because an NPC instance had no character to keep its
+/// tally on. Every participant is a character now, so the choice is
+/// gone - and two goblins off one statblock still die separately,
+/// because they are two characters rather than two views of one.
 fn vitals_payload(
     character_id: &Option<String>,
-    actor_id: &str,
     successes: i64,
     failures: i64,
     dead: bool,
 ) -> Value {
-    match character_id {
-        Some(c) => json!({
-            "character_id": c,
-            "death_successes": successes,
-            "death_failures": failures,
-            "dead": dead,
-        }),
-        None => json!({
-            "actor_id": actor_id,
-            "death_successes": successes,
-            "death_failures": failures,
-            "dead": dead,
-        }),
-    }
+    json!({
+        "character_id": character_id,
+        "death_successes": successes,
+        "death_failures": failures,
+        "dead": dead,
+    })
 }
 
 /// One death saving throw, for whoever is dying.
@@ -863,7 +861,7 @@ fn death_save(
             },
             "p_rolls": [roll],
             "p_hp": hp,
-            "p_vitals": vitals_payload(&v.character_id, &actor_id, successes, failures, false),
+            "p_vitals": vitals_payload(&v.character_id, successes, failures, false),
         }),
     )
 }

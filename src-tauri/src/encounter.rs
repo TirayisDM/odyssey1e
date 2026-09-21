@@ -33,8 +33,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-use crate::attack;
-use crate::character::{Ability, Sheet, Vitals};
+use crate::character::Sheet;
 use crate::death::{self, Condition};
 use crate::equipment::{self, AcMode, Item};
 use crate::narrative::quoted;
@@ -86,23 +85,22 @@ pub struct Target {
 /// Returns the number and the account of it. Kept together because a
 /// number with no provenance is the thing this codebase keeps refusing
 /// to ship - see the equipment panel, and `rolls.reason`.
-pub fn resolve_ac(
-    ac_override: Option<i64>,
-    npc_ac: Option<i64>,
-    character_ac: Option<i64>,
-) -> Option<(i64, String)> {
+///
+/// TWO SOURCES, NOT THREE. There used to be a statblock source between
+/// these, for monsters whose AC was read live off `npcs`. 022 removed
+/// it: every actor is a character and carries its own armour class, a
+/// statblock's arriving as ac_mode 'flat' with an override. So a
+/// monster's AC resolves through the same `character_ac` a player's
+/// does, and the difference is a setting rather than a branch.
+pub fn resolve_ac(ac_override: Option<i64>, character_ac: Option<i64>) -> Option<(i64, String)> {
     if let Some(v) = ac_override {
         return Some((v, "override on this actor".to_string()));
     }
-    if let Some(v) = npc_ac {
-        return Some((v, "statblock".to_string()));
-    }
     if let Some(v) = character_ac {
-        return Some((v, "computed from equipment".to_string()));
+        return Some((v, "the individual's own".to_string()));
     }
-    // An actor whose source has vanished - a statblock deleted out from
-    // under it. Offering no target is honest; inventing 10 would be a
-    // number someone rolls against.
+    // An actor whose character has vanished. Offering no target is
+    // honest; inventing 10 would be a number someone rolls against.
     None
 }
 
@@ -162,44 +160,17 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         ],
     )?;
 
-    // --- statblocks, one request for every distinct key ---
-    let npc_keys: Vec<String> = actor_rows
-        .iter()
-        .filter_map(|r| as_opt_str(r, "npc_key"))
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let mut npc_ac: HashMap<String, i64> = HashMap::new();
-    let mut npc_hp: HashMap<String, i64> = HashMap::new();
-    if !npc_keys.is_empty() {
-        let quoted_keys: Vec<String> = npc_keys.iter().map(|k| quoted(k)).collect();
-        let rows = supabase::rest_get(
-            token,
-            "npcs",
-            &[
-                ("select", "key,game_id,name,ac,hp_max"),
-                ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-                ("key", &format!("in.({})", quoted_keys.join(","))),
-            ],
-        )?;
-        // A game-scoped statblock shadows the global one sharing its key,
-        // same precedence as items and narrative lines.
-        for r in rows.as_array().unwrap_or(&Vec::new()) {
-            let key = as_str(r, "key");
-            let scoped = as_opt_str(r, "game_id").is_some();
-            let ac = r.get("ac").and_then(|x| x.as_i64()).unwrap_or(10);
-            let hp = r.get("hp_max").and_then(|x| x.as_i64()).unwrap_or(1);
-            if scoped || !npc_ac.contains_key(&key) {
-                npc_ac.insert(key.clone(), ac);
-                npc_hp.insert(key, hp);
-            }
-        }
-    }
+    // NO STATBLOCK READ. Since 022 every actor IS a character and owns
+    // its armour class and its maximum hit points, so there is nothing
+    // to look up on `npcs` - a whole request per encounter gone, and
+    // with it the hazard that editing a type moved a creature already
+    // in play. An NPC's AC arrives as ac_mode 'flat' with an override
+    // and is resolved by the same function a player's is.
 
     // --- player characters, computed in one batch ---
     let char_ids: Vec<String> = actor_rows
         .iter()
+        // Every one of them, monsters included.
         .filter_map(|r| as_opt_str(r, "character_id"))
         .collect::<HashSet<_>>()
         .into_iter()
@@ -223,50 +194,37 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
 
     for r in &actor_rows {
         let label = as_str(r, "label");
-        let npc_key = as_opt_str(r, "npc_key");
         let character_id = as_opt_str(r, "character_id");
-        let npc = npc_key.as_ref().and_then(|k| npc_ac.get(k).copied());
-        let pc = character_id.as_ref().and_then(|c| char_stats.get(c).map(|s| s.ac));
+        let stats = character_id.as_ref().and_then(|c| char_stats.get(c));
+        let pc = stats.map(|s| s.ac);
 
-        // An override on the actor wins, then the source's own maximum.
+        // An override on the actor wins, then the individual's own
+        // maximum. Two goblins off one statblock still differ, because
+        // 022 made them two characters rather than two views of one.
         let hp_max = r
             .get("hp_override")
             .and_then(|x| x.as_i64())
-            .or_else(|| npc_key.as_ref().and_then(|k| npc_hp.get(k).copied()))
-            .or_else(|| {
-                character_id
-                    .as_ref()
-                    .and_then(|c| char_stats.get(c).and_then(|s| s.hp_max))
-            });
+            .or_else(|| stats.and_then(|s| s.hp_max));
 
-        // Keyed the way the damage is recorded: a character by their
-        // character_id wherever they appear, an NPC by this instance.
-        let spent = match &character_id {
-            Some(c) => deltas.get(c).copied().unwrap_or(0),
-            None => deltas.get(&as_str(r, "id")).copied().unwrap_or(0),
-        };
+        // ONE KEY. Damage lands on the character since 023, for everyone,
+        // so there is no longer a question of which id to look under.
+        let spent = character_id
+            .as_ref()
+            .and_then(|c| deltas.get(c).copied())
+            .unwrap_or(0);
         let hp_current = hp_max.map(|m| m + spent);
 
-        // The death saves live where the hit points do: a character
-        // keeps theirs on their own row wherever they appear, an NPC
-        // instance keeps its own so two goblins die separately.
-        let (successes, failures, flagged) = match &character_id {
-            Some(c) => match char_stats.get(c) {
-                Some(st) => (st.successes, st.failures, st.dead),
-                None => (0, 0, false),
-            },
-            None => (
-                r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0),
-                r.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0),
-                r.get("dead").and_then(|x| x.as_bool()).unwrap_or(false),
-            ),
+        // And the death saves live with the hit points, on the same row.
+        let (successes, failures, flagged) = match stats {
+            Some(st) => (st.successes, st.failures, st.dead),
+            None => (0, 0, false),
         };
 
         // Unconscious, and therefore worth nothing to hit. HOUSE RULE -
         // see death.rs; 5e keeps the armour class and grants advantage.
         let condition = death::condition(hp_current.unwrap_or(1), successes, failures, flagged);
 
-        match resolve_ac(r.get("ac_override").and_then(|x| x.as_i64()), npc, pc) {
+        match resolve_ac(r.get("ac_override").and_then(|x| x.as_i64()), pc) {
             Some((value, source)) => out.push(Target {
                 id: as_str(r, "id"),
                 row: "actor",
@@ -364,15 +322,17 @@ pub fn load_actor_vitals(token: &str, actor_id: &str) -> Result<Option<ActorVita
         None => return Ok(None),
     };
 
+    // ONE PATH SINCE 022. character_id is NOT NULL on every actor, so
+    // this no longer asks whether it is looking at a person or a
+    // monster - the individual owns its maximum, its death saves and
+    // its wounds, whichever it is. The statblock branch that used to
+    // sit here read `npcs` live, which is the hazard 022 removed.
     let character_id = as_opt_str(&r, "character_id");
     let mut hp_max = r.get("hp_override").and_then(|x| x.as_i64());
-    let mut successes = r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0);
-    let mut failures = r.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0);
-    let mut dead = r.get("dead").and_then(|x| x.as_bool()).unwrap_or(false);
+    let mut successes = 0;
+    let mut failures = 0;
+    let mut dead = false;
 
-    // A character keeps their maximum and their death saves on their own
-    // row, wherever they happen to be standing. An NPC instance keeps
-    // both here, which is what lets two goblins die separately.
     if let Some(c) = &character_id {
         let chars = supabase::rest_get(
             token,
@@ -383,36 +343,23 @@ pub fn load_actor_vitals(token: &str, actor_id: &str) -> Result<Option<ActorVita
             ],
         )?;
         if let Some(cr) = chars.as_array().and_then(|a| a.first()) {
+            // An override on this appearance still wins over the
+            // individual's own maximum - the ogre that walks in already
+            // wounded is a per-encounter fact.
             hp_max = hp_max.or_else(|| cr.get("hp_max").and_then(|x| x.as_i64()));
             successes = cr.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0);
             failures = cr.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0);
             dead = cr.get("dead").and_then(|x| x.as_bool()).unwrap_or(false);
         }
-    } else if let Some(k) = as_opt_str(&r, "npc_key") {
-        let npcs = supabase::rest_get(
-            token,
-            "npcs",
-            &[
-                ("select", "key,game_id,hp_max"),
-                ("key", &format!("eq.{}", k)),
-            ],
-        )?;
-        if hp_max.is_none() {
-            // A game override shadows the global statblock; taking the
-            // last row read is enough when there is at most one of each.
-            for nr in npcs.as_array().unwrap_or(&Vec::new()) {
-                hp_max = nr.get("hp_max").and_then(|x| x.as_i64()).or(hp_max);
-            }
-        }
     }
 
-    let key = character_id.clone().unwrap_or_else(|| actor_id.to_string());
-    let deltas = load_hp_deltas(
-        token,
-        &[actor_id.to_string()],
-        &character_id.clone().into_iter().collect::<Vec<_>>(),
-    )?;
-    let spent = deltas.get(&key).copied().unwrap_or(0);
+    // Damage lands on the character since 023, for everyone.
+    let chars: Vec<String> = character_id.clone().into_iter().collect();
+    let deltas = load_hp_deltas(token, &[], &chars)?;
+    let spent = character_id
+        .as_ref()
+        .and_then(|c| deltas.get(c).copied())
+        .unwrap_or(0);
 
     Ok(Some(ActorVitals {
         character_id,
@@ -585,46 +532,41 @@ mod tests {
 
     #[test]
     fn an_override_beats_everything() {
-        let (v, why) = resolve_ac(Some(19), Some(15), Some(16)).unwrap();
+        let (v, why) = resolve_ac(Some(19), Some(16)).unwrap();
         assert_eq!(v, 19);
         assert!(why.contains("override"), "unhelpful source: {}", why);
     }
 
     #[test]
-    fn an_npc_takes_its_statblock() {
-        let (v, why) = resolve_ac(None, Some(15), None).unwrap();
-        assert_eq!(v, 15);
-        assert!(why.contains("statblock"), "unhelpful source: {}", why);
-    }
-
-    #[test]
-    fn a_character_takes_the_computed_number() {
-        let (v, why) = resolve_ac(None, None, Some(16)).unwrap();
+    fn everyone_else_takes_their_own() {
+        // Monster or person, one source since 022. A statblock's AC
+        // arrives on the individual as a flat override and resolves
+        // here exactly as a computed one does.
+        let (v, why) = resolve_ac(None, Some(16)).unwrap();
         assert_eq!(v, 16);
-        assert!(why.contains("computed"), "unhelpful source: {}", why);
+        assert!(!why.trim().is_empty(), "a number arrived with no account of itself");
     }
 
     #[test]
     fn an_actor_with_no_source_yields_no_target() {
-        // A statblock deleted out from under an actor. Better to offer
+        // A character deleted out from under an actor. Better to offer
         // nothing than a default everybody hits.
-        assert!(resolve_ac(None, None, None).is_none());
+        assert!(resolve_ac(None, None).is_none());
     }
 
     #[test]
     fn an_override_of_zero_is_still_an_override() {
         // Some(0) is a real AC, and must not fall through to the
-        // statblock the way a None would.
-        let (v, _) = resolve_ac(Some(0), Some(15), None).unwrap();
+        // individual's own the way a None would.
+        let (v, _) = resolve_ac(Some(0), Some(15)).unwrap();
         assert_eq!(v, 0);
     }
 
     #[test]
     fn every_source_says_where_the_number_came_from() {
         for case in [
-            resolve_ac(Some(19), None, None),
-            resolve_ac(None, Some(15), None),
-            resolve_ac(None, None, Some(16)),
+            resolve_ac(Some(19), None),
+            resolve_ac(None, Some(16)),
         ] {
             let (_, why) = case.unwrap();
             assert!(!why.trim().is_empty(), "a number arrived with no account of itself");
@@ -634,161 +576,32 @@ mod tests {
 
 /* ======================== A MONSTER'S SHEET ======================== */
 
-/// Build a `Sheet` for an NPC instance, so a goblin can swing through
-/// the same code a character does.
+/// The sheet of whoever this actor is.
 ///
-/// THIS IS THE WHOLE POINT OF 019. The cheap way to let a monster attack
-/// was a table of stored numbers - "+4 to hit, 1d6+2" - which is how a
-/// printed statblock reads and what 011 already did for `npcs.ac`. That
-/// would have meant two attack paths in the engine forever, and the
-/// first rule that differed between them would have been a bug nobody
-/// could see. Instead the statblock carries scores and real items, and
-/// this assembles them into the shape the existing path already takes.
+/// THIS USED TO BE NINETY LINES. It read a statblock, translated `intl`
+/// back to "int", assembled six ability rows by hand, loaded a separate
+/// NPC kit, and built a Sheet that looked like a character's without
+/// being one. 022 deleted the reason for all of it: an actor points at a
+/// character, and a monster's sheet is loaded by the function that loads
+/// anyone's.
 ///
-/// What is deliberately empty: skills, skill proficiencies, and the
-/// narrative pack. A monster has no skill list yet and no prose written
-/// for it, and an empty map is the honest way to say so - `pick` returns
-/// None and the card ships without a line, exactly as it does for a key
-/// no pack covers.
-///
-/// Returns None when the actor is not an NPC - a character actor already
-/// has a real sheet, and handing back a fake one would be a lie the
-/// caller could not detect.
-pub fn load_npc_sheet(token: &str, actor_id: &str) -> Result<Option<Sheet>, String> {
+/// What is left is the lookup from an actor to its individual. Returns
+/// None when the actor does not exist or is not visible.
+pub fn load_actor_sheet(token: &str, actor_id: &str) -> Result<Option<Sheet>, String> {
     let rows = supabase::rest_get(
         token,
         "encounter_actors",
         &[
-            (
-                "select",
-                "id,encounter_id,character_id,npc_key,label,ac_override,hp_override",
-            ),
+            ("select", "id,character_id"),
             ("id", &format!("eq.{}", actor_id)),
         ],
     )?;
-    let a = match rows.as_array().and_then(|x| x.first()) {
-        Some(r) => r.clone(),
-        None => return Ok(None),
-    };
-    let npc_key = match as_opt_str(&a, "npc_key") {
-        Some(k) => k,
-        // A character actor. Not ours to fake.
-        None => return Ok(None),
-    };
-
-    // The encounter names the game, and the game scopes every catalogue
-    // read below.
-    let enc = supabase::rest_get(
-        token,
-        "encounters",
-        &[
-            ("select", "id,game_id"),
-            ("id", &format!("eq.{}", as_str(&a, "encounter_id"))),
-        ],
-    )?;
-    let game_id = match enc.as_array().and_then(|x| x.first()) {
-        Some(e) => as_str(e, "game_id"),
-        None => return Ok(None),
-    };
-
-    let npcs = supabase::rest_get(
-        token,
-        "npcs",
-        &[
-            (
-                "select",
-                "key,game_id,name,ac,hp_max,size,str,dex,con,intl,wis,cha,prof_bonus,level",
-            ),
-            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            ("key", &format!("in.({})", quoted(&npc_key))),
-        ],
-    )?;
-    // A game-scoped statblock shadows the global one sharing its key.
-    let mut block: Option<Value> = None;
-    for r in npcs.as_array().unwrap_or(&Vec::new()) {
-        let scoped = r.get("game_id").map(|g| !g.is_null()).unwrap_or(false);
-        if block.is_none() || scoped {
-            block = Some(r.clone());
-        }
-    }
-    let block = match block {
-        Some(b) => b,
-        None => return Ok(None),
-    };
-
-    // 019 stores INTELLIGENCE as `intl` because `int` is reserved in
-    // SQL. The engine calls it "int" like every other ability, and the
-    // translation happens here and nowhere else.
-    let mut abilities = HashMap::new();
-    for (code, column) in [
-        ("str", "str"),
-        ("dex", "dex"),
-        ("con", "con"),
-        ("int", "intl"),
-        ("wis", "wis"),
-        ("cha", "cha"),
-    ] {
-        abilities.insert(
-            code.to_string(),
-            Ability {
-                score: block.get(column).and_then(|x| x.as_i64()).unwrap_or(10),
-                // A monster's saving throw proficiencies are not modelled.
-                save_prof: false,
-            },
-        );
-    }
-
-    let loadout = equipment::load_npc_loadout(token, &npc_key, &game_id, true)?;
-    let item_keys: Vec<String> = loadout.iter().map(|o| o.item.key.clone()).collect();
-    let techniques = if item_keys.is_empty() {
-        Vec::new()
-    } else {
-        attack::load_techniques(token, &game_id, &item_keys)?
-    };
-
-    // An NPC's AC is STORED - 011 settled that, and nothing here
-    // recomputes it from armour the goblin is not wearing. The instance
-    // override wins, then the statblock.
-    let ac = a
-        .get("ac_override")
-        .and_then(|x| x.as_i64())
-        .or_else(|| block.get("ac").and_then(|x| x.as_i64()))
-        .unwrap_or(10);
-    let hp_max = a
-        .get("hp_override")
-        .and_then(|x| x.as_i64())
-        .or_else(|| block.get("hp_max").and_then(|x| x.as_i64()));
-
-    Ok(Some(Sheet {
-        // No character row. The label travels in character_name instead.
-        character_id: None,
-        game_id,
-        name: as_str(&a, "label"),
-        level: block.get("level").and_then(|x| x.as_i64()).unwrap_or(1),
-        prof_bonus: Some(block.get("prof_bonus").and_then(|x| x.as_i64()).unwrap_or(2)),
-        abilities,
-        skills: Vec::new(),
-        profs: HashMap::new(),
-        narrative_pack: String::new(),
-        narratives: HashMap::new(),
-        // Proficiency comes off npc_items, which reads NULL as true, so
-        // there is no training list to consult. See 019.
-        weapon_profs: Vec::new(),
-        armor_profs: Vec::new(),
-        loadout,
-        techniques,
-        vitals: Vitals {
-            hp_max,
-            hp_temp: 0,
-            hp_temp_max: 0,
-            ac_mode: "flat".to_string(),
-            ac_override: Some(ac),
-            death_successes: 0,
-            death_failures: 0,
-            exhaustion: 0,
-            inspiration: false,
-            size: as_opt_str(&block, "size"),
+    let character_id = match rows.as_array().and_then(|x| x.first()) {
+        Some(r) => match as_opt_str(r, "character_id") {
+            Some(c) => c,
+            None => return Ok(None),
         },
-        armor_class: ac,
-    }))
+        None => return Ok(None),
+    };
+    crate::character::load_sheet(token, &character_id).map(Some)
 }

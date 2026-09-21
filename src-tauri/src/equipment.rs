@@ -559,6 +559,12 @@ pub fn load_loadout(
 ///   from training"; a monster has no training model, and a goblin is
 ///   proficient with the axe its statblock hands it. The override column
 ///   exists for the exception, and FALSE still means false.
+/// NOT CALLED SINCE 022. Instantiation copies a statblock's kit inside
+/// `instantiate_npc`, in SQL, so the whole thing lands or none of it
+/// does. Kept rather than deleted because a statblock VIEWER still
+/// wants exactly this - reading a type's kit without making one - and
+/// that is the next thing the DM side is asking for.
+#[allow(dead_code)]
 pub fn load_npc_loadout(
     token: &str,
     npc_key: &str,

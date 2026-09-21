@@ -176,15 +176,19 @@ pub fn set_encounter_status(
 /// Put a creature in the encounter.
 ///
 /// Exactly one of `npc_key` and `character_id`, never both and never
-/// neither - the XOR check on the table is the real rule, and this
-/// states it early so the answer is a sentence rather than a constraint
-/// name. That check is the whole reason one table holds both kinds of
-/// participant.
+/// neither. That was a schema constraint until 022; it is now a rule
+/// about the REQUEST - which kind of thing is being enrolled - because
+/// the row that results always has a character behind it either way.
 ///
-/// A BLANK NAME IS THE POINT. Leave it empty and 018 names the thing:
-/// `<Species> <Class> 0001`, numbered per game so one number means one
-/// creature for the life of the campaign. Enrolling three goblins is
-/// three clicks and no typing, which is what this command exists for.
+/// AN NPC IS INSTANTIATED, NOT REFERENCED. `instantiate_npc` copies the
+/// statblock's scores, kit, AC and hit points onto a NEW character, so
+/// the goblin that walks in is an individual and later edits to the type
+/// never reach it. That is the whole of 022, and the reason this command
+/// calls a function rather than writing a row: a half-built goblin with
+/// scores but no weapons must not be able to exist.
+///
+/// A BLANK NAME IS STILL THE POINT. Leave it empty and 018 names the
+/// actor, and `instantiate_npc` gives the character the same name.
 #[tauri::command]
 pub fn enrol_actor(
     state: State<AppState>,
@@ -205,13 +209,53 @@ pub fn enrol_actor(
         _ => {}
     }
 
+    // The encounter names the game, and instantiation needs it.
+    let encs = supabase::rest_get(
+        &token,
+        "encounters",
+        &[
+            ("select", "id,game_id"),
+            ("id", &format!("eq.{}", encounter_id)),
+        ],
+    )?;
+    let game_id = encs
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|e| e.get("game_id"))
+        .and_then(|g| g.as_str())
+        .ok_or_else(|| "that encounter is not visible to you".to_string())?
+        .to_string();
+
+    // A statblock becomes an individual; a character is already one.
+    let resolved = match npc {
+        Some(k) => {
+            let made = supabase::rpc(
+                &token,
+                "instantiate_npc",
+                &json!({
+                    "p_npc_key": k,
+                    "p_game_id": game_id,
+                    "p_label": name_or_null(label.clone()),
+                }),
+            )
+            .map_err(|e| denied(e, "enrol an actor"))?;
+            match made.as_str() {
+                Some(id) => id.to_string(),
+                None => return Err(format!("could not make an individual from '{}'", k)),
+            }
+        }
+        None => chr.unwrap_or_default().to_string(),
+    };
+
     supabase::rest_insert(
         &token,
         "encounter_actors",
         &json!({
             "encounter_id": encounter_id,
+            "character_id": resolved,
+            // PROVENANCE since 022. Nothing is read through it; it
+            // records which type this individual came from.
             "npc_key": npc,
-            "character_id": chr,
             // NULL, deliberately. See 018.
             "label": name_or_null(label),
         }),
@@ -383,9 +427,9 @@ pub fn list_skill_keys(state: State<AppState>, game_id: String) -> Result<Value,
 #[tauri::command]
 pub fn list_npc_attacks(state: State<AppState>, actor_id: String) -> Result<Value, String> {
     let token = state.token()?;
-    let sheet = match crate::encounter::load_npc_sheet(&token, &actor_id)? {
+    let sheet = match crate::encounter::load_actor_sheet(&token, &actor_id)? {
         Some(s) => s,
-        // A character actor has a real sheet and its own controls.
+        // No such actor, or not visible to this account.
         None => return Ok(json!([])),
     };
 
@@ -449,8 +493,8 @@ pub fn npc_attack(
         .current()?
         .ok_or_else(|| "not signed in".to_string())?;
 
-    let sheet = crate::encounter::load_npc_sheet(&session.access_token, &actor_id)?
-        .ok_or_else(|| "that actor is not an NPC, or is not visible to you".to_string())?;
+    let sheet = crate::encounter::load_actor_sheet(&session.access_token, &actor_id)?
+        .ok_or_else(|| "that actor is not in the encounter, or is not visible to you".to_string())?;
 
     crate::swing(
         &session,

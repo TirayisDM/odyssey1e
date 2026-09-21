@@ -85,6 +85,35 @@ pub fn effective_ac(base_ac: i64, condition: Condition) -> i64 {
     }
 }
 
+/// Whether this creature rolls a death save at all.
+///
+/// Only something that is DYING does. Three states are refused and they
+/// are refused for different reasons, so each says its own:
+///
+///   Conscious  is not making death saves, it is on its feet.
+///   Stable     is three successes. Still unconscious, no longer dying,
+///              and NOT rolling - this is the one the command missed.
+///              Letting a stable creature roll again is not a harmless
+///              extra die: a failure would start it dying a second time
+///              from a state the rules say it has left.
+///   Dead       is over. Nothing further to determine.
+///
+/// A rule rather than a guard in the command, because "may this thing
+/// roll" is a question about the game and gets tested like one. The
+/// command's job is to ask.
+pub fn may_roll_death_save(condition: Condition) -> Result<(), String> {
+    match condition {
+        Condition::Down => Ok(()),
+        Condition::Conscious => {
+            Err("only something that is down rolls death saves".to_string())
+        }
+        Condition::Stable => {
+            Err("it is stable - three successes, and no longer dying".to_string())
+        }
+        Condition::Dead => Err("it is already dead".to_string()),
+    }
+}
+
 /// How a label reads once someone is off their feet.
 ///
 /// "Goblin 1 - down" rather than "Goblin 1 - dead" while the death saves
@@ -171,6 +200,48 @@ pub fn massive_damage_kills(overflow: i64, hp_max: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------------- who may roll ----------------------------------- */
+
+    #[test]
+    fn only_the_dying_roll_death_saves() {
+        assert!(may_roll_death_save(Condition::Down).is_ok());
+        assert!(may_roll_death_save(Condition::Conscious).is_err());
+        assert!(may_roll_death_save(Condition::Stable).is_err());
+        assert!(may_roll_death_save(Condition::Dead).is_err());
+    }
+
+    #[test]
+    fn stable_is_refused_and_says_why() {
+        // The case the command missed. Stable is neither conscious nor
+        // dead, so a guard that only checks those two lets a creature
+        // that has finished dying start again.
+        let e = may_roll_death_save(Condition::Stable).unwrap_err();
+        assert!(e.contains("stable"), "{}", e);
+        assert!(e.contains("no longer dying"), "{}", e);
+    }
+
+    #[test]
+    fn each_refusal_says_its_own_reason() {
+        // Three different situations; three different sentences. "Cannot
+        // roll" for all of them would leave the DM guessing which.
+        let c = may_roll_death_save(Condition::Conscious).unwrap_err();
+        let s = may_roll_death_save(Condition::Stable).unwrap_err();
+        let d = may_roll_death_save(Condition::Dead).unwrap_err();
+        assert_ne!(c, s);
+        assert_ne!(s, d);
+        assert_ne!(c, d);
+    }
+
+    #[test]
+    fn three_successes_then_a_failure_cannot_happen() {
+        // The sequence the missing guard allowed: stabilise, then roll
+        // again and fail. The rule refuses at the point of rolling, so
+        // the failure never gets a chance to be recorded.
+        let after_three_successes = condition(0, 3, 0, false);
+        assert_eq!(after_three_successes, Condition::Stable);
+        assert!(may_roll_death_save(after_three_successes).is_err());
+    }
 
     /* ---------------- the condition ---------------------------------- */
 

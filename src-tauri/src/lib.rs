@@ -788,13 +788,12 @@ fn death_save(
     let v = encounter::load_actor_vitals(&session.access_token, &actor_id)?
         .ok_or_else(|| "that actor is not in the encounter".to_string())?;
 
+    // Asked, not decided here. This guard used to refuse conscious and
+    // dead and let STABLE through, so a creature that had finished
+    // dying could roll again and start over. "May this thing roll" is a
+    // question about the game, so it lives in death.rs with tests.
     let was = death::condition(v.hp_current, v.successes, v.failures, v.dead);
-    if was.is_conscious() {
-        return Err("only something that is down rolls death saves".to_string());
-    }
-    if was == death::Condition::Dead {
-        return Err("it is already dead".to_string());
-    }
+    death::may_roll_death_save(was)?;
 
     let rolled = dice::roll_formula("1d20")?;
     let face = rolled.natural.unwrap_or(rolled.total);

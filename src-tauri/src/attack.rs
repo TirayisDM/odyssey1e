@@ -28,7 +28,7 @@ use crate::equipment::{Mode, Owned};
 /// A house technique: a named attack with its own damage dice and its
 /// own crit and fumble range. 006 seeded 31 of them; 007 keyed them to
 /// an item and a mode.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Technique {
     pub key: String,
     pub name: String,

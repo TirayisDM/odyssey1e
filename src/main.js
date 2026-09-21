@@ -556,6 +556,51 @@ async function loadInventory() {
   }
 }
 
+// What an item can do, as things to click.
+//
+// DERIVED, like the NPC roster's buttons and for the same reason: a
+// weapon offers one attack per mode it has, so the Light Hammer offers
+// Melee and Thrown because the item carries `thr`. Its techniques come
+// off the sheet, already filtered to the EQUIPPED weapons by the engine
+// and gated by level here — an unearned technique is not an error and
+// not a fallback, so it simply is not offered.
+//
+// The `request` is the same string that would have been typed. That is
+// the point: "Heavy Smash" should never need typing, but what runs is
+// the identical path, so nothing can behave differently because it was
+// clicked.
+function itemActions(it) {
+  if (it.item.kind !== "weapon") return [];
+  const out = [];
+
+  for (const m of it.modes) {
+    const label = m === "melee" ? it.item.name : it.item.name + " (" + m + ")";
+    out.push({
+      request: label,
+      label: m,
+      hint: label + " — " + it.item.damage_number + "d" + it.item.damage_denomination +
+            (it.proficient ? "" : ", NOT proficient"),
+    });
+  }
+
+  const level = (state.sheet && state.sheet.level) || 1;
+  for (const t of (state.sheet && state.sheet.techniques) || []) {
+    if (t.item_key !== it.item.key) continue;
+    if (!it.modes.includes(t.mode)) continue;
+    if (t.min_level > level) continue;
+    out.push({
+      request: t.roll_name,
+      label: t.name,
+      technique: true,
+      hint: t.name + " — " + t.dice + " in " + t.mode +
+            (t.crit_min !== 20 || t.fumble_max !== 1
+              ? ", crit " + t.crit_min + "+, fumble " + t.fumble_max + "-" : ""),
+    });
+  }
+
+  return out;
+}
+
 function inventoryRow(it) {
   const li = document.createElement("li");
   li.className = "flat item" + (it.equipped ? " on" : "");
@@ -575,9 +620,21 @@ function inventoryRow(it) {
     await loadSheet();
   });
 
+  const actions = itemActions(it);
+
   const name = document.createElement("span");
-  name.className = "nm";
+  name.className = "nm" + (actions.length ? " has-actions" : "");
   name.textContent = it.item.name + (it.quantity > 1 ? " ×" + it.quantity : "");
+  // Activate the item to see what it can do. Clicking the NAME, not the
+  // checkbox beside it — equipping and inspecting are different
+  // questions and must not share a hit area.
+  if (actions.length) {
+    name.title = "show what this can do";
+    name.addEventListener("click", () => {
+      const open = li.classList.toggle("open");
+      detail.hidden = !open;
+    });
+  }
 
   // Toggle and name on one line, the engine's verdicts on the next. The
   // left column is narrow and chips wrap badly beside a flexible name.
@@ -610,6 +667,29 @@ function inventoryRow(it) {
 
   li.append(head);
   if (tags.childElementCount > 0) li.append(tags);
+
+  // What the item can DO, hidden until asked for. Built now rather than
+  // on open so `detail` exists for the click handler above.
+  const detail = document.createElement("div");
+  detail.className = "actions";
+  detail.hidden = true;
+  for (const a of actions) {
+    const b = document.createElement("button");
+    b.className = "tiny" + (a.technique ? " ghost" : "");
+    b.textContent = a.label;
+    b.title = a.hint;
+    // SELECTS, does not roll. Advantage and the target live in the
+    // Rolls box and a second set of them here would be two places to
+    // get one swing wrong. This removes the typing, which was the ask.
+    b.addEventListener("click", () => {
+      document.querySelector("#named-request").value = a.request;
+      updatePreview();
+      document.querySelector("#roll-named").scrollIntoView({ block: "nearest" });
+    });
+    detail.append(b);
+  }
+  if (actions.length) li.append(detail);
+
   return li;
 }
 

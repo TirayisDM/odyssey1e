@@ -99,9 +99,18 @@ pub struct Sheet {
     /// all. Read once with the sheet for the same reason the narrative
     /// pack is: choosing one at roll time should cost nothing.
     ///
-    /// Skipped both ways in serde - the webview has no use for them yet,
-    /// and a technique picker can have them when it exists.
-    #[serde(skip)]
+    /// SENT OUT NOW. This was skipped both ways with the note that a
+    /// technique picker could have them when one existed; the equipment
+    /// panel is that picker. Only the EQUIPPED weapons' techniques are
+    /// here - 31 rows in the whole table - so this is a handful of
+    /// small objects, not the 180-line problem `narratives` was.
+    ///
+    /// OUTWARD ONLY. `skip_deserializing` rather than `default`, because
+    /// Sheet derives Deserialize and `default` still demands the field
+    /// be deserializable - it supplies a value when one is absent, it
+    /// does not excuse the trait. Technique has no reason to implement
+    /// it: nothing parses a Sheet back.
+    #[serde(skip_deserializing)]
     pub techniques: Vec<crate::attack::Technique>,
     /// HP, death saves, exhaustion, size. 010.
     pub vitals: Vitals,

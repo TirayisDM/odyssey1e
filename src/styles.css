@@ -131,3 +131,11 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .attacks{display:flex;gap:.25rem;flex-wrap:wrap;align-items:center;margin-top:.15rem}
 .attacks select{width:auto;flex:1;min-width:9rem;margin:0;padding:.18rem .3rem;font-size:11px}
 .attacks button.tiny{margin:0}
+
+/* An item's actions, revealed by clicking its name. A plain button is a
+   base attack in one of its modes; a ghost one is a house technique. */
+.item .nm.has-actions{cursor:pointer}
+.item .nm.has-actions:hover{color:var(--accent)}
+.item.open .nm.has-actions{color:var(--accent)}
+.item .actions{display:flex;gap:.25rem;flex-wrap:wrap;margin-top:.2rem}
+.item .actions button{margin:0}

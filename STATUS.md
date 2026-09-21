@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the DM side and NPC attacks.**
+**Written 2026-09-17, updated after convergence and fast login.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -58,7 +58,17 @@ That is 018 behaving as written, not a bug, and a campaign started after
 it never sees the mixture.
 
 The global `goblin` statblock carries a handaxe AND a scimitar, on
-purpose. See the convergence note under architecture decisions.
+purpose. Same creature, one set of scores, and the only difference
+between the two weapons is three letters - `fin` on the scimitar, so it
+swings on DEX 14 for +4 where the axe swings on STR 8 for +1. The
+Monster Manual's number falls out of a property rather than being
+copied in. See the convergence note under architecture decisions.
+
+SINCE 022 EVERY ACTOR IS ALSO A CHARACTER ROW, `is_npc` true - five of
+them at the time of writing. They do not appear in a player's character
+list, which is the only thing that flag does. `Unnamed` and `Snot` are
+player characters created by hand during testing and are junk; delete
+them when they get in the way.
 
 ---
 
@@ -164,7 +174,22 @@ carries `thr`, and nothing in the frontend knows what a handaxe is.
 Characters get no buttons - their player rolls from the sheet, which is
 what having one is for.
 
-**168 tests, zero warnings.** `cd src-tauri && cargo test`.
+And a monster is an individual. Enrolling a goblin makes a CHARACTER
+from the statblock - its own scores, its own kit, its own hit points -
+so editing the type afterwards never reaches anything already in play.
+It used to: hp_current is hp_max plus the sum of damage, so raising the
+goblin type from 7 to 9 healed every wounded goblin on the table,
+unconscious ones included, with no warning. See 022 and the convergence
+note under architecture decisions.
+
+And a PIN unlocks the app. Four digits instead of an email and a
+password, which matters because the session lives in memory and every
+restart signs you out. The unlock screen names the account it is about
+to open, "use password" is always available, and a wrong PIN never
+reaches the network. IT IS CONVENIENCE, NOT SECURITY - pin.rs says so
+at the top and the reasons are worth reading before trusting it.
+
+**177 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -204,6 +229,11 @@ and not after.
 019 npc gear - a statblock gets ability scores and carries real items,
     so a monster attacks through the character path
 020 scimitar - the weapon that makes the goblin match its own statblock
+021 write_action character_name - the name was being dropped in transit
+022 instantiate on enrol - a goblin becomes an INDIVIDUAL when enrolled;
+    the convergence migration
+023 hp_events follow the character - one subject, now there always is one
+024 name_actor after convergence - 022 made 018's naming unreachable
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -335,6 +365,29 @@ instead. Two vocabularies, two different reconciliations, each stated
 in its column comment. This asymmetry is the most likely thing to trip
 the next person. (008)
 
+**AN EXPLICIT COLUMN LIST INSIDE A WRITER FUNCTION IS A SECOND SCHEMA.**
+write_action names the columns it inserts, and `character_name` was not
+among them - so a name set in Rust was parsed off the payload, ignored
+by the select, and replaced by 'Someone' with no error anywhere. TWO
+fixes were written and committed against that defect before anyone
+noticed neither worked, because both were verified by COMPILING rather
+than by reading a row back. Adding a column to a table and setting it
+from Rust is not enough if the value travels through a writer. (021)
+
+**A CONSTRAINT WILL REFUSE THE MIGRATION THAT EXISTS TO SATISFY IT.**
+Three migrations in a row were rejected on first attempt: two by a check
+constraint forbidding exactly the row the migration was creating, one by
+freeze_roll_identity. Drop before backfilling, not after. The third
+refusal was correct and the backfill was wrong - a snapshot that can be
+corrected later is not a snapshot. (021, 022, 023)
+
+**A GUARD THAT LISTS THE CASES IT REFUSES WILL MISS ONE.** death_save
+refused Conscious and Dead; Stable is neither, so a creature that had
+finished dying could roll again and start over. And 018's naming asked
+"does this actor have a character", which 022 made always true, so the
+ordinal branch went unreachable and every goblin was called "Goblin".
+Both were found by exercising the thing, not by reading it. (024)
+
 **A CORRECT REFUSAL LOOKS EXACTLY LIKE A BROKEN FEATURE.** The `active`
 button "did not work": the database was refusing it, correctly, because
 only one encounter may be active per game. The explanation existed, was
@@ -419,57 +472,54 @@ ever disagrees.
 
 ## Architecture decisions that should hold
 
-**ONE STRUCTURE FOR CHARACTERS AND NPCS. A DIRECTION, NOT YET A STATE.**
+**ONE STRUCTURE FOR CHARACTERS AND NPCS. LARGELY BUILT, 022-024.**
 Separate, lighter rules for monsters were fine for basic D&D. Giving an
 NPC real depth is easier if it simply follows the structure a character
 already has, and the long-run simplification is the point: one set of
 mechanisms to build, fix and reason about instead of two that must agree.
 
-019 is this direction applied, and the argument for it is visible on one
-roster row. The goblin carries a handaxe and a scimitar. Same creature,
-same scores, same code:
+ENROLLING AN NPC CREATES A CHARACTER. `npcs` is purely a template now -
+a pattern you make individuals from. The individual owns its scores, its
+kit, its hit points and its death saves, so editing the type never
+reaches anything already in play. Editing a goblin is an edit of THAT
+goblin. A Goblin Elite Assassin may be a recurring type; each one
+generated from it is its own creature.
 
-    Handaxe   lgt thr   STR -1, prof +2  ->  +1   1d6-1
-    Scimitar  fin lgt   DEX +2, prof +2  ->  +4   1d6+2
+    npcs              the type. Scores, kit, AC, HP - a pattern.
+    characters        the individual, is_npc true. Owns everything.
+    encounter_actors  who is in this fight, pointing at a character and
+                      remembering which type it came from.
 
-The Monster Manual's +4 falls out of the `fin` property rather than
-being copied in. The cheap alternative - an `npc_attacks` table of
-stored to-hit numbers, matching how a statblock is printed - would have
-meant two attack paths in the engine forever, and the first rule that
-differed between them would have been a bug nobody could see.
+`npc_key` survives on the actor as PROVENANCE. Nothing is read through
+it. It is the door left open for species rules to be inherited one day,
+which is the one thing that might reasonably flow from a type to an
+individual after the fact.
 
-WHERE IT ALREADY HOLDS: `swing` in lib.rs is one function for a goblin
-and for Rodnar. Thresholds, the verdict, crit doubling the dice and not
-the modifier, massive damage, the extra failure for hitting someone
-already down, the single atomic write - all of it runs once and applies
-to both. `roll_named` and `npc_attack` are four lines each.
+WHAT THIS ALREADY COLLAPSED, all of it debt this section used to list:
 
-WHERE IT DOES NOT, AND THESE ARE DEBT RATHER THAN DESIGN:
+    swing()          one function for a goblin and for Rodnar
+    hp_events        one subject, because there always is one now (023)
+    vitals_payload   one place a death-save tally lives
+    resolve_ac       three sources became two - a monster's AC arrives
+                     as ac_mode 'flat' and resolves through the same
+                     path a player's does. A setting, not a branch.
+    load_npc_sheet   ninety lines assembling a sheet that looked like a
+                     character's without being one, now a lookup
+    load_targets     stopped reading `npcs` at all
+    proficiency      stopped being assumed-for-monsters; the statblock's
+                     assumption is written ONCE at instantiation
+    characters.prof_bonus  the nullable override Sheet.prof_bonus had
+                     already assumed - NULL derives from level
 
-    characters              vs  npcs
-    character_items         vs  npc_items          two junctions, one job
-    character_abilities     vs  npcs.str/dex/...   rows vs columns
-    AC computed (010)       vs  AC stored (011)
-    proficiency derived     vs  proficiency assumed (019)
-    HP and death saves on characters vs on encounter_actors
+WHAT IS LEFT, and it is small. `npc_items` and the ability columns on
+`npcs` still exist, because a TEMPLATE needs somewhere to keep its
+pattern - that is no longer a parallel structure, it is a different
+thing. `npcs.intl` is still ugly, and is ugly only because `int` is
+reserved in SQL.
 
-That last one is why `vitals_payload` has an either/or in it, and the
-rows-vs-columns split is the only reason `npcs.intl` exists - `int` is
-reserved in SQL, and an abilities table keyed by a code would never have
-needed the ugly name.
-
-WHERE IT IS HEADING: a statblock becomes a character template, an actor
-points at a character row, and `npcs` stops existing. Then
-`character_items`, `character_abilities`, computed AC and derived
-proficiency serve both, `vitals_payload`'s branch collapses, and the
-death-save split goes with it. That is four or five tables and a data
-migration, so not a thing to start on a whim - but it is where those
-pieces point.
-
-UNTIL THEN: when an NPC needs something, reuse the character mechanism
-rather than adding a lighter parallel. If a parallel is genuinely
-unavoidable, say so in the migration rather than quietly widening the
-gap - 019 widened it twice and said so.
+THE RULE FOR NEW WORK IS UNCHANGED: when an NPC needs something, reuse
+the character mechanism. If a parallel is genuinely unavoidable, say so
+in the migration rather than quietly widening the gap.
 
 **A DECISION TAKEN, NOT YET BUILT: WHO MAY BE TARGETED IS A QUESTION
 ABOUT THE ACTION, NOT ABOUT THE TARGET.** Self-targeting is allowed
@@ -632,14 +682,16 @@ already in place; what is missing is the screen.
 
 ## Pick up here
 
-**Be clear about what is and is not done.** The foundation is square:
-the access model, the dice, the sheet resolver, the prose. What AppSheet
-did that this does not do yet is *deliver*. `rolls.status` goes
-`pending -> resolved -> delivered` and nothing in this codebase moves a
-row to `delivered`. There is no die art, no death saves, no rests, no
-spell slots, no techniques, no session that survives a restart, and the
-UI is a test rig. The port is not nearly finished; the part that had to
-be right first is.
+**Be clear about what is and is not done.** The foundation is square
+and the combat loop runs: the access model, the dice, the sheet
+resolver, the prose, equipment, attacks, hit points, dying, the DM's
+screen, and monsters that are individuals rather than views of a type.
+
+What AppSheet did that this still does not is *deliver*. `rolls.status`
+goes `pending -> resolved -> delivered` and nothing in this codebase
+moves a row to `delivered`. There is also no initiative, no die art, no
+rests, no spell slots, and the UI is a test rig. A PIN now saves you
+retyping a password, but the session still lives in memory.
 
 006 is applied and every seeded table was checksum-verified against the
 spreadsheet. Read the 006 header: spells and techniques were ported
@@ -683,13 +735,14 @@ Roughly in order:
    on a creature's own turn, which is how the rule is actually written.
    Enrolment should prompt the players to roll for it. A miss spends a
    slot exactly as a hit does, which is why every roll became an action.
-2. CONVERGENCE, when there is an appetite for it. The direction is
-   settled and written up under architecture decisions: one structure
-   for characters and NPCs, `npcs` stops existing, a statblock becomes a
-   character template. Four or five tables and a data migration. Nothing
-   below depends on it, and everything below gets simpler after it -
-   which is the argument for doing it before the list gets longer rather
-   than after.
+2. THE NPC VIEW, which is now mostly wiring. A goblin is a character,
+   so the sheet and equipment panels work on one unchanged - abilities,
+   kit, the activate-an-item actions. What is missing is a button on the
+   DM roster to open it, and then editing: change this goblin, or save
+   what you built back as a template. The template/instance danger that
+   made this worth thinking hard about is GONE - 022 means editing an
+   individual cannot reach anything else, so the mode flag that was
+   going to guard it is not needed.
 3. The roll-to-challenge payoff. `actions.target_challenge_id` is
    written and nothing reads it, so the iron lock still cannot say
    whether it has been picked. The derivation is a query away: a
@@ -709,8 +762,15 @@ Roughly in order:
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-7. Session persistence (currently in memory - a restart signs you out;
-   fine on desktop, fatal on a phone). Wants the OS keychain, not a file.
+7. Session persistence, PROPERLY. A PIN now stands in front of it, so
+   a restart costs four digits instead of a password - but the session
+   still lives in memory and the refresh token sits in a plain file in
+   the app data directory. The real answer is unchanged and is the OS
+   keychain: Credential Manager, Keychain, the Android Keystore. Then
+   the token is held by the operating system, the PIN becomes a second
+   factor rather than the only one, and pin.rs changes from "where the
+   token lives" to "what unlocks it". Read pin.rs before trusting the
+   PIN with anything.
 8. A real phone-first UI. What exists is a desktop test rig.
 9. Android via `npm run tauri android init`. iOS needs a Mac.
 

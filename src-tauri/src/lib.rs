@@ -27,6 +27,7 @@ mod dice;
 mod encounter;
 mod equipment;
 mod narrative;
+mod pin;
 mod resolution;
 mod supabase;
 
@@ -1011,6 +1012,11 @@ pub fn run() {
             // A path registers exactly like a bare name, and the command
             // is still "me" on the wire. See commands/mod.rs.
             commands::session::me,
+            // Fast login. Convenience, not security - see pin.rs.
+            commands::session::pin_status,
+            commands::session::set_pin,
+            commands::session::unlock,
+            commands::session::forget_pin,
             list_games,
             create_game,
             join_game,

@@ -101,6 +101,43 @@ async function call(cmd, args) {
 
 /* ---------- session ---------- */
 
+// Fast login.
+//
+// Shown INSTEAD of the password form when a PIN is set on this device,
+// and it names the account it is about to open - a PIN that silently
+// signs you in as someone else is how a DM rolls as a player.
+//
+// "Use password" is always there. A stored token can expire or be
+// revoked, and a door with no other way in is a trap.
+async function paintUnlock() {
+  const st = await call("pin_status");
+  const unlock = document.querySelector("#unlock-panel");
+  const auth = document.querySelector("#auth-panel");
+  const set = !!(st && st.set) && !state.user;
+  unlock.hidden = !set;
+  auth.hidden = set;
+  if (set) {
+    document.querySelector("#unlock-who").textContent = st.email || "";
+    document.querySelector("#pin").value = "";
+    unlockSay("");
+  }
+  // Offering to set one only makes sense once there is a session to
+  // store, so it lives under the password form and appears after.
+  document.querySelector("#pin-setup").hidden = !state.user;
+  if (st && st.set) {
+    document.querySelector("#clear-pin").hidden = false;
+  } else {
+    document.querySelector("#clear-pin").hidden = true;
+  }
+}
+
+function unlockSay(text, isError) {
+  const el = document.querySelector("#unlock-msg");
+  el.textContent = text || "";
+  el.className = "dm-msg" + (isError ? " err" : "");
+  el.hidden = !text;
+}
+
 function paintUser() {
   const who = document.querySelector("#who");
   const out = document.querySelector("#signout");
@@ -1130,11 +1167,13 @@ const val = (id) => document.querySelector(id).value.trim();
 window.addEventListener("DOMContentLoaded", async () => {
   state.user = await call("me");
   paintUser();
+  // Decide which door to show before anything else is drawn.
+  await paintUnlock();
   if (state.user) await loadGames();
 
   document.querySelector("#signin").addEventListener("click", async () => {
     const u = await call("sign_in", { email: val("#email"), password: val("#password") });
-    if (u) { state.user = u; paintUser(); clearData(); await loadGames(); }
+    if (u) { state.user = u; paintUser(); clearData(); await paintUnlock(); await loadGames(); }
   });
 
   document.querySelector("#signup").addEventListener("click", async () => {
@@ -1143,7 +1182,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       password: val("#password"),
       displayName: val("#display") || "Adventurer",
     });
-    if (u) { state.user = u; paintUser(); clearData(); await loadGames(); }
+    if (u) { state.user = u; paintUser(); clearData(); await paintUnlock(); await loadGames(); }
   });
 
   document.querySelector("#signout").addEventListener("click", async () => {
@@ -1151,6 +1190,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     state.user = null;
     paintUser();
     clearData();
+    // Signing out returns to the unlock screen if a PIN is set. The PIN
+    // is NOT forgotten - signing out is "not me right now", and
+    // forgetting the device is a separate, deliberate button.
+    await paintUnlock();
   });
 
   document.querySelector("#refresh-games").addEventListener("click", loadGames);
@@ -1381,6 +1424,47 @@ window.addEventListener("DOMContentLoaded", async () => {
     } else {
       dmSay(r.error, true);
     }
+  });
+
+  /* ---------- fast login ---------- */
+
+  guarded("#do-unlock", async () => {
+    unlockSay("");
+    const r = await tryCall("unlock", { pinCode: val("#pin") });
+    if (!r.ok) {
+      unlockSay(r.error, true);
+      document.querySelector("#pin").value = "";
+      return;
+    }
+    state.user = r.value;
+    paintUser();
+    await paintUnlock();
+    await loadGames();
+  });
+
+  // Always available. A stored token that has expired must not lock
+  // someone out of their own app.
+  document.querySelector("#use-password").addEventListener("click", async () => {
+    document.querySelector("#unlock-panel").hidden = true;
+    document.querySelector("#auth-panel").hidden = false;
+  });
+
+  guarded("#save-pin", async () => {
+    const r = await tryCall("set_pin", { pinCode: val("#new-pin") });
+    document.querySelector("#new-pin").value = "";
+    if (!r.ok) return log("set_pin", r.error, true);
+    await paintUnlock();
+  });
+
+  guarded("#clear-pin", async () => {
+    await call("forget_pin");
+    await paintUnlock();
+  });
+
+  // Enter submits, because four digits and a reach for the mouse is not
+  // faster than a password.
+  document.querySelector("#pin").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.querySelector("#do-unlock").click();
   });
 
   document.querySelector("#clear-log").addEventListener("click", () => {

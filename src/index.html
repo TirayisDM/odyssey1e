@@ -19,6 +19,17 @@
   <div class="cols">
     <div class="left">
 
+      <section id="unlock-panel" hidden>
+        <h2>Unlock <span id="unlock-who" class="muted"></span></h2>
+        <div class="row">
+          <input id="pin" type="password" inputmode="numeric" maxlength="4"
+                 placeholder="4-digit PIN" autocomplete="off" class="narrow" />
+          <button id="do-unlock">Unlock</button>
+          <button id="use-password" class="ghost">Use password</button>
+        </div>
+        <div id="unlock-msg" class="dm-msg" hidden></div>
+      </section>
+
       <section id="auth-panel">
         <h2>Account</h2>
         <input id="email" type="email" placeholder="tirayis.dm+p1@gmail.com" autocomplete="off" />
@@ -27,6 +38,15 @@
         <div class="row">
           <button id="signin">Sign in</button>
           <button id="signup" class="ghost">Sign up</button>
+        </div>
+        <div id="pin-setup" hidden>
+          <div class="row">
+            <input id="new-pin" type="password" inputmode="numeric" maxlength="4"
+                   placeholder="set a 4-digit PIN" autocomplete="off" class="narrow" />
+            <button id="save-pin" class="ghost">Save PIN</button>
+            <button id="clear-pin" class="ghost">Forget PIN</button>
+          </div>
+          <div class="muted pin-note">Convenience, not security &mdash; see pin.rs.</div>
         </div>
       </section>
 

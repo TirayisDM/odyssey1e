@@ -25,6 +25,9 @@ serde_json = "1"
 # rustls rather than native-tls: one fewer system dependency on Windows,
 # and it is what will still build when this targets Android.
 rand = "0.8"
+# Hashing the fast-login PIN. Pure Rust, no system dependency, builds
+# for Android - the same reasons rustls was chosen over native-tls.
+sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 

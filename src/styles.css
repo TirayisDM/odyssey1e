@@ -139,3 +139,9 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .item.open .nm.has-actions{color:var(--accent)}
 .item .actions{display:flex;gap:.25rem;flex-wrap:wrap;margin-top:.2rem}
 .item .actions button{margin:0}
+
+/* Fast login. The note under the PIN setup is not decoration - a
+   four-digit PIN over a stored refresh token is convenience, and the
+   screen that offers it should say so. */
+.pin-note{font-size:10px;margin:-.2rem 0 .3rem}
+#pin,#new-pin{letter-spacing:.4em;text-align:center}

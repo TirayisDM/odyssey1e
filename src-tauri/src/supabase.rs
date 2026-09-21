@@ -168,6 +168,20 @@ pub fn sign_in(email: &str, password: &str) -> Result<Session, String> {
     )
 }
 
+/// Trade a refresh token for a live session.
+///
+/// The same endpoint sign_in uses with a different grant, which is why
+/// it returns the same shape and needs no parsing of its own. A refresh
+/// token is single-use at Supabase: the response carries a NEW one, and
+/// whoever stored the old one has to store the new one or the next
+/// unlock fails. See commands/session.rs, which does exactly that.
+pub fn refresh(refresh_token: &str) -> Result<Session, String> {
+    auth_call(
+        "token?grant_type=refresh_token",
+        &json!({ "refresh_token": refresh_token }),
+    )
+}
+
 /* ============================ POSTGREST ============================ */
 
 fn rest_url(path: &str) -> String {

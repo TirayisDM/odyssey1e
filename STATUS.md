@@ -471,6 +471,30 @@ rather than adding a lighter parallel. If a parallel is genuinely
 unavoidable, say so in the migration rather than quietly widening the
 gap - 019 widened it twice and said so.
 
+**A DECISION TAKEN, NOT YET BUILT: WHO MAY BE TARGETED IS A QUESTION
+ABOUT THE ACTION, NOT ABOUT THE TARGET.** Self-targeting is allowed
+everywhere and filtered nowhere. That is deliberate and it is not the
+final answer.
+
+The obvious rule - you cannot aim at yourself - is wrong the moment
+healing exists, and healing is the ordinary case rather than the exotic
+one. A buff, a defensive stance, a second wind and most of what a cleric
+does all name the actor taking the action. Even the attack case is not
+clean: hitting yourself with the pommel of your own sword is a thing a
+DM might allow, and the engine has no business refusing it.
+
+So the discriminator is the KIND of action. `Resolved.key` already
+carries that vocabulary - skill keys, `wis_save`, `wis_check`, `custom`,
+with room for `attack`, `spell` and `death` - and a targeting rule
+belongs against it, once there is a healing or buff path for the rule to
+be about. Filtering by identity in the meantime would encode the wrong
+rule in the easiest place to forget it.
+
+The NPC attack row DID filter the attacker out of its own target list
+for one commit. That was a game rule decided in JavaScript while a
+player's roll box, three hundred lines away, allowed the same thing -
+and the disagreement is how it was noticed.
+
 **A roll is a record.** `character_name`, `roller_name`, die art and
 dice set are snapshotted onto the row at insert, never derived at read
 time. The AppSheet version derived them, so historical rolls silently

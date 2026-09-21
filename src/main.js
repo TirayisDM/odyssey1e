@@ -857,12 +857,19 @@ async function attackRow(actor, encounterId) {
     return wrap;
   }
 
-  // Everything in this encounter except the monster itself — a goblin
-  // swinging at a goblin is legal and sometimes the point, but swinging
-  // at itself is not.
+  // EVERYTHING IN THIS ENCOUNTER, INCLUDING THE ATTACKER.
+  //
+  // This filtered out the monster itself, on the assumption a goblin
+  // should not hit itself. That was a game rule decided in JavaScript,
+  // and the wrong one: plenty of actions target the actor taking them —
+  // healing, a buff, a defensive stance — and the discriminator is the
+  // KIND of action, not who is pointing at whom. A player's roll box
+  // never filtered self either, so the two disagreed.
+  //
+  // Allowed here until there is a type to filter on. See the note in
+  // STATUS.md under architecture decisions.
   const pick = document.createElement("select");
   for (const t of state.dmTargets) {
-    if (t.id === actor.id) continue;
     const o = document.createElement("option");
     o.value = JSON.stringify({
       id: t.id, row: t.row, kind: t.target_kind,

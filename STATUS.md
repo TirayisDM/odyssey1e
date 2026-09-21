@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after HP, dying and death saves.**
+**Written 2026-09-17, updated after the DM side and NPC attacks.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -45,6 +45,20 @@ Foundry export in `_RAW`. Two items are equipped, Scale Mail and the
 Mace; the Light Hammer and the Heavy Crossbow are carried, not held; the
 Ember is attuned at 6 of 7 charges. Character2 carries nothing, which
 makes it the empty-inventory case for free.
+
+Two encounters, and they are a useful pair rather than clutter. One is
+`active` and one is not, which is the state that catches anything
+confusing "the encounter the DM is editing" with "the encounter the
+players can see". The roster holds hand-named actors from before 018
+(`Goblin 1`, `Goblin 2`) beside auto-named ones from after it
+(`Goblin 0001`, `Goblin Fighter 0001`), so both naming eras are on
+screen at once - the ordinal does NOT continue from the hand-named ones,
+because those carry a null `name_base` and the counter cannot see them.
+That is 018 behaving as written, not a bug, and a campaign started after
+it never sees the mixture.
+
+The global `goblin` statblock carries a handaxe AND a scimitar, on
+purpose. See the convergence note under architecture decisions.
 
 ---
 
@@ -130,6 +144,26 @@ way. The target list reads `Goblin 1 - down` with the tally beside it,
 and a button rolls the save until initiative exists to fire it
 automatically.
 
+And the DM can build the fight from the app. Encounters, enrolment,
+challenges and statblocks were authored by hand in SQL until 28d5c27;
+every policy had been in place since 011 and what was missing was a way
+to reach them. Twelve commands in `commands/dm.rs`, none of them in
+lib.rs. Enrolling is three clicks and no typing - leave the name blank
+and 018 names it `Goblin 0003`, numbered per game.
+
+THE PANEL ONLY APPEARS FOR THE DM OF THE SELECTED GAME, which is a
+courtesy and not a guard: `is_game_dm` is in 011's policy on every one
+of those tables, so a player calling them is refused by Postgres.
+testdeck1 belongs to the `dm` account, so the panel is absent for p1 -
+correct, and worth knowing before wondering where it went.
+
+And a monster acts. Each NPC in the roster carries a target picker and
+one button per attack, DERIVED from what its statblock holds: the
+handaxe offers both `handaxe` and `handaxe (thrown)` because the item
+carries `thr`, and nothing in the frontend knows what a handaxe is.
+Characters get no buttons - their player rolls from the sheet, which is
+what having one is for.
+
 **168 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
@@ -164,6 +198,12 @@ and not after.
 015 dying - zero is unconscious, not dead; death saves for NPCs too
 016 actor death saves - a members policy plus a trigger, after an
     RLS-blocked UPDATE turned out to fail silently
+017 tighten new function grants - the two functions 009-016 left
+    outside 002's pattern; consistency, not a breach
+018 npc naming - an unnamed NPC names itself <Species> <Class> 0001
+019 npc gear - a statblock gets ability scores and carries real items,
+    so a monster attacks through the character path
+020 scimitar - the weapon that makes the goblin match its own statblock
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -295,6 +335,29 @@ instead. Two vocabularies, two different reconciliations, each stated
 in its column comment. This asymmetry is the most likely thing to trip
 the next person. (008)
 
+**A CORRECT REFUSAL LOOKS EXACTLY LIKE A BROKEN FEATURE.** The `active`
+button "did not work": the database was refusing it, correctly, because
+only one encounter may be active per game. The explanation existed, was
+accurate, and went to the log pane on the far side of the screen. That
+pane was built to make RLS denials loud FOR SOMEONE READING THE LOG,
+which is a different job from telling a DM why a click did not take.
+Anything that can be refused now says so next to the button that earned
+it - `dmSay`, and `tryCall` which is `call` that hands back why. This
+happened twice before it was fixed; if the panel grows, it will happen
+again.
+
+**TWO IDS THAT MEAN NEARLY THE SAME THING WILL BE CONFUSED.**
+`state.encounterId` is the ACTIVE encounter, owned by loadTargets - what
+players aim at and what a roll is attributed to. `state.dmEncounterId`
+is what the DM has open, which is usually a draft. They were one
+variable for ten minutes: selecting a draft, enrolling, then refreshing
+the target list snapped the selection back, and a roll taken in between
+would have been filed against the wrong encounter. `dmTargets` is a
+third list for the same reason. The DM panel now states which encounter
+it is editing and whether anyone can see it, because an outline on a row
+and a word in grey was not enough - a goblin and two challenges got
+built into an ended encounter before it said so.
+
 **`flex:none` does not undo `width:100%`.** `styles.css` makes every
 input full width, which is right for the stacked forms and wrong for a
 checkbox in a row. `flex: none` is `0 0 auto`, and an `auto` basis reads
@@ -355,6 +418,58 @@ ever disagrees.
 ---
 
 ## Architecture decisions that should hold
+
+**ONE STRUCTURE FOR CHARACTERS AND NPCS. A DIRECTION, NOT YET A STATE.**
+Separate, lighter rules for monsters were fine for basic D&D. Giving an
+NPC real depth is easier if it simply follows the structure a character
+already has, and the long-run simplification is the point: one set of
+mechanisms to build, fix and reason about instead of two that must agree.
+
+019 is this direction applied, and the argument for it is visible on one
+roster row. The goblin carries a handaxe and a scimitar. Same creature,
+same scores, same code:
+
+    Handaxe   lgt thr   STR -1, prof +2  ->  +1   1d6-1
+    Scimitar  fin lgt   DEX +2, prof +2  ->  +4   1d6+2
+
+The Monster Manual's +4 falls out of the `fin` property rather than
+being copied in. The cheap alternative - an `npc_attacks` table of
+stored to-hit numbers, matching how a statblock is printed - would have
+meant two attack paths in the engine forever, and the first rule that
+differed between them would have been a bug nobody could see.
+
+WHERE IT ALREADY HOLDS: `swing` in lib.rs is one function for a goblin
+and for Rodnar. Thresholds, the verdict, crit doubling the dice and not
+the modifier, massive damage, the extra failure for hitting someone
+already down, the single atomic write - all of it runs once and applies
+to both. `roll_named` and `npc_attack` are four lines each.
+
+WHERE IT DOES NOT, AND THESE ARE DEBT RATHER THAN DESIGN:
+
+    characters              vs  npcs
+    character_items         vs  npc_items          two junctions, one job
+    character_abilities     vs  npcs.str/dex/...   rows vs columns
+    AC computed (010)       vs  AC stored (011)
+    proficiency derived     vs  proficiency assumed (019)
+    HP and death saves on characters vs on encounter_actors
+
+That last one is why `vitals_payload` has an either/or in it, and the
+rows-vs-columns split is the only reason `npcs.intl` exists - `int` is
+reserved in SQL, and an abilities table keyed by a code would never have
+needed the ugly name.
+
+WHERE IT IS HEADING: a statblock becomes a character template, an actor
+points at a character row, and `npcs` stops existing. Then
+`character_items`, `character_abilities`, computed AC and derived
+proficiency serve both, `vitals_payload`'s branch collapses, and the
+death-save split goes with it. That is four or five tables and a data
+migration, so not a thing to start on a whim - but it is where those
+pieces point.
+
+UNTIL THEN: when an NPC needs something, reuse the character mechanism
+rather than adding a lighter parallel. If a parallel is genuinely
+unavoidable, say so in the migration rather than quietly widening the
+gap - 019 widened it twice and said so.
 
 **A roll is a record.** `character_name`, `roller_name`, die art and
 dice set are snapshotted onto the row at insert, never derived at read
@@ -510,13 +625,13 @@ AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
 ActorDice junction, with a partial unique index enforcing one equipped
 set per character. `narrative_lines` is wired in; the rest is not.
 
-**The equipment chain is one step from done.** 007 and 008 put the
-schema in place, `equipment.rs` reads it - proficiency, attack modes,
-the one-armor rule, the key integrity check - and `dice.rs` now carries
-variable crit and fumble thresholds. Only the attack itself remains,
-item 1 below.
+**The equipment chain is done, and the DM side with it.** The attack
+key landed, `equipment.rs` reads the schema, `dice.rs` carries variable
+crit and fumble thresholds, and 28d5c27 gave the DM a screen for
+encounters, enrolment, challenges and statblocks. A monster attacks
+through the same `swing` a character does.
 
-**A DECISION TAKEN, NOT YET BUILT: proficiency must be visible, not
+**A DECISION TAKEN, AND BUILT: proficiency must be visible, not
 just felt.** The Heavy Crossbow comes back at +1 where the Mace comes
 back at +5, and the difference is entirely whether the character is
 trained. A player who cannot see that reads it as the app being wrong.
@@ -524,6 +639,13 @@ trained. A player who cannot see that reads it as the app being wrong.
 of printing it; the attack path should carry enough to say WHY - the
 ability used, the proficiency bonus applied or withheld, and the fact
 that it was withheld. Traceable is the requirement, not decorative.
+
+Built, and in three places now. The attack preview says `STR +1,
+prof +3` or `NOT proficient`. The equipment panel says `proficient ·
+derived` against `proficient · flagged`, so an explicit answer from the
+source never looks like a computed one. And an NPC's attack buttons
+carry the same, which is how the goblin's +1 handaxe beside its +4
+scimitar reads as the finesse rule rather than as a mistake.
 
 **That question is now answered.** 009 and `resolution.rs` are in, and
 the attack key is no longer blocked - see "Targets and outcomes" above
@@ -537,12 +659,13 @@ Roughly in order:
    on a creature's own turn, which is how the rule is actually written.
    Enrolment should prompt the players to roll for it. A miss spends a
    slot exactly as a hit does, which is why every roll became an action.
-2. THE DM SIDE. Everything an encounter needs is authored by hand in SQL
-   right now - there is no way to create an encounter, enrol an actor,
-   add a challenge or write a statblock from the app. The policies are
-   already in place for all of it; what is missing is the screen. This
-   is the largest gap between what the schema supports and what anyone
-   can do.
+2. CONVERGENCE, when there is an appetite for it. The direction is
+   settled and written up under architecture decisions: one structure
+   for characters and NPCs, `npcs` stops existing, a statblock becomes a
+   character template. Four or five tables and a data migration. Nothing
+   below depends on it, and everything below gets simpler after it -
+   which is the argument for doing it before the list gets longer rather
+   than after.
 3. The roll-to-challenge payoff. `actions.target_challenge_id` is
    written and nothing reads it, so the iron lock still cannot say
    whether it has been picked. The derivation is a query away: a

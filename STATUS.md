@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after convergence and fast login.**
+**Written 2026-09-17, updated after the NPC view.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -189,6 +189,15 @@ to open, "use password" is always available, and a wrong PIN never
 reaches the network. IT IS CONVENIENCE, NOT SECURITY - pin.rs says so
 at the top and the reasons are worth reading before trusting it.
 
+And a creature can be looked at, and named. `view` on a roster row
+opens THE SAME SHEET A PLAYER GETS - scores with their modifiers, hit
+points, armour class, the kit with its modes and proficiency - because
+022 made a monster a character and there is no second view to keep in
+step. `Goblin 0003` becomes `Snaggletooth` in one call that moves the
+actor's label and the character's name together; older rolls keep the
+name they snapshotted, and the spent ordinal is not released, so the
+next unnamed goblin is still 0004.
+
 **177 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
@@ -234,6 +243,7 @@ and not after.
     the convergence migration
 023 hp_events follow the character - one subject, now there always is one
 024 name_actor after convergence - 022 made 018's naming unreachable
+025 rename actor - a label and a character's name move together
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -735,14 +745,12 @@ Roughly in order:
    on a creature's own turn, which is how the rule is actually written.
    Enrolment should prompt the players to roll for it. A miss spends a
    slot exactly as a hit does, which is why every roll became an action.
-2. THE NPC VIEW, which is now mostly wiring. A goblin is a character,
-   so the sheet and equipment panels work on one unchanged - abilities,
-   kit, the activate-an-item actions. What is missing is a button on the
-   DM roster to open it, and then editing: change this goblin, or save
-   what you built back as a template. The template/instance danger that
-   made this worth thinking hard about is GONE - 022 means editing an
-   individual cannot reach anything else, so the mode flag that was
-   going to guard it is not needed.
+2. EDITING a creature, now that viewing one works. Renaming is done;
+   the rest is scores, hit points, AC and kit, all of which are plain
+   columns on a character the DM already owns. Then "save as template",
+   which is the same copy `instantiate_npc` does, pointed the other way
+   - and it is worth doing, because building an interesting goblin in
+   play and keeping it is how a DM actually works.
 3. The roll-to-challenge payoff. `actions.target_challenge_id` is
    written and nothing reads it, so the iron lock still cannot say
    whether it has been picked. The derivation is a query away: a

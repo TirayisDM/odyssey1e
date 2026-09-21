@@ -909,7 +909,21 @@ async function selectEncounter(id) {
       await selectEncounter(id);
       await loadTargets();
     });
-    head.append(tog, del);
+    // View. Opens the same sheet a player gets, because since 022 a
+    // goblin IS a character - see viewRow.
+    const see = document.createElement("button");
+    see.className = "tiny ghost";
+    see.textContent = "view";
+    see.addEventListener("click", async () => {
+      const open = li.classList.toggle("open");
+      view.hidden = !open;
+      if (open && !view.dataset.loaded) {
+        await paintActorView(view, a, id);
+        view.dataset.loaded = "1";
+      }
+    });
+
+    head.append(see, tog, del);
     li.append(head);
 
     const tags = document.createElement("span");
@@ -930,6 +944,11 @@ async function selectEncounter(id) {
       li.append(await attackRow(a, id));
     }
 
+    const view = document.createElement("div");
+    view.className = "actorview";
+    view.hidden = true;
+    li.append(view);
+
     rl.append(li);
   }
 
@@ -948,6 +967,110 @@ async function selectEncounter(id) {
     });
     li.append(tog);
     cl.append(li);
+  }
+}
+
+// One creature, opened out: rename, vitals, scores, kit.
+//
+// THE SAME SHEET A PLAYER GETS. 022 made a monster a character, so
+// view_actor calls the same load_sheet Rodnar's panel uses and this
+// renders what comes back. There is no NPC-shaped view and no second
+// set of rules - if a rule changes for a player it has already changed
+// for the goblin.
+//
+// Rendered once and kept: reopening a row should not cost a round trip,
+// and nothing in here moves on its own. A rename reloads the roster,
+// which rebuilds it.
+async function paintActorView(host, actor, encounterId) {
+  host.innerHTML = "";
+  const data = await call("view_actor", { actorId: actor.id });
+  if (!data || !data.sheet) {
+    host.append(chip("could not read this one", "no"));
+    return;
+  }
+  const sh = data.sheet;
+
+  // --- name ---
+  const nameRow = document.createElement("div");
+  nameRow.className = "row";
+  const nameBox = document.createElement("input");
+  nameBox.value = actor.label;
+  nameBox.placeholder = "name";
+  const save = document.createElement("button");
+  save.className = "tiny";
+  save.textContent = "rename";
+  let busy = false;
+  save.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true; save.disabled = true;
+    try {
+      dmSay("");
+      const r = await tryCall("rename_actor", { actorId: actor.id, name: nameBox.value });
+      if (!r.ok) { dmSay(r.error, true); return; }
+      dmSay(actor.label + " is now " + nameBox.value.trim());
+      // The roster and the target list both carry the old name.
+      await selectEncounter(encounterId);
+      await loadTargets();
+    } finally { busy = false; save.disabled = false; }
+  });
+  nameRow.append(nameBox, save);
+  host.append(nameRow);
+
+  // --- vitals, and where each number came from ---
+  const pb = sh.prof_bonus !== null && sh.prof_bonus !== undefined
+    ? sh.prof_bonus : Math.floor((sh.level - 1) / 4) + 2;
+  const vitals = document.createElement("div");
+  vitals.className = "tags";
+  vitals.append(chip("level " + sh.level, "cls"));
+  vitals.append(chip("PB +" + pb + (sh.prof_bonus !== null && sh.prof_bonus !== undefined
+    ? " stated" : " from level"), "cls"));
+  vitals.append(chip("AC " + sh.armor_class +
+    (sh.vitals && sh.vitals.ac_mode === "flat" ? " flat" : " from armour"), "cls"));
+  if (data.hp_current !== null && data.hp_current !== undefined) {
+    vitals.append(chip(data.hp_current + "/" + (data.hp_max ?? "?") + " hp",
+                       data.hp_current > 0 ? "use" : "no"));
+  }
+  if (actor.npc_key) vitals.append(chip("from " + actor.npc_key, "cls"));
+  if (actor.name_ordinal) vitals.append(chip("#" + actor.name_ordinal + " of its kind", "cls"));
+  host.append(vitals);
+
+  // --- scores ---
+  const abils = document.createElement("div");
+  abils.className = "abils";
+  for (const code of ABILS) {
+    const score = (sh.abilities[code] || {}).score ?? 10;
+    const mod = Math.floor((score - 10) / 2);
+    const el = document.createElement("div");
+    el.className = "abil";
+    const tag = document.createElement("b");
+    tag.textContent = code.toUpperCase();
+    const num = document.createElement("span");
+    num.textContent = score;
+    const m = document.createElement("span");
+    m.className = "mod";
+    m.textContent = (mod >= 0 ? "+" : "") + mod;
+    el.append(tag, num, m);
+    abils.append(el);
+  }
+  host.append(abils);
+
+  // --- kit, with the engine's verdicts, exactly as the player panel
+  // shows them. Read-only here: equipping a goblin mid-fight is a
+  // different question and does not have an answer yet.
+  if (sh.loadout && sh.loadout.length) {
+    for (const it of sh.loadout) {
+      const line = document.createElement("div");
+      line.className = "tags";
+      line.append(chip(it.item.name, "mode"));
+      for (const m of it.modes) line.append(chip(m, "cls"));
+      if (it.item.kind === "weapon" || it.item.kind === "armor") {
+        line.append(chip(it.proficient ? "proficient" : "not proficient",
+                         it.proficient ? "yes" : "no"));
+      }
+      host.append(line);
+    }
+  } else {
+    host.append(chip("carrying nothing", "cls"));
   }
 }
 

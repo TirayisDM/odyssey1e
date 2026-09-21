@@ -145,3 +145,12 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    screen that offers it should say so. */
 .pin-note{font-size:10px;margin:-.2rem 0 .3rem}
 #pin,#new-pin{letter-spacing:.4em;text-align:center}
+
+/* One creature, opened out. Indented under its roster row so it reads
+   as belonging to it rather than as a new section. */
+.actorview{margin-top:.35rem;padding:.4rem .5rem;border-left:2px solid var(--line);
+           display:flex;flex-direction:column;gap:.3rem}
+.actorview .row{gap:.3rem}
+.actorview .row input{margin:0}
+.actorview .abils{margin:0;gap:.2rem}
+.actorview .abil span{font:12px ui-monospace,Menlo,monospace}

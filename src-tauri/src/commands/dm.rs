@@ -514,3 +514,81 @@ pub fn npc_attack(
     )
     .map_err(|e| denied(e, "roll for an NPC"))
 }
+
+/* ============================ SEEING ONE ============================ */
+
+/// Everything about one creature in the fight.
+///
+/// THIS IS THE SAME SHEET A PLAYER GETS. 022 made a monster a character,
+/// so `load_sheet` answers for a goblin exactly as it answers for
+/// Rodnar - scores, proficiency bonus, armour class, hit points, the
+/// kit with its modes and proficiency already derived, and any
+/// techniques its weapons offer. There is no NPC sheet loader any more
+/// and no second set of rules to keep in step.
+///
+/// The actor's own facts ride alongside, because they belong to this
+/// APPEARANCE rather than to the creature: which type it came from,
+/// whether it is hidden, its initiative, and the per-encounter
+/// overrides.
+#[tauri::command]
+pub fn view_actor(state: State<AppState>, actor_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "encounter_actors",
+        &[
+            (
+                "select",
+                "id,character_id,npc_key,label,initiative,active,\
+                 ac_override,hp_override,name_base,name_ordinal,enrolled_at",
+            ),
+            ("id", &format!("eq.{}", actor_id)),
+        ],
+    )?;
+    let actor = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .ok_or_else(|| "no such actor, or it is not visible to you".to_string())?;
+
+    let character_id = actor
+        .get("character_id")
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| "that actor has no character".to_string())?;
+
+    let sheet = crate::character::load_sheet(&token, character_id)?;
+    let hp = crate::encounter::load_actor_vitals(&token, &actor_id)?;
+
+    Ok(json!({
+        "actor": actor,
+        "sheet": sheet,
+        // Current hit points are DERIVED from the damage log, not stored,
+        // so they do not live on the sheet - see 013.
+        "hp_current": hp.as_ref().map(|v| v.hp_current),
+        "hp_max": hp.as_ref().and_then(|v| v.hp_max),
+    }))
+}
+
+/// Give a creature a name.
+///
+/// One call, because the actor's label and the character's name are one
+/// fact and writing them separately opens a window where the roster and
+/// the roll log disagree. See 025.
+#[tauri::command]
+pub fn rename_actor(
+    state: State<AppState>,
+    actor_id: String,
+    name: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    if name.trim().is_empty() {
+        return Err("a name cannot be blank".to_string());
+    }
+    supabase::rpc(
+        &token,
+        "rename_actor",
+        &json!({ "p_actor_id": actor_id, "p_name": name.trim() }),
+    )
+    .map_err(|e| denied(e, "rename a creature"))
+}

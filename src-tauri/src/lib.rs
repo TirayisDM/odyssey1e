@@ -1044,6 +1044,8 @@ pub fn run() {
             // character's attack does — see 019.
             commands::dm::list_npc_attacks,
             commands::dm::npc_attack,
+            commands::dm::view_actor,
+            commands::dm::rename_actor,
             death_save,
             get_sheet,
             set_level,

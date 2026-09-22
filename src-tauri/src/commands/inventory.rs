@@ -120,10 +120,12 @@ pub fn give_item(
 /// object and not the same one moved, because the seven rations were
 /// never seven objects to begin with.
 ///
-/// A dropped thing is unequipped on the way out. Nothing enforces that
-/// at the database - `equipped` is a fact about a row, not about a
-/// holder - so it is stated here, because armour nobody is wearing
-/// should not go on contributing to an AC.
+/// A dropped thing is unequipped on the way out, and since 030 that is
+/// the DATABASE's job rather than this one's. A cascade runs inside
+/// Postgres where no command does, so the rule had to move somewhere
+/// that sees every route to being unheld - `unheld_is_unequipped`. It
+/// is not restated here, because two copies of one rule is two answers
+/// to keep in agreement and only one of them would run.
 #[tauri::command]
 pub fn drop_object(
     state: State<AppState>,
@@ -146,7 +148,8 @@ pub fn drop_object(
             &token,
             "objects",
             &[("id", &format!("eq.{}", object_id))],
-            &json!({ "character_id": null, "equipped": false, "attuned": false }),
+            // equipped and attuned are cleared by the trigger, not here.
+            &json!({ "character_id": null }),
         );
     }
 
@@ -165,7 +168,6 @@ pub fn drop_object(
             "character_id": null,
             "item_key": obj.item_key,
             "quantity": moved,
-            "equipped": false,
         }),
     )
 }

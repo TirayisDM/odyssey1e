@@ -252,6 +252,8 @@ and not after.
     had since 008, and instantiate_npc stops faking them
 029 level is hit dice - a goblin is 2d6, so a goblin is level 2; hit
     points stop being a magic number
+030 objects outlive their holder - deleting a creature drops its gear
+    instead of destroying it
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -947,6 +949,46 @@ The four rules worth naming, all in `objects.rs`:
 - **A partial drop splits.** The held row keeps the remainder and a new
   unheld row carries what left, because the seven rations were never
   seven objects.
+
+**030 stopped a delete from eating inventory.** 008 made
+`character_items.character_id` NOT NULL with ON DELETE CASCADE, and
+that was correct: an object with no holder could not be represented, so
+there was nowhere for an orphan to go. 026 removed the premise and left
+the conclusion - character_id became nullable, NULL came to mean nobody
+is carrying it, and the cascade went on destroying things anyway.
+Clearing some stale test goblins would have taken a scimitar, a handaxe
+and a sickle with them, not because anyone decided gear should be
+destroyed but because a rule written for a different schema was still
+running.
+
+SET NULL now. Deleting a creature drops what it was carrying. This puts
+objects in the same category `rolls` and `actions` were already in -
+some things outlive the row that pointed at them - while hp_events,
+abilities, skills, dice and actors go on cascading, because every one
+of those is a fact ABOUT a creature and means nothing without it. An
+object is not: it is a thing in the world that was in someone's hands.
+
+**The trigger is the half that is easy to miss.** An object that
+becomes unheld must stop being equipped, and `drop_object` said so in
+Rust - but a CASCADE runs inside Postgres where no command does. Without
+`unheld_is_unequipped`, deleting a character would leave a breastplate
+on the floor still flagged equipped, and `take_object` would put it
+straight onto whoever picked it up: equipped, unchecked, bypassing the
+one-armor rule. The rule moved to the database rather than being copied
+there, and `drop_object` no longer restates it.
+
+Verified against live data and rolled back: deleting Crumbs left all
+three of its weapons unheld, unequipped and still in the campaign, its
+actor row correctly gone, and the three rolls that named it still
+readable with character_id set to null.
+
+**A PLAYER CANNOT PICK UP LOOT, and that is now worth knowing.** The
+`objects: holder or dm` policies reach a campaign either through
+`is_game_dm` or through the holder's owner_uid - and an unheld object
+has no holder, so only the DM can touch one. That was invisible while
+unheld objects barely existed; 030 makes them ordinary. Nothing here
+changed a policy, because widening access control is a decision rather
+than a consequence. `take_object` is DM-only until it is made otherwise.
 
 **Unheld still means nowhere.** A dropped object has no location,
 because Locations is a stub - no room, no floor, no container. It is

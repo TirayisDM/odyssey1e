@@ -1541,6 +1541,11 @@ function objectRow(o) {
     head.append(t);
   }
 
+  // ON THE ROW, not only in the detail. How full a bag is is the thing
+  // you want to know while scanning a list of them, and opening each
+  // one to find out defeats the list.
+  if (o.is_container) head.append(gauge(o.used_slots || 0, o.capacity_slots));
+
   const detail = panel("detail");
   const editor = panel("editor");
   const mover = panel("mover");
@@ -1621,6 +1626,60 @@ function poundsOf(weight, quantity) {
   return (Math.round(total * 100) / 100).toString();
 }
 
+// How full a container is, as a bar and a number.
+//
+// THE NUMBERS COME FROM RUST and are the ones the refusal is computed
+// from - holders.rs sums the contents with containers::slot_total, the
+// same function `fits` uses. A gauge that did its own arithmetic would
+// be a gauge that reads half empty while the container says no.
+//
+// NO CAPACITY RECORDED IS SAID, NOT DRAWN. 032 decided an absent
+// capacity is an unfinished catalogue row rather than a bottomless bag,
+// and an empty bar would show it as roomy - the opposite of the truth,
+// since that container currently refuses everything.
+function gauge(used, capacity) {
+  const wrap = document.createElement("span");
+  wrap.className = "gauge-wrap";
+
+  if (capacity == null) {
+    const t = document.createElement("span");
+    t.className = "tag warn";
+    t.textContent = "no capacity recorded";
+    wrap.append(t);
+    return wrap;
+  }
+
+  const pct = capacity > 0 ? (used / capacity) * 100 : 100;
+  const bar = document.createElement("span");
+  bar.className = "gauge";
+  const fill = document.createElement("span");
+  fill.className = "gauge-fill";
+  // Clamped, because a bar wider than its track is a layout bug rather
+  // than information. The NUMBERS below are not clamped, so an
+  // overfull container - possible for rows that predate the check -
+  // still says so.
+  fill.style.width = Math.min(100, Math.max(0, pct)) + "%";
+  if (pct > 100) fill.classList.add("over");
+  else if (pct >= 90) fill.classList.add("full");
+  bar.append(fill);
+
+  const label = document.createElement("span");
+  label.className = "gauge-text";
+  // Rounded for reading, not for arithmetic. A purse of coins lands on
+  // 4.8 rather than 5 and should not print as "4.800000000000001".
+  label.textContent =
+    trim(used) + "/" + trim(capacity) + " \u00b7 " + Math.round(pct) + "%";
+
+  wrap.append(bar, label);
+  return wrap;
+}
+
+// Drop a trailing .0 so whole slots read as whole numbers.
+function trim(n) {
+  const r = Math.round(n * 100) / 100;
+  return String(r);
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -1689,9 +1748,6 @@ async function fillDetail(el, o) {
     if (item && item.accepts && item.accepts.length) {
       facts.push(["takes only", item.accepts.join(", ")]);
     }
-    if (item && item.capacity_slots != null) {
-      facts.push(["room", item.capacity_slots + " slots"]);
-    }
   }
   if (item && item.properties && item.properties.length) {
     facts.push(["properties", item.properties.join(", ")]);
@@ -1707,6 +1763,19 @@ async function fillDetail(el, o) {
     const b = document.createElement("span");
     b.textContent = v;
     line.append(a, b);
+    el.append(line);
+  }
+
+  // The gauge rather than the bare capacity: "30 slots" never said how
+  // many of them were left, which is the only part anybody was asking.
+  // Built after the facts loop because it is an element, not a string.
+  if (o.is_container) {
+    const line = document.createElement("div");
+    line.className = "fact";
+    const k = document.createElement("span");
+    k.className = "muted";
+    k.textContent = "room";
+    line.append(k, gauge(o.used_slots || 0, o.capacity_slots));
     el.append(line);
   }
 
@@ -1898,9 +1967,17 @@ function fillMover(el, o) {
     // Say what it will take, because that is what the refusal will be
     // about: a purse that holds Tiny things is worth knowing before
     // the click rather than after it.
+    // Say what it takes AND how much room is left, because those are
+    // the two things the refusal will be about.
+    const room =
+      c.capacity_slots == null
+        ? "no capacity recorded"
+        : trim(Math.max(0, c.capacity_slots - (c.used_slots || 0))) + " free";
     opt.textContent =
       (c.name || c.item_key) +
-      (c.holds_size ? " (holds " + sizeWord(c.holds_size) + ")" : "");
+      " \u2014 " +
+      (c.holds_size ? "holds " + sizeWord(c.holds_size) + ", " : "") +
+      room;
     into.append(opt);
   }
   into.disabled = !reachable.length;

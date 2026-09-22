@@ -67,12 +67,21 @@ pub struct Obj {
 
 /// What the CATALOGUE says about a key. The half of an object that is
 /// true of every one of them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// NOT Eq, because slots is an f64 and a float has no total equality.
+// PartialEq is what the tests compare with and is honest about it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Kind {
     pub key: String,
     pub size: String,
     pub holds_size: Option<String>,
     pub weight: Option<String>,
+    /// How much room one of these takes up inside something. Fractional
+    /// on purpose - a coin is 0.2 of a slot, so a 5-slot purse holds 25.
+    pub slots: f64,
+    /// How much room it HAS, when it is a container. None is an
+    /// unfinished catalogue row rather than "bottomless", which is 032's
+    /// decision and the opposite of what None means for `holds_size`.
+    pub capacity_slots: Option<f64>,
 }
 
 /// Something that can hold: a character, a container or a place.
@@ -87,7 +96,8 @@ pub struct Holder {
 }
 
 /// An object with its holder said out loud.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// Not Eq: see Kind. Slot fills are floats because a coin is 0.2.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Located {
     pub id: String,
     pub item_key: String,
@@ -126,6 +136,19 @@ pub struct Located {
     pub reach: String,
     /// The same root in words, for saying so.
     pub reach_name: String,
+    /// Containers only: how much room is in use, by the SAME
+    /// arithmetic that refuses the next thing - containers::slot_total.
+    /// A gauge computed any other way is a gauge that reads half empty
+    /// while the container says no.
+    ///
+    /// Direct contents only, which is what `fits` counts too: a purse
+    /// inside a pack costs the pack the purse's own slots, not the
+    /// slots of what is in the purse.
+    pub used_slots: Option<f64>,
+    /// Containers only: how much room there is. None IS A FAULT rather
+    /// than "infinite" - see Kind - and the screen says so instead of
+    /// drawing an empty gauge.
+    pub capacity_slots: Option<f64>,
 }
 
 /// Where a thing ultimately is, once every container between it and
@@ -241,6 +264,36 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
             // purse in a pack - cheaper than the round trip that asking
             // the database per link would cost.
             let root = root_of(o.holder_id.as_deref(), objects, &index);
+
+            // HOW FULL, when this is a container. Its direct contents
+            // are the objects whose holder is its own entity.
+            let (used, capacity) = match o.entity_id.as_deref() {
+                None => (None, None),
+                Some(mine) => {
+                    let inside: Vec<(f64, i64)> = objects
+                        .iter()
+                        .filter(|x| x.holder_id.as_deref() == Some(mine))
+                        .map(|x| {
+                            (
+                                types
+                                    .iter()
+                                    .find(|t| t.key == x.item_key)
+                                    // A key nobody catalogued takes one
+                                    // slot, which is the column default.
+                                    // Zero would make an uncatalogued
+                                    // hoard look weightless.
+                                    .map(|t| t.slots)
+                                    .unwrap_or(1.0),
+                                x.quantity,
+                            )
+                        })
+                        .collect();
+                    (
+                        Some(crate::containers::slot_total(&inside)),
+                        t.and_then(|t| t.capacity_slots),
+                    )
+                }
+            };
             Located {
                 id: o.id.clone(),
                 item_key: o.item_key.clone(),
@@ -268,6 +321,8 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                 weight: t.and_then(|t| t.weight.clone()),
                 reach: root.token(),
                 reach_name: root.name().to_string(),
+                used_slots: used,
+                capacity_slots: capacity,
             }
         })
         .collect()
@@ -403,6 +458,14 @@ pub fn within_reach(
 
 /* ============================ LOADING ============================ */
 
+/// PostgREST sends `numeric` as a JSON STRING, not a number, so a plain
+/// `as_f64` returns None on every slot and capacity in the catalogue.
+/// The same trap containers::as_f64 exists for, and the same fix.
+fn num(v: Option<&serde_json::Value>) -> Option<f64> {
+    let v = v?;
+    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
 /// Every object in a game, everything that can hold one, and what the
 /// catalogue says about each key.
 ///
@@ -476,7 +539,7 @@ pub fn load_world(
         token,
         "items",
         &[
-            ("select", "key,game_id,size,holds_size,weight"),
+            ("select", "key,game_id,size,holds_size,weight,slots,capacity_slots"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             // This campaign's row first, so the de-duplication below
             // keeps the override - the same precedence
@@ -496,6 +559,12 @@ pub fn load_world(
             holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
             // numeric arrives as a string; see Located::weight.
             weight: r.get("weight").and_then(|v| v.as_str()).map(str::to_string),
+            // THESE TWO ARE PARSED, unlike weight, because they are
+            // summed and compared rather than printed. PostgREST sends
+            // numeric as a JSON string, so as_f64 alone returns None on
+            // every one of them - the trap containers::as_f64 documents.
+            slots: num(r.get("slots")).unwrap_or(1.0),
+            capacity_slots: num(r.get("capacity_slots")),
         });
     }
 
@@ -526,13 +595,19 @@ mod tests {
     /// key MISSING from it is a case worth keeping reachable, because
     /// an object whose type nobody catalogued is a real thing to render.
     fn catalogue() -> Vec<Kind> {
-        vec![
-            Kind { key: "dagger".into(), size: "tiny".into(), holds_size: None,
-                   weight: Some("1".into()) },
-            Kind { key: "greatsword".into(), size: "lg".into(), holds_size: None,
-                   weight: Some("6".into()) },
-            Kind { key: "chest".into(), size: "lg".into(),
-                   holds_size: Some("lg".into()), weight: Some("25".into()) },
+vec![
+            kind("dagger", "tiny", None, 1.0, None, Some("1")),
+            kind("greatsword", "lg", None, 2.0, None, Some("6")),
+            kind("chest", "lg", Some("lg"), 8.0, Some(30.0), Some("25")),
+            kind("backpack", "med", Some("med"), 1.0, Some(20.0), Some("5")),
+            // THE RATIO THE FRACTIONS EXIST FOR: a purse is 5 slots and
+            // holds 25 coins, so a coin is 0.2. Straight from 032.
+            kind("coin_purse", "tiny", Some("tiny"), 0.5, Some(5.0), Some("1")),
+            kind("coin_gp", "tiny", None, 0.2, None, Some("0.02")),
+            // Deliberately no capacity: an unfinished catalogue row is
+            // a real state and 032 calls it a fault rather than
+            // bottomless.
+            kind("priests_pack", "sm", Some("sm"), 1.0, None, Some("5")),
         ]
     }
 
@@ -742,6 +817,24 @@ mod tests {
         )
     }
 
+    fn kind(
+        key: &str,
+        size: &str,
+        holds: Option<&str>,
+        slots: f64,
+        capacity: Option<f64>,
+        weight: Option<&str>,
+    ) -> Kind {
+        Kind {
+            key: key.into(),
+            size: size.into(),
+            holds_size: holds.map(str::to_string),
+            weight: weight.map(str::to_string),
+            slots,
+            capacity_slots: capacity,
+        }
+    }
+
     fn root(id: &str) -> Root {
         let (objects, holders) = nested();
         let o = objects.iter().find(|o| o.id == id).unwrap().clone();
@@ -890,6 +983,92 @@ mod tests {
         // The chest is in the room, which is somewhere else entirely.
         assert_ne!(coin.reach, chest.reach);
         assert_eq!(chest.reach_name, "Frostvalley Inn");
+    }
+
+    /* ---------- how full, 032's arithmetic ---------- */
+
+    #[test]
+    fn a_container_reports_what_is_in_it() {
+        let (objects, holders) = nested();
+        let out = resolve(&objects, &holders, &catalogue());
+        let purse = out.iter().find(|o| o.id == "o-purse").unwrap();
+        // One coin at 0.2 of a slot, in a purse that holds 5.
+        assert_eq!(purse.used_slots, Some(0.2));
+        assert_eq!(purse.capacity_slots, Some(5.0));
+    }
+
+    // DIRECT CONTENTS ONLY, which is what `fits` counts. The pack holds
+    // the PURSE - half a slot - and not the coin inside it.
+    #[test]
+    fn a_nested_container_costs_its_own_slots_not_its_contents() {
+        let (objects, holders) = nested();
+        let out = resolve(&objects, &holders, &catalogue());
+        let pack = out.iter().find(|o| o.id == "o-pack").unwrap();
+        assert_eq!(pack.used_slots, Some(0.5));
+    }
+
+    #[test]
+    fn a_thing_that_is_not_a_container_has_no_gauge() {
+        let (objects, holders) = nested();
+        let out = resolve(&objects, &holders, &catalogue());
+        let coin = out.iter().find(|o| o.id == "o-coin").unwrap();
+        assert_eq!(coin.used_slots, None);
+        assert_eq!(coin.capacity_slots, None);
+    }
+
+    // An empty container is 0 of something, not None. The difference
+    // matters: None means "not a container", and a screen that read
+    // them the same would draw no gauge on an empty chest.
+    #[test]
+    fn an_empty_container_is_zero_rather_than_nothing() {
+        let (objects, holders) = nested();
+        let out = resolve(&objects, &holders, &catalogue());
+        let chest = out.iter().find(|o| o.id == "o-chest").unwrap();
+        assert_eq!(chest.used_slots, Some(0.0));
+        assert_eq!(chest.capacity_slots, Some(30.0));
+    }
+
+    // 032's unfinished row survives to the screen as a capacity of
+    // None, so it can be SAID rather than drawn as an empty bar.
+    #[test]
+    fn a_container_with_no_capacity_recorded_says_nothing_not_zero() {
+        let mut pack = obj("o-p", "priests_pack", None);
+        pack.entity_id = Some("e-p".into());
+        let out = resolve(&[pack], &[], &catalogue());
+        assert_eq!(out[0].used_slots, Some(0.0));
+        assert_eq!(out[0].capacity_slots, None);
+    }
+
+    // THE GAUGE AND THE REFUSAL AGREE. Twenty-five coins fill a purse
+    // exactly, and 0.2 does not survive binary floating point - ten of
+    // them sum to 1.9999999999999998. Whatever the sum is, it is the
+    // one `fits` compares against, because both go through slot_total.
+    #[test]
+    fn the_gauge_uses_the_same_sum_the_refusal_does() {
+        let mut purse = obj("o-purse", "coin_purse", None);
+        purse.entity_id = Some("e-purse".into());
+        let mut coins = obj("o-coins", "coin_gp", Some("e-purse"));
+        coins.quantity = 25;
+
+        let out = resolve(&[purse, coins], &[], &catalogue());
+        let used = out[0].used_slots.unwrap();
+        let direct = crate::containers::slot_total(&[(0.2, 25)]);
+        assert_eq!(used, direct);
+        // Full to the brim, within the hundredth-of-a-slot tolerance
+        // `fits` uses for exactly this reason.
+        assert!((used - 5.0).abs() < 0.005, "{}", used);
+    }
+
+    // A key nobody catalogued takes one slot - the column default -
+    // rather than nothing, or an uncatalogued hoard would look
+    // weightless in a full chest.
+    #[test]
+    fn an_uncatalogued_thing_still_takes_room() {
+        let mut chest = obj("o-chest", "chest", None);
+        chest.entity_id = Some("e-chest".into());
+        let odd = obj("o-odd", "whatsit", Some("e-chest"));
+        let out = resolve(&[chest, odd], &[], &catalogue());
+        assert_eq!(out[0].used_slots, Some(1.0));
     }
 
 }

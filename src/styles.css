@@ -125,6 +125,17 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .detail .sub{margin-top:.5rem}
 .detail .list{margin-bottom:0}
 .fact{display:flex;justify-content:space-between;gap:1rem;font-size:12px;padding:.1rem 0}
+/* How full a container is. A bar for the glance and a number for the
+   answer - the bar alone cannot say 4.8 of 5, and the number alone is
+   not readable down a list of thirty. */
+.gauge-wrap{display:inline-flex;align-items:center;gap:.35rem;flex:0 0 auto}
+.gauge{display:inline-block;width:46px;height:6px;border-radius:3px;
+       background:#20242b;border:1px solid var(--line);overflow:hidden}
+.gauge-fill{display:block;height:100%;background:var(--accent)}
+.gauge-fill.full{background:#e0b341}
+.gauge-fill.over{background:var(--bad)}
+.gauge-text{font-size:10px;color:var(--muted);white-space:nowrap}
+.tag.warn{color:#e0b341;border-color:#e0b341}
 .editor .row,.mover .row{margin-bottom:.35rem}
 .editor .row:last-child,.mover .row:last-child{margin-bottom:0}
 .editor input{margin-bottom:0}

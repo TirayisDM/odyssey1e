@@ -135,10 +135,20 @@ pub fn admits_size(profile: &Profile, incoming: &Bulk, container_name: &str) -> 
 
 /// How much room is in use, given everything already inside.
 pub fn used_slots(contents: &[(Bulk, i64)]) -> f64 {
-    contents
-        .iter()
-        .map(|(b, qty)| b.slots * (*qty as f64))
-        .sum()
+    let pairs: Vec<(f64, i64)> = contents.iter().map(|(b, q)| (b.slots, *q)).collect();
+    slot_total(&pairs)
+}
+
+/// The sum itself, without needing a `Bulk` to hold it.
+///
+/// SPLIT OUT SO THERE IS ONLY ONE OF IT. holders.rs works out how full
+/// every container is for the manager screen, and it has sizes and
+/// slots but no content tags - so it cannot build a `Bulk` without
+/// inventing one. The alternative was a second sum written beside a
+/// display, which is a gauge that reads half empty while the container
+/// refuses the next thing.
+pub fn slot_total(contents: &[(f64, i64)]) -> f64 {
+    contents.iter().map(|(slots, qty)| slots * (*qty as f64)).sum()
 }
 
 /// Whether that many more will fit.

@@ -482,6 +482,78 @@ ever disagrees.
 
 ## Architecture decisions that should hold
 
+**EIGHT LIBRARIES. THE FRAMEWORK, NOT A COMPRESSION.**
+
+Not three tables that everything squeezes into - three primary
+libraries for the nouns of the game world, plus five more for the
+things that are different in kind, each with its own family of tables
+underneath. It answers "where does this go?" before the question turns
+into an argument.
+
+    Game         games, game_members, profiles
+    Characters   characters, character_abilities, character_skills,
+                 character_items, character_dice, npcs, encounter_actors
+    Objects      items, npc_items, dice_sets, dice_faces
+    Locations    encounters, encounter_challenges
+    Rules        skills, techniques, spells
+    Resources    narrative_lines, skill_prompts
+    Ledger       rolls, hp_events, actions
+    Actions      - empty -
+
+RESOURCES MEANS ASSETS: prose, art, portraits, prompts. Not
+expendables. Hit points and charges are mechanics and live with the
+things that have them.
+
+THE EMPTY AND THIN SHELVES ARE THE ROADMAP, which is the part worth
+having. Actions is empty because `actions` is a LEDGER row - a swing
+that happened, owning its rolls - and no action economy exists: no
+action, bonus, reaction or movement, because none of that can exist
+before turns do. Locations is thin because `encounters` is standing in
+for place; there is no room, no map, no floor to drop a sword on. And
+Objects has a template with no instance, which is the gap below.
+
+ONE SHAPE CUTS ACROSS ALL OF THEM and is not a library: nullable
+`game_id` with two partial unique indexes - a global row and a campaign
+override sharing a key. items, npcs, skills, narrative_lines,
+dice_sets, spells and techniques all use it. It is a TENANCY pattern,
+and filing it as a place in the taxonomy would be a mistake.
+
+**COMPONENTS FOR SHARED MECHANICS. DECIDED, NOT YET EARNED.**
+
+A goblin, a door and an inn all have hit points, and it is the same
+mechanic each time - a number that goes down. The right shape is a
+component table joining whatever has one, rather than six HP columns
+copied onto every table that might be damageable.
+
+THE VERSION THAT FAILS HERE is a polymorphic owner: `owner_id` plus
+`owner_kind`, or nullable character_id/object_id under an XOR check.
+That shape has been built twice in this schema and removed twice in one
+week - hp_events lost its XOR in 023, encounter_actors lost its in 022 -
+because it branches at every read and cannot carry a foreign key.
+
+THE VERSION THAT WORKS needs a real id space, which is the second beam
+the truss spans between:
+
+    entities(id, kind, game_id)
+    characters.entity_id -> entities     a real FK
+    objects.entity_id    -> entities     a real FK
+    locations.entity_id  -> entities     a real FK
+    hit_points(entity_id -> entities, ...)
+    ammunition(entity_id -> entities, ...)
+
+AC IS NOT ONE OF THESE, and it is the warning case. A character's AC is
+COMPUTED from what they wear; a door's is STATED. That is two
+derivations, not one mechanic with two owners, and 022 already settled
+it with ac_mode flat/default.
+
+WHAT EARNS THE BUILD is the first damageable object. Today only
+characters have hit points, so the truss would span a gap with nothing
+on the far side, at the cost of migrating HP and the death counters off
+`characters` - the hottest table in the schema, read on every roll.
+`characters` is 26 columns and carrying HP, death saves, exhaustion,
+inspiration, size and both proficiency arrays, so it is the table most
+likely to want this first. Queued behind a need, not dismissed.
+
 **ONE STRUCTURE FOR CHARACTERS AND NPCS. LARGELY BUILT, 022-024.**
 Separate, lighter rules for monsters were fine for basic D&D. Giving an
 NPC real depth is easier if it simply follows the structure a character

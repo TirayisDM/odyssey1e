@@ -153,6 +153,33 @@
           </div>
           <button id="create-npc" class="ghost">Write statblock</button>
         </div>
+
+        <!-- The world. Depth is the whole hierarchy: a universe and a
+             broom cupboard are the same kind of row, and the indent is
+             computed rather than stored. -->
+        <div class="sub">World</div>
+        <div class="row">
+          <input id="loc-name" placeholder="place name, e.g. Frostvalley Inn" />
+          <select id="loc-kind">
+            <option value="structure">structure</option>
+            <option value="outdoors">outdoors</option>
+            <option value="underground">underground</option>
+            <option value="aquatic">aquatic</option>
+            <option value="aerial">aerial</option>
+            <option value="vehicle">vehicle</option>
+          </select>
+        </div>
+        <div class="row">
+          <select id="loc-parent"></select>
+          <button id="create-location" class="ghost">Add place</button>
+        </div>
+        <ul id="locations" class="list"></ul>
+        <!-- Things dropped before there was anywhere to drop them. This
+             should empty out and then it can go. -->
+        <div id="loose-wrap" hidden>
+          <div class="sub">Lying nowhere</div>
+          <ul id="loose" class="list"></ul>
+        </div>
       </section>
 
       <section>

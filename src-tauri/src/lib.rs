@@ -28,6 +28,7 @@ mod death;
 mod dice;
 mod encounter;
 mod equipment;
+mod locations;
 mod narrative;
 mod objects;
 mod pin;
@@ -1070,6 +1071,15 @@ pub fn run() {
             commands::inventory::take_object,
             commands::inventory::rename_object,
             commands::inventory::destroy_object,
+            commands::locations::list_locations,
+            commands::locations::create_location,
+            commands::locations::rename_location,
+            commands::locations::move_location,
+            commands::locations::delete_location,
+            commands::locations::location_contents,
+            commands::locations::drop_here,
+            commands::locations::loose_objects,
+            commands::locations::place_object,
             commands::dm::list_npcs,
             commands::dm::create_npc,
             commands::dm::create_encounter,

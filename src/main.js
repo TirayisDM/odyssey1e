@@ -327,7 +327,21 @@ async function selectGame(id) {
   await loadCharacters();
   await loadRolls();
   await loadTargets();
+  // BEFORE loadDM, and outside it. The places are member-readable by
+  // 033's policy, and a player dropping a torch needs somewhere to drop
+  // it as much as the DM does. Loading them only inside the DM panel
+  // would leave every player's drop offering nothing but "nowhere",
+  // which is the leak this fixes rather than a cosmetic gap.
+  await loadPlaces();
   await loadDM();
+}
+
+// The places, for anybody. loadWorld paints the DM's editor on top of
+// the same list; this is the half a player needs.
+async function loadPlaces() {
+  state.locations = [];
+  if (!state.gameId) return;
+  state.locations = (await call("list_locations", { gameId: state.gameId })) || [];
 }
 
 // The active encounter's actors and challenges, as things to aim at.
@@ -698,13 +712,34 @@ function objectControls(it, onDone) {
   qty.className = "narrow";
   qty.hidden = it.quantity <= 1;
 
+  // WHERE IT GOES, not just that it goes.
+  //
+  // Dropping used to mean holder_id NULL, because until 033 there was
+  // nowhere for a dropped thing to be. The cost was invisible until a
+  // handaxe sat unheld for a day with nothing able to render it: an
+  // object nobody holds and no place contains is not in the world, it
+  // is only in the table.
+  //
+  // Blank still means nowhere. It is a real answer - the DM has not
+  // built the room yet - but it is now a CHOICE rather than the only
+  // outcome, and the lost-and-found in the World panel is where those
+  // end up rather than nothing at all.
+  const where = document.createElement("select");
+  where.className = "wheretodrop";
+  fillPlaces(where, "— nowhere —");
+
   const dropBtn = document.createElement("button");
   dropBtn.className = "tiny ghost";
   dropBtn.textContent = "drop";
-  dropBtn.title = "stays in the campaign, held by nobody";
+  dropBtn.title = "put it down — pick a place, or nowhere";
   dropBtn.addEventListener("click", async () => {
     const n = it.quantity > 1 ? Number(qty.value) : null;
-    await call("drop_object", { objectId: it.id, quantity: n });
+    // Two commands because they are two events: drop_here puts it in a
+    // place, drop_object lets it go. Both split the same way.
+    const r = where.value
+      ? await tryCall("drop_here", { objectId: it.id, locationId: where.value, quantity: n })
+      : await tryCall("drop_object", { objectId: it.id, quantity: n });
+    if (!r.ok) log("drop", r.error, true);
     await onDone();
   });
 
@@ -719,7 +754,7 @@ function objectControls(it, onDone) {
     await onDone();
   });
 
-  wrap.append(nameBox, nameBtn, qty, dropBtn, killBtn);
+  wrap.append(nameBox, nameBtn, qty, where, dropBtn, killBtn);
 
   // Into a container. Only rendered when there is one to choose, so an
   // inventory with no bags looks exactly as it did before 032.
@@ -971,6 +1006,148 @@ function dmSay(text, isError) {
   el.hidden = !text;
 }
 
+// The world, as a tree the DM can build.
+//
+// DEPTH IS THE WHOLE HIERARCHY. 033 stores parent_id and nothing else -
+// no level, no path - and locations.rs works both out on the Rust side,
+// so the indent here is a rendering of a derived number rather than a
+// column anybody has to keep true. The original materialised both and
+// its own data disagrees with its own convention.
+//
+// Selecting a place shows what is lying in it. That is one step, not a
+// search: a chest in the room holds its own contents, and "what is on
+// the floor" is a different question from "what is in this building
+// somewhere".
+async function loadWorld() {
+  const ul = document.querySelector("#locations");
+  const parent = document.querySelector("#loc-parent");
+  ul.innerHTML = "";
+  state.locations = [];
+  parent.innerHTML = '<option value="">— top of the world —</option>';
+  if (!state.gameId) return;
+
+  const places = await call("list_locations", { gameId: state.gameId });
+  state.locations = places || [];
+
+  for (const l of state.locations) {
+    // Two spaces a level. The list is already depth-first, so an indent
+    // is all it takes to read as a tree.
+    const indent = "\u00a0\u00a0".repeat(l.depth);
+    const li = row(indent + l.name, l.kind, () => selectPlace(l.id), l.id === state.placeId);
+
+    const del = document.createElement("button");
+    del.className = "tiny ghost";
+    del.textContent = "remove";
+    del.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      // 033 makes parent_id RESTRICT, so a place with somewhere inside
+      // it refuses to go. The command turns that into a sentence.
+      const r = await call("delete_location", { locationId: l.id });
+      if (r !== null) {
+        if (state.placeId === l.id) state.placeId = null;
+        dmSay("removed " + l.name);
+        await loadWorld();
+      } else {
+        dmSay("could not remove " + l.name + " — is something inside it?", true);
+      }
+    });
+    li.append(del);
+    ul.append(li);
+
+    const o = document.createElement("option");
+    o.value = l.id;
+    o.textContent = "\u00a0\u00a0".repeat(l.depth) + l.name;
+    parent.append(o);
+  }
+
+  await loadLoose();
+}
+
+// Fill a select with every place, indented by depth.
+//
+// One function because three controls want the same list - the parent of
+// a new place, where an encounter happens, and where a thing is put
+// down - and three copies would drift.
+function fillPlaces(sel, blankLabel) {
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = blankLabel;
+  sel.append(none);
+  for (const l of state.locations || []) {
+    const o = document.createElement("option");
+    o.value = l.id;
+    o.textContent = "\u00a0\u00a0".repeat(l.depth) + l.name;
+    sel.append(o);
+  }
+  if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+// Things dropped before there was anywhere to drop them.
+//
+// A lost and found rather than a feature: 026 and 032 both accepted that
+// unheld meant nowhere, which was right and still left a handaxe
+// invisible for a day. Once drop_here is the only way to put something
+// down this list stays empty, and then it can go.
+async function loadLoose() {
+  const wrap = document.querySelector("#loose-wrap");
+  const ul = document.querySelector("#loose");
+  ul.innerHTML = "";
+  const loose = await call("loose_objects", { gameId: state.gameId });
+  if (!loose || !loose.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+
+  for (const o of loose) {
+    const li = document.createElement("li");
+    li.className = "flat item";
+    const head = document.createElement("div");
+    head.className = "head";
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
+    head.append(nm);
+
+    const where = document.createElement("select");
+    fillPlaces(where, "— pick a place —");
+    const put = document.createElement("button");
+    put.className = "tiny ghost";
+    put.textContent = "put here";
+    put.addEventListener("click", async () => {
+      if (!where.value) return dmSay("pick somewhere to put it", true);
+      // take_object then drop_here would be two writes and a moment
+      // where nobody holds it. This moves it in one.
+      const r = await tryCall("place_object", {
+        objectId: o.id,
+        locationId: where.value,
+      });
+      dmSay(r.ok ? "put away" : r.error, !r.ok);
+      await loadWorld();
+    });
+    head.append(where, put);
+    li.append(head);
+    ul.append(li);
+  }
+}
+
+// What is lying in a place, shown under the list.
+async function selectPlace(id) {
+  state.placeId = id;
+  await loadWorld();
+  const here = (state.locations || []).find((l) => l.id === id);
+  const contents = await call("location_contents", { locationId: id });
+  if (!here) return;
+  if (!contents || !contents.length) {
+    dmSay(here.path.join(" > ") + " — nothing lying here");
+    return;
+  }
+  const what = contents
+    .map((c) => (c.name || c.item_key) + (c.quantity > 1 ? " x" + c.quantity : ""))
+    .join(", ");
+  dmSay(here.path.join(" > ") + " — " + what);
+}
+
 // Everything an encounter needs was authored in SQL until now. The
 // policies have been in place since 011; this is the screen that was
 // missing.
@@ -987,6 +1164,8 @@ async function loadDM() {
   }
   panel.hidden = false;
   document.querySelector("#dm-who").textContent = "you run this game";
+
+  await loadWorld();
 
   const encounters = await call("list_encounters", { gameId: state.gameId });
   // Kept so selectEncounter can say WHICH encounter is being edited
@@ -1005,8 +1184,7 @@ async function loadDM() {
     const next = e.status === "draft" ? "active" : e.status === "active" ? "ended" : "draft";
     const b = document.createElement("button");
     b.className = "tiny ghost";
-    b.textContent = "→ " + next;
-    b.addEventListener("click", async (ev) => {
+    b.textContent = "→ " + next;    b.addEventListener("click", async (ev) => {
       ev.stopPropagation();
       dmSay("");
       const r = await tryCall("set_encounter_status", {
@@ -1876,6 +2054,28 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     await selectEncounter(state.dmEncounterId);
     await loadTargets();
+  });
+
+  guarded("#create-location", async () => {
+    if (!state.gameId) return log("create_location", "select a game first", true);
+    dmSay("");
+    const r = await tryCall("create_location", {
+      gameId: state.gameId,
+      name: val("#loc-name"),
+      kind: document.querySelector("#loc-kind").value,
+      // Blank is the top of the world, not a missing answer.
+      parentId: document.querySelector("#loc-parent").value || null,
+      description: null,
+    });
+    if (r.ok) {
+      document.querySelector("#loc-name").value = "";
+      await loadWorld();
+      dmSay("added");
+    } else {
+      // A cycle and a cross-game parent are both refused by 033's
+      // triggers, and both arrive here as the sentence they raised.
+      dmSay(r.error, true);
+    }
   });
 
   guarded("#create-npc", async () => {

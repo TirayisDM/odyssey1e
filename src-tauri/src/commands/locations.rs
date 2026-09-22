@@ -1,0 +1,351 @@
+//! Places: making them, moving them, and seeing what is lying in them.
+//!
+//! 033 built the schema and nothing could reach it - the same gap dm.rs
+//! closed for encounters. This is the reaching.
+//!
+//! DM-ONLY, AND NOT BECAUSE THIS MODULE SAYS SO. 033 wrote
+//! `is_game_dm` into the write policies on `locations`; a player calling
+//! any of the writes gets refused by Postgres. Nothing is re-checked
+//! here, for the reason dm.rs gives: a second copy of an access rule is
+//! a second place for it to be wrong. Reading is different - members
+//! read, because the players have to see where they are.
+//!
+//! THE ONE EXCEPTION IS `drop_here`, and it belongs to everybody. A
+//! player putting something down in the room they are standing in is
+//! not an act of world-building, and 033's objects policy already says
+//! a loose thing is anyone's to move.
+//!
+//! Thin, per commands/mod.rs. The one derivation in reach - depth and
+//! path - is in `src/locations.rs` where it can be tested, and this file
+//! only asks for it.
+
+use serde_json::{json, Value};
+use tauri::State;
+
+use crate::locations::{self, Place, Placed};
+use crate::objects;
+use crate::supabase::{self, AppState};
+
+/// Turn a policy refusal into a sentence. Same helper as dm.rs, same
+/// reason: PostgREST answers an RLS denial with a body no DM would
+/// recognise.
+fn denied(e: String, what: &str) -> String {
+    if e.contains("(401)") || e.contains("(403)") || e.contains("42501") {
+        format!("only the DM of this game can {} — you are signed in as a player", what)
+    } else {
+        e
+    }
+}
+
+/// Blank is not a parent. An untouched select sends "", and "" is not a
+/// uuid - it means top of the world.
+fn id_or_null(v: Option<String>) -> Value {
+    match v.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => json!(s),
+        None => Value::Null,
+    }
+}
+
+/// Every place in the game, in depth-first order with its depth and the
+/// road to it.
+///
+/// The rows come back flat - 033 stores `parent_id` and nothing else -
+/// and `locations::arrange` works out the shape. A player sees what the
+/// policy lets them see, and a room whose parent is not in that set
+/// comes back as a root rather than being dropped.
+#[tauri::command]
+pub fn list_locations(state: State<AppState>, game_id: String) -> Result<Vec<Placed>, String> {
+    let token = state.token()?;
+    let rows = supabase::rest_get(
+        &token,
+        "locations",
+        &[
+            ("select", "id,parent_id,name,kind,description"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("order", "name.asc"),
+        ],
+    )?;
+
+    let places: Vec<Place> = serde_json::from_value(rows)
+        .map_err(|e| format!("could not read the locations: {}", e))?;
+    Ok(locations::arrange(&places))
+}
+
+/// Make a place. A blank parent means the top of its own tree.
+///
+/// Nothing here checks the parent: 033's trigger refuses a cycle and a
+/// parent in another game, and both refusals arrive as sentences.
+#[tauri::command]
+pub fn create_location(
+    state: State<AppState>,
+    game_id: String,
+    name: String,
+    kind: String,
+    parent_id: Option<String>,
+    description: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    if name.trim().is_empty() {
+        return Err("a place needs a name".to_string());
+    }
+    supabase::rest_insert(
+        &token,
+        "locations",
+        &json!({
+            "game_id": game_id,
+            "name": name.trim(),
+            "kind": kind,
+            "parent_id": id_or_null(parent_id),
+            "description": description,
+        }),
+    )
+    .map_err(|e| denied(e, "build the world"))
+}
+
+/// Rename a place, or rewrite its description.
+#[tauri::command]
+pub fn rename_location(
+    state: State<AppState>,
+    location_id: String,
+    name: String,
+    description: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    if name.trim().is_empty() {
+        return Err("a place needs a name".to_string());
+    }
+    supabase::rest_update(
+        &token,
+        "locations",
+        &[("id", &format!("eq.{}", location_id))],
+        &json!({ "name": name.trim(), "description": description }),
+    )
+    .map_err(|e| denied(e, "rename a place"))
+}
+
+/// Move a place under a different parent, or out to the top.
+///
+/// THE CYCLE CHECK IS NOT HERE. `no_location_cycles` is a trigger, so
+/// putting the Inn inside its own cupboard is refused by Postgres with a
+/// sentence. Checking it here as well would be the second copy dm.rs
+/// warns about, and this is the one that cannot be bypassed.
+#[tauri::command]
+pub fn move_location(
+    state: State<AppState>,
+    location_id: String,
+    parent_id: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "locations",
+        &[("id", &format!("eq.{}", location_id))],
+        &json!({ "parent_id": id_or_null(parent_id) }),
+    )
+    .map_err(|e| denied(e, "move a place"))
+}
+
+/// Remove a place.
+///
+/// 033 makes `parent_id` ON DELETE RESTRICT, so a place that still
+/// contains one refuses to go - empty it first. What is LYING in it is a
+/// different matter: deleting the room takes its entity with it and
+/// everything resting on the floor SET NULLs back to nowhere, the same
+/// way destroying a chest spills it.
+#[tauri::command]
+pub fn delete_location(state: State<AppState>, location_id: String) -> Result<(), String> {
+    let token = state.token()?;
+    supabase::rest_delete(&token, "locations", &[("id", &format!("eq.{}", location_id))])
+        .map(|_| ())
+        .map_err(|e| {
+            if e.contains("23503") || e.to_lowercase().contains("foreign key") {
+                "something is inside that place — empty it first".to_string()
+            } else {
+                denied(e, "remove a place")
+            }
+        })
+}
+
+/// What is lying in a place.
+///
+/// Objects whose holder IS this location - not what is inside a chest
+/// that is in the room, which belongs to the chest. One step, because
+/// "what can I see on the floor" is a different question from "what is
+/// in this building somewhere".
+#[tauri::command]
+pub fn location_contents(
+    state: State<AppState>,
+    location_id: String,
+) -> Result<Vec<objects::Stack>, String> {
+    let token = state.token()?;
+    let rows = supabase::rest_get(
+        &token,
+        "locations",
+        &[
+            ("select", "entity_id"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    let entity = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("entity_id"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "no such place, or it is not visible to you".to_string())?;
+
+    objects::load_held(&token, entity)
+}
+
+/// Everything in this game that is lying NOWHERE.
+///
+/// 026 and 032 both accepted that a dropped object has no location, on
+/// the grounds that the alternative was deleting what people let go of.
+/// They were right, and it left things genuinely lost: a handaxe
+/// dropped on the 21st sat in the table for a day with nothing able to
+/// render it, because nothing renders nowhere.
+///
+/// 033 gave dropping somewhere to go. This is the way back for the ones
+/// that went nowhere before it existed - a lost and found, not a
+/// feature. Once `drop_here` is the only way to put something down this
+/// should return nothing, and the day it does is the day it can go.
+#[tauri::command]
+pub fn loose_objects(
+    state: State<AppState>,
+    game_id: String,
+) -> Result<Vec<objects::Stack>, String> {
+    let token = state.token()?;
+    let rows = supabase::rest_get(
+        &token,
+        "objects",
+        &[
+            ("select", "id,name,item_key,quantity"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("holder_id", "is.null"),
+            ("order", "acquired_at.asc"),
+        ],
+    )?;
+    serde_json::from_value(rows).map_err(|e| format!("could not read what is lying about: {}", e))
+}
+
+/// Put a LOOSE thing into a place.
+///
+/// Not `drop_here`, which drops something out of a holder's hands and
+/// refuses an object nobody is holding. This one is for the other case:
+/// a thing that is already nowhere, being given somewhere to be.
+///
+/// The whole row moves, because there is nothing to split - a loose
+/// stack is not held by anyone to keep the remainder.
+#[tauri::command]
+pub fn place_object(
+    state: State<AppState>,
+    object_id: String,
+    location_id: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let obj = objects::load_object(&token, &object_id)?;
+    if obj.holder_id.is_some() {
+        return Err("somebody is holding that — drop it instead".to_string());
+    }
+    let here = location_entity(&token, &location_id)?;
+    supabase::rest_update(
+        &token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "holder_id": here }),
+    )
+}
+
+/// A location's entity - the thing `objects.holder_id` actually points
+/// at. Three commands ask for it, so it is asked once.
+fn location_entity(token: &str, location_id: &str) -> Result<String, String> {
+    let rows = supabase::rest_get(
+        token,
+        "locations",
+        &[
+            ("select", "entity_id"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    rows.as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("entity_id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "no such place, or it is not visible to you".to_string())
+}
+
+/// Put something down HERE rather than nowhere.
+///
+/// `drop_object` sets the holder to NULL because until 033 there was
+/// nowhere for a dropped thing to be. There is now, and this is the same
+/// event with a destination.
+///
+/// NOT DM-ONLY. A player putting a torch on the floor of the room they
+/// are standing in is not world-building, and 033's objects policy
+/// already lets a member move anything loose.
+///
+/// The split rule is `objects::split`, the same one `drop_object` uses:
+/// dropping three of seven rations leaves four held and puts three on
+/// the floor, because the seven were never seven objects.
+#[tauri::command]
+pub fn drop_here(
+    state: State<AppState>,
+    object_id: String,
+    location_id: String,
+    quantity: Option<i64>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "locations",
+        &[
+            ("select", "entity_id"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    let here = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("entity_id"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "no such place, or it is not visible to you".to_string())?
+        .to_string();
+
+    let obj = objects::load_object(&token, &object_id)?;
+    if obj.holder_id.is_none() {
+        return Err("nobody is holding that".to_string());
+    }
+    let (keep, moved) = objects::split(obj.quantity, quantity)?;
+
+    if keep == 0 {
+        // The whole row travels, name and charges with it - which is why
+        // it is moved rather than deleted and re-inserted.
+        return supabase::rest_update(
+            &token,
+            "objects",
+            &[("id", &format!("eq.{}", object_id))],
+            // equipped and attuned are cleared by 031's trigger, because
+            // a sword on the floor is not worn.
+            &json!({ "holder_id": here }),
+        );
+    }
+
+    supabase::rest_update(
+        &token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "quantity": keep }),
+    )?;
+
+    supabase::rest_insert(
+        &token,
+        "objects",
+        &json!({
+            "game_id": obj.game_id,
+            "holder_id": here,
+            "item_key": obj.item_key,
+            "quantity": moved,
+        }),
+    )
+}

@@ -370,7 +370,14 @@ fn list_inventory(
     let p = character::load_profile(&token, &character_id)?;
     equipment::load_loadout(
         &token,
-        &character_id,
+        // THE HOLDER, NOT THE CHARACTER. 031 moved objects onto
+        // entities and renamed this parameter from character_id to
+        // holder_id; this call kept passing the same variable, which
+        // still compiled because both are String. The query then asked
+        // for objects held by a character id, which nothing ever is, so
+        // every inventory came back empty - and a give that had worked
+        // looked like a give that had failed.
+        &p.entity_id,
         &p.game_id,
         &p.weapon_profs,
         &p.armor_profs,

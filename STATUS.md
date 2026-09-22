@@ -1007,6 +1007,66 @@ signed-in player's sheet - so rendering a goblin's axe with it would
 have offered Rodnar's Heavy Smash to the goblin. That is the shape of
 bug this project keeps finding: two layers that each look right alone.
 
+## Acquisition - SPECIFIED, rules built, plumbing not (acquire.rs)
+
+Dave's five options for how an object changes hands. They are FIVE
+NAMES FOR TWO MECHANISMS: one event - an object changes holder - gated
+either by a roll or by consent.
+
+    Take         contested   overt
+    Pick Pocket  contested   covert
+    Buy          consented   by price
+    Sell         consented   by price, reversed
+    Give         consented   by the owner
+
+`give_item` and `take_object` are already the transfer. Nothing in
+`acquire.rs` moves anything; it answers what happened and something
+else writes it down - the same division `attack.rs` and `swing` have.
+
+**THE TAKE RULE, settled 2026-09-22 and tested:**
+
+- A dead or unconscious holder gets nothing. No notice, no struggle.
+  Looting a body is not a contest.
+- Otherwise the holder rolls WISDOM TO NOTICE - and that save does NOT
+  stop the take. It only decides whether they see it happening. Miss it
+  and the object is simply gone.
+- Notice it and it becomes DEXTERITY AGAINST DEXTERITY. A tie leaves
+  the situation as it was, so the holder keeps it.
+
+Notice and success being separate questions is the whole point. Folding
+them into one roll would lose the case that makes the feature worth
+having: taking something cleanly from somebody who never knew.
+
+Pick Pocket is the thinner reading, marked as such in the file: one
+roll decides both, and being noticed ends it. No wrestling a purse out
+of a hand that has already closed on it.
+
+**WHAT IS NOT BUILT, and what each one is blocked on:**
+
+- **The plumbing for Take.** A player-initiated take cannot be a REST
+  write - the `objects` policies reach a campaign through `is_game_dm`
+  or the holder's owner_uid, and a player has no claim on someone
+  else's gear. It needs a SECURITY DEFINER function running the contest
+  and the transfer together, the shape `write_action` uses. That is the
+  next piece and nothing blocks it.
+- **Traps.** `Step::SpringsTrap` exists and nothing can ever return it,
+  because there is no trap subsystem - no table, no column. The step is
+  in the enum because the ORDER was specified and is worth not losing:
+  a trap on the body or the container answers before anyone notices
+  anything.
+- **Give to a LOCATION.** Give to a character works today. Locations is
+  still the stub 026 complained about, so there is nowhere to put a
+  thing down.
+- **Buy and Sell.** Not "rules to come later" - a subsystem first.
+  `items.price` and `denom` exist and nothing holds coins: no wallet on
+  `characters`, no currency anywhere.
+
+**One default I chose rather than was given:** the Wisdom save is
+against 10 + the taker's Dexterity modifier. The taker makes no roll to
+Take - that was the spec, and it is what separates a Take from a Pick
+Pocket - so the difficulty has to come from somewhere, and a DM-stated
+DC overrides it the way `add_challenge` states every other one.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

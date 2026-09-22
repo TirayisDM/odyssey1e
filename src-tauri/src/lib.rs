@@ -19,6 +19,7 @@
 //! What stays: `run()` and the `generate_handler!` list. One registry in
 //! the crate root is what you read to find out what the app can do.
 
+mod acquire;
 mod attack;
 mod character;
 mod commands;

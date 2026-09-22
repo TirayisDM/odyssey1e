@@ -43,6 +43,7 @@ pub fn put_in_container(
     state: State<AppState>,
     object_id: String,
     container_id: String,
+    quantity: Option<i64>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     if object_id == container_id {
@@ -118,11 +119,17 @@ pub fn put_in_container(
     // for and it gives the better sentence. Arithmetic about how much
     // room a greatsword needs in a coin purse answers a question nobody
     // asked.
+    // HOW MANY, decided before the room is checked, because the room
+    // needed is the room for what is ACTUALLY going in. Asking whether
+    // eighteen coins fit when one is being moved refuses a purse with
+    // plenty of space in it.
+    let (_, going) = objects::split(obj.quantity, quantity)?;
+
     containers::admits(&profile, &incoming, &name)?;
     containers::admits_size(&profile, &incoming, &name)?;
-    containers::fits(&profile, &contents, &incoming, obj.quantity, &name)?;
+    containers::fits(&profile, &contents, &incoming, going, &name)?;
 
-    move_into(&token, &obj, &object_id, &inside, Some(&into))
+    move_into(&token, &obj, &object_id, &inside, Some(&into), quantity)
 }
 
 /// Take something out of a container and into somebody's hands.
@@ -134,12 +141,17 @@ pub fn take_from_container(
     state: State<AppState>,
     object_id: String,
     character_id: String,
+    quantity: Option<i64>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
     let taker = crate::character::load_profile(&token, &character_id)?;
     let held = objects::load_held(&token, &taker.entity_id)?;
-    move_into(&token, &obj, &object_id, &held, Some(&taker.entity_id))
+    // NOTHING TO CHECK ON THE WAY OUT. A person is not a container with
+    // a capacity - encumbrance is a rule about what they can CARRY and
+    // it does not exist yet - so taking is only ever a split and a
+    // merge.
+    move_into(&token, &obj, &object_id, &held, Some(&taker.entity_id), quantity)
 }
 
 /// Move an object to a holder, merging into a stack already there.
@@ -147,39 +159,96 @@ pub fn take_from_container(
 /// The merge is the whole reason this is shared: ten gold into a purse
 /// holding five is fifteen in one row, not a second row the stack index
 /// would refuse anyway.
+/// Move a thing, or some of it, into a holder.
+///
+/// FOUR OUTCOMES, from two independent questions. Does all of it go, or
+/// only part? And is there already a stack at the destination for it to
+/// join?
+///
+///                      nothing to join          a stack to join
+///   all of it          the row changes hands    merge, and the row goes
+///   part of it         the source keeps the     merge, and the source
+///                      rest, a new row travels  keeps the rest
+///
+/// `quantity` of None means all of it, which is what moving a thing
+/// means. `objects::split` refuses zero and refuses more than there is,
+/// and says why.
+///
+/// A NAMED THING CANNOT BE SPLIT and needs no guard here: `may_name`
+/// refuses a name on a stack of more than one, so a named row is always
+/// a single thing and every split of it takes the whole.
 fn move_into(
     token: &str,
     obj: &objects::ObjectRow,
     object_id: &str,
     destination_contents: &[objects::Stack],
     holder: Option<&str>,
+    quantity: Option<i64>,
 ) -> Result<Value, String> {
-    if let Some(id) = objects::merge_into(
-        destination_contents,
-        &obj.item_key,
-        obj.name.as_deref(),
-    ) {
+    let (keep, moved) = objects::split(obj.quantity, quantity)?;
+    let target = objects::merge_into(destination_contents, &obj.item_key, obj.name.as_deref());
+
+    if keep == 0 {
+        if let Some(id) = target {
+            let have = destination_contents
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.quantity)
+                .unwrap_or(0);
+            let merged = supabase::rest_update(
+                token,
+                "objects",
+                &[("id", &format!("eq.{}", id))],
+                &json!({ "quantity": have + moved }),
+            )?;
+            // The row that moved is gone, because it was never a thing
+            // in its own right - the same reasoning `take_object` uses.
+            supabase::rest_delete(token, "objects", &[("id", &format!("eq.{}", object_id))])?;
+            return Ok(merged);
+        }
+        return supabase::rest_update(
+            token,
+            "objects",
+            &[("id", &format!("eq.{}", object_id))],
+            &json!({ "holder_id": holder }),
+        );
+    }
+
+    // Part of it. The source keeps the remainder whatever happens next.
+    supabase::rest_update(
+        token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "quantity": keep }),
+    )?;
+
+    if let Some(id) = target {
         let have = destination_contents
             .iter()
             .find(|s| s.id == id)
             .map(|s| s.quantity)
             .unwrap_or(0);
-        let merged = supabase::rest_update(
+        return supabase::rest_update(
             token,
             "objects",
             &[("id", &format!("eq.{}", id))],
-            &json!({ "quantity": have + obj.quantity }),
-        )?;
-        // The row that moved is gone, because it was never a thing in
-        // its own right - the same reasoning `take_object` uses.
-        supabase::rest_delete(token, "objects", &[("id", &format!("eq.{}", object_id))])?;
-        return Ok(merged);
+            &json!({ "quantity": have + moved }),
+        );
     }
 
-    supabase::rest_update(
+    supabase::rest_insert(
         token,
         "objects",
-        &[("id", &format!("eq.{}", object_id))],
-        &json!({ "holder_id": holder }),
+        &json!({
+            "game_id": obj.game_id,
+            "holder_id": holder,
+            "item_key": obj.item_key,
+            "quantity": moved,
+            // THE OVERRIDE TRAVELS WITH THE SPLIT. If a DM said this
+            // stack of coins is Large, the half that moves is still
+            // Large - dropping it here would lose an edit silently,
+            // which is the failure this codebase keeps meeting.
+            "size_override": obj.size_override,
+        }),
     )
 }

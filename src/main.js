@@ -1680,6 +1680,15 @@ function trim(n) {
   return String(r);
 }
 
+// "3 coin_gp" or "the Wool Blanket" - what actually left, so a partial
+// move reads as one.
+function moved(o, n) {
+  const what = o.name || o.item_key;
+  const all = n == null || n >= o.quantity;
+  if (all && o.quantity === 1) return what;
+  return (all ? o.quantity : n) + " " + what;
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -1910,6 +1919,49 @@ function fillEditor(el, o) {
 function fillMover(el, o) {
   el.innerHTML = "";
 
+  /* ---- how many ---- */
+
+  // ONE COUNT FOR ALL THREE DESTINATIONS. A thing goes to a place, into
+  // a container or out of one, and "how many" means the same in each,
+  // so it is asked once rather than three times.
+  //
+  // DEFAULTS TO ALL OF THEM, which is what moving a thing has always
+  // meant - objects::split reads None as the whole stack, and this
+  // control exists to say LESS than that. A default of 1 would make
+  // every ordinary move a two-step.
+  //
+  // Absent entirely for a single thing. A box that can only say "1" is
+  // a box asking a question with one answer.
+  let howMany = null;
+  if (o.quantity > 1) {
+    const line = document.createElement("div");
+    line.className = "row count";
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = "how many of " + o.quantity;
+    howMany = document.createElement("input");
+    howMany.type = "number";
+    howMany.min = "1";
+    howMany.max = String(o.quantity);
+    howMany.value = String(o.quantity);
+    howMany.className = "narrow";
+    line.append(label, howMany);
+    el.append(line);
+  }
+
+  // Null means all of it, which is what every one of these commands
+  // reads as "the whole stack". Out-of-range is NOT clamped here: the
+  // rule is objects::split, it says "only 18 to move, not 20" in words,
+  // and a second copy of it in the browser would be a second answer.
+  const count = () => {
+    if (!howMany || howMany.value === "") return null;
+    // NOT `|| null`. Zero is falsy, so that would turn "move 0" into
+    // "move all of it" - the loudest possible misreading of the
+    // quietest possible typo. A 0 goes through and objects::split
+    // refuses it by name: "moving none of something is not moving it".
+    return Number(howMany.value);
+  };
+
   /* ---- into a place ---- */
 
   const to = fillPlaces(document.createElement("select"), "\u2014 move to \u2014");
@@ -1923,8 +1975,9 @@ function fillMover(el, o) {
     const r = await tryCall(held ? "drop_here" : "place_object", {
       objectId: o.id,
       locationId: to.value,
+      quantity: count(),
     });
-    dmSay(r.ok ? (o.name || o.item_key) + " moved" : r.error, !r.ok);
+    dmSay(r.ok ? moved(o, count()) + " moved" : r.error, !r.ok);
     if (r.ok) await loadObjects();
   });
   const placeLine = document.createElement("div");
@@ -1987,8 +2040,9 @@ function fillMover(el, o) {
     const r = await tryCall("put_in_container", {
       objectId: o.id,
       containerId: into.value,
+      quantity: count(),
     });
-    dmSay(r.ok ? (o.name || o.item_key) + " packed away" : r.error, !r.ok);
+    dmSay(r.ok ? moved(o, count()) + " packed away" : r.error, !r.ok);
     if (r.ok) await loadObjects();
   });
 
@@ -2013,9 +2067,12 @@ function fillMover(el, o) {
       const r = await tryCall("take_from_container", {
         objectId: o.id,
         characterId: owner.id,
+        quantity: count(),
       });
       dmSay(
-        r.ok ? (owner.token_name || owner.name) + " takes the " + o.item_key : r.error,
+        r.ok
+          ? (owner.token_name || owner.name) + " takes " + moved(o, count())
+          : r.error,
         !r.ok
       );
       if (r.ok) await loadObjects();

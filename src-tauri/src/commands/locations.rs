@@ -203,13 +203,15 @@ pub fn location_contents(
 /// refuses an object nobody is holding. This one is for the other case:
 /// a thing that is already nowhere, being given somewhere to be.
 ///
-/// The whole row moves, because there is nothing to split - a loose
-/// stack is not held by anyone to keep the remainder.
+/// `quantity` of None means all of it. A partial move leaves the
+/// remainder exactly where it was, which for a loose stack is nowhere -
+/// a real place since 033, and the reason this can split at all.
 #[tauri::command]
 pub fn place_object(
     state: State<AppState>,
     object_id: String,
     location_id: String,
+    quantity: Option<i64>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
@@ -217,11 +219,39 @@ pub fn place_object(
         return Err("somebody is holding that — drop it instead".to_string());
     }
     let here = location_entity(&token, &location_id)?;
+
+    // IT SPLITS NOW, like every other way of moving a stack. The
+    // original comment said there was nothing to split because a loose
+    // stack has no holder to keep the remainder - but nowhere IS where
+    // the remainder stays, which 033 settled and this had not caught up
+    // with.
+    let (keep, moved) = objects::split(obj.quantity, quantity)?;
+    if keep == 0 {
+        return supabase::rest_update(
+            &token,
+            "objects",
+            &[("id", &format!("eq.{}", object_id))],
+            &json!({ "holder_id": here }),
+        );
+    }
+
     supabase::rest_update(
         &token,
         "objects",
         &[("id", &format!("eq.{}", object_id))],
-        &json!({ "holder_id": here }),
+        &json!({ "quantity": keep }),
+    )?;
+    supabase::rest_insert(
+        &token,
+        "objects",
+        &json!({
+            "game_id": obj.game_id,
+            "holder_id": here,
+            "item_key": obj.item_key,
+            "quantity": moved,
+            // Travels with the split - see move_into.
+            "size_override": obj.size_override,
+        }),
     )
 }
 
@@ -316,6 +346,8 @@ pub fn drop_here(
             "holder_id": here,
             "item_key": obj.item_key,
             "quantity": moved,
+            // Travels with the split - see move_into.
+            "size_override": obj.size_override,
         }),
     )
 }

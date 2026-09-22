@@ -153,6 +153,9 @@ pub struct ObjectRow {
     pub item_key: String,
     pub name: Option<String>,
     pub quantity: i64,
+    /// 036. Carried so that splitting a stack passes it to the half
+    /// that travels - a DM's edit must not evaporate on a move.
+    pub size_override: Option<String>,
 }
 
 pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
@@ -160,7 +163,7 @@ pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
         token,
         "objects",
         &[
-            ("select", "holder_id,entity_id,game_id,item_key,name,quantity"),
+            ("select", "holder_id,entity_id,game_id,item_key,name,quantity,size_override"),
             ("id", &format!("eq.{}", object_id)),
         ],
     )?;
@@ -178,6 +181,7 @@ pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
         item_key: as_text(&r, "item_key"),
         name: str_or_none(&r, "name"),
         quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
+        size_override: str_or_none(&r, "size_override"),
     })
 }
 

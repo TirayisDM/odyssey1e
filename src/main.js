@@ -650,8 +650,7 @@ function inventoryRow(it) {
   box.title = "equipped";
   box.addEventListener("change", async () => {
     await call("set_item_equipped", {
-      characterId: state.characterId,
-      itemKey: it.item.key,
+      objectId: it.id,
       equipped: box.checked,
     });
     await loadSheet();
@@ -661,7 +660,12 @@ function inventoryRow(it) {
 
   const name = document.createElement("span");
   name.className = "nm" + (actions.length ? " has-actions" : "");
-  name.textContent = it.item.name + (it.quantity > 1 ? " ×" + it.quantity : "");
+  // ITS OWN NAME WHEN IT HAS ONE. Most swords are just swords, and
+  // `name` is null for those; "Runt's Axe" prints as itself with the
+  // type kept as a chip below, because what it can do still comes from
+  // being a handaxe.
+  name.textContent = (it.name || it.item.name) +
+                     (it.quantity > 1 ? " ×" + it.quantity : "");
   // Activate the item to see what it can do. Clicking the NAME, not the
   // checkbox beside it — equipping and inspecting are different
   // questions and must not share a hit area.
@@ -683,6 +687,7 @@ function inventoryRow(it) {
   tags.className = "tags";
 
   // What the engine classified it as — the evidence behind the verdict.
+  if (it.name) tags.append(chip(it.item.name, "cls"));
   const cls = it.item.weapon_class || it.item.armor_category;
   if (cls) tags.append(chip(cls, "cls"));
 

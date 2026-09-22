@@ -368,6 +368,8 @@ mod tests {
     fn owned(item: Item, proficient: bool) -> Owned {
         let modes = crate::equipment::modes(&item);
         Owned {
+            id: String::new(),
+            name: None,
             item,
             quantity: 1,
             equipped: true,

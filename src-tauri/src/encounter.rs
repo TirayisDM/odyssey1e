@@ -459,7 +459,7 @@ fn batch_character_stats(
     // key they mention. Two requests, not two per character.
     let owned = supabase::rest_get(
         token,
-        "character_items",
+        "objects",
         &[
             ("select", "character_id,item_key"),
             ("character_id", &format!("in.({})", list)),

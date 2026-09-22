@@ -374,55 +374,62 @@ fn list_inventory(
     )
 }
 
-/// Equip or unequip one item.
+/// Equip or unequip one object.
 ///
 /// This exists so the one-armor rule is ENFORCED rather than merely
-/// described. `character_items.equipped` is deliberately unconstrained —
-/// several weapons may be held at once — and the one-armor rule cannot
+/// described. `objects.equipped` is deliberately unconstrained -
+/// several weapons may be held at once - and the one-armor rule cannot
 /// live in a partial index because deciding it needs `items.kind` from
 /// another table. 008's comment says the rule lives in equipment.rs, and
 /// a rule that only runs on the way out is a lint, not a rule.
 ///
 /// The check reads the loadout as it would be AFTER the change, so it
 /// refuses the second breastplate instead of reporting it afterwards.
+///
+/// TAKES AN OBJECT, NOT A PAIR. Until 026 this was (character, item_key)
+/// upserted on that pair, which had two faults the identity fixes. It
+/// could CREATE inventory by accident - an upsert on a key that was not
+/// there inserts - and after 026 that key is not even unique, because a
+/// character may hold two shortswords. An id names one of them.
 #[tauri::command]
 fn set_item_equipped(
     state: State<AppState>,
-    character_id: String,
-    item_key: String,
+    object_id: String,
     equipped: bool,
 ) -> Result<Value, String> {
     let token = state.token()?;
 
     if equipped {
+        let obj = equipment::load_object(&token, &object_id)?;
+        let character_id = obj
+            .character_id
+            .ok_or_else(|| "nobody is holding that - it cannot be equipped".to_string())?;
         let sheet = character::load_sheet(&token, &character_id)?;
-        let incoming = equipment::load_item(&token, &sheet.game_id, &item_key)?
-            .ok_or_else(|| format!("no item with key '{}'", item_key))?;
+        let incoming = equipment::load_item(&token, &sheet.game_id, &obj.item_key)?
+            .ok_or_else(|| format!("no item with key '{}'", obj.item_key))?;
 
         // Only an armor can break the rule, so nothing else pays for
-        // the check. Re-equipping something already worn is not a
-        // second armor, hence filtering the incoming key out first.
+        // the check. Filtering THIS object out first means re-equipping
+        // what is already worn is not read as a second armor - and it
+        // filters the object, not the key, because since 026 the other
+        // breastplate is a different thing rather than the same row.
         if incoming.kind == "armor" {
             let mut after: Vec<&equipment::Item> = sheet
                 .loadout
                 .iter()
+                .filter(|e| e.id != object_id)
                 .map(|e| &e.item)
-                .filter(|i| i.key != item_key)
                 .collect();
             after.push(&incoming);
             equipment::check_one_armor(&after)?;
         }
     }
 
-    supabase::rest_upsert(
+    supabase::rest_update(
         &token,
-        "character_items",
-        &json!({
-            "character_id": character_id,
-            "item_key": item_key,
-            "equipped": equipped
-        }),
-        "character_id,item_key",
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "equipped": equipped }),
     )
 }
 

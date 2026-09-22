@@ -98,6 +98,13 @@ pub struct Item {
 /// and an inventory screen, which is everything.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Owned {
+    /// THE OBJECT'S OWN ID. Not the type's - this sword, which since 026
+    /// is a row with an identity rather than a junction keyed by what
+    /// kind of thing it is.
+    pub id: String,
+    /// What THIS one is called, when it has earned a name. None means
+    /// call it by its type.
+    pub name: Option<String>,
     pub item: Item,
     pub quantity: i64,
     /// In hand or worn. Always true in a sheet loadout; meaningful in a
@@ -483,7 +490,8 @@ pub fn load_loadout(
     let mut query: Vec<(&str, String)> = vec![
         (
             "select",
-            "item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max"
+            // No spaces: PostgREST reads this verbatim.
+            "id,name,item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max"
                 .to_string(),
         ),
         ("character_id", format!("eq.{}", character_id)),
@@ -494,7 +502,7 @@ pub fn load_loadout(
     }
     let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
-    let owned = supabase::rest_get(token, "character_items", &query)?;
+    let owned = supabase::rest_get(token, "objects", &query)?;
     let owned = owned.as_array().cloned().unwrap_or_default();
     // Nothing owned means no second request. An empty in.() list is not
     // valid PostgREST, so this guard is load-bearing, not tidiness.
@@ -531,6 +539,8 @@ pub fn load_loadout(
 
         let proficient_override = r.get("proficient_override").and_then(|x| x.as_bool());
         out.push(Owned {
+            id: as_str(r, "id"),
+            name: as_opt_str(r, "name"),
             proficient: is_proficient(&item, proficient_override, weapon_profs, armor_profs),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
@@ -634,6 +644,11 @@ pub fn load_npc_loadout(
         };
         let proficient_override = r.get("proficient_override").and_then(|x| x.as_bool());
         out.push(Owned {
+            // A KIT ENTRY IS NOT AN OBJECT. This is the type side - a
+            // pattern of what the statblock carries - and nothing here
+            // exists until instantiate_npc makes one.
+            id: String::new(),
+            name: None,
             proficient: proficient_override.unwrap_or(true),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
@@ -646,6 +661,40 @@ pub fn load_npc_loadout(
         });
     }
     Ok(out)
+}
+
+/// One object by id: who holds it, what type it is, what it is called.
+///
+/// The equip path needs this now that 026 gave objects an identity. It
+/// used to be handed a (character, item_key) pair, which named a type
+/// and trusted the caller to have picked a real one; an id names the
+/// thing itself, and the holder comes back from the row rather than
+/// from whoever asked.
+pub struct ObjectRow {
+    pub character_id: Option<String>,
+    pub item_key: String,
+}
+
+pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
+    let rows = supabase::rest_get(
+        token,
+        "objects",
+        &[
+            ("select", "character_id,item_key"),
+            ("id", &format!("eq.{}", object_id)),
+        ],
+    )?;
+    // An object a policy hides is indistinguishable from one that was
+    // never there, and deliberately so - see supabase::error_message.
+    let r = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .ok_or_else(|| "no such object, or it is not visible to you".to_string())?;
+    Ok(ObjectRow {
+        character_id: as_opt_str(&r, "character_id"),
+        item_key: as_str(&r, "item_key"),
+    })
 }
 
 /// One catalogue row by key, with this game's override applied, or None

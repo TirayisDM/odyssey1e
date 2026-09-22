@@ -22,7 +22,7 @@
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::holders::{self, Holder, Located, Obj};
+use crate::holders::{self, Holder, Kind, Located, Obj};
 use crate::locations::{self, Place, Placed};
 use crate::objects;
 use crate::supabase::{self, AppState};
@@ -437,7 +437,7 @@ pub fn list_objects(state: State<AppState>, game_id: String) -> Result<Vec<Locat
         &token,
         "objects",
         &[
-            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id"),
+            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id,\n                        size_override,holds_size_override"),
             ("game_id", &format!("eq.{}", game_id)),
             // Named things first, then the catalogue key, so a manager
             // reads as a list of THINGS rather than of rows. The fold
@@ -491,5 +491,44 @@ pub fn list_objects(state: State<AppState>, game_id: String) -> Result<Vec<Locat
         }
     }
 
-    Ok(holders::resolve(&objects, &index))
+    // WHAT THE CATALOGUE SAYS, which is where size and weight actually
+    // live. 036 put an optional override on the instance, so the
+    // effective answer is a coalesce - and holders::resolve does it,
+    // with a test, rather than the screen.
+    //
+    // The whole catalogue in one read. A lookup per object would be
+    // thirty requests to be told what a dagger weighs, and the answer
+    // is the same every time.
+    let rows = supabase::rest_get(
+        &token,
+        "items",
+        &[
+            ("select", "key,game_id,size,holds_size,weight"),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            // This campaign's row first, so the de-duplication below
+            // keeps the override - the same precedence
+            // collapse_overrides applies, done by the sort.
+            ("order", "game_id.desc"),
+        ],
+    )?;
+    let mut types: Vec<Kind> = Vec::new();
+    for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+        let key = r.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if types.iter().any(|t| t.key == key) {
+            continue;
+        }
+        types.push(Kind {
+            key,
+            size: r
+                .get("size")
+                .and_then(|v| v.as_str())
+                .unwrap_or("med")
+                .to_string(),
+            holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
+            // numeric arrives as a string; see holders::Located::weight.
+            weight: r.get("weight").and_then(|v| v.as_str()).map(str::to_string),
+        });
+    }
+
+    Ok(holders::resolve(&objects, &index, &types))
 }

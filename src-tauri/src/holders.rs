@@ -49,6 +49,23 @@ pub struct Obj {
     /// That is what makes this table both the question and half the
     /// answer.
     pub entity_id: Option<String>,
+    /// 036. None means take it from the catalogue, which is what almost
+    /// every object does.
+    pub size_override: Option<String>,
+    /// 036, containers only. None means ask the type - and the TYPE's
+    /// own None is what means unrestricted. Two different absences, one
+    /// behind the other.
+    pub holds_size_override: Option<String>,
+}
+
+/// What the CATALOGUE says about a key. The half of an object that is
+/// true of every one of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Kind {
+    pub key: String,
+    pub size: String,
+    pub holds_size: Option<String>,
+    pub weight: Option<String>,
 }
 
 /// Something that can hold: a character, a container or a place.
@@ -80,6 +97,17 @@ pub struct Located {
     pub holder_name: String,
     /// Kept so a click can act on the holder rather than re-derive it.
     pub holder_id: Option<String>,
+    /// How big this one is, the override applied. Empty when the
+    /// catalogue has no row for the key - which is a broken object
+    /// rather than a sizeless one, and says so by being blank.
+    pub size: String,
+    /// The largest thing it takes, if it takes anything and there is a
+    /// limit. None on a container means no limit; None on anything else
+    /// means it is not a container.
+    pub holds_size: Option<String>,
+    /// Pounds for ONE of them. The screen multiplies by quantity,
+    /// because a stack's weight is a rendering and not a fact.
+    pub weight: Option<String>,
 }
 
 /* ============================ RULES ============================ */
@@ -97,7 +125,12 @@ const UNKNOWN: &str = "somewhere unaccounted for";
 /// `extra` carries the holders this table cannot supply itself -
 /// characters and locations. Containers are found in `objects` during
 /// the same pass, because a container IS one.
-pub fn resolve(objects: &[Obj], extra: &[Holder]) -> Vec<Located> {
+///
+/// `types` is the catalogue, by key. 036 put size on the TYPE with an
+/// optional override on the instance, so the effective answer is a
+/// coalesce - and a coalesce is a rule, which is why it happens here
+/// with a test rather than on the screen.
+pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located> {
     // The index: everything that can hold, by entity.
     let mut index: Vec<Holder> = extra.to_vec();
     for o in objects {
@@ -122,6 +155,7 @@ pub fn resolve(objects: &[Obj], extra: &[Holder]) -> Vec<Located> {
                     None => ("unknown".to_string(), UNKNOWN.to_string()),
                 },
             };
+            let t = types.iter().find(|t| t.key == o.item_key);
             Located {
                 id: o.id.clone(),
                 item_key: o.item_key.clone(),
@@ -132,6 +166,20 @@ pub fn resolve(objects: &[Obj], extra: &[Holder]) -> Vec<Located> {
                 holder_kind: kind,
                 holder_name: name,
                 holder_id: o.holder_id.clone(),
+                // THE INSTANCE WINS. A giant's dagger is a shortsword to
+                // anybody else, and the override is the only way to say
+                // so while there is no screen for writing a catalogue
+                // row.
+                size: o
+                    .size_override
+                    .clone()
+                    .or_else(|| t.map(|t| t.size.clone()))
+                    .unwrap_or_default(),
+                holds_size: o
+                    .holds_size_override
+                    .clone()
+                    .or_else(|| t.and_then(|t| t.holds_size.clone())),
+                weight: t.and_then(|t| t.weight.clone()),
             }
         })
         .collect()
@@ -165,7 +213,23 @@ mod tests {
             equipped: false,
             holder_id: holder.map(str::to_string),
             entity_id: None,
+            size_override: None,
+            holds_size_override: None,
         }
+    }
+
+    /// The catalogue these tests measure against. Small on purpose: a
+    /// key MISSING from it is a case worth keeping reachable, because
+    /// an object whose type nobody catalogued is a real thing to render.
+    fn catalogue() -> Vec<Kind> {
+        vec![
+            Kind { key: "dagger".into(), size: "tiny".into(), holds_size: None,
+                   weight: Some("1".into()) },
+            Kind { key: "greatsword".into(), size: "lg".into(), holds_size: None,
+                   weight: Some("6".into()) },
+            Kind { key: "chest".into(), size: "lg".into(),
+                   holds_size: Some("lg".into()), weight: Some("25".into()) },
+        ]
     }
 
     fn person(entity: &str, name: &str) -> Holder {
@@ -186,14 +250,14 @@ mod tests {
 
     #[test]
     fn a_carried_thing_names_its_carrier() {
-        let out = resolve(&[obj("o1", "dagger", Some("e-rodnar"))], &[person("e-rodnar", "Rodnar")]);
+        let out = resolve(&[obj("o1", "dagger", Some("e-rodnar"))], &[person("e-rodnar", "Rodnar")], &catalogue());
         assert_eq!(out[0].holder_kind, "character");
         assert_eq!(out[0].holder_name, "Rodnar");
     }
 
     #[test]
     fn a_thing_on_the_floor_names_the_room() {
-        let out = resolve(&[obj("o1", "handaxe", Some("e-inn"))], &[place("e-inn", "Frostvalley Inn")]);
+        let out = resolve(&[obj("o1", "handaxe", Some("e-inn"))], &[place("e-inn", "Frostvalley Inn")], &catalogue());
         assert_eq!(out[0].holder_kind, "location");
         assert_eq!(out[0].holder_name, "Frostvalley Inn");
     }
@@ -202,7 +266,7 @@ mod tests {
     // screen must say the word rather than print a blank.
     #[test]
     fn unheld_is_nowhere_and_says_so() {
-        let out = resolve(&[obj("o1", "torch", None)], &[]);
+        let out = resolve(&[obj("o1", "torch", None)], &[], &catalogue());
         assert_eq!(out[0].holder_kind, "nowhere");
         assert_eq!(out[0].holder_name, "nowhere");
         assert_eq!(out[0].holder_id, None);
@@ -217,7 +281,7 @@ mod tests {
         chest.name = Some("iron chest".into());
         let coin = obj("o-coin", "gp", Some("e-chest"));
 
-        let out = resolve(&[chest, coin], &[place("e-inn", "Frostvalley Inn")]);
+        let out = resolve(&[chest, coin], &[place("e-inn", "Frostvalley Inn")], &catalogue());
 
         // The chest itself is on the floor...
         assert_eq!(out[0].holder_name, "Frostvalley Inn");
@@ -235,7 +299,7 @@ mod tests {
         purse.entity_id = Some("e-purse".into());
         let coin = obj("o-coin", "gp", Some("e-purse"));
 
-        let out = resolve(&[pack, purse, coin], &[person("e-rodnar", "Rodnar")]);
+        let out = resolve(&[pack, purse, coin], &[person("e-rodnar", "Rodnar")], &catalogue());
 
         assert_eq!(out[0].holder_name, "Rodnar");
         assert_eq!(out[1].holder_name, "backpack");
@@ -251,7 +315,7 @@ mod tests {
         let mut chest = obj("o-chest", "chest", None);
         chest.entity_id = Some("e-chest".into());
         let coin = obj("o-coin", "gp", Some("e-chest"));
-        let out = resolve(&[chest, coin], &[]);
+        let out = resolve(&[chest, coin], &[], &catalogue());
         assert_eq!(out[1].holder_name, "chest");
     }
 
@@ -261,7 +325,7 @@ mod tests {
     // real.
     #[test]
     fn a_holder_nobody_can_name_keeps_its_object_visible() {
-        let out = resolve(&[obj("o1", "gp", Some("e-ghost"))], &[]);
+        let out = resolve(&[obj("o1", "gp", Some("e-ghost"))], &[], &catalogue());
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].holder_kind, "unknown");
         assert_eq!(out[0].holder_name, UNKNOWN);
@@ -271,7 +335,7 @@ mod tests {
 
     #[test]
     fn nothing_in_nothing_out() {
-        assert!(resolve(&[], &[person("e", "Nobody")]).is_empty());
+        assert!(resolve(&[], &[person("e", "Nobody")], &catalogue()).is_empty());
     }
 
     // Order is the caller's. The command asks PostgREST to sort, and
@@ -281,6 +345,7 @@ mod tests {
         let out = resolve(
             &[obj("a", "rope", None), obj("b", "torch", None), obj("c", "gp", None)],
             &[],
+            &catalogue(),
         );
         assert_eq!(
             out.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
@@ -297,4 +362,58 @@ mod tests {
         o.name = Some("   ".into());
         assert_eq!(label(&o), "longsword");
     }
+    /* ---------- size and weight, 036 ---------- */
+
+    #[test]
+    fn size_comes_from_the_catalogue() {
+        let out = resolve(&[obj("o1", "dagger", None)], &[], &catalogue());
+        assert_eq!(out[0].size, "tiny");
+        assert_eq!(out[0].weight.as_deref(), Some("1"));
+    }
+
+    // THE GIANT'S DAGGER. There is no screen for writing a catalogue
+    // row, so the instance override is the only way to say that this
+    // particular one is not ordinary.
+    #[test]
+    fn the_instance_overrides_the_type() {
+        let mut o = obj("o1", "dagger", None);
+        o.size_override = Some("lg".into());
+        let out = resolve(&[o], &[], &catalogue());
+        assert_eq!(out[0].size, "lg");
+        // The WEIGHT still comes from the type - 036 gave no override
+        // for it, deliberately, because weight is the book's.
+        assert_eq!(out[0].weight.as_deref(), Some("1"));
+    }
+
+    // TWO ABSENCES, ONE BEHIND THE OTHER. None on the instance means
+    // "ask the type"; the type's own None is what means "no limit".
+    #[test]
+    fn a_container_limit_falls_through_to_the_type() {
+        let mut chest = obj("o-chest", "chest", None);
+        chest.entity_id = Some("e-chest".into());
+        let out = resolve(&[chest], &[], &catalogue());
+        assert_eq!(out[0].holds_size.as_deref(), Some("lg"));
+    }
+
+    #[test]
+    fn a_giants_backpack_says_so_on_the_instance() {
+        let mut chest = obj("o-chest", "chest", None);
+        chest.entity_id = Some("e-chest".into());
+        chest.holds_size_override = Some("huge".into());
+        let out = resolve(&[chest], &[], &catalogue());
+        assert_eq!(out[0].holds_size.as_deref(), Some("huge"));
+    }
+
+    // An object whose type nobody catalogued is a real thing to render
+    // - the same call this module makes about a holder it cannot name.
+    // Blank rather than a guess, because "med" here would be inventing
+    // a fact rather than reporting one.
+    #[test]
+    fn a_key_missing_from_the_catalogue_is_blank_not_guessed() {
+        let out = resolve(&[obj("o1", "whatsit", None)], &[], &catalogue());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].size, "");
+        assert_eq!(out[0].weight, None);
+    }
+
 }

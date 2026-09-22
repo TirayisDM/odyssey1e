@@ -1499,8 +1499,12 @@ function objectRow(o) {
 
   for (const text of [
     o.holder_name,
+    // On the row rather than only in the detail: size is the thing that
+    // decides whether a move will be refused, and finding that out by
+    // being refused is a worse way to learn it.
+    sizeWord(o.size),
     o.equipped ? "worn" : null,
-    o.is_container ? "container" : null,
+    o.is_container ? "holds " + (o.holds_size ? sizeWord(o.holds_size) : "any size") : null,
   ]) {
     if (!text) continue;
     const t = document.createElement("span");
@@ -1539,6 +1543,56 @@ function objectRow(o) {
   return li;
 }
 
+// 036's ladder, and the only copy of it on this side.
+//
+// Short words in the database, long ones on screen. The database is
+// what 010 already spelled for creatures and what every check
+// constraint now names; a person reading a screen wants "Large".
+const SIZES = [
+  ["tiny", "Tiny"],
+  ["sm", "Small"],
+  ["med", "Medium"],
+  ["lg", "Large"],
+  ["huge", "Huge"],
+  ["grg", "Gargantuan"],
+];
+
+function sizeWord(key) {
+  const found = SIZES.find(([k]) => k === key);
+  // An unrecognised word is PRINTED, not blanked. It means a row this
+  // screen does not understand, and hiding it would hide the problem.
+  return found ? found[1] : key || "";
+}
+
+// A picker over the ladder, with a blank that means something specific.
+function sizeSelect(value, blankLabel) {
+  const sel = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = blankLabel;
+  sel.append(none);
+  for (const [k, word] of SIZES) {
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = word;
+    sel.append(o);
+  }
+  sel.value = value || "";
+  return sel;
+}
+
+// Pounds, as a number the screen can add up. PostgREST sends numeric as
+// a string, and holders.rs keeps it as one deliberately - the rounding
+// question belongs here, where there is something to round it for.
+function poundsOf(weight, quantity) {
+  const each = Number(weight);
+  if (!weight || Number.isNaN(each)) return null;
+  const total = each * (quantity || 1);
+  // Arrows are 0.05lb. Two decimals keeps a quiver honest and stops a
+  // longsword reading as "3.00".
+  return (Math.round(total * 100) / 100).toString();
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -1571,7 +1625,24 @@ async function fillDetail(el, o) {
     ["quantity", String(o.quantity)],
     ["held by", o.holder_name + " (" + o.holder_kind + ")"],
     ["kind", item ? item.kind : "not in the catalogue"],
+    // WHOSE ANSWER IT IS, said out loud. A size that came from the
+    // catalogue and one a DM set on this particular object are
+    // different facts, and a screen that prints them identically hides
+    // an edit somebody made.
+    [
+      "size",
+      sizeWord(o.size) +
+        (item && o.size !== item.size ? " (set on this one)" : ""),
+    ],
   ];
+
+  const pounds = poundsOf(o.weight, o.quantity);
+  if (pounds) {
+    facts.push([
+      "weight",
+      o.quantity > 1 ? pounds + " lb for " + o.quantity : pounds + " lb",
+    ]);
+  }
   if (item && item.damage_number && item.damage_denomination) {
     facts.push([
       "damage",
@@ -1580,6 +1651,20 @@ async function fillDetail(el, o) {
     ]);
   }
   if (item && item.base_ac != null) facts.push(["armour", "AC " + item.base_ac]);
+  if (o.is_container) {
+    // THREE THINGS A CONTAINER REFUSES ON, and they are not the same
+    // question: what it takes, how big, and how much. 036 added the
+    // middle one; the other two have been enforced since 032 and were
+    // never shown, so a refusal arrived with no way to have predicted
+    // it.
+    facts.push(["holds up to", o.holds_size ? sizeWord(o.holds_size) : "any size"]);
+    if (item && item.accepts && item.accepts.length) {
+      facts.push(["takes only", item.accepts.join(", ")]);
+    }
+    if (item && item.capacity_slots != null) {
+      facts.push(["room", item.capacity_slots + " slots"]);
+    }
+  }
   if (item && item.properties && item.properties.length) {
     facts.push(["properties", item.properties.join(", ")]);
   }
@@ -1640,6 +1725,33 @@ function fillEditor(el, o) {
   line.className = "row";
   line.append(nameIn, qtyIn);
 
+  // THE OVERRIDES, and the blank option is the point of them. 036 puts
+  // size on the TYPE; this says THIS ONE is different - a giant's
+  // dagger, a rodent's backpack - because there is no screen for
+  // writing a catalogue row and otherwise the only way is a migration.
+  //
+  // The catalogue's own answer is named in the blank label, so leaving
+  // it alone is an informed choice rather than an empty box.
+  const item = (state.catalogue || []).find((i) => i.key === o.item_key);
+  const sizeIn = sizeSelect(
+    item && o.size === item.size ? "" : o.size,
+    "size: as a " + o.item_key + (item ? " (" + sizeWord(item.size) + ")" : "")
+  );
+  const sizeLine = document.createElement("div");
+  sizeLine.className = "row";
+  sizeLine.append(sizeIn);
+
+  let holdsIn = null;
+  if (o.is_container) {
+    const fromType = item && item.holds_size;
+    holdsIn = sizeSelect(
+      fromType && o.holds_size === fromType ? "" : o.holds_size || "",
+      "holds: as a " + o.item_key +
+        " (" + (fromType ? sizeWord(fromType) : "any size") + ")"
+    );
+    sizeLine.append(holdsIn);
+  }
+
   const save = document.createElement("button");
   save.className = "tiny ghost";
   save.textContent = "save";
@@ -1648,6 +1760,11 @@ function fillEditor(el, o) {
       objectId: o.id,
       name: nameIn.value,
       quantity: Number(qtyIn.value) || o.quantity,
+      // Always sent, because "" is how the command is told to CLEAR an
+      // override rather than leave it alone. Omitting the field is what
+      // means "do not touch".
+      sizeOverride: sizeIn.value,
+      holdsSizeOverride: holdsIn ? holdsIn.value : null,
     });
     dmSay(r.ok ? "saved" : r.error, !r.ok);
     if (r.ok) await loadObjects();
@@ -1669,7 +1786,7 @@ function fillEditor(el, o) {
   const buttons = document.createElement("div");
   buttons.className = "row";
   buttons.append(save, kill);
-  el.append(line, buttons);
+  el.append(line, sizeLine, buttons);
 }
 
 // Put it somewhere real.
@@ -1722,7 +1839,12 @@ function paintCatalogue() {
   }
   for (const i of shown) {
     const li = row(i.name, i.kind || "", null);
-    const bits = [];
+    const bits = [sizeWord(i.size)];
+    // Seeded by 027 and 032 from the book, and read by nothing until
+    // now - equipment.rs said as much in its own header.
+    const lb = poundsOf(i.weight, 1);
+    if (lb) bits.push(lb + " lb");
+    if (i.holds_size) bits.push("holds " + sizeWord(i.holds_size));
     if (i.damage_number && i.damage_denomination) {
       bits.push(i.damage_number + "d" + i.damage_denomination);
     }

@@ -51,6 +51,30 @@ pub fn hit_die(size: Option<&str>) -> Option<i64> {
     }
 }
 
+/// Where a size sits on the ladder, small to large.
+///
+/// BESIDE `hit_die` ON PURPOSE. The two read the same six words, and a
+/// ladder in one file with a die table in another is two copies of one
+/// vocabulary waiting to disagree about whether "grg" exists. 036 put
+/// items on this same ladder rather than inventing a parallel one, for
+/// the reason 033 gave about a place `kind` that drifted - so a Huge
+/// backpack holding Huge things needs no translation.
+///
+/// The numbers are ORDER AND NOTHING ELSE. They are never subtracted,
+/// scaled or printed; only compared. A gap between them would mean
+/// something, so there is none.
+pub fn size_rank(size: &str) -> Option<i64> {
+    match size {
+        "tiny" => Some(0),
+        "sm" => Some(1),
+        "med" => Some(2),
+        "lg" => Some(3),
+        "huge" => Some(4),
+        "grg" => Some(5),
+        _ => None,
+    }
+}
+
 /// The average of one die, doubled, so the arithmetic stays in integers.
 ///
 /// A d6 averages 3.5 and there is no honest way to hold that in an i64.
@@ -178,6 +202,43 @@ mod tests {
         assert_eq!(hit_die(None), None);
         assert_eq!(hit_die(Some("large")), None);
         assert_eq!(hit_die(Some("")), None);
+    }
+
+    // THE LADDER AND THE DIE TABLE READ THE SAME SIX WORDS. That is the
+    // reason they share a file, and this is the test that says so - if
+    // one of them ever learns a seventh, this fails rather than a
+    // container silently refusing a size it has never heard of.
+    #[test]
+    fn one_vocabulary_for_creatures_and_for_crates() {
+        for (word, _) in [
+            ("tiny", 4), ("sm", 6), ("med", 8),
+            ("lg", 10), ("huge", 12), ("grg", 20),
+        ] {
+            assert!(hit_die(Some(word)).is_some(), "no die for {}", word);
+            assert!(size_rank(word).is_some(), "no rank for {}", word);
+        }
+    }
+
+    #[test]
+    fn the_ladder_climbs() {
+        let ladder = ["tiny", "sm", "med", "lg", "huge", "grg"];
+        for pair in ladder.windows(2) {
+            assert!(
+                size_rank(pair[0]) < size_rank(pair[1]),
+                "{} should be smaller than {}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    #[test]
+    fn a_size_nobody_wrote_has_no_rank() {
+        // Including the spellings somebody will try. 008's lesson about
+        // two spellings of armour, applied before it can happen again.
+        for bad in ["", "small", "large", "medium", "Tiny", "gargantuan"] {
+            assert_eq!(size_rank(bad), None, "accepted {:?}", bad);
+        }
     }
 
     #[test]

@@ -17,10 +17,19 @@
 //! test below says exactly that, because that ratio is the reason the
 //! numbers are fractional and it would otherwise look arbitrary.
 //!
-//! NOT CARRIED OVER YET, and all of it from the same prior art:
-//! `ItemSize` and a size limit, so a greatsword fails to fit in a purse
-//! for a second and better reason than its tags; open/closed and locked
-//! state; and a nesting depth separate from the cycle guard.
+//! SIZE ARRIVED IN 036, and it is the third axis rather than a
+//! replacement for either of the other two. Tags say a greatsword is
+//! not a coin; slots say it is bulky; NEITHER SAYS IT IS TOO BIG. Those
+//! are different objections - a marble is untagged and tiny, and an
+//! unrestricted thimble should still refuse it - and size is the one a
+//! person reaches for first, which is the order they are checked in.
+//!
+//! The ladder is `vitality::size_rank`, the same six words 010 gives
+//! creatures. One vocabulary, so "a Huge backpack holds Huge things"
+//! needs no translation.
+//!
+//! STILL NOT CARRIED OVER, from the same prior art: open/closed and
+//! locked state, and a nesting depth separate from the cycle guard.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -41,6 +50,13 @@ pub struct Profile {
     /// capacity nobody wrote down is a catalogue row somebody did not
     /// finish, and pretending it is bottomless hides that.
     pub capacity_slots: Option<f64>,
+    /// The largest size it admits. NONE MEANS NO LIMIT, which is the
+    /// opposite of what None means one field up - and deliberately so.
+    /// `capacity_slots` is a quantity, so its absence is an unfinished
+    /// row; this is a restriction, like `accepts`, and an absent
+    /// restriction is not one. A sack cares how much goes in it, not
+    /// how long any one thing is.
+    pub holds_size: Option<String>,
 }
 
 /// How much room a thing takes, and what it counts as.
@@ -49,6 +65,10 @@ pub struct Bulk {
     pub key: String,
     pub slots: f64,
     pub content_tags: Vec<String>,
+    /// 036's ladder. Every catalogue row has one - the column is NOT
+    /// NULL and defaults to med - so this is not an Option the way the
+    /// limit above is.
+    pub size: String,
 }
 
 /* ============================ RULES ============================ */
@@ -79,6 +99,38 @@ pub fn admits(profile: &Profile, incoming: &Bulk, container_name: &str) -> Resul
             incoming.content_tags.join(" and ")
         }
     ))
+}
+
+/// Whether this container is big enough for this thing.
+///
+/// CHECKED BEFORE THE SLOTS, because it is the objection a person
+/// reaches for first and it gives the better sentence. "a coin purse
+/// holds nothing bigger than tiny - a greatsword is large" says what is
+/// wrong; "no room: greatsword needs 1.00 and coin purse has 5.00 free"
+/// is arithmetic about a thing that was never going to fit.
+///
+/// A SIZE NOBODY RECOGNISES IS REFUSED, not waved through. The columns
+/// are checked in 036 so this should be unreachable from the database,
+/// but the alternative to refusing is admitting anything spelled
+/// wrongly - and 008's two spellings of armour are what that looks like
+/// when it goes unnoticed.
+pub fn admits_size(profile: &Profile, incoming: &Bulk, container_name: &str) -> Result<(), String> {
+    let limit = match profile.holds_size.as_deref() {
+        // No restriction recorded, so there is not one. See the field.
+        None => return Ok(()),
+        Some(l) => l,
+    };
+    let cap = crate::vitality::size_rank(limit)
+        .ok_or_else(|| format!("{} has a size limit nobody recognises: {}", container_name, limit))?;
+    let mine = crate::vitality::size_rank(&incoming.size)
+        .ok_or_else(|| format!("{} is a size nobody recognises: {}", incoming.key, incoming.size))?;
+    if mine > cap {
+        return Err(format!(
+            "a {} holds nothing bigger than {} - {} is {}",
+            container_name, limit, incoming.key, incoming.size
+        ));
+    }
+    Ok(())
 }
 
 /// How much room is in use, given everything already inside.
@@ -132,7 +184,7 @@ pub fn load_profile(
         token,
         "items",
         &[
-            ("select", "key,game_id,kind,accepts,capacity_slots"),
+            ("select", "key,game_id,kind,accepts,capacity_slots,holds_size"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("key", &format!("in.({})", quoted(key))),
             ("order", "game_id.desc"),
@@ -147,6 +199,12 @@ pub fn load_profile(
     Ok(Some(Profile {
         accepts: strings(r, "accepts"),
         capacity_slots: r.get("capacity_slots").and_then(as_f64),
+        // Absent is no limit, which is why this is not defaulted to
+        // anything. See the field.
+        holds_size: r
+            .get("holds_size")
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
     }))
 }
 
@@ -160,7 +218,7 @@ pub fn load_bulk(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Bulk
         token,
         "items",
         &[
-            ("select", "key,game_id,slots,content_tags"),
+            ("select", "key,game_id,slots,content_tags,size"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("key", &format!("in.({})", list.join(","))),
             ("order", "game_id.desc"),
@@ -179,6 +237,15 @@ pub fn load_bulk(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Bulk
             key,
             slots: r.get("slots").and_then(as_f64).unwrap_or(1.0),
             content_tags: strings(r, "content_tags"),
+            // 036 makes the column NOT NULL with a default, so a row
+            // without one has not been through that migration. "med" is
+            // that migration's own default, which keeps a stale row
+            // ordinary rather than unmeasurable.
+            size: r
+                .get("size")
+                .and_then(|x| x.as_str())
+                .unwrap_or("med")
+                .to_string(),
         });
     }
     Ok(out)
@@ -211,6 +278,7 @@ mod tests {
         Profile {
             accepts: vec!["coin".to_string()],
             capacity_slots: Some(5.0),
+            holds_size: Some("tiny".to_string()),
         }
     }
 
@@ -218,23 +286,43 @@ mod tests {
         Profile {
             accepts: Vec::new(),
             capacity_slots: Some(20.0),
+            holds_size: Some("med".to_string()),
+        }
+    }
+
+    /// A container with no size limit recorded - which is NOT the same
+    /// as a limit of zero. See the field.
+    fn sack() -> Profile {
+        Profile {
+            accepts: Vec::new(),
+            capacity_slots: Some(20.0),
+            holds_size: None,
         }
     }
 
     fn bulk(key: &str, slots: f64, tags: &[&str]) -> Bulk {
+        sized(key, slots, tags, "med")
+    }
+
+    fn sized(key: &str, slots: f64, tags: &[&str], size: &str) -> Bulk {
         Bulk {
             key: key.to_string(),
             slots,
             content_tags: tags.iter().map(|s| s.to_string()).collect(),
+            size: size.to_string(),
         }
     }
 
     fn coin() -> Bulk {
-        bulk("coin_gp", 0.2, &["coin"])
+        sized("coin_gp", 0.2, &["coin"], "tiny")
     }
 
     fn sword() -> Bulk {
         bulk("longsword", 2.0, &[])
+    }
+
+    fn greatsword() -> Bulk {
+        sized("greatsword", 2.0, &[], "lg")
     }
 
     #[test]
@@ -262,6 +350,7 @@ mod tests {
         let case = Profile {
             accepts: vec!["lore".to_string(), "paper".to_string()],
             capacity_slots: Some(5.0),
+            holds_size: None,
         };
         assert!(admits(&case, &bulk("scroll", 0.5, &["paper"]), "Scroll Case").is_ok());
     }
@@ -297,6 +386,7 @@ mod tests {
         let broken = Profile {
             accepts: Vec::new(),
             capacity_slots: None,
+            holds_size: None,
         };
         let e = fits(&broken, &[], &coin(), 1, "Mystery Sack").unwrap_err();
         assert!(e.contains("unfinished"), "{}", e);
@@ -310,4 +400,68 @@ mod tests {
             .unwrap_err();
         assert!(e.contains("ammunition"), "{}", e);
     }
+    /* ---------- size, 036 ---------- */
+
+    // THE CASE containers.rs ASKED FOR IN ITS HEADER since 032: a
+    // greatsword fails to fit in a purse for a second and better reason
+    // than its tags.
+    #[test]
+    fn a_purse_holds_nothing_bigger_than_a_coin() {
+        let e = admits_size(&purse(), &greatsword(), "coin purse").unwrap_err();
+        assert!(e.contains("nothing bigger than tiny"), "{}", e);
+        assert!(e.contains("greatsword is lg"), "{}", e);
+    }
+
+    #[test]
+    fn a_coin_goes_in_a_purse() {
+        assert!(admits_size(&purse(), &coin(), "coin purse").is_ok());
+    }
+
+    // Equal fits. A Medium backpack takes a Medium longsword - the
+    // limit is the largest it ADMITS, not the largest it is bigger
+    // than.
+    #[test]
+    fn the_limit_is_inclusive() {
+        assert!(admits_size(&backpack(), &sword(), "backpack").is_ok());
+    }
+
+    #[test]
+    fn a_backpack_refuses_a_greatsword() {
+        assert!(admits_size(&backpack(), &greatsword(), "backpack").is_err());
+    }
+
+    // NONE IS NO LIMIT, and this is the test that keeps it from being
+    // read as zero. capacity_slots means the opposite by the same
+    // absence, which is exactly why this is written down.
+    #[test]
+    fn a_container_with_no_size_limit_takes_anything() {
+        assert!(admits_size(&sack(), &greatsword(), "sack").is_ok());
+        assert!(admits_size(&sack(), &sized("ship", 1.0, &[], "grg"), "sack").is_ok());
+    }
+
+    // 008's two spellings of armour, refused before they can happen
+    // again. A word off the ladder is an error, not a pass.
+    #[test]
+    fn a_size_nobody_recognises_is_refused_not_waved_through() {
+        let odd = sized("thing", 1.0, &[], "small");
+        let e = admits_size(&backpack(), &odd, "backpack").unwrap_err();
+        assert!(e.contains("nobody recognises"), "{}", e);
+
+        let bad_limit = Profile {
+            accepts: Vec::new(),
+            capacity_slots: Some(20.0),
+            holds_size: Some("medium".to_string()),
+        };
+        assert!(admits_size(&bad_limit, &coin(), "crate").is_err());
+    }
+
+    // Size and slots are DIFFERENT OBJECTIONS, and this is the pair
+    // that proves neither implies the other: a greatsword is 2 slots
+    // and a purse has 5 free, so the slot check alone would let it in.
+    #[test]
+    fn room_is_not_the_same_question_as_size() {
+        assert!(fits(&purse(), &[], &greatsword(), 1, "coin purse").is_ok());
+        assert!(admits_size(&purse(), &greatsword(), "coin purse").is_err());
+    }
+
 }

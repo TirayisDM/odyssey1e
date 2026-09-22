@@ -362,6 +362,15 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // Not what these fixtures are about. Written out
+            // rather than defaulted, because a fixture that is
+            // faithful to the seed makes a failure mean the RULE
+            // changed.
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 

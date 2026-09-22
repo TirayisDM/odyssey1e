@@ -88,6 +88,27 @@ pub struct Item {
     /// light armour; Some(0) is heavy armour allowing none. The
     /// difference matters and NULL must not be read as zero.
     pub dex_cap: Option<i64>,
+    /// 036's ladder, shared with creatures: tiny sm med lg huge grg.
+    /// NOT NULL in the table with a default of med, so a row that
+    /// arrives without one has not been through that migration.
+    pub size: String,
+    /// Containers only: the largest size it admits. None is NO LIMIT,
+    /// which is the opposite of what None means for a capacity - see
+    /// containers::Profile, where the same pair is explained at length.
+    pub holds_size: Option<String>,
+    /// Pounds, from the book, seeded by 027 and 032 and read by nothing
+    /// until now. PostgREST sends `numeric` as a STRING, which is why
+    /// this is not an f64 - see containers::as_f64 for the same trap.
+    pub weight: Option<String>,
+    /// Containers only: the content_tags it admits. EMPTY MEANS
+    /// ANYTHING. Enforced by containers::admits since 032 and shown
+    /// nowhere until now, so a refusal arrived with no way to have
+    /// predicted it.
+    pub accepts: Vec<String>,
+    /// Containers only: how much room, in slots. None is an unfinished
+    /// catalogue row rather than "bottomless" - see containers::Profile,
+    /// where that decision is argued.
+    pub capacity_slots: Option<String>,
 }
 
 /// One thing a character has: the catalogue row plus their state for it,
@@ -441,11 +462,25 @@ fn item_from_row(r: &Value) -> Item {
         armor_category: as_opt_str(r, "armor_category"),
         base_ac: r.get("base_ac").and_then(|x| x.as_i64()),
         dex_cap: r.get("dex_cap").and_then(|x| x.as_i64()),
+        // 036's column is NOT NULL with a default of med, so a row
+        // arriving without one has not been through that migration.
+        // That migration's own default keeps it ordinary rather than
+        // unmeasurable.
+        size: as_opt_str(r, "size").unwrap_or_else(|| "med".to_string()),
+        holds_size: as_opt_str(r, "holds_size"),
+        // PostgREST sends `numeric` as a JSON STRING. Kept as one
+        // rather than parsed, because nothing here does arithmetic on
+        // it and a parse would turn "0.05" into a rounding question
+        // that only the screen has to answer.
+        weight: as_opt_str(r, "weight"),
+        accepts: as_strings(r, "accepts"),
+        capacity_slots: as_opt_str(r, "capacity_slots"),
     }
 }
 
 pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
-damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap";
+damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap,\
+size,holds_size,weight,accepts,capacity_slots";
 
 /// Global rows plus this game's overrides, collapsed so an override
 /// replaces the global row sharing its key. Same two-pass shape as the
@@ -847,6 +882,15 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // Not what these fixtures are about. Written out
+            // rather than defaulted, because a fixture that is
+            // faithful to the seed makes a failure mean the RULE
+            // changed.
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -867,6 +911,11 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -887,6 +936,11 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -907,6 +961,11 @@ mod tests {
             armor_category: Some("med".into()),
             base_ac: Some(14),
             dex_cap: Some(2),
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -927,6 +986,11 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -1075,6 +1139,11 @@ mod tests {
             armor_category: Some("hvy".into()),
             base_ac: Some(18),
             dex_cap: Some(0),
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
             ..scale_mail()
         };
 
@@ -1213,6 +1282,11 @@ mod tests {
             armor_category: Some("shl".into()),
             base_ac: Some(2),
             dex_cap: None,
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -1234,6 +1308,11 @@ mod tests {
             armor_category: Some("lgt".into()),
             base_ac: Some(11),
             dex_cap: None,
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 
@@ -1254,6 +1333,11 @@ mod tests {
             armor_category: Some("hvy".into()),
             base_ac: Some(18),
             dex_cap: Some(0),
+            size: "med".into(),
+            holds_size: None,
+            weight: None,
+            accepts: vec![],
+            capacity_slots: None,
         }
     }
 

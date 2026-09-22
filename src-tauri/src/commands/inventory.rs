@@ -284,6 +284,8 @@ pub fn edit_object(
     object_id: String,
     name: Option<String>,
     quantity: Option<i64>,
+    size_override: Option<String>,
+    holds_size_override: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
@@ -305,6 +307,28 @@ pub fn edit_object(
         // quantity. Raising a named sword to three is the same refusal
         // from the other direction.
         objects::may_name(qty)?;
+    }
+
+    // 036'S TWO OVERRIDES, and a blank clears one rather than skipping
+    // it. That is the difference between "leave it alone" and "it is
+    // ordinary after all", and only an explicit empty string can say
+    // the second - which is why these are Option<String> and not
+    // Option<Option<String>>: the screen sends "" to clear.
+    //
+    // The words are not checked here. 036 puts a CHECK on both columns,
+    // so a size nobody recognises is refused by Postgres with its own
+    // sentence, and a second copy of the ladder in this file is a second
+    // place for it to be wrong.
+    for (field, given) in [
+        ("size_override", &size_override),
+        ("holds_size_override", &holds_size_override),
+    ] {
+        if let Some(raw) = given.as_deref() {
+            patch[field] = match raw.trim() {
+                "" => Value::Null,
+                v => json!(v),
+            };
+        }
     }
 
     supabase::rest_update(

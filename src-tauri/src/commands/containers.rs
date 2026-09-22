@@ -80,7 +80,19 @@ pub fn put_in_container(
         contents.push((find(&s.item_key)?, s.quantity));
     }
 
+    // THREE OBJECTIONS, WORST-FIRST. They are not the same question
+    // and any one of them is enough:
+    //
+    //   admits       a purse takes coins, and that is not a coin
+    //   admits_size  nothing bigger than tiny goes in, and that is large
+    //   fits         it would go in, but there is no room left
+    //
+    // Size before slots because it is the objection a person reaches
+    // for and it gives the better sentence. Arithmetic about how much
+    // room a greatsword needs in a coin purse answers a question nobody
+    // asked.
     containers::admits(&profile, &incoming, &name)?;
+    containers::admits_size(&profile, &incoming, &name)?;
     containers::fits(&profile, &contents, &incoming, obj.quantity, &name)?;
 
     move_into(&token, &obj, &object_id, &inside, Some(&into))

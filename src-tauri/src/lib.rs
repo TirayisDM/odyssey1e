@@ -31,6 +31,7 @@ mod objects;
 mod pin;
 mod resolution;
 mod supabase;
+mod vitality;
 
 use character::{Resolved, Sheet};
 use dice::{RandomRoller, RollResult};
@@ -1069,6 +1070,7 @@ pub fn run() {
             commands::dm::npc_attack,
             commands::dm::view_actor,
             commands::dm::rename_actor,
+            commands::dm::set_actor_level,
             death_save,
             get_sheet,
             set_level,

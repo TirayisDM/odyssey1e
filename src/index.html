@@ -128,7 +128,21 @@
           </div>
           <div class="row">
             <input id="npc-ac" type="number" min="0" placeholder="AC" />
-            <input id="npc-hp" type="number" min="1" placeholder="HP" />
+            <!-- Blank derives it from size and level. Level IS hit
+                 dice, so 2d6 is level 2 and the 7 comes out. -->
+            <input id="npc-hp" type="number" min="1" placeholder="HP (blank = from hit dice)" />
+          </div>
+          <div class="row">
+            <select id="npc-size">
+              <option value="">size (needed to derive HP)</option>
+              <option value="tiny">Tiny &mdash; d4</option>
+              <option value="sm">Small &mdash; d6</option>
+              <option value="med">Medium &mdash; d8</option>
+              <option value="lg">Large &mdash; d10</option>
+              <option value="huge">Huge &mdash; d12</option>
+              <option value="grg">Gargantuan &mdash; d20</option>
+            </select>
+            <input id="npc-level" type="number" min="1" placeholder="level = hit dice" class="narrow" />
           </div>
           <!-- What it is TRAINED with, not what it carries. Without
                these a statblock is proficient with nothing and its

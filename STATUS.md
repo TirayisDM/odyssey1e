@@ -250,6 +250,8 @@ and not after.
     columns versatile needed; 49 seed rows
 028 statblock proficiency - npcs gets the two arrays characters has
     had since 008, and instantiate_npc stops faking them
+029 level is hit dice - a goblin is 2d6, so a goblin is level 2; hit
+    points stop being a magic number
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -261,6 +263,62 @@ replaced `techniques.weapon` - free text holding a display name like
 not an identifier, and that one string was carrying two facts: which
 item, and which attack mode. The light hammer has different technique
 lists for melee and thrown, 7 and 6.
+
+**029 made a monster's level its HIT DICE.** The Monster Manual always
+wrote it that way - `Hit Points 7 (2d6)` - and 029 stops treating the
+bracket as trivia. `npcs.hp_max` was a magic number: 7, because the
+book says 7. Nothing could check it, nothing could move it, and a DM
+who wanted a tougher goblin had to write a second statblock.
+
+The rule is `vitality.rs`: `floor(level * (die + 1) / 2) + level *
+con_mod`, with the die coming from SIZE - d4 d6 d8 d10 d12 d20 for the
+six categories, which is why the book never states it separately. Its
+tests check five printed Monster Manual lines from d6 to d20, and those
+are the most valuable tests in the repo because anyone holding the book
+can falsify them:
+
+    Goblin     2d6,  CON 10    7     Orc    2d8,  CON 16   15
+    Bugbear    5d8,  CON 13   27     Ogre   7d10, CON 16   59
+    Tarrasque  33d20, CON 30  676
+
+Two things that are easy to get wrong from memory and are pinned by
+their own tests: Constitution applies PER DIE (the ogre's +21 is +3
+across seven), and the TOTAL rounds down rather than each die (7d10 is
+38.5 to 38, not seven lots of 5.5 to 35).
+
+The goblin's hit points did not move. It was level 1 with a stated 7
+and is now level 2, and 2d6 averages to exactly 7 - the number is the
+same and has stopped being arbitrary, which is the whole point.
+
+**`set_actor_level` moves it on the INDIVIDUAL**, not the statblock.
+Levelling Crumbs makes Crumbs tougher; the shared goblin is untouched.
+022 settled that, and this is the first command that would have been
+ambiguous before it. Wounds survive a level change and that falls out
+of 013 rather than being arranged - hit points are a log, so raising
+the maximum by seven leaves a creature at 3 of 7 sitting at 10 of 14,
+still down by four.
+
+The proficiency override is CLEARED when a DM levels something by hand,
+and that is a decision rather than a side effect. A statblock states
+its bonus because the book rates a monster by CHALLENGE, not hit dice -
+an ogre is 7 dice and CR 2, so the book says +2 where level derives +3.
+That answer is about the monster the book printed; a creature a DM has
+hand-levelled is not that monster any more.
+
+**What does NOT ripple, and do not assume it does.** Skills would ride
+on the proficiency bonus for free, except `npcs` carries no skill
+proficiencies at all - so there is nothing riding on it yet, and giving
+statblocks skills is its own piece of work. Special abilities are not a
+ripple, they are a missing subsystem: there is no table, so a goblin's
+Nimble Escape does not exist anywhere in this schema and levelling one
+cannot scale something the database has never heard of.
+
+A statblock with no `size` cannot derive a die, and that is reported
+rather than guessed - guessing d8 would quietly hand every sizeless
+statblock a medium creature's hit points. `Goblin Fighter` (`0000A1`)
+is the live example: written through the DM panel before the form had a
+size field, so it keeps its stated 23 and refuses to be levelled until
+somebody gives it one.
 
 **028 is the bug the inventory system exposed.** `characters` has had
 weapon_profs and armor_profs since 008 and `npcs` never got them, so

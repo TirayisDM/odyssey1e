@@ -86,7 +86,9 @@ pub fn create_npc(
     key: String,
     name: String,
     ac: i64,
-    hp_max: i64,
+    hp_max: Option<i64>,
+    size: Option<String>,
+    level: Option<i64>,
     species: Option<String>,
     class: Option<String>,
     weapon_profs: Option<String>,
@@ -96,9 +98,43 @@ pub fn create_npc(
     if key.trim().is_empty() || name.trim().is_empty() {
         return Err("a statblock needs a key and a name".to_string());
     }
-    if ac < 0 || hp_max < 1 {
-        return Err("ac cannot be negative and hp must be at least 1".to_string());
+    if ac < 0 {
+        return Err("ac cannot be negative".to_string());
     }
+
+    // LEVEL IS HIT DICE, so a statblock that states its size does not
+    // have to state its hit points - they come out of the two. Stating
+    // them anyway still wins: a boss with a hand-picked maximum is a
+    // real thing, and this is the same stated-beats-derived shape
+    // prof_bonus and proficient_override already use.
+    let level = level.unwrap_or(1);
+    if level < 1 {
+        return Err("a creature is at least level 1".to_string());
+    }
+    // Kept as an Option<String> rather than going straight through
+    // name_or_null, because the hit die lookup needs the code itself.
+    let size = size
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    let hp_max = match hp_max {
+        Some(h) if h >= 1 => h,
+        Some(_) => return Err("hp must be at least 1".to_string()),
+        None => {
+            let die = crate::vitality::hit_die(size.as_deref()).ok_or_else(|| {
+                concat!(
+                    "give it a size (tiny sm med lg huge grg) so the hit die ",
+                    "is known, or state hp directly"
+                )
+                .to_string()
+            })?;
+            // Constitution is not asked for on this form, so the die
+            // alone decides. A statblock that wants a Constitution
+            // bonus in its maximum states the maximum.
+            crate::vitality::average_hp(level, die, 0)
+        }
+    };
 
     // Refused before the insert rather than stored and discovered later.
     // A bad proficiency code does not fail, it under-grants - see
@@ -117,6 +153,8 @@ pub fn create_npc(
             "class": name_or_null(class),
             "ac": ac,
             "hp_max": hp_max,
+            "size": name_or_null(size.clone()),
+            "level": level,
             "weapon_profs": weapon_profs,
             "armor_profs": armor_profs,
         }),
@@ -585,6 +623,130 @@ pub fn view_actor(state: State<AppState>, actor_id: String) -> Result<Value, Str
 /// One call, because the actor's label and the character's name are one
 /// fact and writing them separately opens a window where the roster and
 /// the roll log disagree. See 025.
+/// Move a creature's level, and let it ripple.
+///
+/// LEVEL IS HIT DICE - see vitality.rs. So moving a level is not an
+/// annotation, it is a rewrite of what the creature is: a goblin at 2
+/// has 2d6 and a goblin at 6 has 6d6, and its hit points and
+/// proficiency bonus both follow from that. This is the command that
+/// makes the level the source and the rest the consequence.
+///
+/// THE INSTANCE, NOT THE STATBLOCK. Levelling Crumbs makes Crumbs
+/// tougher; the `goblin` every other campaign enrols is untouched. 022
+/// settled that - a monster is an individual and stopped being a view
+/// of its type - and this is the first command that would have been
+/// ambiguous before it.
+///
+/// WOUNDS SURVIVE IT, and that falls out of 013 rather than being
+/// arranged. Hit points are a log: current is maximum plus the sum of
+/// what has happened. Raise the maximum by seven and a creature at 3 of
+/// 7 is at 10 of 14 - still down by four, which is what levelling up
+/// means. Nothing is healed and nothing is re-rolled.
+///
+/// THE PROFICIENCY OVERRIDE IS CLEARED, deliberately. A statblock
+/// states its bonus because the book rates a monster by challenge
+/// rather than by hit dice - an ogre is 7 dice and CR 2. That answer is
+/// about the monster the book printed, and a creature a DM has hand
+/// levelled is no longer that monster, so it derives from level like
+/// everyone else from here on.
+///
+/// HIT POINTS ARE THE AVERAGE, not a roll. The Monster Manual's printed
+/// number is the average and this reproduces it exactly. A roll would
+/// also mean a creature's maximum jittering every time a DM corrected a
+/// typo in its level, which is not a feature.
+#[tauri::command]
+pub fn set_actor_level(
+    state: State<AppState>,
+    actor_id: String,
+    level: i64,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    if level < 1 {
+        return Err("a creature is at least level 1".to_string());
+    }
+
+    let rows = supabase::rest_get(
+        &token,
+        "encounter_actors",
+        &[
+            ("select", "character_id"),
+            ("id", &format!("eq.{}", actor_id)),
+        ],
+    )?;
+    let character_id = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("character_id"))
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| "no such actor, or it is not visible to you".to_string())?
+        .to_string();
+
+    let p = crate::character::load_profile(&token, &character_id)?;
+
+    // A die that cannot be known must not be invented. A statblock
+    // written through the DM panel before 029 carries no size, and
+    // guessing d8 would quietly give it a medium creature's hit points.
+    let die = crate::vitality::hit_die(p.vitals.size.as_deref()).ok_or_else(|| {
+        format!(
+            "{} has no size, so there is no hit die to level - set one on its statblock first",
+            p.name
+        )
+    })?;
+
+    let con = load_ability(&token, &character_id, "con")?;
+    let hp_max = crate::vitality::average_hp(level, die, (con - 10).div_euclid(2));
+
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({
+            "level": level,
+            "hp_max": hp_max,
+            // Null, not the derived number: stated and derived are
+            // different facts, and writing the value would leave a
+            // creature that stops tracking its own level.
+            "prof_bonus": Value::Null,
+        }),
+    )
+    .map_err(|e| denied(e, "change a creature's level"))?;
+
+    // What it became, rather than the row that was written. A level
+    // change moves three numbers and the DM should be told all three -
+    // the hit dice especially, since that is the fact the other two
+    // come out of and the one that is not stored anywhere.
+    Ok(json!({
+        "level": level,
+        "hit_dice": format!("{}d{}", level, die),
+        "hp_max": hp_max,
+        "prof_bonus": crate::vitality::prof_bonus_for(level),
+    }))
+}
+
+/// One ability score. The level path needs Constitution and nothing
+/// else, and `load_sheet` would fetch a skill catalogue and a loadout
+/// to get it.
+fn load_ability(token: &str, character_id: &str, code: &str) -> Result<i64, String> {
+    let rows = supabase::rest_get(
+        token,
+        "character_abilities",
+        &[
+            ("select", "score"),
+            ("character_id", &format!("eq.{}", character_id)),
+            ("ability", &format!("eq.{}", code)),
+        ],
+    )?;
+    Ok(rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("score"))
+        .and_then(|x| x.as_i64())
+        // Ten is the average and the schema seeds all six on creation,
+        // so an absent row is a fault elsewhere and not a reason to
+        // refuse. A modifier of zero is the harmless reading.
+        .unwrap_or(10))
+}
+
 #[tauri::command]
 pub fn rename_actor(
     state: State<AppState>,

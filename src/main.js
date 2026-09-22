@@ -1130,6 +1130,50 @@ async function paintActorView(host, actor, encounterId) {
   nameRow.append(nameBox, save);
   host.append(nameRow);
 
+  // --- level, which is HIT DICE ---
+  //
+  // Not an annotation. A goblin at 2 is 2d6 and a goblin at 6 is 6d6,
+  // so moving this rewrites what the creature is - its hit points and
+  // its proficiency bonus both fall out of it. The command says what it
+  // did rather than the panel guessing, because the hit dice are the
+  // fact the other two come from and the one nothing stores.
+  //
+  // WOUNDS SURVIVE IT. Hit points are a log, so raising the maximum by
+  // seven leaves a creature at 3 of 7 sitting at 10 of 14 - still down
+  // by four, which is what levelling up means.
+  const lvlRow = document.createElement("div");
+  lvlRow.className = "row";
+  const lvlBox = document.createElement("input");
+  lvlBox.type = "number";
+  lvlBox.min = "1";
+  lvlBox.value = sh.level;
+  lvlBox.className = "narrow";
+  lvlBox.title = "level is hit dice";
+  const setLvl = document.createElement("button");
+  setLvl.className = "tiny";
+  setLvl.textContent = "set level";
+  let lvlBusy = false;
+  setLvl.addEventListener("click", async () => {
+    if (lvlBusy) return;
+    lvlBusy = true; setLvl.disabled = true;
+    try {
+      dmSay("");
+      const r = await tryCall("set_actor_level", {
+        actorId: actor.id,
+        level: Number(lvlBox.value) || 0,
+      });
+      if (!r.ok) { dmSay(r.error, true); return; }
+      const v = r.value || {};
+      dmSay(actor.label + " is level " + v.level + " · " + v.hit_dice +
+            " · " + v.hp_max + " hp · PB +" + v.prof_bonus);
+      await paintActorView(host, actor, encounterId);
+      // The target list prints hit points, so it is now stale.
+      await loadTargets();
+    } finally { lvlBusy = false; setLvl.disabled = false; }
+  });
+  lvlRow.append(lvlBox, setLvl);
+  host.append(lvlRow);
+
   // --- vitals, and where each number came from ---
   const pb = sh.prof_bonus !== null && sh.prof_bonus !== undefined
     ? sh.prof_bonus : Math.floor((sh.level - 1) / 4) + 2;
@@ -1738,7 +1782,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       key: val("#npc-key"),
       name: val("#npc-name"),
       ac: Number(val("#npc-ac") || 0),
-      hpMax: Number(val("#npc-hp") || 0),
+      // null, not 0: blank means "derive it", and 0 would be a stated
+      // maximum the command is right to refuse.
+      hpMax: val("#npc-hp") ? Number(val("#npc-hp")) : null,
+      size: val("#npc-size") || null,
+      level: val("#npc-level") ? Number(val("#npc-level")) : null,
       species: val("#npc-species") || null,
       class: val("#npc-class") || null,
       weaponProfs: val("#npc-wprof") || null,

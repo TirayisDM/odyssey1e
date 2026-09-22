@@ -1009,7 +1009,7 @@ fn list_encounters(state: State<AppState>, game_id: String) -> Result<Value, Str
         &token,
         "encounters",
         &[
-            ("select", "id,name,status,created_at"),
+            ("select", "id,name,status,location_id,created_at"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "created_at.desc"),
         ],
@@ -1080,6 +1080,7 @@ pub fn run() {
             commands::locations::drop_here,
             commands::locations::loose_objects,
             commands::locations::place_object,
+            commands::dm::set_encounter_location,
             commands::dm::list_npcs,
             commands::dm::create_npc,
             commands::dm::create_encounter,

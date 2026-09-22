@@ -1060,6 +1060,7 @@ async function loadWorld() {
     parent.append(o);
   }
 
+  fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
   await loadLoose();
 }
 
@@ -1179,12 +1180,47 @@ async function loadDM() {
     // without refetching it. Rebuilding on every click would work and
     // would also throw away the DM's scroll position mid-setup.
     li.dataset.encId = e.id;
+
+    // Where it happens, when it happens anywhere.
+    if (e.location_id) {
+      const at = (state.locations || []).find((l) => l.id === e.location_id);
+      if (at) {
+        const w = document.createElement("span");
+        w.className = "tag";
+        w.textContent = at.path.join(" > ");
+        li.append(w);
+      }
+    }
     // draft -> active -> ended, as a button rather than a dropdown: the
     // next state is nearly always the obvious one.
-    const next = e.status === "draft" ? "active" : e.status === "active" ? "ended" : "draft";
+    // ended and cancelled both go back to draft: a finished fight and
+    // an abandoned one are equally re-openable, and 034 keeps the two
+    // words apart for what they will trigger, not for what they allow.
+    const next =
+      e.status === "draft" ? "active" : e.status === "active" ? "ended" : "draft";
     const b = document.createElement("button");
     b.className = "tiny ghost";
-    b.textContent = "→ " + next;    b.addEventListener("click", async (ev) => {
+    b.textContent = "→ " + next;
+    // CANCELLED IS NOT ENDED. 034 says why: ended is what will trigger
+    // the experience review and the journal entry, and a called-off
+    // encounter must earn nobody anything. Offered only while there is
+    // something to call off.
+    if (e.status === "draft" || e.status === "active") {
+      const x = document.createElement("button");
+      x.className = "tiny ghost";
+      x.textContent = "cancel";
+      x.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const r = await tryCall("set_encounter_status", {
+          encounterId: e.id,
+          status: "cancelled",
+        });
+        dmSay(r.ok ? e.name + " called off — nobody earns anything for it" : r.error, !r.ok);
+        await loadDM();
+      });
+      li.append(x);
+    }
+    b.addEventListener("click", async (ev) => {
       ev.stopPropagation();
       dmSay("");
       const r = await tryCall("set_encounter_status", {
@@ -2014,6 +2050,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const r = await tryCall("create_encounter", {
       gameId: state.gameId,
       name: val("#enc-name"),
+      locationId: document.querySelector("#enc-where").value || null,
     });
     if (r.ok) document.querySelector("#enc-name").value = "";
     else dmSay(r.error, true);

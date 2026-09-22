@@ -174,6 +174,7 @@ pub fn create_encounter(
     state: State<AppState>,
     game_id: String,
     name: String,
+    location_id: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     if name.trim().is_empty() {
@@ -182,9 +183,41 @@ pub fn create_encounter(
     supabase::rest_insert(
         &token,
         "encounters",
-        &json!({ "game_id": game_id, "name": name.trim(), "status": "draft" }),
+        &json!({
+            "game_id": game_id,
+            "name": name.trim(),
+            "status": "draft",
+            // Blank is nowhere in particular, which 034 allows: a
+            // scratch encounter with no place is a legitimate thing.
+            "location_id": match location_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                Some(s) => json!(s),
+                None => Value::Null,
+            },
+        }),
     )
     .map_err(|e| denied(e, "create an encounter"))
+}
+
+/// Move an encounter to a place, or out of one.
+#[tauri::command]
+pub fn set_encounter_location(
+    state: State<AppState>,
+    encounter_id: String,
+    location_id: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "encounters",
+        &[("id", &format!("eq.{}", encounter_id))],
+        &json!({
+            "location_id": match location_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                Some(s) => json!(s),
+                None => Value::Null,
+            },
+        }),
+    )
+    .map_err(|e| denied(e, "move an encounter"))
 }
 
 /// draft -> active -> ended.
@@ -200,8 +233,12 @@ pub fn set_encounter_status(
     status: String,
 ) -> Result<Value, String> {
     let token = state.token()?;
-    if !["draft", "active", "ended"].contains(&status.as_str()) {
-        return Err("status must be draft, active or ended".to_string());
+    // ENDED AND CANCELLED ARE NOT THE SAME WORD. 034 says why at
+    // length: ended is what will trigger the experience review and the
+    // journal entry, and a cancelled encounter must earn nobody
+    // anything. The check constraint admits both; so does this.
+    if !["draft", "active", "ended", "cancelled"].contains(&status.as_str()) {
+        return Err("status must be draft, active, ended or cancelled".to_string());
     }
 
     supabase::rest_update(

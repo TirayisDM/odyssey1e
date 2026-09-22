@@ -89,6 +89,8 @@ pub fn create_npc(
     hp_max: i64,
     species: Option<String>,
     class: Option<String>,
+    weapon_profs: Option<String>,
+    armor_profs: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     if key.trim().is_empty() || name.trim().is_empty() {
@@ -97,6 +99,12 @@ pub fn create_npc(
     if ac < 0 || hp_max < 1 {
         return Err("ac cannot be negative and hp must be at least 1".to_string());
     }
+
+    // Refused before the insert rather than stored and discovered later.
+    // A bad proficiency code does not fail, it under-grants - see
+    // equipment::parse_armor_profs.
+    let weapon_profs = crate::equipment::parse_weapon_profs(weapon_profs.as_deref().unwrap_or(""))?;
+    let armor_profs = crate::equipment::parse_armor_profs(armor_profs.as_deref().unwrap_or(""))?;
 
     supabase::rest_insert(
         &token,
@@ -109,6 +117,8 @@ pub fn create_npc(
             "class": name_or_null(class),
             "ac": ac,
             "hp_max": hp_max,
+            "weapon_profs": weapon_profs,
+            "armor_profs": armor_profs,
         }),
     )
     .map_err(|e| denied(e, "write a statblock"))

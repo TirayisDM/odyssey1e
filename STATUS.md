@@ -248,6 +248,8 @@ and not after.
     surrogate id; a sword becomes a particular sword
 027 the catalogue - the SRD weapon and armour tables, and the two
     columns versatile needed; 49 seed rows
+028 statblock proficiency - npcs gets the two arrays characters has
+    had since 008, and instantiate_npc stops faking them
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -259,6 +261,31 @@ replaced `techniques.weapon` - free text holding a display name like
 not an identifier, and that one string was carrying two facts: which
 item, and which attack mode. The light hammer has different technique
 lists for melee and thrown, 7 and 6.
+
+**028 is the bug the inventory system exposed.** `characters` has had
+weapon_profs and armor_profs since 008 and `npcs` never got them, so
+`instantiate_npc` built a monster with empty arrays and covered for it
+by stamping `coalesce(x.proficient_override, true)` on every kit row.
+That reads as "a monster is proficient with its gear". What it says is
+"proficient with exactly what came out of npc_items and nothing else,
+ever" - and it was invisible until there was a way to hand a monster
+something. One sickle later:
+
+    Runt   · Scimitar  1d20 +4   DEX +2, PB +2   the stamped override
+    Crumbs · Sickle    1d20 -1   STR -1, no PB   derived, against {}
+
+Same species, same round, and the only difference was which table the
+weapon arrived through. 028 gives `npcs` the arrays, copies them on
+instantiate, and drops the coalesce, so `is_proficient` decides it for
+a goblin exactly as it decides it for Rodnar - unchanged, one rule.
+
+The goblin is `{sim}` plus an explicit override on its scimitar, NOT
+`{sim,mar}`. A goblin knows the blade it carries; it is not a
+martial-weapon user in general, and promoting the species would hand it
+a greatsword and a longbow it has never held. Verified through the live
+function and rolled back: handaxe and sickle proficient by derivation,
+scimitar by override, and a greataxe correctly NOT - which is the
+control proving the rule still discriminates.
 
 **026 is the one to read before touching inventory.** `character_items`
 was a junction keyed `(character_id, item_key)`, and that key was the
@@ -498,9 +525,26 @@ as crits. Flat zero is simpler and reads plainly at the table.
 
 Everything else in there is 5e and was deliberately not invented: ten or
 better succeeds, a natural 1 is two failures, a natural 20 restores one
-hit point and clears the tally, three either way settles it, being hit
-while down costs a failure and two on a crit, and overflow damage
-meeting the hit point maximum kills outright.
+hit point and clears the tally, three either way settles it, and being
+hit while down costs a failure and two on a crit.
+
+**Overflow death is only half implemented, and this section used to
+claim otherwise.** `massive_damage_kills` is right and tested, but
+`lib.rs` only calls it behind `was.is_conscious()` - so it runs on the
+blow that drops you and never again. Two consequences, both visible on
+a goblin that reached -35 of 7:
+
+- **Hit points run unbounded negative.** 5e has no negative hit points
+  at all; that is the 3.5e rule. Damage past 0 leaves you AT 0 and the
+  excess is discarded, except for the one check below.
+- **Damage taken while already down never checks for instant death.**
+  By the book, damage at 0 that equals or exceeds the hit point maximum
+  kills outright, and at 0 there is no subtraction to do - it is the raw
+  damage against max. Today it only ever adds a death save failure, so a
+  creature at 0 can absorb five times its maximum and go on dying.
+
+Both are in the same block at `lib.rs:669`. The rule half belongs in
+`death.rs` beside the others, with tests.
 
 One more, in `resolution.rs`: a natural 20 does NOT carry an ability
 check, only an attack. That is rules as written, and

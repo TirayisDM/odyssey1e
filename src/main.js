@@ -1741,6 +1741,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       hpMax: Number(val("#npc-hp") || 0),
       species: val("#npc-species") || null,
       class: val("#npc-class") || null,
+      weaponProfs: val("#npc-wprof") || null,
+      armorProfs: val("#npc-aprof") || null,
     });
     if (r.ok) {
       for (const id of ["#npc-key", "#npc-name", "#npc-species", "#npc-class", "#npc-ac", "#npc-hp"]) {

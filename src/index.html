@@ -130,6 +130,13 @@
             <input id="npc-ac" type="number" min="0" placeholder="AC" />
             <input id="npc-hp" type="number" min="1" placeholder="HP" />
           </div>
+          <!-- What it is TRAINED with, not what it carries. Without
+               these a statblock is proficient with nothing and its
+               kit has to fake it one row at a time - see 028. -->
+          <div class="row">
+            <input id="npc-wprof" placeholder="weapons trained: sim, mar" />
+            <input id="npc-aprof" placeholder="armour: lgt med hvy shl" />
+          </div>
           <button id="create-npc" class="ghost">Write statblock</button>
         </div>
       </section>

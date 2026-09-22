@@ -663,6 +663,77 @@ pub fn load_npc_loadout(
     Ok(out)
 }
 
+/// The four armour proficiency codes, and nothing else is one.
+///
+/// A CLOSED SET, which is what makes it checkable. 008 normalizes the
+/// export's light/medium/heavy/shield into these and says the two
+/// vocabularies are reconciled there and nowhere else - so `light` in
+/// this column is not a synonym, it is a value that matches no armour
+/// and silently grants nothing.
+pub const ARMOR_PROF_CODES: [&str; 4] = ["lgt", "med", "hvy", "shl"];
+
+/// Parse a typed armour proficiency list, refusing anything outside the
+/// vocabulary.
+///
+/// The refusal is the whole point. A wrong code here does not fail, it
+/// under-grants - the creature simply turns out not to be proficient
+/// with armour it should be wearing, which reads as the AC being wrong
+/// rather than as the input being wrong.
+pub fn parse_armor_profs(raw: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split(|c| c == ',' || c == ' ') {
+        let t = part.trim().to_lowercase();
+        if t.is_empty() {
+            continue;
+        }
+        if !ARMOR_PROF_CODES.contains(&t.as_str()) {
+            return Err(format!(
+                "'{}' is not an armour proficiency - use {}",
+                t,
+                ARMOR_PROF_CODES.join(", ")
+            ));
+        }
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    Ok(out)
+}
+
+/// Parse a typed weapon proficiency list.
+///
+/// NOT a closed set: 008 allows `sim`, `mar`, or a bare baseItem
+/// granting one weapon, so `longsword` is a legal entry and this cannot
+/// reject an unknown token without rejecting that.
+///
+/// What it CAN catch is the near miss. `simple`, `martial` and
+/// `simpleM` all look like an answer and all match nothing -
+/// `is_proficient` compares against the sim/mar prefix of a weapon's
+/// class, so `simpleM` in this column is a baseItem named simpleM. Those
+/// four spellings are the ones a person actually types, and letting them
+/// through is how a statblock ends up trained in nothing at all.
+pub fn parse_weapon_profs(raw: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split(|c| c == ',' || c == ' ') {
+        let t = part.trim().to_lowercase();
+        if t.is_empty() {
+            continue;
+        }
+        let meant = match t.as_str() {
+            "simple" | "simplem" | "simpler" => Some("sim"),
+            "martial" | "martialm" | "martialr" => Some("mar"),
+            _ => None,
+        };
+        if let Some(code) = meant {
+            return Err(format!("'{}' matches no weapon - did you mean '{}'?", t, code));
+        }
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    Ok(out)
+}
+
 /// Every item this campaign can offer, global rows plus its own
 /// overrides.
 ///
@@ -1209,6 +1280,51 @@ mod tests {
     fn unarmoured_is_ten_plus_dex() {
         assert_eq!(armor_class(3, &[], AcMode::Default, None), 13);
         assert_eq!(armor_class(0, &[], AcMode::Default, None), 10);
+    }
+
+    #[test]
+    fn armour_codes_outside_the_vocabulary_are_refused() {
+        // The exact typo 008 warns about: the export's own spelling,
+        // which matches no armour and grants nothing.
+        assert!(parse_armor_profs("light, shield").is_err());
+        assert_eq!(
+            parse_armor_profs("lgt, shl"),
+            Ok(vec!["lgt".to_string(), "shl".to_string()])
+        );
+    }
+
+    #[test]
+    fn armour_parsing_is_forgiving_about_everything_but_the_code() {
+        assert_eq!(
+            parse_armor_profs("  LGT ,, med   hvy "),
+            Ok(vec!["lgt".to_string(), "med".to_string(), "hvy".to_string()])
+        );
+        assert_eq!(parse_armor_profs("   "), Ok(Vec::new()));
+        // Said twice is still said once.
+        assert_eq!(parse_armor_profs("shl shl"), Ok(vec!["shl".to_string()]));
+    }
+
+    #[test]
+    fn a_bare_base_item_is_a_legal_weapon_proficiency() {
+        // 008 allows one weapon by name, so this cannot be a closed set.
+        assert_eq!(
+            parse_weapon_profs("sim, longsword"),
+            Ok(vec!["sim".to_string(), "longsword".to_string()])
+        );
+    }
+
+    #[test]
+    fn the_near_misses_are_caught_by_name() {
+        // Each of these looks like an answer and matches nothing:
+        // is_proficient compares against the sim/mar prefix, so
+        // "simpleM" here is a baseItem called simpleM.
+        for typo in ["simple", "martial", "simpleM", "martialR"] {
+            assert!(
+                parse_weapon_profs(typo).is_err(),
+                "{} should have been caught",
+                typo
+            );
+        }
     }
 
     #[test]

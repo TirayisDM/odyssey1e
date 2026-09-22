@@ -325,6 +325,9 @@ fn as_strings(v: &Value, key: &str) -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
     pub character_id: String,
+    /// This character AS A HOLDER - 031. What their objects point at,
+    /// and the thing every inventory read filters on now.
+    pub entity_id: String,
     /// NULL means derive from level. A statblock states one; a player
     /// character does not have one to state. See 022.
     pub prof_bonus: Option<i64>,
@@ -370,7 +373,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         &[
             (
                 "select",
-                "id,game_id,name,level,narrative_pack,weapon_profs,armor_profs,                 hp_max,hp_temp,hp_temp_max,ac_mode,ac_override,                 death_successes,death_failures,exhaustion,inspiration,size",
+                "id,entity_id,game_id,name,level,narrative_pack,weapon_profs,armor_profs,                 hp_max,hp_temp,hp_temp_max,ac_mode,ac_override,                 death_successes,death_failures,exhaustion,inspiration,size",
             ),
             ("id", &format!("eq.{}", character_id)),
         ],
@@ -389,6 +392,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
 
     Ok(Profile {
         character_id: as_str(c, "id"),
+        entity_id: as_str(c, "entity_id"),
         prof_bonus: c.get("prof_bonus").and_then(|x| x.as_i64()),
         is_npc: c.get("is_npc").and_then(|x| x.as_bool()).unwrap_or(false),
         game_id: as_str(c, "game_id"),
@@ -549,7 +553,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
 
     let loadout = equipment::load_loadout(
         token,
-        character_id,
+        &profile.entity_id,
         &game_id,
         &profile.weapon_profs,
         &profile.armor_profs,

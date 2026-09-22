@@ -144,7 +144,11 @@ pub fn check_quantity(n: i64) -> Result<i64, String> {
 /// thing itself, and the holder comes back from the row rather than
 /// from whoever asked.
 pub struct ObjectRow {
-    pub character_id: Option<String>,
+    /// WHERE IT IS: a character's entity, a container's entity, or None
+    /// for nowhere. See 031 - one column, because two would rot.
+    pub holder_id: Option<String>,
+    /// WHAT IT IS, when it can hold. None for an arrow.
+    pub entity_id: Option<String>,
     pub game_id: String,
     pub item_key: String,
     pub name: Option<String>,
@@ -156,7 +160,7 @@ pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
         token,
         "objects",
         &[
-            ("select", "character_id,game_id,item_key,name,quantity"),
+            ("select", "holder_id,entity_id,game_id,item_key,name,quantity"),
             ("id", &format!("eq.{}", object_id)),
         ],
     )?;
@@ -168,7 +172,8 @@ pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
         .cloned()
         .ok_or_else(|| "no such object, or it is not visible to you".to_string())?;
     Ok(ObjectRow {
-        character_id: str_or_none(&r, "character_id"),
+        holder_id: str_or_none(&r, "holder_id"),
+        entity_id: str_or_none(&r, "entity_id"),
         game_id: as_text(&r, "game_id"),
         item_key: as_text(&r, "item_key"),
         name: str_or_none(&r, "name"),
@@ -176,17 +181,38 @@ pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
     })
 }
 
-/// Everything one character holds, in the shape the stacking rule
-/// wants. Deliberately not the loadout: deciding where seven rations go
+/// The character this holder IS, or None when it is a container.
+///
+/// DIRECT, deliberately. Postgres has `holder_character`, which walks
+/// up through containers and answers "whose is this ultimately" - the
+/// question a POLICY asks. This asks the narrower one the equip rule
+/// needs: is this thing in somebody's hands, rather than somewhere in
+/// their luggage.
+pub fn character_holding(token: &str, holder_id: &str) -> Result<Option<String>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[("select", "id"), ("entity_id", &format!("eq.{}", holder_id))],
+    )?;
+    Ok(rows
+        .as_array()
+        .and_then(|a| a.first())
+        .map(|r| as_text(r, "id")))
+}
+
+/// Everything directly inside ONE HOLDER, in the shape the stacking
+/// rule wants. A character's entity gives what they are carrying; a
+/// chest's gives what is in the chest. Not recursive: what is in the
+/// backpack is the backpack's, not theirs. Deliberately not the loadout: deciding where seven rations go
 /// needs no catalogue row, and loading one would turn an add into three
 /// requests.
-pub fn load_held(token: &str, character_id: &str) -> Result<Vec<Stack>, String> {
+pub fn load_held(token: &str, holder_id: &str) -> Result<Vec<Stack>, String> {
     let rows = supabase::rest_get(
         token,
         "objects",
         &[
             ("select", "id,item_key,name,quantity"),
-            ("character_id", &format!("eq.{}", character_id)),
+            ("holder_id", &format!("eq.{}", holder_id)),
         ],
     )?;
     Ok(rows

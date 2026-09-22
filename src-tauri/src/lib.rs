@@ -22,6 +22,7 @@
 mod acquire;
 mod attack;
 mod character;
+mod containers;
 mod commands;
 mod death;
 mod dice;
@@ -404,9 +405,15 @@ fn set_item_equipped(
 
     if equipped {
         let obj = objects::load_object(&token, &object_id)?;
-        let character_id = obj
-            .character_id
+        // DIRECTLY held, not merely somewhere. A breastplate at the
+        // bottom of a backpack is not being worn, and since 031 that is
+        // a state the schema can actually represent.
+        let holder = obj
+            .holder_id
             .ok_or_else(|| "nobody is holding that - it cannot be equipped".to_string())?;
+        let character_id = objects::character_holding(&token, &holder)?.ok_or_else(|| {
+            "that is inside something - take it out before equipping it".to_string()
+        })?;
         let sheet = character::load_sheet(&token, &character_id)?;
         let incoming = equipment::load_item(&token, &sheet.game_id, &obj.item_key)?
             .ok_or_else(|| format!("no item with key '{}'", obj.item_key))?;
@@ -1047,6 +1054,9 @@ pub fn run() {
             list_targets,
             // The DM side. Eleven commands, none of them in this file —
             // see commands/mod.rs for why that is the point.
+            commands::containers::list_contents,
+            commands::containers::put_in_container,
+            commands::containers::take_from_container,
             commands::inventory::list_catalogue,
             commands::inventory::give_item,
             commands::inventory::drop_object,

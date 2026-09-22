@@ -440,7 +440,7 @@ fn batch_character_stats(
         token,
         "characters",
         &[
-            ("select", "id,ac_mode,ac_override,hp_max,death_successes,death_failures,dead"),
+            ("select", "id,entity_id,ac_mode,ac_override,hp_max,death_successes,death_failures,dead"),
             ("id", &format!("in.({})", list)),
         ],
     )?;
@@ -462,16 +462,33 @@ fn batch_character_stats(
 
     // Equipped rows for everyone at once, then the catalogue for every
     // key they mention. Two requests, not two per character.
-    let owned = supabase::rest_get(
-        token,
-        "objects",
-        &[
-            ("select", "character_id,item_key"),
-            ("character_id", &format!("in.({})", list)),
-            ("equipped", "is.true"),
-        ],
-    )?;
-    let owned = owned.as_array().cloned().unwrap_or_default();
+    // Objects point at an ENTITY since 031, so the query asks for the
+    // holders and the answers are mapped back. Equipped is still
+    // character-only - the trigger sees to that - so every row this
+    // returns belongs to somebody in this list.
+    let mut entity_of: HashMap<String, String> = HashMap::new();
+    for r in chars.as_array().unwrap_or(&Vec::new()) {
+        if let Some(e) = as_opt_str(r, "entity_id") {
+            entity_of.insert(e, as_str(r, "id"));
+        }
+    }
+    let holders: Vec<String> = entity_of.keys().cloned().collect();
+    let owned = if holders.is_empty() {
+        Vec::new()
+    } else {
+        supabase::rest_get(
+            token,
+            "objects",
+            &[
+                ("select", "holder_id,item_key"),
+                ("holder_id", &format!("in.({})", holders.join(","))),
+                ("equipped", "is.true"),
+            ],
+        )?
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    };
 
     let keys: Vec<String> = owned
         .iter()
@@ -499,10 +516,14 @@ fn batch_character_stats(
 
     let mut worn: HashMap<String, Vec<Item>> = HashMap::new();
     for r in &owned {
+        // Back from the holder to whose it is. A row whose holder is not
+        // in the map belongs to somebody outside this encounter, which
+        // the query should have excluded - skipping is the safe read.
+        let Some(cid) = entity_of.get(&as_str(r, "holder_id")) else {
+            continue;
+        };
         if let Some(item) = catalogue.get(&as_str(r, "item_key")) {
-            worn.entry(as_str(r, "character_id"))
-                .or_default()
-                .push(item.clone());
+            worn.entry(cid.clone()).or_default().push(item.clone());
         }
     }
 

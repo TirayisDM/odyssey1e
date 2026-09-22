@@ -55,6 +55,7 @@
 //!                        challenge, write a statblock     (item 2) DONE
 //!   inventory.rs         list the catalogue, give, drop, take,
 //!                        name and destroy an object                DONE
+//!   containers.rs        what is inside, put in, take out          DONE
 //!   initiative.rs        rolling for it, reading turn order        (item 1)
 //!   challenges.rs        whether the iron lock has been picked     (item 3)
 //!
@@ -72,6 +73,7 @@
 use crate::supabase::{AppState, Session};
 use tauri::State;
 
+pub mod containers;
 pub mod dm;
 pub mod inventory;
 pub mod session;

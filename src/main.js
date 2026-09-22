@@ -590,9 +590,32 @@ async function loadInventory() {
     return;
   }
 
+  // Kept so a row can offer the OTHER rows as somewhere to put itself.
+  state.inventory = items;
   for (const it of items) {
     list.append(inventoryRow(it));
   }
+}
+
+// Is this row a thing you can put things in?
+//
+// The catalogue's own `kind`, not a guess. A container is an object
+// like any other - it is carried, dropped and stolen - and the only
+// thing that marks it out is that since 031 it has an entity, so
+// something can point INTO it.
+function isContainer(it) {
+  return it.item.kind === "container";
+}
+
+// Where this object could go: every container the character carries,
+// except itself.
+//
+// Shallow on purpose. A container inside a container is legal and the
+// database walks the whole chain to decide whose it is, but a picker
+// that offers six levels of nesting is a tree widget, and this is a
+// test rig.
+function containerChoices(it) {
+  return (state.inventory || []).filter((c) => isContainer(c) && c.id !== it.id);
 }
 
 // The catalogue, read once per campaign.
@@ -697,6 +720,35 @@ function objectControls(it, onDone) {
   });
 
   wrap.append(nameBox, nameBtn, qty, dropBtn, killBtn);
+
+  // Into a container. Only rendered when there is one to choose, so an
+  // inventory with no bags looks exactly as it did before 032.
+  const into = containerChoices(it);
+  if (into.length) {
+    const pick = document.createElement("select");
+    pick.className = "into";
+    for (const c of into) {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name || c.item.name;
+      pick.append(o);
+    }
+    const put = document.createElement("button");
+    put.className = "tiny ghost";
+    put.textContent = "put in";
+    put.title = "a coin purse takes only coins";
+    put.addEventListener("click", async () => {
+      // tryCall, not call: a refusal here is the rule working - the
+      // purse saying no to a sword - and it is worth reading.
+      const r = await tryCall("put_in_container", {
+        objectId: it.id,
+        containerId: pick.value,
+      });
+      if (!r.ok) { alert(r.error); return; }
+      await onDone();
+    });
+    wrap.append(pick, put);
+  }
   return wrap;
 }
 
@@ -839,9 +891,61 @@ function inventoryRow(it) {
     detail.append(b);
   }
   detail.append(objectControls(it, loadSheet));
-  li.append(detail);
 
+  // WHAT IS INSIDE. Loaded when the row is opened rather than with the
+  // inventory: a character with five bags would otherwise cost five
+  // extra requests on every repaint, for lists nobody has looked at.
+  if (isContainer(it)) {
+    const inside = document.createElement("div");
+    inside.className = "contents";
+    inside.textContent = "…";
+    detail.append(inside);
+    let loaded = false;
+    name.addEventListener("click", async () => {
+      if (loaded || detail.hidden) return;
+      loaded = true;
+      await paintContents(inside, it);
+    });
+  }
+
+  li.append(detail);
   return li;
+}
+
+// The inside of one container.
+//
+// Each line offers the way back out - into the character's own hands -
+// which is the inverse move and the same command family. There is no
+// nesting here: opening a purse inside a backpack is the purse's own
+// row's job, and a rig does not need a tree.
+async function paintContents(host, container) {
+  host.innerHTML = "";
+  const rows = await call("list_contents", { containerId: container.id });
+  if (!Array.isArray(rows) || rows.length === 0) {
+    host.append(chip("empty", "cls"));
+    return;
+  }
+  for (const r of rows) {
+    const line = document.createElement("div");
+    line.className = "row inside-row";
+    const label = document.createElement("span");
+    label.className = "tags";
+    label.append(chip((r.name || r.item.name) +
+                      (r.quantity > 1 ? " ×" + r.quantity : ""), "mode"));
+    const out = document.createElement("button");
+    out.className = "tiny ghost";
+    out.textContent = "take out";
+    out.addEventListener("click", async () => {
+      const res = await tryCall("take_from_container", {
+        objectId: r.id,
+        characterId: state.characterId,
+      });
+      if (!res.ok) { alert(res.error); return; }
+      await loadSheet();
+    });
+    line.append(label, out);
+    host.append(line);
+  }
 }
 
 function chip(text, kind) {

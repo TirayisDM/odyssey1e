@@ -254,6 +254,9 @@ and not after.
     points stop being a magic number
 030 objects outlive their holder - deleting a creature drops its gear
     instead of destroying it
+031 entities and holders - the truss 026 said to wait for; objects
+    point at a holder, not at a character
+032 containers - a spell book, a treasure chest and a coin purse
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -989,6 +992,77 @@ has no holder, so only the DM can touch one. That was invisible while
 unheld objects barely existed; 030 makes them ordinary. Nothing here
 changed a policy, because widening access control is a decision rather
 than a consequence. `take_object` is DM-only until it is made otherwise.
+
+## Containers - BUILT to a minimum working state (031, 032)
+
+**031 IS THE TRUSS 026 SAID TO WAIT FOR.** Its header set the
+condition: "When a location or another object can hold something, that
+is the moment `entities` is earned - and doing it now with a nullable
+character_id beside a nullable location_id under an XOR is precisely
+the shape 022 and 023 removed." A container can hold something, so the
+moment arrived.
+
+`entities(id, game_id, kind)` is a shared id space over the things that
+can HOLD. A character gets one. A chest gets one. A room will get one.
+An arrow does not, because nothing goes inside an arrow.
+
+**THE PRIOR ART IS DAVE'S OWN.** odyssey-engine's `container.rs` has
+carried `HolderType { Actor, Tile, Container }` and `Placement {
+item_uid, holder_type, holder_id }` since long before this port. 031 is
+that, written as a schema. The tag vocabulary and the slot arithmetic
+came across intact too - `coin_purse()` there is 5 slots restricted to
+`["coin"]`, and a coin is 0.2 of a slot because 5 slots is 25 coins.
+
+`objects.character_id` is GONE. An object now carries:
+
+    holder_id   WHERE IT IS - one column, one FK. NULL is nowhere.
+    entity_id   WHAT IT IS, when it can hold. NULL on an arrow.
+
+A chest carries both: it is somewhere, and things are inside it. Two
+columns answering "where is this" would have been two sources of truth,
+and 028 is what that looks like when the second one rots.
+
+**A CONTAINER IS AN OBJECT**, and everything follows from that. A coin
+purse is carried, dropped, stolen and put inside a backpack, so it is
+not a table of its own. `container_gets_an_entity` gives it its holder
+identity on the way in, mirroring the character trigger.
+
+**Where each rule lives, and why they are not in the same place:**
+
+- **Acceptance** (does a purse take a sword) is RUST, in
+  `containers.rs`, tested. It needs `items.accepts` on one row and
+  `items.content_tags` on another, and a CHECK sees neither - the same
+  reasoning 008 gave for the one-armor rule.
+- **Cycles** are POSTGRES, in `no_container_cycles`. That is integrity,
+  not rules: a cycle does not make an answer wrong, it makes
+  `holder_character` walk until its guard trips, and every policy on
+  `objects` calls that function.
+- **Ownership through nesting** is `holder_character(uuid)`, which
+  walks up the chain. A purse inside a backpack carried by Rodnar is
+  Rodnar's, and a policy that looked one level up would say it is
+  nobody's. Depth-capped at eight.
+
+**A SWORD IN A CHEST IS NOT EQUIPPED.** 030's trigger could only ask
+whether a holder was NULL. It asks a better question now - is the
+holder a CHARACTER - so putting a breastplate in a backpack takes it
+off, and `set_item_equipped` refuses anything that is inside something.
+
+**Verified live and rolled back:** Character1 carries a named purse
+holding 15gp and 8sp at 4.6 of 5 slots; nesting the purse inside the
+backpack still resolves the coins to Character1; a container refuses to
+go inside itself both directly and through a chain.
+
+**Seeded:** backpack, coin purse, treasure chest, spell book, quiver,
+plus arrows and three coin rows. COINS ARE A DUMMY, as asked - three
+`loot` rows tagged `coin` so the purse has something to accept and
+everything else to refuse. `items.kind` has no 'currency' value and 032
+deliberately does not add one, because that belongs with the subsystem
+that needs it. Currency is next.
+
+**NOT CARRIED OVER from odyssey-engine, all deliberate:** `ItemSize`
+and a size limit (so a greatsword fails on a purse for a second and
+better reason than its tags), open/closed and locked state, and a
+nesting depth separate from the cycle guard. Capacity is slots only.
 
 **Unheld still means nowhere.** A dropped object has no location,
 because Locations is a stub - no room, no floor, no container. It is

@@ -481,7 +481,7 @@ pub(crate) fn collapse_overrides(rows: &[Value]) -> Vec<Item> {
 /// reasoning as load_sheet's four.
 pub fn load_loadout(
     token: &str,
-    character_id: &str,
+    holder_id: &str,
     game_id: &str,
     weapon_profs: &[String],
     armor_profs: &[String],
@@ -494,7 +494,7 @@ pub fn load_loadout(
             "id,name,item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max"
                 .to_string(),
         ),
-        ("character_id", format!("eq.{}", character_id)),
+        ("holder_id", format!("eq.{}", holder_id)),
         ("order", "acquired_at.asc".to_string()),
     ];
     if equipped_only {

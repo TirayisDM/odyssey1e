@@ -84,7 +84,7 @@ pub fn give_item(
         return Err(format!("no item with key '{}' in this game", item_key));
     }
 
-    let held = objects::load_held(&token, &character_id)?;
+    let held = objects::load_held(&token, &sheet.entity_id)?;
     if let Some(id) = objects::merge_into(&held, &item_key, name.as_deref()) {
         let have = held
             .iter()
@@ -104,7 +104,7 @@ pub fn give_item(
         "objects",
         &json!({
             "game_id": sheet.game_id,
-            "character_id": character_id,
+            "holder_id": sheet.entity_id,
             "item_key": item_key,
             "quantity": quantity,
             "name": name,
@@ -134,7 +134,7 @@ pub fn drop_object(
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
-    if obj.character_id.is_none() {
+    if obj.holder_id.is_none() {
         return Err("nobody is holding that".to_string());
     }
 
@@ -149,7 +149,7 @@ pub fn drop_object(
             "objects",
             &[("id", &format!("eq.{}", object_id))],
             // equipped and attuned are cleared by the trigger, not here.
-            &json!({ "character_id": null }),
+            &json!({ "holder_id": null }),
         );
     }
 
@@ -165,7 +165,7 @@ pub fn drop_object(
         "objects",
         &json!({
             "game_id": obj.game_id,
-            "character_id": null,
+            "holder_id": null,
             "item_key": obj.item_key,
             "quantity": moved,
         }),
@@ -186,11 +186,12 @@ pub fn take_object(
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
-    if obj.character_id.is_some() {
+    if obj.holder_id.is_some() {
         return Err("somebody is already holding that".to_string());
     }
 
-    let held = objects::load_held(&token, &character_id)?;
+    let taker = crate::character::load_profile(&token, &character_id)?;
+    let held = objects::load_held(&token, &taker.entity_id)?;
     if let Some(id) = objects::merge_into(&held, &obj.item_key, obj.name.as_deref()) {
         let have = held
             .iter()
@@ -211,7 +212,7 @@ pub fn take_object(
         &token,
         "objects",
         &[("id", &format!("eq.{}", object_id))],
-        &json!({ "character_id": character_id }),
+        &json!({ "holder_id": taker.entity_id }),
     )
 }
 

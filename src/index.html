@@ -65,22 +65,29 @@
         <button id="join-game" class="ghost">Join by code</button>
       </section>
 
+      <!-- The PICKER, not the manager. Who you are playing decides
+           what every tab below shows, so it stays in the strip; making
+           a new one is a rare act and lives in Characters. -->
       <section>
         <h2>Characters</h2>
         <ul id="characters" class="list"></ul>
-        <input id="char-name" placeholder="character name" />
-        <button id="create-char">Create character</button>
       </section>
 
       <!-- THE TABS. The rig showed every panel for every role at once,
            which stopped being navigable somewhere around the DM screen.
-           These are the three things somebody is actually doing: playing
-           a character, running what is in front of the table, or
-           building the world behind it. -->
+
+           Play is the one a player lives in. The other four are DM
+           tools, split by what they are ABOUT rather than by when they
+           get used: the fight in front of the table, the map, the
+           people, the things. Statblock authoring sat in World for one
+           restructure and was wrong there - a creature type is not a
+           place. -->
       <nav class="tabs" id="tabs">
         <button class="tab on" data-tab="play">Play</button>
         <button class="tab" data-tab="run">Run</button>
         <button class="tab" data-tab="world">World</button>
+        <button class="tab" data-tab="chars">Characters</button>
+        <button class="tab" data-tab="objects">Objects</button>
       </nav>
 
       <!-- One message line for the whole DM side, in the strip rather
@@ -200,9 +207,33 @@
         </section>
       </div>
 
-      <div class="pane" data-pane="world" hidden>
-        <section id="world-panel" hidden>
-          <h2>World <span id="world-who" class="muted"></span></h2>
+      <div class="pane" data-pane="chars" hidden>
+        <section id="chars-panel" hidden>
+          <h2>Characters <span id="chars-who" class="muted"></span></h2>
+          <nav class="tabs mini" id="chars-tabs">
+            <button class="tab on" data-chars="pcs">
+              PCs <span class="count" id="n-pcs"></span>
+            </button>
+            <button class="tab" data-chars="npcs">
+              NPCs <span class="count" id="n-npcs"></span>
+            </button>
+          </nav>
+
+          <div class="chars-pane" data-chars="pcs">
+            <ul id="pc-list" class="list"></ul>
+            <div class="sub">New character</div>
+            <input id="char-name" placeholder="character name" />
+            <button id="create-char">Create character</button>
+          </div>
+
+          <div class="chars-pane" data-chars="npcs" hidden>
+            <!-- TWO DIFFERENT THINGS, and the order says which comes
+                 first. A statblock is a TYPE - a pattern with scores and
+                 a kit. Enrolling one into an encounter copies it onto a
+                 brand new character, and THAT is what the second list
+                 holds. Editing a type never reaches the individuals
+                 already made from it; see 022. -->
+            <div class="sub">Statblocks &mdash; types</div>
           <div class="sub">Statblock</div>
           <div class="row">
             <input id="npc-name" placeholder="name, e.g. Goblin Archer" />
@@ -238,6 +269,59 @@
             <input id="npc-aprof" placeholder="armour: lgt med hvy shl" />
           </div>
           <button id="create-npc" class="ghost">Write statblock</button>
+            <ul id="npc-types" class="list"></ul>
+
+            <div class="sub">In play &mdash; individuals</div>
+            <ul id="npc-list" class="list"></ul>
+          </div>
+        </section>
+      </div>
+
+      <div class="pane" data-pane="objects" hidden>
+        <section id="objects-panel" hidden>
+          <h2>Objects <span id="objects-who" class="muted"></span></h2>
+          <nav class="tabs mini" id="objects-tabs">
+            <button class="tab on" data-objects="inplay">
+              In play <span class="count" id="n-objs"></span>
+            </button>
+            <button class="tab" data-objects="catalogue">
+              Catalogue <span class="count" id="n-cat"></span>
+            </button>
+          </nav>
+
+          <div class="objects-pane" data-objects="inplay">
+            <!-- EVERY object in the game, whoever is holding it. The
+                 narrower views all knew their holder already; this one
+                 works backwards from the object, which is the only way
+                 to answer "where did that handaxe go". -->
+            <div class="row">
+              <input id="obj-find" placeholder="filter by name or holder" />
+              <select id="obj-where">
+                <option value="">anywhere</option>
+                <option value="character">carried</option>
+                <option value="container">in a container</option>
+                <option value="location">on the floor</option>
+                <option value="nowhere">nowhere</option>
+                <option value="unknown">unaccounted for</option>
+              </select>
+            </div>
+            <ul id="obj-list" class="list"></ul>
+          </div>
+
+          <div class="objects-pane" data-objects="catalogue" hidden>
+            <!-- What CAN exist, as opposed to what does. Global rows
+                 come from migrations; a campaign's own rows shadow them
+                 by key. Read only here - authoring items is 027's job
+                 and has never had a screen. -->
+            <input id="cat-find" placeholder="filter the catalogue" />
+            <ul id="cat-list" class="list"></ul>
+          </div>
+        </section>
+      </div>
+
+      <div class="pane" data-pane="world" hidden>
+        <section id="world-panel" hidden>
+          <h2>World <span id="world-who" class="muted"></span></h2>
         <!-- The world. Depth is the whole hierarchy: a universe and a
              broom cupboard are the same kind of row, and the indent is
              computed rather than stored. -->
@@ -300,12 +384,6 @@
           <div class="scene-pane" data-scene="things" hidden>
             <ul id="scene-things" class="list"></ul>
           </div>
-        </div>
-        <!-- Things dropped before there was anywhere to drop them. This
-             should empty out and then it can go. -->
-        <div id="loose-wrap" hidden>
-          <div class="sub">Lying nowhere</div>
-          <ul id="loose" class="list"></ul>
         </div>
         </section>
       </div>

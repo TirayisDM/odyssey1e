@@ -1031,6 +1031,23 @@ function showTab(name) {
   state.tab = name;
 }
 
+// The sub-tab strips, one function three strips use.
+//
+// They differ only in the attribute they switch on, so this takes it as
+// an argument rather than being copied three times - which is what the
+// scene's version was on its way to becoming. It is still deliberately
+// NOT the same function as showTab: the top strip switches panes and
+// this one switches panels inside a pane, and one refactor merging them
+// is one bug away from clicking PCs closing the Characters tab.
+function showSub(strip, attr, name) {
+  for (const b of document.querySelectorAll("#" + strip + " .tab")) {
+    b.classList.toggle("on", b.dataset[attr] === name);
+  }
+  for (const p of document.querySelectorAll("." + attr + "-pane")) {
+    p.hidden = p.dataset[attr] !== name;
+  }
+}
+
 // Say it where the DM is looking.
 //
 // The log pane carries every call and its raw result, which is the right
@@ -1105,7 +1122,6 @@ async function loadWorld() {
   // chosen on the create form.
   fillPlaces(document.querySelector("#enc-place"), "— nowhere in particular —");
   if (state.dmEncounterId) syncEncPlace(state.dmEncounterId);
-  await loadLoose();
   // AND THE SCENE, if one is open. Every write on this tab can change
   // what is in the selected place - putting a loose thing away lands in
   // it, removing a place can close it - so repainting the tree without
@@ -1135,52 +1151,6 @@ function fillPlaces(sel, blankLabel) {
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
 }
 
-// Things dropped before there was anywhere to drop them.
-//
-// A lost and found rather than a feature: 026 and 032 both accepted that
-// unheld meant nowhere, which was right and still left a handaxe
-// invisible for a day. Once drop_here is the only way to put something
-// down this list stays empty, and then it can go.
-async function loadLoose() {
-  const wrap = document.querySelector("#loose-wrap");
-  const ul = document.querySelector("#loose");
-  ul.innerHTML = "";
-  const loose = await call("loose_objects", { gameId: state.gameId });
-  if (!loose || !loose.length) { wrap.hidden = true; return; }
-  wrap.hidden = false;
-
-  for (const o of loose) {
-    const li = document.createElement("li");
-    li.className = "flat item";
-    const head = document.createElement("div");
-    head.className = "head";
-    const nm = document.createElement("span");
-    nm.className = "nm";
-    nm.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
-    head.append(nm);
-
-    const where = document.createElement("select");
-    fillPlaces(where, "— pick a place —");
-    const put = document.createElement("button");
-    put.className = "tiny ghost";
-    put.textContent = "put here";
-    put.addEventListener("click", async () => {
-      if (!where.value) return dmSay("pick somewhere to put it", true);
-      // take_object then drop_here would be two writes and a moment
-      // where nobody holds it. This moves it in one.
-      const r = await tryCall("place_object", {
-        objectId: o.id,
-        locationId: where.value,
-      });
-      dmSay(r.ok ? "put away" : r.error, !r.ok);
-      await loadWorld();
-    });
-    head.append(where, put);
-    li.append(head);
-    ul.append(li);
-  }
-}
-
 // Open a place. Selecting the one already open closes it again, which
 // is the only way back to the bare tree.
 async function selectPlace(id) {
@@ -1194,12 +1164,7 @@ async function selectPlace(id) {
 // version of it: two tab strips sharing one function is one refactor
 // away from the World tab closing itself when somebody clicks People.
 function showSceneTab(name) {
-  for (const b of document.querySelectorAll("#scene-tabs .tab")) {
-    b.classList.toggle("on", b.dataset.scene === name);
-  }
-  for (const p of document.querySelectorAll(".scene-pane")) {
-    p.hidden = p.dataset.scene !== name;
-  }
+  showSub("scene-tabs", "scene", name);
   state.sceneTab = name;
 }
 
@@ -1360,6 +1325,242 @@ function syncEncPlace(id) {
   sel.value = (e && e.location_id) || "";
 }
 
+/* ---------- the character manager ---------- */
+
+// Who exists in this campaign, players and monsters.
+//
+// A DM TOOL, and behind the same gate as Run and World. A player has
+// their own character on the sheet and no business with the roster.
+//
+// ONE CALL FOR BOTH LISTS. who_is_where already returns everybody with
+// is_npc and where they are standing, so the two sub-tabs are two
+// filters of one answer rather than two round trips that can disagree.
+async function loadChars() {
+  const panel = document.querySelector("#chars-panel");
+  if (!state.gameId || !amDM()) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  document.querySelector("#chars-who").textContent = "you run this game";
+
+  const roster = (await call("who_is_where", { gameId: state.gameId })) || [];
+  paintFolk("#pc-list", "#n-pcs", roster.filter((c) => !c.is_npc));
+  paintFolk("#npc-list", "#n-npcs", roster.filter((c) => c.is_npc));
+
+  // The TYPES, which are a different table and a different idea from
+  // the individuals above. 022 is the whole distinction.
+  const types = (await call("list_npcs", { gameId: state.gameId })) || [];
+  const ul = document.querySelector("#npc-types");
+  ul.innerHTML = "";
+  if (!types.length) ul.append(row("no statblocks yet", "", null));
+  for (const t of types) {
+    // A campaign's own row shadows the global one sharing its key, and
+    // which one you are looking at decides whether you may edit it.
+    const li = row(t.name, t.game_id ? "yours" : "shared", null);
+    const bits = [t.species, t.class, t.ac ? "AC " + t.ac : null,
+                  t.hp_max ? t.hp_max + " hp" : null]
+      .filter(Boolean)
+      .join(" \u00b7 ");
+    if (bits) {
+      const d = document.createElement("span");
+      d.className = "tag";
+      d.textContent = bits;
+      li.append(d);
+    }
+    ul.append(li);
+  }
+}
+
+// One list painter for both sub-tabs. They differ by a filter, not by
+// shape, and two copies would drift the moment one gained a column.
+function paintFolk(listSel, countSel, folk) {
+  const ul = document.querySelector(listSel);
+  ul.innerHTML = "";
+  setCount(countSel, folk.length);
+  if (!folk.length) {
+    ul.append(row("nobody", "", null));
+    return;
+  }
+  for (const c of folk) {
+    const at = (state.locations || []).find((l) => l.id === c.location_id);
+    const li = row(c.token_name || c.name, at ? at.name : "nowhere", null);
+    if (c.dead) {
+      const d = document.createElement("span");
+      d.className = "tag";
+      d.textContent = "dead";
+      li.append(d);
+    }
+    if (!c.is_active) {
+      const d = document.createElement("span");
+      d.className = "tag";
+      d.textContent = "retired";
+      li.append(d);
+    }
+    // EDITING IS THE SHEET, which already exists and already writes
+    // scores, level and skills. A second editor here would be a second
+    // place for the same rules to be wrong - and since 022 an NPC IS a
+    // character, so the goblin opens in exactly the same screen.
+    const open = document.createElement("button");
+    open.className = "tiny ghost";
+    open.textContent = "open sheet";
+    open.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      await selectCharacter(c.id);
+      showTab("play");
+    });
+    li.append(open);
+    ul.append(li);
+  }
+}
+
+/* ---------- the object manager ---------- */
+
+// Every object in the game and who is holding it.
+//
+// THE VIEW THAT WORKS BACKWARDS. Every other object screen starts from
+// a holder and asks what is in it; this one starts from the thing and
+// asks where it went, which is the question an actual DM has - "where
+// did that handaxe go" - and the one nothing could answer.
+//
+// The holder is resolved in Rust by holders::resolve, because a
+// container is an object and therefore both the question and half the
+// answer. It is a fold with tests rather than a join.
+async function loadObjects() {
+  const panel = document.querySelector("#objects-panel");
+  if (!state.gameId || !amDM()) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  document.querySelector("#objects-who").textContent = "you run this game";
+
+  state.objects = (await call("list_objects", { gameId: state.gameId })) || [];
+  paintObjects();
+
+  const cat = (await call("list_catalogue", { gameId: state.gameId })) || [];
+  state.catalogue = cat;
+  paintCatalogue();
+}
+
+// Filtering happens here and not on the server: the whole list is
+// already in hand, and a round trip per keystroke would be slower and
+// no more correct.
+function paintObjects() {
+  const ul = document.querySelector("#obj-list");
+  ul.innerHTML = "";
+  const find = (document.querySelector("#obj-find").value || "").toLowerCase().trim();
+  const where = document.querySelector("#obj-where").value;
+
+  const shown = (state.objects || []).filter((o) => {
+    if (where && o.holder_kind !== where) return false;
+    if (!find) return true;
+    return (
+      (o.name || "").toLowerCase().includes(find) ||
+      o.item_key.toLowerCase().includes(find) ||
+      o.holder_name.toLowerCase().includes(find)
+    );
+  });
+
+  // The count is of EVERYTHING, not of what survived the filter - a
+  // tab label that changes as you type says nothing about the game.
+  setCount("#n-objs", (state.objects || []).length);
+
+  if (!shown.length) {
+    ul.append(row(find || where ? "nothing matches" : "no objects yet", "", null));
+    return;
+  }
+
+  for (const o of shown) {
+    const li = document.createElement("li");
+    li.className = "flat item";
+    const head = document.createElement("div");
+    head.className = "head";
+
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
+    head.append(nm);
+
+    for (const [text, cls] of [
+      [o.holder_name, "tag"],
+      [o.equipped ? "worn" : null, "tag"],
+      [o.is_container ? "container" : null, "tag"],
+    ]) {
+      if (!text) continue;
+      const t = document.createElement("span");
+      t.className = cls;
+      t.textContent = text;
+      head.append(t);
+    }
+
+    // PUT IT SOMEWHERE REAL. Which command depends on whether anybody
+    // is holding it: drop_here takes it out of a pair of hands and
+    // splits a stack, place_object moves a whole loose row. Both end
+    // with the thing resting in a place; they are not interchangeable
+    // and the difference is whose it was.
+    const to = document.createElement("select");
+    fillPlaces(to, "\u2014 move to \u2014");
+    const go = document.createElement("button");
+    go.className = "tiny ghost";
+    go.textContent = "move";
+    go.addEventListener("click", async () => {
+      if (!to.value) return dmSay("pick somewhere to put it", true);
+      const held = o.holder_kind === "character" || o.holder_kind === "container";
+      const r = await tryCall(held ? "drop_here" : "place_object", {
+        objectId: o.id,
+        locationId: to.value,
+      });
+      dmSay(r.ok ? (o.name || o.item_key) + " moved" : r.error, !r.ok);
+      await loadObjects();
+    });
+    head.append(to, go);
+    li.append(head);
+    ul.append(li);
+  }
+}
+
+// What CAN exist, as opposed to what does.
+//
+// Read only. 027 seeds the shared rows by migration and a campaign's
+// own rows shadow them by key; authoring an item has never had a
+// screen and does not get one here by accident.
+function paintCatalogue() {
+  const ul = document.querySelector("#cat-list");
+  ul.innerHTML = "";
+  const find = (document.querySelector("#cat-find").value || "").toLowerCase().trim();
+  const all = state.catalogue || [];
+  setCount("#n-cat", all.length);
+
+  const shown = all.filter(
+    (i) =>
+      !find ||
+      i.name.toLowerCase().includes(find) ||
+      i.key.toLowerCase().includes(find) ||
+      (i.kind || "").toLowerCase().includes(find)
+  );
+  if (!shown.length) {
+    ul.append(row("nothing matches", "", null));
+    return;
+  }
+  for (const i of shown) {
+    const li = row(i.name, i.kind || "", null);
+    const bits = [];
+    if (i.damage_number && i.damage_denomination) {
+      bits.push(i.damage_number + "d" + i.damage_denomination);
+    }
+    if (i.base_ac != null) bits.push("AC " + i.base_ac);
+    if (i.properties && i.properties.length) bits.push(i.properties.join(" "));
+    if (bits.length) {
+      const d = document.createElement("span");
+      d.className = "tag";
+      d.textContent = bits.join(" \u00b7 ");
+      li.append(d);
+    }
+    ul.append(li);
+  }
+}
+
 // Everything an encounter needs was authored in SQL until now. The
 // policies have been in place since 011; this is the screen that was
 // missing.
@@ -1377,6 +1578,11 @@ async function loadDM() {
   if (!state.gameId || !amDM()) {
     run.hidden = true;
     world.hidden = true;
+    // The managers gate themselves the same way, and are called here so
+    // a player switching games does not keep the last DM's roster on a
+    // tab they can still click.
+    await loadChars();
+    await loadObjects();
     return;
   }
   run.hidden = false;
@@ -1384,7 +1590,12 @@ async function loadDM() {
   document.querySelector("#dm-who").textContent = "you run this game";
   document.querySelector("#world-who").textContent = "you run this game";
 
+  // BEFORE the managers, because both of them print where somebody or
+  // something is by looking up state.locations - which loadWorld is
+  // what fills.
   await loadWorld();
+  await loadChars();
+  await loadObjects();
 
   const encounters = await call("list_encounters", { gameId: state.gameId });
   // Kept so selectEncounter can say WHICH encounter is being edited
@@ -2446,6 +2657,22 @@ window.addEventListener("DOMContentLoaded", async () => {
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {
     b.addEventListener("click", () => showSceneTab(b.dataset.scene));
   }
+
+  for (const b of document.querySelectorAll("#chars-tabs .tab")) {
+    b.addEventListener("click", () => showSub("chars-tabs", "chars", b.dataset.chars));
+  }
+
+  for (const b of document.querySelectorAll("#objects-tabs .tab")) {
+    b.addEventListener("click", () =>
+      showSub("objects-tabs", "objects", b.dataset.objects)
+    );
+  }
+
+  // Filtering is local - the whole list is already here - so it repaints
+  // on every keystroke without asking the database anything.
+  document.querySelector("#obj-find").addEventListener("input", paintObjects);
+  document.querySelector("#obj-where").addEventListener("change", paintObjects);
+  document.querySelector("#cat-find").addEventListener("input", paintCatalogue);
 
   guarded("#bring-here", async () => {
     const who = document.querySelector("#bring-who");

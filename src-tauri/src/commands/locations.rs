@@ -22,6 +22,7 @@
 use serde_json::{json, Value};
 use tauri::State;
 
+use crate::holders::{self, Holder, Located, Obj};
 use crate::locations::{self, Place, Placed};
 use crate::objects;
 use crate::supabase::{self, AppState};
@@ -194,37 +195,6 @@ pub fn location_contents(
         .ok_or_else(|| "no such place, or it is not visible to you".to_string())?;
 
     objects::load_held(&token, entity)
-}
-
-/// Everything in this game that is lying NOWHERE.
-///
-/// 026 and 032 both accepted that a dropped object has no location, on
-/// the grounds that the alternative was deleting what people let go of.
-/// They were right, and it left things genuinely lost: a handaxe
-/// dropped on the 21st sat in the table for a day with nothing able to
-/// render it, because nothing renders nowhere.
-///
-/// 033 gave dropping somewhere to go. This is the way back for the ones
-/// that went nowhere before it existed - a lost and found, not a
-/// feature. Once `drop_here` is the only way to put something down this
-/// should return nothing, and the day it does is the day it can go.
-#[tauri::command]
-pub fn loose_objects(
-    state: State<AppState>,
-    game_id: String,
-) -> Result<Vec<objects::Stack>, String> {
-    let token = state.token()?;
-    let rows = supabase::rest_get(
-        &token,
-        "objects",
-        &[
-            ("select", "id,name,item_key,quantity"),
-            ("game_id", &format!("eq.{}", game_id)),
-            ("holder_id", "is.null"),
-            ("order", "acquired_at.asc"),
-        ],
-    )?;
-    serde_json::from_value(rows).map_err(|e| format!("could not read what is lying about: {}", e))
 }
 
 /// Put a LOOSE thing into a place.
@@ -440,4 +410,86 @@ pub fn move_character(
             e
         }
     })
+}
+
+/* ========================= THE MANAGER ========================= */
+
+/// Every object in the game, with its holder said out loud.
+///
+/// THE ONLY VIEW THAT CROSSES ALL THREE KINDS OF HOLDER. Everything
+/// before it asked a narrower question - what is in this chest, what is
+/// on this floor, what is this character carrying - and each of those
+/// already knew the answer because it supplied the holder. This one
+/// starts from the objects and has to work backwards.
+///
+/// Four reads and a fold. The fold is `holders::resolve`, which lives in
+/// src/ with tests because a container is an object and therefore both
+/// the question and half the answer - see its header.
+///
+/// RLS decides what comes back, as always. A character in another game
+/// is invisible, and an object held by one reads as "somewhere
+/// unaccounted for" rather than disappearing.
+#[tauri::command]
+pub fn list_objects(state: State<AppState>, game_id: String) -> Result<Vec<Located>, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "objects",
+        &[
+            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id"),
+            ("game_id", &format!("eq.{}", game_id)),
+            // Named things first, then the catalogue key, so a manager
+            // reads as a list of THINGS rather than of rows. The fold
+            // preserves whatever order arrives.
+            ("order", "item_key.asc,acquired_at.asc"),
+        ],
+    )?;
+    let objects: Vec<Obj> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the objects: {}", e))?;
+
+    // The two kinds of holder that are not objects. Containers are
+    // found among the objects themselves.
+    let people = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "name,token_name,entity_id"),
+            ("game_id", &format!("eq.{}", game_id)),
+        ],
+    )?;
+    let places = supabase::rest_get(
+        &token,
+        "locations",
+        &[
+            ("select", "name,entity_id"),
+            ("game_id", &format!("eq.{}", game_id)),
+        ],
+    )?;
+
+    let mut index: Vec<Holder> = Vec::new();
+    for (rows, kind) in [(&people, "character"), (&places, "location")] {
+        for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+            let entity = match r.get("entity_id").and_then(|v| v.as_str()) {
+                Some(e) => e,
+                None => continue,
+            };
+            // The short name where there is one - a roll card says
+            // "Rodnar", and so should the column saying who is holding
+            // the sword.
+            let name = r
+                .get("token_name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| r.get("name").and_then(|v| v.as_str()))
+                .unwrap_or("unnamed");
+            index.push(Holder {
+                entity_id: entity.to_string(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+            });
+        }
+    }
+
+    Ok(holders::resolve(&objects, &index))
 }

@@ -20,6 +20,13 @@
 //! locations - which is a fold, not a query, and belongs here where it
 //! can be tested rather than in a command that cannot.
 //!
+//! AND WHERE A THING ULTIMATELY IS. `resolve` answers one step - the
+//! coin is in the purse - and `root_of` walks the rest of the way: the
+//! purse is in the backpack, the backpack is on Rodnar, so the coin is
+//! ultimately Rodnar's. That walk is what decides whether two things
+//! are within reach of each other, which is the first question putting
+//! one inside the other has to answer.
+//!
 //! NOTHING IS EVER DROPPED. Two holders can be invisible to the caller:
 //! RLS hides a character in another game, and a container the DM has
 //! since destroyed leaves rows pointing at an id that no longer names
@@ -90,6 +97,10 @@ pub struct Located {
     /// True when this object is itself a container - the screen offers
     /// to look inside.
     pub is_container: bool,
+    /// Its own entity, when it is a container. What `holder_id` points
+    /// at for everything inside it, which is how a screen can tell
+    /// "this container" from "the container this is already in".
+    pub entity_id: Option<String>,
     /// "character", "container", "location", "nowhere" or "unknown".
     pub holder_kind: String,
     /// What to print. "nowhere" and "unknown" carry their own words so
@@ -108,6 +119,76 @@ pub struct Located {
     /// Pounds for ONE of them. The screen multiplies by quantity,
     /// because a stack's weight is a rendering and not a fact.
     pub weight: Option<String>,
+    /// WHERE THIS ULTIMATELY IS, as one comparable string - see
+    /// Root::token. Two objects sharing it are within reach of each
+    /// other, which is what lets a picker offer only the containers a
+    /// thing could actually go into. EMPTY MEANS OFFER NOTHING.
+    pub reach: String,
+    /// The same root in words, for saying so.
+    pub reach_name: String,
+}
+
+/// Where a thing ultimately is, once every container between it and
+/// the world has been walked through.
+///
+/// FOUR ANSWERS AND THEY ARE ALL DIFFERENT. Nowhere is a real place -
+/// 033 kept it deliberately - and Unknown is the admission that the
+/// chain ran into something this caller cannot see. Collapsing those
+/// two would make an invisible holder look like an empty field, which
+/// is the mistake this module's header is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Root {
+    /// Somebody is carrying it, however deep in their kit.
+    Character { entity: String, name: String },
+    /// It is lying in a place, or in a chest in that place.
+    Location { entity: String, name: String },
+    /// Held by nobody and in no place. Still a real answer.
+    Nowhere,
+    /// The chain ran into a holder nobody can name, or a loop.
+    Unknown,
+}
+
+impl Root {
+    /// What to call it in a sentence.
+    pub fn name(&self) -> &str {
+        match self {
+            Root::Character { name, .. } | Root::Location { name, .. } => name,
+            Root::Nowhere => "nowhere",
+            Root::Unknown => UNKNOWN,
+        }
+    }
+
+    /// The whole root as one comparable string, for a screen.
+    ///
+    /// WHY A TOKEN AND NOT A PAIR OF FIELDS. A picker offering the
+    /// containers a thing can reach has to ask "same place?", and
+    /// asking it with kind-and-id means `within_reach` written a second
+    /// time in JavaScript - which is the rule in two places, one of
+    /// them untested. One string, one comparison, and the rule stays
+    /// here.
+    ///
+    /// UNKNOWN IS THE EMPTY STRING, and empty never equals empty for
+    /// this purpose because the caller is told to treat it as "offer
+    /// nothing". That mirrors `within_reach` refusing Unknown even
+    /// against itself: two unreadable chains have not been shown to
+    /// meet.
+    pub fn token(&self) -> String {
+        match self {
+            Root::Character { entity, .. } => format!("c:{}", entity),
+            Root::Location { entity, .. } => format!("l:{}", entity),
+            Root::Nowhere => "nowhere".to_string(),
+            Root::Unknown => String::new(),
+        }
+    }
+
+    /// The identity two roots are compared on. Names collide - two
+    /// goblins are both "Goblin" - and an entity id does not.
+    fn key(&self) -> Option<&str> {
+        match self {
+            Root::Character { entity, .. } | Root::Location { entity, .. } => Some(entity),
+            _ => None,
+        }
+    }
 }
 
 /* ============================ RULES ============================ */
@@ -156,6 +237,10 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                 },
             };
             let t = types.iter().find(|t| t.key == o.item_key);
+            // The walk, per object. O(depth) each and the depth is a
+            // purse in a pack - cheaper than the round trip that asking
+            // the database per link would cost.
+            let root = root_of(o.holder_id.as_deref(), objects, &index);
             Located {
                 id: o.id.clone(),
                 item_key: o.item_key.clone(),
@@ -163,6 +248,7 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                 quantity: o.quantity,
                 equipped: o.equipped,
                 is_container: o.entity_id.is_some(),
+                entity_id: o.entity_id.clone(),
                 holder_kind: kind,
                 holder_name: name,
                 holder_id: o.holder_id.clone(),
@@ -180,6 +266,8 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                     .clone()
                     .or_else(|| t.and_then(|t| t.holds_size.clone())),
                 weight: t.and_then(|t| t.weight.clone()),
+                reach: root.token(),
+                reach_name: root.name().to_string(),
             }
         })
         .collect()
@@ -196,6 +284,222 @@ pub fn label(o: &Obj) -> String {
         Some(n) => n.to_string(),
         None => o.item_key.clone(),
     }
+}
+
+/// Walk up from a holder until the world is reached.
+///
+/// A container is an object with an entity, so a holder that matches
+/// one of THOSE means "keep going" - the purse is in the backpack is on
+/// Rodnar. A character or a location ends the walk, and so does running
+/// out of chain.
+///
+/// GUARDED AT 32, the same number `no_location_cycles` uses. A loop
+/// should be impossible - `no_container_cycles` refuses one in the
+/// database - but a walk that trusts that is a walk that hangs the day
+/// it is wrong, and returning Unknown says exactly as much as is known.
+pub fn root_of(start: Option<&str>, objects: &[Obj], holders: &[Holder]) -> Root {
+    let mut here = match start {
+        None => return Root::Nowhere,
+        Some(h) => h.to_string(),
+    };
+
+    for _ in 0..32 {
+        if let Some(h) = holders.iter().find(|x| x.entity_id == here) {
+            return match h.kind.as_str() {
+                "character" => Root::Character {
+                    entity: h.entity_id.clone(),
+                    name: h.name.clone(),
+                },
+                "location" => Root::Location {
+                    entity: h.entity_id.clone(),
+                    name: h.name.clone(),
+                },
+                // A container in the index. Keep climbing.
+                _ => match objects.iter().find(|o| o.entity_id.as_deref() == Some(&here)) {
+                    Some(o) => match o.holder_id.as_deref() {
+                        Some(next) => {
+                            here = next.to_string();
+                            continue;
+                        }
+                        // A chest resting on nothing at all.
+                        None => Root::Nowhere,
+                    },
+                    None => Root::Unknown,
+                },
+            };
+        }
+
+        // Not in the index at all, but it may still be a container we
+        // know from the objects themselves.
+        match objects.iter().find(|o| o.entity_id.as_deref() == Some(&here)) {
+            Some(o) => match o.holder_id.as_deref() {
+                Some(next) => here = next.to_string(),
+                None => return Root::Nowhere,
+            },
+            None => return Root::Unknown,
+        }
+    }
+
+    Root::Unknown
+}
+
+/// Whether a thing and a container are close enough for one to go in
+/// the other.
+///
+/// THE TOP-LEVEL GATE, and it runs before what a container accepts, how
+/// big it is or how much room is left. Those three ask whether the
+/// thing BELONGS in it; this asks whether anybody could put it there at
+/// all, and no answer to the other three matters if the chest is in a
+/// different building.
+///
+/// The rule in one line: THE SAME ROOT. A thing held by Rodnar goes in
+/// a container held by Rodnar, however deep either sits in his kit. A
+/// thing lying in the Frostvalley Inn goes in a chest in the Frostvalley
+/// Inn. Nothing crosses between the two.
+///
+/// TWO THINGS THAT ARE BOTH NOWHERE ARE REACHABLE. That looks odd and
+/// it is deliberate: 033 made nowhere a real answer rather than a gap,
+/// and a DM tidying what was dropped before there was anywhere to drop
+/// it should not have to place both first.
+///
+/// UNKNOWN IS ALWAYS REFUSED, even against itself. Two chains that both
+/// vanish into something nobody can see have not been shown to meet -
+/// they have been shown to be unreadable, which is not the same and
+/// must not pass for it.
+pub fn within_reach(
+    thing: &Root,
+    container: &Root,
+    thing_name: &str,
+    container_name: &str,
+) -> Result<(), String> {
+    if matches!(thing, Root::Unknown) || matches!(container, Root::Unknown) {
+        return Err(format!(
+            "cannot tell where {} or {} is - one of them is {}",
+            thing_name, container_name, UNKNOWN
+        ));
+    }
+    if thing == container || (thing.key().is_none() && thing.key() == container.key()) {
+        return Ok(());
+    }
+    Err(match (thing, container) {
+        (Root::Character { .. }, Root::Character { .. }) => format!(
+            "{} is carrying {} and {} is carrying {} - one person cannot reach the other's kit",
+            thing.name(), thing_name, container.name(), container_name
+        ),
+        (Root::Nowhere, _) => format!(
+            "{} is nowhere - put it somewhere before putting it in {}",
+            thing_name, container_name
+        ),
+        (_, Root::Nowhere) => format!(
+            "{} is nowhere - it has to be somewhere before anything goes in it",
+            container_name
+        ),
+        _ => format!(
+            "{} is in {} and {} is in {} - they are not in the same place",
+            thing_name, thing.name(), container_name, container.name()
+        ),
+    })
+}
+
+/* ============================ LOADING ============================ */
+
+/// Every object in a game, everything that can hold one, and what the
+/// catalogue says about each key.
+///
+/// FOUR READS AND NO MORE, whoever is asking. A walk up a chain of
+/// containers is a query per link if it is done one link at a time, and
+/// the answers do not change between links - so the whole board is
+/// loaded once and walked in memory.
+///
+/// RLS decides what comes back. A holder in another game is simply
+/// absent, and `root_of` reports that as Unknown rather than guessing.
+pub fn load_world(
+    token: &str,
+    game_id: &str,
+) -> Result<(Vec<Obj>, Vec<Holder>, Vec<Kind>), String> {
+    let rows = crate::supabase::rest_get(
+        token,
+        "objects",
+        &[
+            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id,size_override,holds_size_override"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("order", "item_key.asc,acquired_at.asc"),
+        ],
+    )?;
+    let objects: Vec<Obj> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the objects: {}", e))?;
+
+    // The two kinds of holder that are not objects. Containers are
+    // found among the objects themselves - see the module header.
+    let people = crate::supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "name,token_name,entity_id"),
+            ("game_id", &format!("eq.{}", game_id)),
+        ],
+    )?;
+    let places = crate::supabase::rest_get(
+        token,
+        "locations",
+        &[
+            ("select", "name,entity_id"),
+            ("game_id", &format!("eq.{}", game_id)),
+        ],
+    )?;
+
+    let mut holders: Vec<Holder> = Vec::new();
+    for (rows, kind) in [(&people, "character"), (&places, "location")] {
+        for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+            let entity = match r.get("entity_id").and_then(|v| v.as_str()) {
+                Some(e) => e,
+                None => continue,
+            };
+            // The short name where there is one - a roll card says
+            // "Rodnar", and so should the line saying who is holding
+            // the sword.
+            let name = r
+                .get("token_name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| r.get("name").and_then(|v| v.as_str()))
+                .unwrap_or("unnamed");
+            holders.push(Holder {
+                entity_id: entity.to_string(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+            });
+        }
+    }
+
+    let rows = crate::supabase::rest_get(
+        token,
+        "items",
+        &[
+            ("select", "key,game_id,size,holds_size,weight"),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            // This campaign's row first, so the de-duplication below
+            // keeps the override - the same precedence
+            // collapse_overrides applies, done by the sort.
+            ("order", "game_id.desc"),
+        ],
+    )?;
+    let mut types: Vec<Kind> = Vec::new();
+    for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+        let key = r.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if types.iter().any(|t| t.key == key) {
+            continue;
+        }
+        types.push(Kind {
+            key,
+            size: r.get("size").and_then(|v| v.as_str()).unwrap_or("med").to_string(),
+            holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
+            // numeric arrives as a string; see Located::weight.
+            weight: r.get("weight").and_then(|v| v.as_str()).map(str::to_string),
+        });
+    }
+
+    Ok((objects, holders, types))
 }
 
 /* ============================ TESTS ============================ */
@@ -414,6 +718,178 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].size, "");
         assert_eq!(out[0].weight, None);
+    }
+
+    /* ---------- reach ---------- */
+
+    /// Rodnar carrying a backpack, with a purse inside it, in the Inn.
+    /// The whole chain this walk exists for, in one fixture.
+    fn nested() -> (Vec<Obj>, Vec<Holder>) {
+        let mut pack = obj("o-pack", "backpack", Some("e-rodnar"));
+        pack.entity_id = Some("e-pack".into());
+        let mut purse = obj("o-purse", "coin_purse", Some("e-pack"));
+        purse.entity_id = Some("e-purse".into());
+        let coin = obj("o-coin", "coin_gp", Some("e-purse"));
+
+        let mut chest = obj("o-chest", "chest", Some("e-inn"));
+        chest.entity_id = Some("e-chest".into());
+        let axe = obj("o-axe", "handaxe", Some("e-inn"));
+        let loose = obj("o-loose", "dagger", None);
+
+        (
+            vec![pack, purse, coin, chest, axe, loose],
+            vec![person("e-rodnar", "Rodnar"), place("e-inn", "Frostvalley Inn")],
+        )
+    }
+
+    fn root(id: &str) -> Root {
+        let (objects, holders) = nested();
+        let o = objects.iter().find(|o| o.id == id).unwrap().clone();
+        root_of(o.holder_id.as_deref(), &objects, &holders)
+    }
+
+    // THE WALK. A coin two containers deep is still Rodnar's.
+    #[test]
+    fn a_coin_in_a_purse_in_a_pack_is_the_carriers() {
+        assert_eq!(
+            root("o-coin"),
+            Root::Character { entity: "e-rodnar".into(), name: "Rodnar".into() }
+        );
+    }
+
+    #[test]
+    fn a_thing_in_a_room_roots_at_the_room() {
+        assert_eq!(
+            root("o-axe"),
+            Root::Location { entity: "e-inn".into(), name: "Frostvalley Inn".into() }
+        );
+    }
+
+    #[test]
+    fn nowhere_is_where_nothing_leads() {
+        assert_eq!(root("o-loose"), Root::Nowhere);
+    }
+
+    #[test]
+    fn a_chain_into_the_unseeable_is_unknown_not_nowhere() {
+        let (objects, holders) = nested();
+        assert_eq!(root_of(Some("e-ghost"), &objects, &holders), Root::Unknown);
+    }
+
+    // A loop cannot happen - no_container_cycles refuses one - but a
+    // walk that trusts that is a walk that hangs the day it is wrong.
+    #[test]
+    fn a_loop_ends_in_unknown_rather_than_forever() {
+        let mut a = obj("o-a", "chest", Some("e-b"));
+        a.entity_id = Some("e-a".into());
+        let mut b = obj("o-b", "chest", Some("e-a"));
+        b.entity_id = Some("e-b".into());
+        assert_eq!(root_of(Some("e-a"), &[a, b], &[]), Root::Unknown);
+    }
+
+    /* ---------- within_reach ---------- */
+
+    #[test]
+    fn a_carrier_can_pack_their_own_kit() {
+        // The coin is Rodnar's and so is the purse it would go into.
+        assert!(within_reach(&root("o-coin"), &root("o-purse"), "coin", "purse").is_ok());
+    }
+
+    #[test]
+    fn a_thing_on_the_floor_goes_in_a_chest_in_the_same_room() {
+        assert!(within_reach(&root("o-axe"), &root("o-chest"), "handaxe", "chest").is_ok());
+    }
+
+    // THE RULE, stated by what it refuses. Rodnar cannot drop a coin
+    // into a chest across the room without picking it up first.
+    #[test]
+    fn a_carried_thing_does_not_reach_a_chest_on_the_floor() {
+        let e = within_reach(&root("o-coin"), &root("o-chest"), "coin", "chest").unwrap_err();
+        assert!(e.contains("not in the same place"), "{}", e);
+    }
+
+    #[test]
+    fn one_person_cannot_reach_anothers_kit() {
+        let mine = Root::Character { entity: "e-a".into(), name: "Rodnar".into() };
+        let theirs = Root::Character { entity: "e-b".into(), name: "Runt".into() };
+        let e = within_reach(&mine, &theirs, "dagger", "pack").unwrap_err();
+        assert!(e.contains("cannot reach"), "{}", e);
+    }
+
+    // TWO GOBLINS ARE BOTH CALLED GOBLIN. Compared on the entity, never
+    // on the name, or one goblin would be packing the other's kit.
+    #[test]
+    fn two_holders_sharing_a_name_are_still_two_holders() {
+        let one = Root::Character { entity: "e-1".into(), name: "Goblin".into() };
+        let two = Root::Character { entity: "e-2".into(), name: "Goblin".into() };
+        assert!(within_reach(&one, &two, "dagger", "pack").is_err());
+    }
+
+    // 033 made nowhere a real answer, so two things that are both there
+    // are as reachable as two things in a room.
+    #[test]
+    fn two_things_that_are_both_nowhere_reach_each_other() {
+        assert!(within_reach(&Root::Nowhere, &Root::Nowhere, "dagger", "chest").is_ok());
+    }
+
+    #[test]
+    fn something_nowhere_does_not_reach_something_somewhere() {
+        let e = within_reach(&root("o-loose"), &root("o-chest"), "dagger", "chest").unwrap_err();
+        assert!(e.contains("nowhere"), "{}", e);
+    }
+
+    // UNKNOWN IS REFUSED EVEN AGAINST ITSELF. Two unreadable chains
+    // have not been shown to meet.
+    #[test]
+    fn unknown_never_reaches_anything_including_unknown() {
+        assert!(within_reach(&Root::Unknown, &Root::Unknown, "a", "b").is_err());
+        assert!(within_reach(&Root::Unknown, &root("o-chest"), "a", "chest").is_err());
+        assert!(within_reach(&root("o-axe"), &Root::Unknown, "axe", "b").is_err());
+    }
+
+    /* ---------- the reach token ---------- */
+
+    // THE PROPERTY A PICKER RELIES ON: things that within_reach admits
+    // share a token, and things it refuses do not. If these two ever
+    // disagreed, a screen would offer a container the command then
+    // refused - or hide one it would have taken.
+    #[test]
+    fn the_token_agrees_with_the_rule() {
+        let (objects, holders) = nested();
+        let ids = ["o-coin", "o-purse", "o-pack", "o-axe", "o-chest", "o-loose"];
+        for a in ids {
+            for b in ids {
+                let ra = root(a);
+                let rb = root(b);
+                let allowed = within_reach(&ra, &rb, a, b).is_ok();
+                let same_token = !ra.token().is_empty() && ra.token() == rb.token();
+                assert_eq!(allowed, same_token, "{} vs {}", a, b);
+            }
+        }
+        let _ = (objects, holders);
+    }
+
+    #[test]
+    fn unknown_tokenises_as_nothing() {
+        assert_eq!(Root::Unknown.token(), "");
+        // And nowhere does NOT, because two things there do reach each
+        // other.
+        assert_eq!(Root::Nowhere.token(), "nowhere");
+    }
+
+    #[test]
+    fn resolve_carries_the_reach_of_the_whole_chain() {
+        let (objects, holders) = nested();
+        let out = resolve(&objects, &holders, &catalogue());
+        let coin = out.iter().find(|o| o.id == "o-coin").unwrap();
+        let pack = out.iter().find(|o| o.id == "o-pack").unwrap();
+        let chest = out.iter().find(|o| o.id == "o-chest").unwrap();
+        // The coin is two containers deep and still Rodnar's.
+        assert_eq!(coin.reach, pack.reach);
+        assert_eq!(coin.reach_name, "Rodnar");
+        // The chest is in the room, which is somewhere else entirely.
+        assert_ne!(coin.reach, chest.reach);
+        assert_eq!(chest.reach_name, "Frostvalley Inn");
     }
 
 }

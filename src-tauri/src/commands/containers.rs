@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use tauri::State;
 
 use crate::containers;
+use crate::holders;
 use crate::objects;
 use crate::supabase::{self, AppState};
 
@@ -58,6 +59,32 @@ pub fn put_in_container(
     let profile = containers::load_profile(&token, &con.game_id, &con.item_key)?
         .ok_or_else(|| "that is not a container".to_string())?;
     let name = con.name.clone().unwrap_or_else(|| con.item_key.clone());
+    let thing = obj.name.clone().unwrap_or_else(|| obj.item_key.clone());
+
+    // CAN ANYBODY REACH BOTH OF THESE AT ONCE. The first question and
+    // the only one that is not about the container: a thing held by
+    // Rodnar goes in a container held by Rodnar, and a thing lying in
+    // the Frostvalley Inn goes in a chest in the Frostvalley Inn.
+    // Nothing crosses between the two, however willing the chest.
+    //
+    // Asked before what the container accepts, how big it is and how
+    // much room is left, because those three ask whether the thing
+    // BELONGS in it and none of their answers matter if it is in
+    // another building.
+    //
+    // WHO may do it is not decided here. 031's objects policy has said
+    // since it was written: the DM, the owner of whoever is holding it,
+    // or any member when the thing is loose. A player packing their own
+    // kit and a party looting a room are both already covered, and a
+    // second copy of that rule in this file is a second place for it to
+    // be wrong.
+    let (world, holders, _) = holders::load_world(&token, &con.game_id)?;
+    holders::within_reach(
+        &holders::root_of(obj.holder_id.as_deref(), &world, &holders),
+        &holders::root_of(con.holder_id.as_deref(), &world, &holders),
+        &thing,
+        &name,
+    )?;
 
     // What is already inside decides how much room is left, so the
     // contents are read before either check.

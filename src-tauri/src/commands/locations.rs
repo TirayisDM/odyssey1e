@@ -22,7 +22,7 @@
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::holders::{self, Holder, Kind, Located, Obj};
+use crate::holders::{self, Located};
 use crate::locations::{self, Place, Placed};
 use crate::objects;
 use crate::supabase::{self, AppState};
@@ -348,7 +348,7 @@ pub fn who_is_where(state: State<AppState>, game_id: String) -> Result<Value, St
         &token,
         "characters",
         &[
-            ("select", "id,name,token_name,is_npc,dead,is_active,location_id"),
+            ("select", "id,name,token_name,is_npc,dead,is_active,location_id,entity_id"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "is_npc.asc,name.asc"),
         ],
@@ -432,112 +432,6 @@ pub fn move_character(
 #[tauri::command]
 pub fn list_objects(state: State<AppState>, game_id: String) -> Result<Vec<Located>, String> {
     let token = state.token()?;
-
-    let rows = supabase::rest_get(
-        &token,
-        "objects",
-        &[
-            // ONE LINE, AND IT STAYS ONE. Wrapping a select needs a Rust
-            // line continuation - a lone backslash at the end of the line.
-            // An escaped \n instead puts a real newline AND its indentation
-            // inside the query string, so PostgREST is asked for a column
-            // named "<newline><spaces>size_override" and refuses the whole
-            // request. Every object vanished from the manager at once, and
-            // an empty list reads as "no objects yet" rather than as a
-            // broken query - which is how it survived a build, a clean
-            // test run and a commit.
-            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id,size_override,holds_size_override"),
-            ("game_id", &format!("eq.{}", game_id)),
-            // Named things first, then the catalogue key, so a manager
-            // reads as a list of THINGS rather than of rows. The fold
-            // preserves whatever order arrives.
-            ("order", "item_key.asc,acquired_at.asc"),
-        ],
-    )?;
-    let objects: Vec<Obj> =
-        serde_json::from_value(rows).map_err(|e| format!("could not read the objects: {}", e))?;
-
-    // The two kinds of holder that are not objects. Containers are
-    // found among the objects themselves.
-    let people = supabase::rest_get(
-        &token,
-        "characters",
-        &[
-            ("select", "name,token_name,entity_id"),
-            ("game_id", &format!("eq.{}", game_id)),
-        ],
-    )?;
-    let places = supabase::rest_get(
-        &token,
-        "locations",
-        &[
-            ("select", "name,entity_id"),
-            ("game_id", &format!("eq.{}", game_id)),
-        ],
-    )?;
-
-    let mut index: Vec<Holder> = Vec::new();
-    for (rows, kind) in [(&people, "character"), (&places, "location")] {
-        for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
-            let entity = match r.get("entity_id").and_then(|v| v.as_str()) {
-                Some(e) => e,
-                None => continue,
-            };
-            // The short name where there is one - a roll card says
-            // "Rodnar", and so should the column saying who is holding
-            // the sword.
-            let name = r
-                .get("token_name")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| r.get("name").and_then(|v| v.as_str()))
-                .unwrap_or("unnamed");
-            index.push(Holder {
-                entity_id: entity.to_string(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-            });
-        }
-    }
-
-    // WHAT THE CATALOGUE SAYS, which is where size and weight actually
-    // live. 036 put an optional override on the instance, so the
-    // effective answer is a coalesce - and holders::resolve does it,
-    // with a test, rather than the screen.
-    //
-    // The whole catalogue in one read. A lookup per object would be
-    // thirty requests to be told what a dagger weighs, and the answer
-    // is the same every time.
-    let rows = supabase::rest_get(
-        &token,
-        "items",
-        &[
-            ("select", "key,game_id,size,holds_size,weight"),
-            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            // This campaign's row first, so the de-duplication below
-            // keeps the override - the same precedence
-            // collapse_overrides applies, done by the sort.
-            ("order", "game_id.desc"),
-        ],
-    )?;
-    let mut types: Vec<Kind> = Vec::new();
-    for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
-        let key = r.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if types.iter().any(|t| t.key == key) {
-            continue;
-        }
-        types.push(Kind {
-            key,
-            size: r
-                .get("size")
-                .and_then(|v| v.as_str())
-                .unwrap_or("med")
-                .to_string(),
-            holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
-            // numeric arrives as a string; see holders::Located::weight.
-            weight: r.get("weight").and_then(|v| v.as_str()).map(str::to_string),
-        });
-    }
-
-    Ok(holders::resolve(&objects, &index, &types))
+    let (objects, holders, types) = holders::load_world(&token, &game_id)?;
+    Ok(holders::resolve(&objects, &holders, &types))
 }

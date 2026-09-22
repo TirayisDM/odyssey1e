@@ -1135,7 +1135,7 @@ async function loadWorld() {
 // a new place, where an encounter happens, and where a thing is put
 // down - and three copies would drift.
 function fillPlaces(sel, blankLabel) {
-  if (!sel) return;
+  if (!sel) return sel;
   const keep = sel.value;
   sel.innerHTML = "";
   const none = document.createElement("option");
@@ -1149,6 +1149,9 @@ function fillPlaces(sel, blankLabel) {
     sel.append(o);
   }
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  // Handed back so a caller can use it in an expression. Every existing
+  // caller ignores it.
+  return sel;
 }
 
 // Open a place. Selecting the one already open closes it again, which
@@ -1466,6 +1469,9 @@ async function loadObjects() {
 
   state.catalogue = cat.value || [];
   state.objects = objs.value || [];
+  // Who could take something back out of a container. Cheap, and the
+  // alternative is the mover asking per row.
+  state.roster = (await call("who_is_where", { gameId: state.gameId })) || [];
 
   paintObjects();
   paintCatalogue();
@@ -1811,21 +1817,24 @@ function fillEditor(el, o) {
   el.append(line, sizeLine, buttons);
 }
 
-// Put it somewhere real.
+// Put it somewhere real, or inside something.
 //
-// WHICH COMMAND DEPENDS ON WHOSE IT IS. drop_here takes a thing out of
-// a pair of hands and splits a stack on the way; place_object moves a
-// whole loose row that nobody is holding. Both end with the thing
-// resting in a place, and they are not interchangeable.
+// TWO DESTINATIONS, because they are two different writes. A place is
+// drop_here or place_object depending on whose the thing is; a
+// container is put_in_container, which has three more questions to ask
+// before it agrees.
 function fillMover(el, o) {
   el.innerHTML = "";
-  const to = document.createElement("select");
-  fillPlaces(to, "\u2014 move to \u2014");
-  const go = document.createElement("button");
-  go.className = "tiny ghost";
-  go.textContent = "put it there";
-  go.addEventListener("click", async () => {
+
+  /* ---- into a place ---- */
+
+  const to = fillPlaces(document.createElement("select"), "\u2014 move to \u2014");
+  const go = action("put it there", async () => {
     if (!to.value) return dmSay("pick somewhere to put it", true);
+    // WHICH COMMAND DEPENDS ON WHOSE IT IS. drop_here takes a thing out
+    // of a pair of hands and splits a stack on the way; place_object
+    // moves a whole loose row that nobody is holding. Both end with the
+    // thing resting in a place, and they are not interchangeable.
     const held = o.holder_kind === "character" || o.holder_kind === "container";
     const r = await tryCall(held ? "drop_here" : "place_object", {
       objectId: o.id,
@@ -1834,10 +1843,93 @@ function fillMover(el, o) {
     dmSay(r.ok ? (o.name || o.item_key) + " moved" : r.error, !r.ok);
     if (r.ok) await loadObjects();
   });
-  const line = document.createElement("div");
-  line.className = "row";
-  line.append(to, go);
-  el.append(line);
+  const placeLine = document.createElement("div");
+  placeLine.className = "row";
+  placeLine.append(to, go);
+  el.append(placeLine);
+
+  /* ---- into a container ---- */
+
+  // ONLY WHAT IT CAN ACTUALLY REACH. `reach` is the whole chain of
+  // containers walked to its root, done in Rust and tested there - a
+  // thing held by Rodnar and a chest on the floor come back with
+  // different tokens, so the chest is never offered. An empty token
+  // means the chain ran into something nobody can see, and then
+  // nothing is offered at all.
+  //
+  // The rule is not copied here. One string compare IS the rule, which
+  // is why holders.rs hands the screen a token rather than a pair of
+  // fields to reason about.
+  const reachable = (state.objects || []).filter(
+    (c) =>
+      c.is_container &&
+      c.id !== o.id &&
+      o.reach &&
+      c.reach === o.reach &&
+      // A thing already in this container has nowhere to go.
+      c.entity_id !== o.holder_id
+  );
+
+  const into = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = reachable.length
+    ? "\u2014 put inside \u2014"
+    : "no container within reach of " + (o.reach_name || "here");
+  into.append(none);
+  for (const c of reachable) {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    // Say what it will take, because that is what the refusal will be
+    // about: a purse that holds Tiny things is worth knowing before
+    // the click rather than after it.
+    opt.textContent =
+      (c.name || c.item_key) +
+      (c.holds_size ? " (holds " + sizeWord(c.holds_size) + ")" : "");
+    into.append(opt);
+  }
+  into.disabled = !reachable.length;
+
+  const put = action("put it in", async () => {
+    if (!into.value) return dmSay("pick a container", true);
+    const r = await tryCall("put_in_container", {
+      objectId: o.id,
+      containerId: into.value,
+    });
+    dmSay(r.ok ? (o.name || o.item_key) + " packed away" : r.error, !r.ok);
+    if (r.ok) await loadObjects();
+  });
+
+  const intoLine = document.createElement("div");
+  intoLine.className = "row";
+  intoLine.append(into, put);
+  el.append(intoLine);
+
+  /* ---- back out of one ---- */
+
+  // Only worth offering when it is IN something, and only into the
+  // hands of whoever ultimately holds that container - which is the
+  // same reach rule read backwards.
+  if (o.holder_kind !== "container") return;
+  const owner = (state.roster || []).find((c) => "c:" + c.entity_id === o.reach);
+  if (!owner) return;
+
+  const outLine = document.createElement("div");
+  outLine.className = "row";
+  outLine.append(
+    action("take it out", async () => {
+      const r = await tryCall("take_from_container", {
+        objectId: o.id,
+        characterId: owner.id,
+      });
+      dmSay(
+        r.ok ? (owner.token_name || owner.name) + " takes the " + o.item_key : r.error,
+        !r.ok
+      );
+      if (r.ok) await loadObjects();
+    })
+  );
+  el.append(outLine);
 }
 
 

@@ -45,8 +45,11 @@
             <input id="new-pin" type="password" inputmode="numeric" maxlength="4"
                    placeholder="set a 4-digit PIN" autocomplete="off" class="narrow" />
             <button id="save-pin" class="ghost">Save PIN</button>
-            <button id="clear-pin" class="ghost">Forget PIN</button>
+            <button id="clear-pin" class="ghost danger">Forget PIN</button>
           </div>
+          <!-- Both buttons now say what they did. Neither did before,
+               and they sit next to each other. -->
+          <div id="pin-msg" class="dm-msg" hidden></div>
           <div class="muted pin-note">Convenience, not security &mdash; see pin.rs.</div>
         </div>
       </section>
@@ -167,6 +170,17 @@
 
         <div id="enc-detail" hidden>
           <div id="enc-editing" class="editing" hidden></div>
+
+          <!-- WHERE IT HAPPENS, changeable. The create form has had this
+               picker since 034 and nothing could move an encounter
+               afterwards, which left every encounter made before that
+               migration stranded nowhere with no way back. -->
+          <div class="sub">Where</div>
+          <div class="row">
+            <select id="enc-place"></select>
+            <button id="set-enc-place" class="ghost">Move here</button>
+          </div>
+
           <div class="sub">Enrol</div>
           <select id="enrol-what"></select>
           <input id="enrol-name" placeholder="name (blank = auto, e.g. Goblin 0003)" />

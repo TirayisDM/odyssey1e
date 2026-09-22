@@ -24,6 +24,10 @@ button:hover{filter:brightness(1.1)}
 button.ghost{background:transparent;color:var(--accent);
              border:1px solid var(--line);font-weight:500}
 button.tiny{padding:.1rem .45rem;font-size:11px;margin:0}
+/* The one that throws something away. Forget PIN sits beside Save
+   PIN and looked identical to it, which is how a stored token
+   disappears without anybody deciding to remove it. */
+button.ghost.danger{color:var(--bad);border-color:var(--bad)}
 .row{display:flex;gap:.4rem}
 .row button{flex:1}
 .muted{color:var(--muted)}

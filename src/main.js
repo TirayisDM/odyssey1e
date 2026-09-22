@@ -131,6 +131,19 @@ async function paintUnlock() {
   }
 }
 
+// Say what happened to the PIN, beside the buttons that did it.
+//
+// Both outcomes used to go to the log pane, which is the right place to
+// read what happened and the wrong one to NOTICE it. Save and Forget are
+// adjacent, identically styled and irreversible in one direction, and
+// neither acknowledged a click.
+function pinSay(text, isError) {
+  const el = document.querySelector("#pin-msg");
+  el.textContent = text || "";
+  el.className = "dm-msg" + (isError ? " err" : "");
+  el.hidden = !text;
+}
+
 function unlockSay(text, isError) {
   const el = document.querySelector("#unlock-msg");
   el.textContent = text || "";
@@ -1087,6 +1100,11 @@ async function loadWorld() {
   }
 
   fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
+  // The detail picker too. Its value is set by selectEncounter rather
+  // than kept: it shows where THIS encounter is, not what was last
+  // chosen on the create form.
+  fillPlaces(document.querySelector("#enc-place"), "— nowhere in particular —");
+  if (state.dmEncounterId) syncEncPlace(state.dmEncounterId);
   await loadLoose();
   // AND THE SCENE, if one is open. Every write on this tab can change
   // what is in the selected place - putting a loose thing away lands in
@@ -1330,6 +1348,18 @@ function paintThings(things) {
   }
 }
 
+// Point the Where picker at the place this encounter is actually in.
+//
+// fillPlaces preserves whatever was selected, which is right for a
+// create form and wrong here: this control REPORTS a fact and must not
+// carry the last encounter's answer over to the next one.
+function syncEncPlace(id) {
+  const sel = document.querySelector("#enc-place");
+  if (!sel) return;
+  const e = (state.encounters || []).find((x) => x.id === id);
+  sel.value = (e && e.location_id) || "";
+}
+
 // Everything an encounter needs was authored in SQL until now. The
 // policies have been in place since 011; this is the screen that was
 // missing.
@@ -1463,6 +1493,7 @@ async function selectEncounter(id) {
   const detail = document.querySelector("#enc-detail");
   detail.hidden = !id;
   if (!id) return;
+  syncEncPlace(id);
 
   // SAY WHICH ENCOUNTER THIS IS, AND WHETHER ANYONE CAN SEE IT.
   //
@@ -2357,13 +2388,27 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   guarded("#save-pin", async () => {
     const r = await tryCall("set_pin", { pinCode: val("#new-pin") });
+    if (!r.ok) {
+      // AND THE BOX KEEPS ITS CONTENTS. It was cleared before the
+      // result was checked, so a PIN rejected for being three digits
+      // vanished without a word and looked exactly like one that saved.
+      pinSay(r.error, true);
+      return;
+    }
     document.querySelector("#new-pin").value = "";
-    if (!r.ok) return log("set_pin", r.error, true);
+    pinSay("PIN saved \u2014 it will be offered next time the app opens");
     await paintUnlock();
   });
 
   guarded("#clear-pin", async () => {
-    await call("forget_pin");
+    // ASKS FIRST. It sits beside Save, looks identical to it, and
+    // throws away the stored token for good - after which the only way
+    // back in is the password.
+    if (!confirm("Forget the PIN on this device? You will need your password next time.")) {
+      return;
+    }
+    const r = await tryCall("forget_pin");
+    pinSay(r.ok ? "PIN forgotten \u2014 sign in with your password" : r.error, !r.ok);
     await paintUnlock();
   });
 
@@ -2376,6 +2421,27 @@ window.addEventListener("DOMContentLoaded", async () => {
   for (const b of document.querySelectorAll("#tabs .tab")) {
     b.addEventListener("click", () => showTab(b.dataset.tab));
   }
+
+  // 034 built set_encounter_location and nothing ever called it. The
+  // create form's picker was the only way to say where a fight
+  // happened, so every encounter made before that migration was stuck
+  // nowhere - which is why the scene's Encounters tab was empty and
+  // right to be.
+  guarded("#set-enc-place", async () => {
+    if (!state.dmEncounterId) return dmSay("pick an encounter first", true);
+    const to = document.querySelector("#enc-place").value || null;
+    const r = await tryCall("set_encounter_location", {
+      encounterId: state.dmEncounterId,
+      locationId: to,
+    });
+    if (!r.ok) return dmSay(r.error, true);
+    const at = (state.locations || []).find((l) => l.id === to);
+    dmSay(at ? "happens in " + at.path.join(" > ") : "happens nowhere in particular");
+    // loadDM, not loadWorld: the encounter list carries location_id and
+    // the scene reads it, so both halves have to come back.
+    await loadDM();
+    await selectEncounter(state.dmEncounterId);
+  });
 
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {
     b.addEventListener("click", () => showSceneTab(b.dataset.scene));

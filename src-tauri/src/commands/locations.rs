@@ -437,7 +437,16 @@ pub fn list_objects(state: State<AppState>, game_id: String) -> Result<Vec<Locat
         &token,
         "objects",
         &[
-            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id,\n                        size_override,holds_size_override"),
+            // ONE LINE, AND IT STAYS ONE. Wrapping a select needs a Rust
+            // line continuation - a lone backslash at the end of the line.
+            // An escaped \n instead puts a real newline AND its indentation
+            // inside the query string, so PostgREST is asked for a column
+            // named "<newline><spaces>size_override" and refuses the whole
+            // request. Every object vanished from the manager at once, and
+            // an empty list reads as "no objects yet" rather than as a
+            // broken query - which is how it survived a build, a clean
+            // test run and a commit.
+            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id,size_override,holds_size_override"),
             ("game_id", &format!("eq.{}", game_id)),
             // Named things first, then the catalogue key, so a manager
             // reads as a list of THINGS rather than of rows. The fold

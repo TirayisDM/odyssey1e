@@ -191,6 +191,7 @@ fn rest_url(path: &str) -> String {
 /// GET against a table or view. `query` is passed through as PostgREST
 /// filter syntax, e.g. [("select", "*"), ("game_id", "eq.<uuid>")].
 pub fn rest_get(token: &str, path: &str, query: &[(&str, &str)]) -> Result<Value, String> {
+    check_query(query)?;
     let resp = http()
         .get(rest_url(path))
         .header("apikey", SUPABASE_ANON_KEY)
@@ -205,6 +206,37 @@ pub fn rest_get(token: &str, path: &str, query: &[(&str, &str)]) -> Result<Value
         return Err(error_message(status, &text));
     }
     serde_json::from_str(&text).map_err(|e| format!("bad JSON from Supabase: {}", e))
+}
+
+/// A control character in a query parameter is always a typo.
+///
+/// THE BUG THIS EXISTS FOR. A `select` list was wrapped across two
+/// lines with an escaped `\n` where it needed a Rust line continuation
+/// - a lone backslash. The string then carried a real newline and
+/// twenty-four spaces INTO the query, so PostgREST was asked for a
+/// column named "<newline><spaces>size_override" and refused the entire
+/// request.
+///
+/// It compiled, it passed every test, and it was committed, because
+/// nothing here runs against a database. On screen the whole object
+/// manager simply went empty - and an empty list renders as "no objects
+/// yet", which is a sentence about the game rather than about a broken
+/// query.
+///
+/// So the failure is moved forward to where it can name itself. No
+/// legitimate filter, select or order contains a newline, a tab or a
+/// carriage return; PostgREST's grammar has no use for one.
+fn check_query(query: &[(&str, &str)]) -> Result<(), String> {
+    for (k, v) in query {
+        if let Some(bad) = v.chars().find(|c| c.is_control()) {
+            return Err(format!(
+                "the '{}' parameter contains {:?}, which is a typo rather than a filter \
+                 - a wrapped string needs a line continuation, not an escape",
+                k, bad
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// INSERT. Prefer: return=representation so the caller gets the row
@@ -330,4 +362,49 @@ pub fn rest_upsert(
         return Err(error_message(status, &text));
     }
     serde_json::from_str(&text).map_err(|e| format!("bad JSON from Supabase: {}", e))
+}
+
+
+/* ============================ TESTS ============================ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ordinary_query_passes() {
+        assert!(check_query(&[
+            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id"),
+            ("game_id", "eq.11111111-2222-3333-4444-555555555555"),
+            ("order", "item_key.asc,acquired_at.asc"),
+            ("or", "(game_id.is.null,game_id.eq.abc)"),
+        ])
+        .is_ok());
+    }
+
+    // THE ONE THAT GOT THROUGH. An escaped \n where a line continuation
+    // was meant, which compiles, tests clean, and empties a screen.
+    #[test]
+    fn a_wrapped_select_with_a_real_newline_is_refused() {
+        let e = check_query(&[(
+            "select",
+            "id,item_key,holder_id,entity_id,\n                        size_override",
+        )])
+        .unwrap_err();
+        assert!(e.contains("select"), "{}", e);
+        assert!(e.contains("typo"), "{}", e);
+    }
+
+    #[test]
+    fn tabs_and_returns_too() {
+        assert!(check_query(&[("select", "a,\tb")]).is_err());
+        assert!(check_query(&[("order", "name.asc\r")]).is_err());
+    }
+
+    // A SPACE IS NOT A CONTROL CHARACTER and must stay legal: a name
+    // filter is a perfectly good place for one.
+    #[test]
+    fn a_space_is_allowed_because_names_have_them() {
+        assert!(check_query(&[("name", "eq.Rodnar Shieldcrest")]).is_ok());
+    }
 }

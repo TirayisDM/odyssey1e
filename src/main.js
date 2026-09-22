@@ -1344,9 +1344,16 @@ async function loadChars() {
   panel.hidden = false;
   document.querySelector("#chars-who").textContent = "you run this game";
 
-  const roster = (await call("who_is_where", { gameId: state.gameId })) || [];
-  paintFolk("#pc-list", "#n-pcs", roster.filter((c) => !c.is_npc));
-  paintFolk("#npc-list", "#n-npcs", roster.filter((c) => c.is_npc));
+  // Same distinction as loadObjects: "nobody" is an answer, and
+  // "the question failed" is not.
+  const roster = await tryCall("who_is_where", { gameId: state.gameId });
+  if (!roster.ok) {
+    dmSay(roster.error, true);
+    return;
+  }
+  const folk = roster.value || [];
+  paintFolk("#pc-list", "#n-pcs", folk.filter((c) => !c.is_npc));
+  paintFolk("#npc-list", "#n-npcs", folk.filter((c) => c.is_npc));
 
   // The TYPES, which are a different table and a different idea from
   // the individuals above. 022 is the whole distinction.
@@ -1439,11 +1446,26 @@ async function loadObjects() {
   // a thing IS - damage, properties, the AC it sets - and painting
   // before it arrives would print objects with no facts attached.
   const [cat, objs] = await Promise.all([
-    call("list_catalogue", { gameId: state.gameId }),
-    call("list_objects", { gameId: state.gameId }),
+    tryCall("list_catalogue", { gameId: state.gameId }),
+    tryCall("list_objects", { gameId: state.gameId }),
   ]);
-  state.catalogue = cat || [];
-  state.objects = objs || [];
+
+  // A QUESTION THAT FAILED IS NOT AN EMPTY ANSWER. `call` turns both
+  // into null, and an empty list paints "no objects yet" - a sentence
+  // about the game rather than about a broken query. That is how a
+  // malformed select emptied this entire screen without anybody
+  // reading it as a fault.
+  if (!objs.ok || !cat.ok) {
+    document.querySelector("#obj-list").innerHTML = "";
+    document.querySelector("#cat-list").innerHTML = "";
+    setCount("#n-objs", 0);
+    setCount("#n-cat", 0);
+    dmSay((objs.ok ? cat.error : objs.error), true);
+    return;
+  }
+
+  state.catalogue = cat.value || [];
+  state.objects = objs.value || [];
 
   paintObjects();
   paintCatalogue();

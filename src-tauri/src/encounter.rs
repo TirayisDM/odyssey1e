@@ -212,7 +212,10 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
             .as_ref()
             .and_then(|c| deltas.get(c).copied())
             .unwrap_or(0);
-        let hp_current = hp_max.map(|m| m + spent);
+        // Floored, because the log sums without one. See death::hp_floor:
+        // the events stay honest about what was dealt and what a
+        // creature HAS cannot go below zero.
+        let hp_current = hp_max.map(|m| death::hp_floor(m + spent));
 
         // And the death saves live with the hit points, on the same row.
         let (successes, failures, flagged) = match stats {
@@ -365,7 +368,9 @@ pub fn load_actor_vitals(token: &str, actor_id: &str) -> Result<Option<ActorVita
         character_id,
         label: as_opt_str(&r, "label").unwrap_or_default(),
         hp_max,
-        hp_current: hp_max.unwrap_or(0) + spent,
+        // Floored here too - this is the other place the log is summed,
+        // and it is the one the damage path reads. See death::hp_floor.
+        hp_current: death::hp_floor(hp_max.unwrap_or(0) + spent),
         successes,
         failures,
         dead,

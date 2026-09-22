@@ -528,23 +528,40 @@ better succeeds, a natural 1 is two failures, a natural 20 restores one
 hit point and clears the tally, three either way settles it, and being
 hit while down costs a failure and two on a crit.
 
-**Overflow death is only half implemented, and this section used to
-claim otherwise.** `massive_damage_kills` is right and tested, but
-`lib.rs` only calls it behind `was.is_conscious()` - so it runs on the
-blow that drops you and never again. Two consequences, both visible on
-a goblin that reached -35 of 7:
+And two more that ARE 5e and are now implemented properly, after a
+goblin was found at -35 of 7 while still rolling saves:
 
-- **Hit points run unbounded negative.** 5e has no negative hit points
-  at all; that is the 3.5e rule. Damage past 0 leaves you AT 0 and the
-  excess is discarded, except for the one check below.
-- **Damage taken while already down never checks for instant death.**
-  By the book, damage at 0 that equals or exceeds the hit point maximum
-  kills outright, and at 0 there is no subtraction to do - it is the raw
-  damage against max. Today it only ever adds a death save failure, so a
-  creature at 0 can absorb five times its maximum and go on dying.
+**Hit points are floored at zero.** 5e has no negative hit points at
+all - that is the 3.5e rule, where you sank to -10. Damage past zero
+leaves you AT zero and the excess is discarded, except for the check
+below which weighs it first.
 
-Both are in the same block at `lib.rs:669`. The rule half belongs in
-`death.rs` beside the others, with tests.
+The floor is applied where hit points are READ, not where damage is
+written, and that distinction is load-bearing. 013 made hit points a
+log and the log is evidence: a goblin that took fourteen took fourteen,
+and clamping the event would record a blow that never landed. Both
+places that sum the log now floor the total - `load_targets` and
+`load_actor_vitals` - and nothing else changed.
+
+**Overflow death is checked on every blow, not just the one that drops
+you.** `massive_damage_kills` was always right; `lib.rs` only called it
+behind `was.is_conscious()`, so it ran once and never again. That is
+how -35 happened. The book checks it whenever damage lands, and at zero
+there is nothing left to subtract - the whole blow is overflow and the
+raw damage is weighed against the maximum.
+
+`death::overflow` is what makes that one expression rather than two
+branches: it subtracts the FLOORED current hit points, so a creature at
+five taking twenty spills fifteen and a creature already at zero taking
+twenty spills all twenty. The second case is the book's rule for damage
+taken while down, arrived at without a second code path.
+
+The evidence it mattered, from the live database: Crumbs had taken 42
+past a maximum of 7, and two of those blows individually met or
+exceeded that maximum. Either should have killed it outright. Runt is
+the control - 9 summed, worst single hit 5, so it correctly sits at
+zero and goes on saving. Past rolls are not reconciled; the log is
+history, the same reasoning 025 used for names.
 
 One more, in `resolution.rs`: a natural 20 does NOT carry an ability
 check, only an attack. That is rules as written, and

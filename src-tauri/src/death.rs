@@ -183,6 +183,38 @@ pub fn failures_from_being_hit(crit: bool) -> i64 {
     }
 }
 
+/// Hit points, floored at zero.
+///
+/// 5E HAS NO NEGATIVE HIT POINTS. That is the 3.5e rule, where you sank
+/// to -10; here, damage that takes you below zero leaves you AT zero
+/// and the excess is discarded - except for the one thing `overflow`
+/// measures, which is checked before it is thrown away.
+///
+/// APPLIED WHERE HIT POINTS ARE READ, NOT WHERE DAMAGE IS WRITTEN. 013
+/// made hit points a log and the log is evidence: a goblin that took
+/// fourteen took fourteen, and clamping the event would record a blow
+/// that never landed. The sum can run past the floor; what a creature
+/// HAS cannot. So the events stay honest and this is applied to their
+/// total.
+pub fn hp_floor(summed: i64) -> i64 {
+    summed.max(0)
+}
+
+/// How much damage is left over once a creature reaches zero.
+///
+/// Negative means they are still standing. Zero or more means they went
+/// down, and the value is what `massive_damage_kills` weighs.
+///
+/// `hp_current` is expected to be floored already, and that is what
+/// makes this one function cover both cases the book distinguishes. A
+/// creature at five taking twenty has fifteen left over. A creature
+/// already at zero taking twenty has all twenty left over, because
+/// there is nothing to subtract - which is exactly the book's rule for
+/// damage taken while down, arrived at without a second branch.
+pub fn overflow(hp_current: i64, damage: i64) -> i64 {
+    damage - hp_floor(hp_current)
+}
+
 /// Did that kill outright?
 ///
 /// 5e: damage that drops a creature to zero AND has enough left over to
@@ -356,6 +388,44 @@ mod tests {
     fn hitting_someone_who_is_down_costs_them() {
         assert_eq!(failures_from_being_hit(false), 1);
         assert_eq!(failures_from_being_hit(true), 2);
+    }
+
+    /* ---------------- the floor -------------------------------------- */
+
+    #[test]
+    fn hit_points_do_not_go_below_zero() {
+        // The bug this fixes: a goblin read -35 of 7, because the log
+        // sums without a floor.
+        assert_eq!(hp_floor(-35), 0);
+        assert_eq!(hp_floor(0), 0);
+        assert_eq!(hp_floor(7), 7);
+    }
+
+    #[test]
+    fn overflow_is_what_is_left_after_reaching_zero() {
+        assert_eq!(overflow(5, 20), 15);
+        assert_eq!(overflow(5, 5), 0);
+        // Still standing, so nothing spilled.
+        assert_eq!(overflow(5, 3), -2);
+    }
+
+    #[test]
+    fn damage_to_something_already_down_all_counts_as_overflow() {
+        // The second half of the fix. At zero there is nothing to
+        // subtract, so the raw damage is weighed against the maximum -
+        // which is the book's rule for being hit while down, and it
+        // falls out of the same function rather than a second branch.
+        assert_eq!(overflow(0, 20), 20);
+        assert!(massive_damage_kills(overflow(0, 7), 7));
+        assert!(!massive_damage_kills(overflow(0, 6), 7));
+    }
+
+    #[test]
+    fn a_log_that_ran_negative_still_measures_overflow_from_zero() {
+        // If an unfloored total ever reaches this, the floor inside
+        // overflow stops it inflating the damage. -35 taking 3 is 3 of
+        // overflow, not 38.
+        assert_eq!(overflow(-35, 3), 3);
     }
 
     /* ---------------- overflow --------------------------------------- */

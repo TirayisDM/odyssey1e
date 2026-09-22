@@ -659,22 +659,31 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
             let mut failures = v.failures;
             let mut dead = v.dead;
 
-            if was.is_conscious() {
-                // Overflow past the hit point maximum kills outright,
-                // with no saves to make. Goblin 1 at seven hit points
-                // taking fourteen is exactly that case.
-                let after = v.hp_current - total;
-                if after <= 0 {
-                    if let Some(max) = v.hp_max {
-                        if death::massive_damage_kills(-after, max) {
-                            dead = true;
-                        }
+            // OVERFLOW FIRST, AND FOR EVERYONE. This used to sit
+            // behind `was.is_conscious()`, so it ran on the blow that
+            // dropped a creature and never again - which is how a
+            // goblin reached -35 of 7 while still rolling saves. The
+            // book checks it every time damage lands: at zero there is
+            // nothing left to subtract, so the whole blow is overflow
+            // and the raw damage is weighed against the maximum.
+            //
+            // `hp_current` is floored, which is what lets one
+            // expression cover both cases - see death::overflow.
+            let over = death::overflow(v.hp_current, total);
+            if over >= 0 {
+                if let Some(max) = v.hp_max {
+                    if death::massive_damage_kills(over, max) {
+                        dead = true;
                     }
                 }
-            } else {
-                // Hitting someone already down is not free: a failure,
-                // and two on a crit. This is the cost of letting a
-                // downed creature stay in the target list.
+            }
+
+            // Hitting someone already down is not free: a failure, and
+            // two on a crit. This is the cost of letting a downed
+            // creature stay in the target list. Skipped when the blow
+            // just killed outright - a death save tally on something
+            // already dead is bookkeeping nobody reads.
+            if !dead && !was.is_conscious() {
                 let crit = first.outcome == Some(dice::Outcome::Crit);
                 failures = (failures + death::failures_from_being_hit(crit)).min(3);
             }

@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the inventory system (026, 027).**
+**Written 2026-09-17, updated after locations.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -198,7 +198,20 @@ actor's label and the character's name together; older rolls keep the
 name they snapshotted, and the spent ordinal is not released, so the
 next unnamed goblin is still 0004.
 
-**177 tests, zero warnings.** `cd src-tauri && cargo test`.
+And the world has places in it. A universe, a continent, a tavern and
+a broom cupboard are the same kind of row at different depths - 033
+stores `parent_id` and nothing else, and `locations.rs` works out depth
+and path on the way to the screen. The DM panel builds the tree,
+selecting a place says what is lying in it, and an encounter can say
+where it happens.
+
+UNHELD NO LONGER MEANS NOWHERE. Every drop control offers a place;
+blank still means nowhere, but as a choice rather than the only
+outcome. What went nowhere before there was anywhere to go is
+recoverable from "Lying nowhere" in the World panel - a lost and found
+that should stay empty from here, and can go the day it does.
+
+**236 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -257,6 +270,10 @@ and not after.
 031 entities and holders - the truss 026 said to wait for; objects
     point at a holder, not at a character
 032 containers - a spell book, a treasure chest and a coin purse
+033 locations - somewhere to be; a location is an entity, and depth is
+    the whole hierarchy
+034 encounters in places - a fight happens somewhere, and cancelled
+    becomes its own word
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -413,6 +430,43 @@ pattern (global rows with `game_id IS NULL`, overrides with it set)
 needs a surrogate id plus two *partial* unique indexes - `NULL != NULL`
 in a unique constraint, so without the partial index two global rows
 both pass. Every reference table from 006 on hits this. (005)
+
+**A BUNDLED ROOT STORE BREAKS ON ANY MACHINE RUNNING ANTIVIRUS, AND THE
+ERROR POINTS THE WRONG WAY.** `reqwest`'s `rustls-tls` compiles a copy
+of Mozilla's root list into the binary and ignores the operating system
+store. Antivirus that inspects HTTPS - Avast's Web Shield here - stands
+in the middle with its own certificate, signed by a root it installs
+into WINDOWS. Every other program reads that store and carries on; this
+one did not, and the handshake failed.
+
+It reports as `error sending request for url` WITH NO HTTP STATUS. No
+401, no 403, nothing naming a certificate - it reads exactly like the
+network being down, and it was called transient twice before it was
+understood. What gave it away was the asymmetry: curl and PowerShell
+reached the same URL from the same shell and got an answer while the
+app could not connect at all. Two programs, one machine, one network,
+different results only happens when they disagree about who to trust.
+
+`rustls-tls-native-roots` is the fix and it is one line. It would have
+hit players as hard as it hit this laptop, and looked like a broken app
+to them and a working one to everybody else.
+
+**A RENAMED PARAMETER THAT STILL COMPILES IS THE EXPENSIVE KIND.** 031
+moved objects onto entities and renamed `load_loadout`'s second
+argument from `character_id` to `holder_id`. One call site kept passing
+`character_id`, and it compiled, because both are `String`. Every
+inventory then came back empty - PostgREST was being asked for objects
+held by a character id, which nothing ever is.
+
+It presented as a WRITE failure. Giving a dagger to a goblin worked
+three times and the panel said "carrying nothing" each time, so three
+successful writes read as three failures. A screenshot of the panel
+beside the row in the database is what settled it.
+
+Two of the three callers were right, which is why a sheet's loadout
+kept working while the full inventory emptied - and why nobody noticed
+for a day. When a rename is only a rename to the compiler, grep the
+call sites. (031, fixed here)
 
 **AN RLS-BLOCKED `UPDATE` SUCCEEDS AND DOES NOTHING.** This is the
 worst one on the list, because it is silent. A row a policy hides is a
@@ -1141,6 +1195,70 @@ Take - that was the spec, and it is what separates a Take from a Pick
 Pocket - so the difficulty has to come from somewhere, and a DM-stated
 DC overrides it the way `add_challenge` states every other one.
 
+## Locations - BUILT (033, 034, locations.rs, commands/locations.rs)
+
+**A LOCATION IS AN ENTITY.** That is the whole design. 031 built
+`entities` as a shared id space over things that can HOLD, and its
+header said a room would get one; 033 is that. `objects.holder_id`
+already pointed at an entity, so a sword rests on a floor with NO
+CHANGE TO THE OBJECTS SCHEMA AT ALL.
+
+**DEPTH, NOT TIERS.** `parent_id` is a nullable self-reference and that
+is the entire hierarchy - a universe, a continent, a tavern and a broom
+cupboard are the same kind of row at different depths. No level column
+and no path column; `locations.rs::arrange` derives both.
+
+The prior art argues FOR this rather than against it. OdysseyAIRPG's
+scene schema materialises `hierarchy.level` and `hierarchy.path` with
+the convention "0=region, 1=settlement, 2=district, 3=building", and its
+56 live scenes already disagree with that comment. Deriving is the
+lesson from it, not a refinement of it.
+
+`kind` is the MEDIUM, not the rank: structure, outdoors, underground,
+aquatic, aerial, vehicle - the axis that original's Config.js documents.
+Depth says how far in you are, kind says what sort of place it is, so a
+ship is a vehicle that contains rooms. CHECKED, because that field
+drifted there: the scene type list is six values and the live data holds
+`kingdom` and `village`, a FACTION type from campaign.js that leaked
+into a place type with nothing to stop it.
+
+**ZONES DO NOT EXIST HERE, deliberately.** The original needed them
+because a scene was heavyweight, so a room inside a building had to be
+a lesser thing with its own shape and a `parentZone` special case. A
+location is cheap, so the Watch Room is a location whose parent is The
+Guardhouse. One concept instead of two.
+
+**What it ended:** unheld meaning nowhere. Both 026 and 032 accepted
+that a dropped object had no location because the alternative was
+deleting what people let go of - and a handaxe dropped on the 21st then
+sat invisible for a day, because nothing renders nowhere. Every drop
+control now offers a place, and `loose_objects` plus `place_object` are
+the way back for the ones that went nowhere before there was anywhere
+to go. That pair is a lost and found: it should stay empty from here,
+and the day it does it can go.
+
+**Guards, all verified firing:** a place inside itself, a cycle through
+any chain, a parent in another game, and deleting a place that still
+contains one. `parent_id` is ON DELETE RESTRICT on purpose - deleting a
+continent should not silently delete its settlements and spill every
+object in them.
+
+**What 033 exposed:** a player could not pick anything up. Every write
+policy on `objects` asks `holder_character(holder_id)` for a character
+the caller owns, and a loose object has no holder, so only the DM could
+ever take one. Nothing rested anywhere before, so nobody met it.
+`holder_character` needed no change - a location's entity matches
+neither branch of its walk, so an axe on the floor is located and
+unowned, which is right. The update policy gained a third path instead:
+loose things are anyone's to take. DELIBERATELY GENEROUS, and the thing
+access control narrows.
+
+**Not here, deliberately:** travel and `scope`, access, ownership,
+property, coordinates. The original defined all of them up front and
+`location.position` is still null years later.
+
+---
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square
@@ -1206,26 +1324,34 @@ Roughly in order:
    which is the same copy `instantiate_npc` does, pointed the other way
    - and it is worth doing, because building an interesting goblin in
    play and keeping it is how a DM actually works.
-3. The roll-to-challenge payoff. `actions.target_challenge_id` is
+3. ACCESS CONTROL, which is the next subsystem and the one with
+   something already waiting for it. `acquire.rs` has held the Take
+   rule - tested - since the 22nd and nothing calls it. Locations are
+   what give it somewhere to apply: a locked room, an owner, a witness,
+   a crime. It is also what NARROWS 033's deliberately generous rule
+   that anything loose is anyone's to take, which is stated in the
+   migration as a starting point rather than a decision that theft is
+   free.
+4. The roll-to-challenge payoff. `actions.target_challenge_id` is
    written and nothing reads it, so the iron lock still cannot say
    whether it has been picked. The derivation is a query away: a
    successful action pointing at the challenge, later than its
    `reset_at`. See 011's comment on that column.
-4. Die art on the roll - read the equipped set from character_dice,
+5. Die art on the roll - read the equipped set from character_dice,
    look up dice_faces for the natural d20, snapshot image_url and
    set_key onto the roll at insert, per the record principle.
    `narrative.rs` is the shape to copy, down to caching it on the sheet.
-5. The rules modules still unported: rests, spell slots - death saves
+6. The rules modules still unported: rests, spell slots - death saves
    landed with 015 -
    each isolated in its own Apps Script file, each wants its own Rust
    module with tests. Each also wants a `resolve_request` key, and the
    vocabulary already has room for `death` and `spell`.
-6. Delivery - whatever moves a resolved roll to `delivered` and puts it
+7. Delivery - whatever moves a resolved roll to `delivered` and puts it
    in front of the table. This is the piece that closes the loop
    AppSheet closed, and nothing else on this list matters as much.
    **It has now been deferred twice.** Note that and decide
    deliberately rather than by drift.
-7. Session persistence, PROPERLY. A PIN now stands in front of it, so
+8. Session persistence, PROPERLY. A PIN now stands in front of it, so
    a restart costs four digits instead of a password - but the session
    still lives in memory and the refresh token sits in a plain file in
    the app data directory. The real answer is unchanged and is the OS
@@ -1234,8 +1360,8 @@ Roughly in order:
    factor rather than the only one, and pin.rs changes from "where the
    token lives" to "what unlocks it". Read pin.rs before trusting the
    PIN with anything.
-8. A real phone-first UI. What exists is a desktop test rig.
-9. Android via `npm run tauri android init`. iOS needs a Mac.
+9. A real phone-first UI. What exists is a desktop test rig.
+10. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

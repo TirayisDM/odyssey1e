@@ -663,38 +663,24 @@ pub fn load_npc_loadout(
     Ok(out)
 }
 
-/// One object by id: who holds it, what type it is, what it is called.
+/// Every item this campaign can offer, global rows plus its own
+/// overrides.
 ///
-/// The equip path needs this now that 026 gave objects an identity. It
-/// used to be handed a (character, item_key) pair, which named a type
-/// and trusted the caller to have picked a real one; an id names the
-/// thing itself, and the holder comes back from the row rather than
-/// from whoever asked.
-pub struct ObjectRow {
-    pub character_id: Option<String>,
-    pub item_key: String,
-}
-
-pub fn load_object(token: &str, object_id: &str) -> Result<ObjectRow, String> {
+/// The same collapse `load_loadout` does on the way to a sheet, without
+/// the loadout - an add-item picker needs the whole shelf, and the one
+/// thing it must not do is offer both longswords when a campaign has
+/// redefined one.
+pub fn load_catalogue(token: &str, game_id: &str) -> Result<Vec<Item>, String> {
     let rows = supabase::rest_get(
         token,
-        "objects",
+        "items",
         &[
-            ("select", "character_id,item_key"),
-            ("id", &format!("eq.{}", object_id)),
+            ("select", ITEM_COLUMNS),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("order", "name.asc"),
         ],
     )?;
-    // An object a policy hides is indistinguishable from one that was
-    // never there, and deliberately so - see supabase::error_message.
-    let r = rows
-        .as_array()
-        .and_then(|a| a.first())
-        .cloned()
-        .ok_or_else(|| "no such object, or it is not visible to you".to_string())?;
-    Ok(ObjectRow {
-        character_id: as_opt_str(&r, "character_id"),
-        item_key: as_str(&r, "item_key"),
-    })
+    Ok(collapse_overrides(rows.as_array().unwrap_or(&Vec::new())))
 }
 
 /// One catalogue row by key, with this game's override applied, or None

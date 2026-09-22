@@ -154,3 +154,25 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .actorview .row input{margin:0}
 .actorview .abils{margin:0;gap:.2rem}
 .actorview .abil span{font:12px ui-monospace,Menlo,monospace}
+
+/* Object controls: name, drop, destroy. One line per object, wrapping
+   rather than compressing — the left column is narrow and a name box
+   squeezed to three characters is worse than a second line.
+
+   The name box is the only flexible thing here; everything else is its
+   natural width. input{width:100%} is global, so each fixed control
+   says width:auto for the same reason .abil and the equip checkbox do:
+   flex:none preserves 100%, it does not override it. */
+.obj-controls{display:flex;align-items:center;gap:.25rem;flex-wrap:wrap;margin-top:.3rem}
+.obj-controls input[type=text],.obj-controls input:not([type]){flex:1;min-width:6rem;margin:0;
+       padding:.18rem .35rem;font-size:11px}
+.obj-controls input[type=number]{width:3.2rem;flex:none;margin:0;
+       padding:.18rem .3rem;font-size:11px;text-align:center}
+.obj-controls button{margin:0}
+
+/* A monster's kit in the DM's actor view. Same two-line shape the
+   player's inventory row uses — toggle and chips, then the controls —
+   because it is the same object seen by someone else. */
+.kit{border:1px solid var(--line);border-radius:4px;padding:.3rem .45rem;margin-bottom:.25rem}
+.kit .head{display:flex;align-items:center;gap:.45rem}
+.kit input[type=checkbox]{margin:0;cursor:pointer;flex:none;width:auto}

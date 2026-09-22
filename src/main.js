@@ -580,6 +580,8 @@ async function loadInventory() {
     "trained: weapons " + ((sheet.weapon_profs || []).join(", ") || "none") +
     " · armor " + ((sheet.armor_profs || []).join(", ") || "none");
 
+  if (sheet.game_id) await fillCatalogue(document.querySelector("#add-what"), sheet.game_id);
+
   if (!Array.isArray(items) || items.length === 0) {
     const li = document.createElement("li");
     li.className = "flat muted";
@@ -591,6 +593,111 @@ async function loadInventory() {
   for (const it of items) {
     list.append(inventoryRow(it));
   }
+}
+
+// The catalogue, read once per campaign.
+//
+// It is ~50 global rows plus whatever the game overrides, and it does
+// not change while the app is open. Re-reading it on every inventory
+// paint would put a request on the wire for a list nobody edited.
+async function catalogueFor(gameId) {
+  state.catalogue = state.catalogue || {};
+  if (!state.catalogue[gameId]) {
+    state.catalogue[gameId] = (await call("list_catalogue", { gameId })) || [];
+  }
+  return state.catalogue[gameId];
+}
+
+// Fill a <select> with what can be added, grouped by kind.
+//
+// The groups are the catalogue's own `kind` column, not a classification
+// invented here — the same value the engine branches on when it decides
+// whether the one-armor rule applies.
+async function fillCatalogue(sel, gameId) {
+  const items = await catalogueFor(gameId);
+  sel.innerHTML = "";
+  const kinds = [];
+  for (const it of items) if (!kinds.includes(it.kind)) kinds.push(it.kind);
+  for (const k of kinds) {
+    const g = document.createElement("optgroup");
+    g.label = k;
+    for (const it of items.filter((i) => i.kind === k)) {
+      const o = document.createElement("option");
+      o.value = it.key;
+      o.textContent = it.name;
+      g.append(o);
+    }
+    sel.append(g);
+  }
+  if (!items.length) {
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = "nothing in the catalogue";
+    sel.append(o);
+  }
+}
+
+// What can be done to one object, as opposed to WITH it.
+//
+// Name, drop, destroy. All three are new with 026 and none of them was
+// expressible before it: a junction row keyed by type had no name to
+// give, no identity to hand over, and nothing to destroy that was not
+// also destroying everyone else's.
+//
+// Drop and destroy are kept apart on purpose. A dropped thing is still
+// in the campaign with nobody holding it and can be picked back up; a
+// destroyed one is gone, which is why it is the only control here that
+// asks first.
+function objectControls(it, onDone) {
+  const wrap = document.createElement("div");
+  wrap.className = "row obj-controls";
+
+  const nameBox = document.createElement("input");
+  nameBox.value = it.name || "";
+  nameBox.placeholder = it.quantity > 1 ? "split one off to name it" : "name this one";
+  nameBox.disabled = it.quantity > 1;
+
+  const nameBtn = document.createElement("button");
+  nameBtn.className = "tiny ghost";
+  nameBtn.textContent = "name";
+  nameBtn.disabled = it.quantity > 1;
+  nameBtn.title = "blank clears the name and calls it by its type again";
+  nameBtn.addEventListener("click", async () => {
+    await call("rename_object", { objectId: it.id, name: nameBox.value });
+    await onDone();
+  });
+
+  const qty = document.createElement("input");
+  qty.type = "number";
+  qty.min = "1";
+  qty.max = String(it.quantity);
+  qty.value = "1";
+  qty.className = "narrow";
+  qty.hidden = it.quantity <= 1;
+
+  const dropBtn = document.createElement("button");
+  dropBtn.className = "tiny ghost";
+  dropBtn.textContent = "drop";
+  dropBtn.title = "stays in the campaign, held by nobody";
+  dropBtn.addEventListener("click", async () => {
+    const n = it.quantity > 1 ? Number(qty.value) : null;
+    await call("drop_object", { objectId: it.id, quantity: n });
+    await onDone();
+  });
+
+  const killBtn = document.createElement("button");
+  killBtn.className = "tiny ghost";
+  killBtn.textContent = "destroy";
+  killBtn.title = "gone for good — a drop is the reversible one";
+  killBtn.addEventListener("click", async () => {
+    const what = it.name || it.item.name;
+    if (!confirm("Destroy " + what + (it.quantity > 1 ? " ×" + it.quantity : "") + "?")) return;
+    await call("destroy_object", { objectId: it.id });
+    await onDone();
+  });
+
+  wrap.append(nameBox, nameBtn, qty, dropBtn, killBtn);
+  return wrap;
 }
 
 // What an item can do, as things to click.
@@ -659,7 +766,7 @@ function inventoryRow(it) {
   const actions = itemActions(it);
 
   const name = document.createElement("span");
-  name.className = "nm" + (actions.length ? " has-actions" : "");
+  name.className = "nm has-actions";
   // ITS OWN NAME WHEN IT HAS ONE. Most swords are just swords, and
   // `name` is null for those; "Runt's Axe" prints as itself with the
   // type kept as a chip below, because what it can do still comes from
@@ -669,13 +776,14 @@ function inventoryRow(it) {
   // Activate the item to see what it can do. Clicking the NAME, not the
   // checkbox beside it — equipping and inspecting are different
   // questions and must not share a hit area.
-  if (actions.length) {
-    name.title = "show what this can do";
-    name.addEventListener("click", () => {
-      const open = li.classList.toggle("open");
-      detail.hidden = !open;
-    });
-  }
+  // Opens for EVERYTHING now, not just what can swing. A blanket has
+  // no attacks and can still be named, dropped and destroyed, and a row
+  // that does not open is a row with no way to do any of them.
+  name.title = actions.length ? "show what this can do" : "show what can be done with it";
+  name.addEventListener("click", () => {
+    const open = li.classList.toggle("open");
+    detail.hidden = !open;
+  });
 
   // Toggle and name on one line, the engine's verdicts on the next. The
   // left column is narrow and chips wrap badly beside a flexible name.
@@ -730,7 +838,8 @@ function inventoryRow(it) {
     });
     detail.append(b);
   }
-  if (actions.length) li.append(detail);
+  detail.append(objectControls(it, loadSheet));
+  li.append(detail);
 
   return li;
 }
@@ -1060,23 +1169,98 @@ async function paintActorView(host, actor, encounterId) {
   host.append(abils);
 
   // --- kit, with the engine's verdicts, exactly as the player panel
-  // shows them. Read-only here: equipping a goblin mid-fight is a
-  // different question and does not have an answer yet.
-  if (sh.loadout && sh.loadout.length) {
-    for (const it of sh.loadout) {
-      const line = document.createElement("div");
-      line.className = "tags";
-      line.append(chip(it.item.name, "mode"));
-      for (const m of it.modes) line.append(chip(m, "cls"));
-      if (it.item.kind === "weapon" || it.item.kind === "armor") {
-        line.append(chip(it.proficient ? "proficient" : "not proficient",
-                         it.proficient ? "yes" : "no"));
-      }
-      host.append(line);
+  // shows them.
+  //
+  // NO LONGER READ-ONLY. It said equipping a goblin was a different
+  // question without an answer; 026 answered it by making an object an
+  // object, and `give_item` never asked whether the holder was a player
+  // — a goblin has been a characters row since 022, so the same command
+  // arms both. What stops a player arming the goblin is the policy, not
+  // this panel.
+  if (sh.character_id) {
+    const add = document.createElement("div");
+    add.className = "row";
+    const pick = document.createElement("select");
+    const go = document.createElement("button");
+    go.className = "tiny ghost";
+    go.textContent = "give";
+    let giving = false;
+    go.addEventListener("click", async () => {
+      if (giving) return;
+      giving = true; go.disabled = true;
+      try {
+        dmSay("");
+        const r = await tryCall("give_item", {
+          characterId: sh.character_id,
+          itemKey: pick.value,
+        });
+        if (!r.ok) { dmSay(r.error, true); return; }
+        // Unequipped on arrival, so the attack list does not change
+        // until somebody says it should.
+        dmSay(actor.label + " now carries " + (pick.selectedOptions[0] || {}).textContent);
+        await paintActorView(host, actor, encounterId);
+      } finally { giving = false; go.disabled = false; }
+    });
+    add.append(pick, go);
+    host.append(add);
+    await fillCatalogue(pick, sh.game_id);
+  }
+
+  // THE WHOLE INVENTORY, not sh.loadout. A sheet's loadout is what is
+  // EQUIPPED, and a DM who has just handed over a longsword would watch
+  // the panel repaint without it: give_item arms nobody, deliberately,
+  // so the new thing has to be visible before it can be equipped.
+  const kit = sh.character_id
+    ? (await call("list_inventory", { characterId: sh.character_id })) || []
+    : sh.loadout || [];
+
+  if (kit.length) {
+    for (const it of kit) {
+      host.append(actorKitRow(it, () => paintActorView(host, actor, encounterId)));
     }
   } else {
     host.append(chip("carrying nothing", "cls"));
   }
+}
+
+// One thing a monster is carrying, with the DM's controls on it.
+//
+// NOT inventoryRow. That one offers techniques, and it reads them off
+// `state.sheet` — the signed-in player's sheet — so rendering a
+// goblin's axe with it would offer Rodnar's Heavy Smash to the goblin.
+// The attack buttons a monster actually has are built from its own
+// statblock in `attackRow`, which is where they belong.
+function actorKitRow(it, onDone) {
+  const line = document.createElement("div");
+  line.className = "kit";
+
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = it.equipped;
+  box.title = "equipped";
+  box.addEventListener("change", async () => {
+    dmSay("");
+    const r = await tryCall("set_item_equipped", { objectId: it.id, equipped: box.checked });
+    if (!r.ok) { dmSay(r.error, true); box.checked = !box.checked; return; }
+    await onDone();
+  });
+
+  const tags = document.createElement("span");
+  tags.className = "tags";
+  tags.append(chip((it.name || it.item.name) + (it.quantity > 1 ? " ×" + it.quantity : ""),
+                   "mode"));
+  if (it.name) tags.append(chip(it.item.name, "cls"));
+  for (const m of it.modes) tags.append(chip(m, "cls"));
+  if (it.item.kind === "weapon" || it.item.kind === "armor") {
+    tags.append(chip(it.proficient ? "proficient" : "not proficient",
+                     it.proficient ? "yes" : "no"));
+  }
+
+  const head = document.createElement("div");
+  head.className = "head";
+  head.append(box, tags);
+  line.append(head, objectControls(it, onDone));
+  return line;
 }
 
 // One row of attack buttons and a target, for one monster.
@@ -1477,6 +1661,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (Array.isArray(faults) && faults.length === 0) {
       log("check_item_keys", "every technique item_key and mode resolves", false);
     }
+  });
+
+  // Guarded, because a double-click is a second longsword. It merges
+  // into the same stack rather than making a second row, which makes it
+  // quieter than a duplicate enrolment and no more wanted.
+  guarded("#add-item", async () => {
+    if (!state.characterId) return log("give_item", "select a character first", true);
+    const key = val("#add-what");
+    if (!key) return log("give_item", "nothing selected", true);
+    const r = await tryCall("give_item", {
+      characterId: state.characterId,
+      itemKey: key,
+      quantity: Number(val("#add-qty")) || 1,
+    });
+    if (r.ok) await loadSheet();
   });
 
   /* ---------- the DM side ---------- */

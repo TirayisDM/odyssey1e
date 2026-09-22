@@ -1,6 +1,6 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after the NPC view.**
+**Written 2026-09-17, updated after the inventory system (026, 027).**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -244,6 +244,10 @@ and not after.
 023 hp_events follow the character - one subject, now there always is one
 024 name_actor after convergence - 022 made 018's naming unreachable
 025 rename actor - a label and a character's name move together
+026 objects get identity - `character_items` becomes `objects` with a
+    surrogate id; a sword becomes a particular sword
+027 the catalogue - the SRD weapon and armour tables, and the two
+    columns versatile needed; 49 seed rows
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -255,6 +259,31 @@ replaced `techniques.weapon` - free text holding a display name like
 not an identifier, and that one string was carrying two facts: which
 item, and which attack mode. The light hammer has different technique
 lists for melee and thrown, 7 and 6.
+
+**026 is the one to read before touching inventory.** `character_items`
+was a junction keyed `(character_id, item_key)`, and that key was the
+limit: two shortswords could not differ, nothing could be named, and
+nothing could exist unheld. It is now `objects` - the individual, with
+who holds it as one of its facts. Stacks survive on purpose (seven
+rations are one object with quantity 7), a named thing is always
+quantity 1, and `character_id` is nullable so a dropped thing can exist
+with no holder.
+
+What 026 is NOT is the `entities` component work. A holder is a
+character and only a character, with a real FK. When a location or
+another object can hold something, THAT is when `entities` is earned -
+doing it now with a nullable character_id beside a nullable location_id
+under an XOR is exactly the shape 022 and 023 removed.
+
+**027 filled the catalogue**, which had 15 rows because it had only ever
+grown to satisfy whoever asked last. Now 37 weapons and 13 armours -
+the SRD tables. Three honest gaps are written into its header:
+versatile stores its second die in new columns that NOTHING READS yet
+(a Versatile mode means widening `techniques_mode_check` and teaching
+the resolver, which is a rule change with its own tests); heavy armour's
+Strength requirement has no column because no rule reads it; and the
+blowgun is absent because a flat 1 damage is not a die and
+`damage_denomination` is checked `>= 2`.
 
 008 seeds `items` from the Foundry export in the `_RAW` tab of
 `Application Data.xlsx`, the same source the AppSheet Inventory and
@@ -762,12 +791,71 @@ already in place; what is missing is the screen.
 
 ---
 
+## Inventory - BUILT (026, 027, objects.rs, commands/inventory.rs)
+
+**There was no way to acquire an item until now, and there had been one
+by accident.** `set_item_equipped` upserted on `(character_id,
+item_key)`, and an upsert on a pair that is not there INSERTS - so the
+way to give Rodnar a longsword was to equip a longsword he did not have.
+Nobody designed that path; it was a side effect of the write. 026 closed
+it by making the command take an object id, and `give_item` is the path
+that replaces it.
+
+The commands are `list_catalogue`, `give_item`, `drop_object`,
+`take_object`, `rename_object`, `destroy_object`, in
+`src/commands/inventory.rs`. Every decision they make is in
+`src/objects.rs` and tested there; the command files hold no rules,
+per the directory's own line.
+
+**One command arms both sides.** `give_item` never asks whether the
+holder is a player or a monster, because since 022 there is nothing to
+ask - a goblin is a `characters` row. What stops a player arming the
+goblin is the RLS policy, not the command and not the panel. A rule
+enforced in two places is a rule that will disagree with itself.
+
+The four rules worth naming, all in `objects.rs`:
+
+- **A named thing never merges**, in either direction. It does not join
+  a plain stack, because then its name would be a fact about all seven;
+  and a plain thing does not join a named one, because "Runt's Axe x2"
+  is not a sentence. This is `objects_stack_idx` stated as a rule rather
+  than as an index.
+- **A stack cannot be named.** Split one off first - the question has no
+  answer otherwise, and the error says so.
+- **Drop and destroy are different events.** A dropped thing stays in
+  the campaign with `character_id` NULL and can be picked back up; a
+  destroyed one is gone. Only destroy asks first.
+- **A partial drop splits.** The held row keeps the remainder and a new
+  unheld row carries what left, because the seven rations were never
+  seven objects.
+
+**Unheld still means nowhere.** A dropped object has no location,
+because Locations is a stub - no room, no floor, no container. It is
+loot in limbo, and it is still worth having: it is what a drop, a chest
+and a shop all need, and the alternative was deleting things people let
+go of.
+
+The DM's actor view shows a monster's WHOLE inventory now, not its
+loadout. A loadout is what is equipped, and a DM who had just handed
+over a longsword would have watched the panel repaint without it -
+`give_item` arms nobody, deliberately.
+
+**NOT `inventoryRow`.** The actor view builds its own kit row, because
+`inventoryRow` offers techniques and reads them off `state.sheet` - the
+signed-in player's sheet - so rendering a goblin's axe with it would
+have offered Rodnar's Heavy Smash to the goblin. That is the shape of
+bug this project keeps finding: two layers that each look right alone.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square
 and the combat loop runs: the access model, the dice, the sheet
 resolver, the prose, equipment, attacks, hit points, dying, the DM's
 screen, and monsters that are individuals rather than views of a type.
+
+Inventory is now real on both sides: a catalogue to pick from, a
+designed way to acquire, and objects that can be named, split, dropped
+and destroyed.
 
 What AppSheet did that this still does not is *deliver*. `rolls.status`
 goes `pending -> resolved -> delivered` and nothing in this codebase
@@ -875,6 +963,18 @@ fixing yet, but that is where the latency is if it ever matters.
 - The old AppSheet system is still live and still has the outstanding
   items in `ISSUES_appsheet_audit.html`. Decide whether it is being
   maintained or retired.
+- **Versatile weapons store their second die and nothing reads it.**
+  027 added `items.versatile_number` / `versatile_denomination` so a
+  longsword row is not a lie, but the engine still offers the 1d8. The
+  work is a fourth `Mode`, which means widening `techniques_mode_check`
+  and teaching `resolve_request` which die to take. Own migration, own
+  tests.
+- **`rch` and `spc` are data with no rule.** Reach is a grid fact and
+  there is no grid; special means "read the entry". They are in the
+  catalogue so a glaive can be told from a greatsword before either
+  rule exists.
+- **The blowgun is still missing** and will be until something can
+  express flat damage. Several other things will want that column.
 - Old Supabase projects `osddb`, `OSDUNGEON`, `ActiveCore_Components`
   are all paused. Free tier allows two active at a time; restoring one
   may force a choice.

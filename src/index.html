@@ -79,6 +79,14 @@
       <section id="equipment-panel" hidden>
         <h2>Equipment <button id="check-keys" class="tiny ghost">check keys</button></h2>
         <div id="equip-profs" class="muted trained"></div>
+        <!-- The designed way to acquire something. Until 026 there was
+             none: equipping an item you did not own created it, because
+             the write underneath was an upsert. -->
+        <div class="row">
+          <select id="add-what"></select>
+          <input id="add-qty" type="number" min="1" value="1" class="narrow" />
+          <button id="add-item" class="ghost">Add</button>
+        </div>
         <ul id="inventory" class="list"></ul>
       </section>
 

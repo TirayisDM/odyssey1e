@@ -27,6 +27,7 @@ mod dice;
 mod encounter;
 mod equipment;
 mod narrative;
+mod objects;
 mod pin;
 mod resolution;
 mod supabase;
@@ -400,7 +401,7 @@ fn set_item_equipped(
     let token = state.token()?;
 
     if equipped {
-        let obj = equipment::load_object(&token, &object_id)?;
+        let obj = objects::load_object(&token, &object_id)?;
         let character_id = obj
             .character_id
             .ok_or_else(|| "nobody is holding that - it cannot be equipped".to_string())?;
@@ -1035,6 +1036,12 @@ pub fn run() {
             list_targets,
             // The DM side. Eleven commands, none of them in this file —
             // see commands/mod.rs for why that is the point.
+            commands::inventory::list_catalogue,
+            commands::inventory::give_item,
+            commands::inventory::drop_object,
+            commands::inventory::take_object,
+            commands::inventory::rename_object,
+            commands::inventory::destroy_object,
             commands::dm::list_npcs,
             commands::dm::create_npc,
             commands::dm::create_encounter,

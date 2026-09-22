@@ -53,6 +53,8 @@
 //!   NEW MATERIAL LANDS HERE FROM NOW ON, no migration required:
 //!   dm.rs                create encounter, enrol actor, add
 //!                        challenge, write a statblock     (item 2) DONE
+//!   inventory.rs         list the catalogue, give, drop, take,
+//!                        name and destroy an object                DONE
 //!   initiative.rs        rolling for it, reading turn order        (item 1)
 //!   challenges.rs        whether the iron lock has been picked     (item 3)
 //!
@@ -71,6 +73,7 @@ use crate::supabase::{AppState, Session};
 use tauri::State;
 
 pub mod dm;
+pub mod inventory;
 pub mod session;
 
 /// Everything a command needs from the session, resolved once.

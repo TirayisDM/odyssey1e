@@ -294,22 +294,29 @@ pub fn enrol_actor(
         _ => {}
     }
 
-    // The encounter names the game, and instantiation needs it.
+    // The encounter names the game, and instantiation needs it. It also
+    // names the PLACE since 034, and the goblin needs that.
     let encs = supabase::rest_get(
         &token,
         "encounters",
         &[
-            ("select", "id,game_id"),
+            ("select", "id,game_id,location_id"),
             ("id", &format!("eq.{}", encounter_id)),
         ],
     )?;
-    let game_id = encs
+    let enc = encs
         .as_array()
         .and_then(|a| a.first())
-        .and_then(|e| e.get("game_id"))
+        .ok_or_else(|| "that encounter is not visible to you".to_string())?;
+    let game_id = enc
+        .get("game_id")
         .and_then(|g| g.as_str())
         .ok_or_else(|| "that encounter is not visible to you".to_string())?
         .to_string();
+    let where_it_happens = enc
+        .get("location_id")
+        .and_then(|l| l.as_str())
+        .map(str::to_string);
 
     // A statblock becomes an individual; a character is already one.
     let resolved = match npc {
@@ -324,10 +331,33 @@ pub fn enrol_actor(
                 }),
             )
             .map_err(|e| denied(e, "enrol an actor"))?;
-            match made.as_str() {
+            let cid = match made.as_str() {
                 Some(id) => id.to_string(),
                 None => return Err(format!("could not make an individual from '{}'", k)),
+            };
+
+            // A CREATURE ARRIVES WHERE THE FIGHT IS. 035 made presence a
+            // fact rather than something read off enrolment, and this is
+            // where that fact gets its first value: an individual made
+            // for this encounter has never been anywhere else.
+            //
+            // Only on the way in, and only for a new one. A character
+            // already in the world is enrolled where they stand - the DM
+            // moves them if the brawl is somewhere they are not - and
+            // nothing here drags a player across the map.
+            //
+            // Best effort. A goblin standing nowhere is a goblin in a
+            // fight that works, so a refusal here must not undo an
+            // enrolment that otherwise succeeded.
+            if let Some(place) = where_it_happens.as_deref() {
+                let _ = supabase::rest_update(
+                    &token,
+                    "characters",
+                    &[("id", &format!("eq.{}", cid))],
+                    &json!({ "location_id": place }),
+                );
             }
+            cid
         }
         None => chr.unwrap_or_default().to_string(),
     };

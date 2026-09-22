@@ -166,7 +166,9 @@ function clearData() {
   document.querySelector("#equipment-panel").hidden = true;
   // Signing out as the DM must not leave the DM panel on screen for
   // whoever signs in next.
-  document.querySelector("#dm-panel").hidden = true;
+  for (const id of ["#run-panel", "#world-panel"]) {
+    document.querySelector(id).hidden = true;
+  }
   state.rolls = [];
   document.querySelector("#games").innerHTML = "";
   document.querySelector("#characters").innerHTML = "";
@@ -992,6 +994,30 @@ function chip(text, kind) {
 
 /* ---------- the DM side ---------- */
 
+// WHICH TAB IS SHOWING.
+//
+// The rig showed every panel for every role at once, which stopped
+// being navigable somewhere around the DM screen. Three tabs, because
+// there are three things somebody is doing: playing a character,
+// running what is in front of the table, or building the world behind
+// it.
+//
+// Show and hide only. No routing, no history, no state beyond which
+// button is lit - the panes are the same markup they always were and
+// every loader still fills them whether or not they are visible. That
+// is deliberate: a tab that only loads when opened is a tab that can be
+// stale, and this rig's whole value is that what it shows is what the
+// database said.
+function showTab(name) {
+  for (const b of document.querySelectorAll("#tabs .tab")) {
+    b.classList.toggle("on", b.dataset.tab === name);
+  }
+  for (const p of document.querySelectorAll(".pane")) {
+    p.hidden = p.dataset.pane !== name;
+  }
+  state.tab = name;
+}
+
 // Say it where the DM is looking.
 //
 // The log pane carries every call and its raw result, which is the right
@@ -1062,6 +1088,11 @@ async function loadWorld() {
 
   fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
   await loadLoose();
+  // AND THE SCENE, if one is open. Every write on this tab can change
+  // what is in the selected place - putting a loose thing away lands in
+  // it, removing a place can close it - so repainting the tree without
+  // repainting the scene leaves the lower half a moment out of date.
+  await loadScene();
 }
 
 // Fill a select with every place, indented by depth.
@@ -1132,21 +1163,171 @@ async function loadLoose() {
   }
 }
 
-// What is lying in a place, shown under the list.
+// Open a place. Selecting the one already open closes it again, which
+// is the only way back to the bare tree.
 async function selectPlace(id) {
-  state.placeId = id;
+  state.placeId = state.placeId === id ? null : id;
   await loadWorld();
+}
+
+// Which of the scene's three lists is showing.
+//
+// The same show-and-hide as showTab and deliberately not a generalised
+// version of it: two tab strips sharing one function is one refactor
+// away from the World tab closing itself when somebody clicks People.
+function showSceneTab(name) {
+  for (const b of document.querySelectorAll("#scene-tabs .tab")) {
+    b.classList.toggle("on", b.dataset.scene === name);
+  }
+  for (const p of document.querySelectorAll(".scene-pane")) {
+    p.hidden = p.dataset.scene !== name;
+  }
+  state.sceneTab = name;
+}
+
+// What is in a place: who is here, what is happening here, what is
+// lying here.
+//
+// THREE CALLS, NOT ONE. They are three tables with three policies, and
+// a combined endpoint would have to decide what a partial answer means
+// - a player who can see the room and its contents but not the whole
+// roster is a real case once access control lands. Asked separately,
+// each list is simply as full as that person is allowed to see.
+//
+// Counts go in the tab labels rather than only inside the lists,
+// because the useful glance at a room is "is anyone in here" and that
+// should not cost three clicks.
+async function loadScene() {
+  const wrap = document.querySelector("#scene");
+  const id = state.placeId;
   const here = (state.locations || []).find((l) => l.id === id);
-  const contents = await call("location_contents", { locationId: id });
-  if (!here) return;
-  if (!contents || !contents.length) {
-    dmSay(here.path.join(" > ") + " — nothing lying here");
+  // A place can vanish under an open scene - removed, or the game
+  // switched - and a stale panel is worse than none.
+  if (!id || !here) {
+    wrap.hidden = true;
     return;
   }
-  const what = contents
-    .map((c) => (c.name || c.item_key) + (c.quantity > 1 ? " x" + c.quantity : ""))
-    .join(", ");
-  dmSay(here.path.join(" > ") + " — " + what);
+  wrap.hidden = false;
+  document.querySelector("#scene-where").textContent = here.path.join(" > ");
+
+  const [roster, fights, things] = await Promise.all([
+    call("who_is_where", { gameId: state.gameId }),
+    call("encounters_here", { locationId: id }),
+    call("location_contents", { locationId: id }),
+  ]);
+
+  paintPeople(roster || [], id);
+  paintSceneEncounters(fights || []);
+  paintThings(things || []);
+}
+
+function setCount(sel, n) {
+  document.querySelector(sel).textContent = n ? "(" + n + ")" : "";
+}
+
+// Who is standing here, and the way to bring somebody else in.
+//
+// NPCS AND PLAYERS IN ONE LIST, unlike the character picker, which
+// filters monsters out so a player's own list is not full of goblins.
+// Most of who is in a room is monsters, so here they are the point -
+// the tag says which is which.
+function paintPeople(roster, id) {
+  const ul = document.querySelector("#scene-people");
+  ul.innerHTML = "";
+  const here = roster.filter((c) => c.location_id === id);
+  setCount("#n-people", here.length);
+
+  if (!here.length) ul.append(row("nobody here", "", null));
+
+  for (const c of here) {
+    const li = row(c.token_name || c.name, c.is_npc ? "npc" : "player", null);
+    if (c.dead) {
+      const d = document.createElement("span");
+      d.className = "tag";
+      d.textContent = "dead";
+      li.append(d);
+    }
+    // Out of the room without saying which room. Somewhere in
+    // particular is what the picker in the destination is for.
+    const out = document.createElement("button");
+    out.className = "tiny ghost";
+    out.textContent = "send off";
+    out.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const r = await tryCall("move_character", {
+        characterId: c.id,
+        locationId: null,
+      });
+      dmSay(
+        r.ok ? (c.token_name || c.name) + " is nowhere in particular" : r.error,
+        !r.ok
+      );
+      await loadWorld();
+    });
+    li.append(out);
+    ul.append(li);
+  }
+
+  // The picker names where each person currently is, so moving somebody
+  // is not a blind guess at which of three goblins is the one in the
+  // corridor.
+  const who = document.querySelector("#bring-who");
+  const keep = who.value;
+  who.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "— who —";
+  who.append(none);
+  for (const c of roster) {
+    if (c.location_id === id) continue;
+    const at = (state.locations || []).find((l) => l.id === c.location_id);
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent =
+      (c.token_name || c.name) + (at ? " — in " + at.name : " — nowhere");
+    who.append(o);
+  }
+  if (keep && [...who.options].some((o) => o.value === keep)) who.value = keep;
+}
+
+// What is happening here. 034 put location_id on encounters and until
+// now only the Run tab read it.
+function paintSceneEncounters(fights) {
+  const ul = document.querySelector("#scene-encounters");
+  ul.innerHTML = "";
+  setCount("#n-events", fights.length);
+  if (!fights.length) {
+    ul.append(row("nothing happening here", "", null));
+    return;
+  }
+  for (const e of fights) {
+    // Clicking it opens it on the Run tab, because that is where it is
+    // run from - the scene says what is here, not how to fight it.
+    ul.append(
+      row(e.name, e.status, async () => {
+        showTab("run");
+        await selectEncounter(e.id);
+      })
+    );
+  }
+}
+
+// What is lying on the floor. One step, not a search: a chest in the
+// room holds its own contents, and opening it is the container panel's
+// job.
+function paintThings(things) {
+  const ul = document.querySelector("#scene-things");
+  ul.innerHTML = "";
+  setCount("#n-things", things.length);
+  if (!things.length) {
+    ul.append(row("nothing lying here", "", null));
+    return;
+  }
+  for (const o of things) {
+    ul.append(
+      row(o.name || o.item_key, o.quantity > 1 ? "x" + o.quantity : "", null)
+    );
+  }
 }
 
 // Everything an encounter needs was authored in SQL until now. The
@@ -1158,13 +1339,20 @@ async function selectPlace(id) {
 // Postgres for anyone else, and the panel would simply fill the log with
 // "only the DM of this game can ...".
 async function loadDM() {
-  const panel = document.querySelector("#dm-panel");
+  // TWO PANELS NOW, one gate. Running a fight and building the world
+  // are different jobs on different tabs; they are still the same
+  // permission, and 011's policies are what actually enforce it.
+  const run = document.querySelector("#run-panel");
+  const world = document.querySelector("#world-panel");
   if (!state.gameId || !amDM()) {
-    panel.hidden = true;
+    run.hidden = true;
+    world.hidden = true;
     return;
   }
-  panel.hidden = false;
+  run.hidden = false;
+  world.hidden = false;
   document.querySelector("#dm-who").textContent = "you run this game";
+  document.querySelector("#world-who").textContent = "you run this game";
 
   await loadWorld();
 
@@ -2183,6 +2371,26 @@ window.addEventListener("DOMContentLoaded", async () => {
   // faster than a password.
   document.querySelector("#pin").addEventListener("keydown", (e) => {
     if (e.key === "Enter") document.querySelector("#do-unlock").click();
+  });
+
+  for (const b of document.querySelectorAll("#tabs .tab")) {
+    b.addEventListener("click", () => showTab(b.dataset.tab));
+  }
+
+  for (const b of document.querySelectorAll("#scene-tabs .tab")) {
+    b.addEventListener("click", () => showSceneTab(b.dataset.scene));
+  }
+
+  guarded("#bring-here", async () => {
+    const who = document.querySelector("#bring-who");
+    if (!who.value) return dmSay("pick somebody to bring", true);
+    if (!state.placeId) return dmSay("open a place first", true);
+    const r = await tryCall("move_character", {
+      characterId: who.value,
+      locationId: state.placeId,
+    });
+    dmSay(r.ok ? "moved" : r.error, !r.ok);
+    await loadWorld();
   });
 
   document.querySelector("#clear-log").addEventListener("click", () => {

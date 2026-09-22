@@ -19,6 +19,7 @@
   <div class="cols">
     <div class="left">
 
+
       <section id="unlock-panel" hidden>
         <h2>Unlock <span id="unlock-who" class="muted"></span></h2>
         <div class="row">
@@ -50,6 +51,8 @@
         </div>
       </section>
 
+      <!-- WHO AND WHERE, always visible. Nothing below works without a
+           game and a character, so these do not belong behind a tab. -->
       <section>
         <h2>Games <button id="refresh-games" class="tiny ghost">refresh</button></h2>
         <ul id="games" class="list"></ul>
@@ -66,6 +69,23 @@
         <button id="create-char">Create character</button>
       </section>
 
+      <!-- THE TABS. The rig showed every panel for every role at once,
+           which stopped being navigable somewhere around the DM screen.
+           These are the three things somebody is actually doing: playing
+           a character, running what is in front of the table, or
+           building the world behind it. -->
+      <nav class="tabs" id="tabs">
+        <button class="tab on" data-tab="play">Play</button>
+        <button class="tab" data-tab="run">Run</button>
+        <button class="tab" data-tab="world">World</button>
+      </nav>
+
+      <!-- One message line for the whole DM side, in the strip rather
+           than inside a pane: an action taken in World should still be
+           readable after switching to Run. -->
+      <div id="dm-msg" class="dm-msg" hidden></div>
+
+      <div class="pane" data-pane="play">
       <section id="sheet-panel" hidden>
         <h2>Sheet <span id="sheet-who" class="muted"></span></h2>
         <div class="row">
@@ -88,101 +108,6 @@
           <button id="add-item" class="ghost">Add</button>
         </div>
         <ul id="inventory" class="list"></ul>
-      </section>
-
-      <section id="dm-panel" hidden>
-        <h2>DM <span id="dm-who" class="muted"></span></h2>
-
-        <div class="row">
-          <input id="enc-name" placeholder="new encounter name" />
-          <!-- Where the fight happens. Blank is nowhere in particular,
-               which 034 allows. -->
-          <select id="enc-where"></select>
-          <button id="create-encounter" class="ghost">Create</button>
-        </div>
-        <div id="dm-msg" class="dm-msg" hidden></div>
-        <ul id="encounters" class="list"></ul>
-
-        <div id="enc-detail" hidden>
-          <div id="enc-editing" class="editing" hidden></div>
-          <div class="sub">Enrol</div>
-          <select id="enrol-what"></select>
-          <input id="enrol-name" placeholder="name (blank = auto, e.g. Goblin 0003)" />
-          <button id="enrol">Enrol</button>
-          <ul id="roster" class="list"></ul>
-
-          <div class="sub">Challenge</div>
-          <div class="row">
-            <input id="chal-label" placeholder="the iron lock" />
-            <input id="chal-dc" type="number" min="1" placeholder="DC" class="narrow" />
-          </div>
-          <select id="chal-skill"></select>
-          <button id="add-challenge" class="ghost">Add challenge</button>
-          <ul id="challenges" class="list"></ul>
-
-          <div class="sub">Statblock</div>
-          <div class="row">
-            <input id="npc-name" placeholder="name, e.g. Goblin Archer" />
-            <input id="npc-key" placeholder="key" />
-          </div>
-          <div class="row">
-            <input id="npc-species" placeholder="species (optional)" />
-            <input id="npc-class" placeholder="class (optional)" />
-          </div>
-          <div class="row">
-            <input id="npc-ac" type="number" min="0" placeholder="AC" />
-            <!-- Blank derives it from size and level. Level IS hit
-                 dice, so 2d6 is level 2 and the 7 comes out. -->
-            <input id="npc-hp" type="number" min="1" placeholder="HP (blank = from hit dice)" />
-          </div>
-          <div class="row">
-            <select id="npc-size">
-              <option value="">size (needed to derive HP)</option>
-              <option value="tiny">Tiny &mdash; d4</option>
-              <option value="sm">Small &mdash; d6</option>
-              <option value="med">Medium &mdash; d8</option>
-              <option value="lg">Large &mdash; d10</option>
-              <option value="huge">Huge &mdash; d12</option>
-              <option value="grg">Gargantuan &mdash; d20</option>
-            </select>
-            <input id="npc-level" type="number" min="1" placeholder="level = hit dice" class="narrow" />
-          </div>
-          <!-- What it is TRAINED with, not what it carries. Without
-               these a statblock is proficient with nothing and its
-               kit has to fake it one row at a time - see 028. -->
-          <div class="row">
-            <input id="npc-wprof" placeholder="weapons trained: sim, mar" />
-            <input id="npc-aprof" placeholder="armour: lgt med hvy shl" />
-          </div>
-          <button id="create-npc" class="ghost">Write statblock</button>
-        </div>
-
-        <!-- The world. Depth is the whole hierarchy: a universe and a
-             broom cupboard are the same kind of row, and the indent is
-             computed rather than stored. -->
-        <div class="sub">World</div>
-        <div class="row">
-          <input id="loc-name" placeholder="place name, e.g. Frostvalley Inn" />
-          <select id="loc-kind">
-            <option value="structure">structure</option>
-            <option value="outdoors">outdoors</option>
-            <option value="underground">underground</option>
-            <option value="aquatic">aquatic</option>
-            <option value="aerial">aerial</option>
-            <option value="vehicle">vehicle</option>
-          </select>
-        </div>
-        <div class="row">
-          <select id="loc-parent"></select>
-          <button id="create-location" class="ghost">Add place</button>
-        </div>
-        <ul id="locations" class="list"></ul>
-        <!-- Things dropped before there was anywhere to drop them. This
-             should empty out and then it can go. -->
-        <div id="loose-wrap" hidden>
-          <div class="sub">Lying nowhere</div>
-          <ul id="loose" class="list"></ul>
-        </div>
       </section>
 
       <section>
@@ -225,6 +150,151 @@
         <button id="patch-roll" class="ghost">Patch narrative</button>
         <ul id="rolls" class="list"></ul>
       </section>
+      </div>
+
+      <div class="pane" data-pane="run" hidden>
+        <section id="run-panel" hidden>
+        <h2>DM <span id="dm-who" class="muted"></span></h2>
+
+        <div class="row">
+          <input id="enc-name" placeholder="new encounter name" />
+          <!-- Where the fight happens. Blank is nowhere in particular,
+               which 034 allows. -->
+          <select id="enc-where"></select>
+          <button id="create-encounter" class="ghost">Create</button>
+        </div>
+        <ul id="encounters" class="list"></ul>
+
+        <div id="enc-detail" hidden>
+          <div id="enc-editing" class="editing" hidden></div>
+          <div class="sub">Enrol</div>
+          <select id="enrol-what"></select>
+          <input id="enrol-name" placeholder="name (blank = auto, e.g. Goblin 0003)" />
+          <button id="enrol">Enrol</button>
+          <ul id="roster" class="list"></ul>
+
+          <div class="sub">Challenge</div>
+          <div class="row">
+            <input id="chal-label" placeholder="the iron lock" />
+            <input id="chal-dc" type="number" min="1" placeholder="DC" class="narrow" />
+          </div>
+          <select id="chal-skill"></select>
+          <button id="add-challenge" class="ghost">Add challenge</button>
+          <ul id="challenges" class="list"></ul>
+
+        </div>
+        </section>
+      </div>
+
+      <div class="pane" data-pane="world" hidden>
+        <section id="world-panel" hidden>
+          <h2>World <span id="world-who" class="muted"></span></h2>
+          <div class="sub">Statblock</div>
+          <div class="row">
+            <input id="npc-name" placeholder="name, e.g. Goblin Archer" />
+            <input id="npc-key" placeholder="key" />
+          </div>
+          <div class="row">
+            <input id="npc-species" placeholder="species (optional)" />
+            <input id="npc-class" placeholder="class (optional)" />
+          </div>
+          <div class="row">
+            <input id="npc-ac" type="number" min="0" placeholder="AC" />
+            <!-- Blank derives it from size and level. Level IS hit
+                 dice, so 2d6 is level 2 and the 7 comes out. -->
+            <input id="npc-hp" type="number" min="1" placeholder="HP (blank = from hit dice)" />
+          </div>
+          <div class="row">
+            <select id="npc-size">
+              <option value="">size (needed to derive HP)</option>
+              <option value="tiny">Tiny &mdash; d4</option>
+              <option value="sm">Small &mdash; d6</option>
+              <option value="med">Medium &mdash; d8</option>
+              <option value="lg">Large &mdash; d10</option>
+              <option value="huge">Huge &mdash; d12</option>
+              <option value="grg">Gargantuan &mdash; d20</option>
+            </select>
+            <input id="npc-level" type="number" min="1" placeholder="level = hit dice" class="narrow" />
+          </div>
+          <!-- What it is TRAINED with, not what it carries. Without
+               these a statblock is proficient with nothing and its
+               kit has to fake it one row at a time - see 028. -->
+          <div class="row">
+            <input id="npc-wprof" placeholder="weapons trained: sim, mar" />
+            <input id="npc-aprof" placeholder="armour: lgt med hvy shl" />
+          </div>
+          <button id="create-npc" class="ghost">Write statblock</button>
+        <!-- The world. Depth is the whole hierarchy: a universe and a
+             broom cupboard are the same kind of row, and the indent is
+             computed rather than stored. -->
+        <div class="sub">World</div>
+        <div class="row">
+          <input id="loc-name" placeholder="place name, e.g. Frostvalley Inn" />
+          <select id="loc-kind">
+            <option value="structure">structure</option>
+            <option value="outdoors">outdoors</option>
+            <option value="underground">underground</option>
+            <option value="aquatic">aquatic</option>
+            <option value="aerial">aerial</option>
+            <option value="vehicle">vehicle</option>
+          </select>
+        </div>
+        <div class="row">
+          <select id="loc-parent"></select>
+          <button id="create-location" class="ghost">Add place</button>
+        </div>
+        <ul id="locations" class="list"></ul>
+
+        <!-- THE SCENE. Selecting a place answers three questions about
+             it, and they are three lists rather than one because they
+             are three different kinds of thing: people who can act,
+             fights that are running, and objects on the floor.
+
+             Sub-tabs for the same reason the top-level ones exist - the
+             counts are visible without opening anything, so a glance at
+             a room says "four people, one fight" and only the list you
+             actually want takes up the column. -->
+        <div id="scene" hidden>
+          <div class="sub" id="scene-where"></div>
+          <nav class="tabs mini" id="scene-tabs">
+            <button class="tab on" data-scene="people">
+              People <span class="count" id="n-people"></span>
+            </button>
+            <button class="tab" data-scene="events">
+              Encounters <span class="count" id="n-events"></span>
+            </button>
+            <button class="tab" data-scene="things">
+              Things <span class="count" id="n-things"></span>
+            </button>
+          </nav>
+
+          <div class="scene-pane" data-scene="people">
+            <ul id="scene-people" class="list"></ul>
+            <!-- The picker offers EVERYBODY, not just the unplaced -
+                 walking from one room to the next is the common case,
+                 and it would be impossible from a list of nobodies. -->
+            <div class="row">
+              <select id="bring-who"></select>
+              <button id="bring-here" class="ghost">Bring here</button>
+            </div>
+          </div>
+
+          <div class="scene-pane" data-scene="events" hidden>
+            <ul id="scene-encounters" class="list"></ul>
+          </div>
+
+          <div class="scene-pane" data-scene="things" hidden>
+            <ul id="scene-things" class="list"></ul>
+          </div>
+        </div>
+        <!-- Things dropped before there was anywhere to drop them. This
+             should empty out and then it can go. -->
+        <div id="loose-wrap" hidden>
+          <div class="sub">Lying nowhere</div>
+          <ul id="loose" class="list"></ul>
+        </div>
+        </section>
+      </div>
 
     </div>
 

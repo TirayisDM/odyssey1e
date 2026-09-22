@@ -1080,6 +1080,11 @@ pub fn run() {
             commands::locations::drop_here,
             commands::locations::loose_objects,
             commands::locations::place_object,
+            // The scene: who is here, what is happening here. What
+            // is LYING here is location_contents, above.
+            commands::locations::who_is_where,
+            commands::locations::encounters_here,
+            commands::locations::move_character,
             commands::dm::set_encounter_location,
             commands::dm::list_npcs,
             commands::dm::create_npc,

@@ -349,3 +349,95 @@ pub fn drop_here(
         }),
     )
 }
+
+/* ============================ THE SCENE ============================ */
+//
+// Three questions of one place: who is here, what is happening here,
+// what is lying here. The third was `location_contents` from the day
+// 033 landed; these are the other two.
+//
+// NONE OF THEM IS DM-ONLY. A place a member can see is a place they can
+// ask about, and 001's read policies already decide that. The world
+// panel is behind amDM() as a courtesy, not as the guard.
+
+/// Everyone in the game and where they are standing.
+///
+/// THE WHOLE ROSTER, not just the ones in a given room - and NPCs
+/// included, unlike `list_characters`, which filters them out so a
+/// player's own list is not full of goblins. Here they are the point:
+/// most of who is in a room is monsters.
+///
+/// One call rather than one per place. The scene filters by
+/// `location_id` on the way to the screen, and the same list fills the
+/// picker that moves somebody here - which has to offer people who are
+/// somewhere ELSE, or nobody could ever walk between two rooms.
+#[tauri::command]
+pub fn who_is_where(state: State<AppState>, game_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "id,name,token_name,is_npc,dead,is_active,location_id"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("order", "is_npc.asc,name.asc"),
+        ],
+    )
+}
+
+/// What is happening in this place.
+///
+/// 034 put `location_id` on encounters and only the Run tab ever read
+/// it. Asked here rather than filtered out of the list the Run tab
+/// already loaded, so that looking at a room does not depend on having
+/// opened another tab first.
+#[tauri::command]
+pub fn encounters_here(state: State<AppState>, location_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_get(
+        &token,
+        "encounters",
+        &[
+            ("select", "id,name,status,location_id,created_at"),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("order", "created_at.desc"),
+        ],
+    )
+}
+
+/// Put a person in a place, or take them out of every place.
+///
+/// NOT DM-ONLY EITHER, and that is 001's decision rather than this
+/// one: "characters: owner or dm updates" has said since the first
+/// migration that a character is moved by the player who owns it or by
+/// the DM. Walking into the next room is exactly what that policy
+/// describes, and it needed no change to cover it.
+///
+/// A blank location is nowhere in particular, which 035 keeps as a real
+/// answer rather than a gap - a character between scenes is not
+/// misfiled. The same-game trigger refuses a room in another campaign,
+/// and that refusal arrives as a sentence.
+#[tauri::command]
+pub fn move_character(
+    state: State<AppState>,
+    character_id: String,
+    location_id: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "location_id": id_or_null(location_id) }),
+    )
+    .map_err(|e| {
+        // NOT `denied`, which says "only the DM can". That is the wrong
+        // sentence here: a player moving their OWN character is allowed,
+        // so a refusal means somebody else's.
+        if e.contains("(401)") || e.contains("(403)") || e.contains("42501") {
+            "that is not your character to move — its owner or the DM can".to_string()
+        } else {
+            e
+        }
+    })
+}

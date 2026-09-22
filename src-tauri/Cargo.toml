@@ -28,7 +28,34 @@ rand = "0.8"
 # Hashing the fast-login PIN. Pure Rust, no system dependency, builds
 # for Android - the same reasons rustls was chosen over native-tls.
 sha2 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# rustls-tls-NATIVE-ROOTS, not plain rustls-tls. rustls stays, for the
+# reasons given above; what changes is whose list of trusted roots it
+# reads.
+#
+# WHY, AND IT IS NOT A PREFERENCE. `rustls-tls` bundles webpki-roots - a
+# copy of Mozilla's root list compiled into the binary - and ignores the
+# operating system's store entirely. Any antivirus that inspects HTTPS
+# does it by standing in the middle with its own certificate, signed by
+# a root it installs into WINDOWS. curl, the browser and every other
+# program on the machine read that store, find the root and carry on;
+# this app read Mozilla's list instead, did not recognise the
+# certificate, and the handshake failed.
+#
+# IT FAILS AS `error sending request for url` WITH NO HTTP STATUS, which
+# is the part that misleads. There is no 401 and no 403 - nothing to
+# suggest a certificate is involved - and it reads exactly like the
+# network being down. It was diagnosed only by noticing that curl and
+# PowerShell reached the same URL from the same shell while the app
+# could not. Avast's Web Shield (wsc_proxy) is what was doing it here.
+#
+# THE REASON IT MATTERS BEYOND ONE LAPTOP: a player running any
+# inspecting antivirus hits the same wall, and the app looks broken to
+# them and fine to everyone else. Reading the system store is what every
+# other desktop program does.
+#
+# Android is unaffected: rustls-native-certs reads the system store
+# there too, so the portability argument above still holds.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

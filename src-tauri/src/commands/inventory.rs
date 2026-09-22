@@ -295,6 +295,24 @@ pub fn edit_object(
         None => obj.quantity,
     };
 
+    // A QUANTITY IS A WAY INTO A CONTAINER. Seventeen gold in a full
+    // purse could become a hundred here with nothing consulted, and the
+    // purse then refused ordinary moves with arithmetic that looked
+    // wrong. `ignoring` leaves this row out of the existing total,
+    // because qty REPLACES it rather than adding to it.
+    //
+    // Only when it GROWS. Emptying a full container is always allowed.
+    if qty > obj.quantity {
+        crate::commands::containers::guard_capacity(
+            &token,
+            obj.holder_id.as_deref(),
+            &obj.game_id,
+            &obj.item_key,
+            qty,
+            Some(&object_id),
+        )?;
+    }
+
     let mut patch = json!({ "quantity": qty });
     if let Some(raw) = name.as_deref() {
         let clean = objects::clean_name(raw);
@@ -366,6 +384,19 @@ pub fn clone_object(
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
     let qty = objects::check_quantity(quantity.unwrap_or(1))?;
+
+    // A CLONE LANDS IN THE SAME HOLDER, so it is a way into a container
+    // and has to ask like any other. Cloning a coin inside a full purse
+    // made a twenty-sixth coin in a purse that holds twenty-five,
+    // because nothing on this path had ever been told about capacity.
+    crate::commands::containers::guard_capacity(
+        &token,
+        obj.holder_id.as_deref(),
+        &obj.game_id,
+        &obj.item_key,
+        qty,
+        None,
+    )?;
 
     // Only a held thing has a holder to stack within. One lying in a
     // room or nowhere at all simply gets a second row.

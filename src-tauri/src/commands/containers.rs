@@ -37,6 +37,112 @@ pub fn list_contents(
     crate::equipment::load_loadout(&token, &entity, &c.game_id, &[], &[], false)
 }
 
+/// Whether this holder would still be a legal container afterwards.
+///
+/// THE ONE GATE. Every way of getting an object into a holder asks this
+/// - moving one in, cloning one that is already there, and raising the
+/// quantity of one that is already there - because a container over its
+/// own capacity is the same broken state however it was reached, and it
+/// then refuses ordinary moves with arithmetic that reads like a bug.
+///
+/// THE TWO THAT NEVER ASKED. `put_in_container` had these checks and
+/// was the only thing that did, because it was the only command that
+/// MOVED anything. Two others write into a holder without moving:
+///
+///   clone_object  copies a row into the SAME holder, so cloning a coin
+///                 inside a full purse made a twenty-sixth coin in a
+///                 purse that holds twenty-five.
+///   edit_object   sets a quantity outright, so seventeen gold could
+///                 become a hundred with nothing consulted.
+///
+/// Neither is exotic. Clone is a button on every row and quantity is a
+/// box in every editor.
+///
+/// A HOLDER THAT IS NOT A CONTAINER IS ALWAYS FINE. A character has no
+/// capacity - encumbrance is a rule about a person and does not exist
+/// yet - and a location is a floor. Both answer Ok, which is what makes
+/// this safe to call from anywhere without first asking what kind of
+/// holder it is.
+///
+/// `adding` is what the total for that key will BE in this container
+/// when the write lands. `ignoring` names a row already inside whose
+/// quantity is being replaced rather than added to, so it is left out
+/// of the existing total instead of counted twice.
+pub(crate) fn guard_capacity(
+    token: &str,
+    holder: Option<&str>,
+    game_id: &str,
+    item_key: &str,
+    adding: i64,
+    ignoring: Option<&str>,
+) -> Result<(), String> {
+    // Nowhere holds anything you like.
+    let Some(into) = holder else { return Ok(()) };
+
+    // Which object IS this holder, if any. A character's entity and a
+    // location's match none, and that is the common case.
+    let rows = supabase::rest_get(
+        token,
+        "objects",
+        &[
+            ("select", "id,item_key,name"),
+            ("entity_id", &format!("eq.{}", into)),
+        ],
+    )?;
+    let Some(con) = rows.as_array().and_then(|a| a.first()) else {
+        return Ok(());
+    };
+    let con_key = con.get("item_key").and_then(|v| v.as_str()).unwrap_or("");
+    let name = con
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(con_key)
+        .to_string();
+
+    let Some(profile) = containers::load_profile(token, game_id, con_key)? else {
+        return Ok(());
+    };
+
+    let inside: Vec<objects::Stack> = objects::load_held(token, into)?
+        .into_iter()
+        .filter(|s| Some(s.id.as_str()) != ignoring)
+        .collect();
+
+    let mut keys: Vec<String> = inside.iter().map(|s| s.item_key.clone()).collect();
+    keys.push(item_key.to_string());
+    let bulks = containers::load_bulk(token, game_id, &keys)?;
+    let find = |k: &str| {
+        bulks
+            .iter()
+            .find(|b| b.key == k)
+            .cloned()
+            .ok_or_else(|| format!("no item with key '{}' in this game", k))
+    };
+
+    let incoming = find(item_key)?;
+    let mut contents: Vec<(containers::Bulk, i64)> = Vec::new();
+    for s in &inside {
+        contents.push((find(&s.item_key)?, s.quantity));
+    }
+
+    // THREE OBJECTIONS, WORST-FIRST. They are not the same question and
+    // any one of them is enough:
+    //
+    //   admits       a purse takes coins, and that is not a coin
+    //   admits_size  nothing bigger than tiny goes in, and that is large
+    //   fits         it would go in, but there is no room left
+    //
+    // Size before slots because it is the objection a person reaches
+    // for and it gives the better sentence. Arithmetic about how much
+    // room a greatsword needs in a coin purse answers a question nobody
+    // asked.
+    containers::admits(&profile, &incoming, &name)?;
+    containers::admits_size(&profile, &incoming, &name)?;
+    containers::fits(&profile, &contents, &incoming, adding, &name)?;
+    Ok(())
+}
+
 /// Put something into a container.
 #[tauri::command]
 pub fn put_in_container(
@@ -57,7 +163,10 @@ pub fn put_in_container(
         .clone()
         .ok_or_else(|| "that is not a container".to_string())?;
 
-    let profile = containers::load_profile(&token, &con.game_id, &con.item_key)?
+    // Loaded only to refuse a non-container early and so the reach
+    // message has something to call it; the three capacity questions
+    // belong to guard_capacity.
+    containers::load_profile(&token, &con.game_id, &con.item_key)?
         .ok_or_else(|| "that is not a container".to_string())?;
     let name = con.name.clone().unwrap_or_else(|| con.item_key.clone());
     let thing = obj.name.clone().unwrap_or_else(|| obj.item_key.clone());
@@ -87,48 +196,19 @@ pub fn put_in_container(
         &name,
     )?;
 
-    // What is already inside decides how much room is left, so the
-    // contents are read before either check.
-    let inside = objects::load_held(&token, &into)?;
-    let mut keys: Vec<String> = inside.iter().map(|s| s.item_key.clone()).collect();
-    keys.push(obj.item_key.clone());
-    let bulks = containers::load_bulk(&token, &con.game_id, &keys)?;
-
-    let find = |k: &str| {
-        bulks
-            .iter()
-            .find(|b| b.key == k)
-            .cloned()
-            .ok_or_else(|| format!("no item with key '{}' in this game", k))
-    };
-
-    let incoming = find(&obj.item_key)?;
-    let mut contents: Vec<(containers::Bulk, i64)> = Vec::new();
-    for s in &inside {
-        contents.push((find(&s.item_key)?, s.quantity));
-    }
-
-    // THREE OBJECTIONS, WORST-FIRST. They are not the same question
-    // and any one of them is enough:
-    //
-    //   admits       a purse takes coins, and that is not a coin
-    //   admits_size  nothing bigger than tiny goes in, and that is large
-    //   fits         it would go in, but there is no room left
-    //
-    // Size before slots because it is the objection a person reaches
-    // for and it gives the better sentence. Arithmetic about how much
-    // room a greatsword needs in a coin purse answers a question nobody
-    // asked.
     // HOW MANY, decided before the room is checked, because the room
     // needed is the room for what is ACTUALLY going in. Asking whether
     // eighteen coins fit when one is being moved refuses a purse with
     // plenty of space in it.
     let (_, going) = objects::split(obj.quantity, quantity)?;
 
-    containers::admits(&profile, &incoming, &name)?;
-    containers::admits_size(&profile, &incoming, &name)?;
-    containers::fits(&profile, &contents, &incoming, going, &name)?;
+    // What a container accepts, how big it takes and how much room is
+    // left are all guard_capacity's now, because two other commands
+    // write into a holder without moving anything and never reached
+    // these three questions - see its header.
+    guard_capacity(&token, Some(&into), &con.game_id, &obj.item_key, going, None)?;
 
+    let inside = objects::load_held(&token, &into)?;
     move_into(&token, &obj, &object_id, &inside, Some(&into), quantity)
 }
 

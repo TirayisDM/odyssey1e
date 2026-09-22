@@ -1724,7 +1724,22 @@ async function fillDetail(el, o) {
     ul.append(row("empty", "", null));
   } else {
     for (const c of inside) {
-      ul.append(row(c.name || c.item_key, c.quantity > 1 ? "x" + c.quantity : "", null));
+      // `item_key` IS NOT A FIELD HERE. list_contents returns
+      // equipment::Owned, which carries the whole catalogue row as
+      // `item` rather than the bare key the way objects::Stack and
+      // holders::Located do. Reading o.item_key off one of these gives
+      // undefined, so anything WITHOUT a given name rendered as a blank
+      // row - and a named one rendered fine, which is why a backpack
+      // holding a Wool Blanket and a set of clothes looked like a
+      // backpack holding a Wool Blanket and a ghost.
+      const what = c.name || (c.item && c.item.name) || "unnamed";
+      const tag = [
+        c.quantity > 1 ? "x" + c.quantity : null,
+        c.item ? sizeWord(c.item.size) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      ul.append(row(what, tag, null));
     }
   }
   el.append(ul);

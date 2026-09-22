@@ -118,6 +118,19 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .count{color:var(--muted);font-size:10px;margin-left:.25rem}
 .tabs .tab.on .count{color:var(--accent)}
 #scene{border-top:1px solid var(--line);margin-top:.9rem;padding-top:.7rem}
+/* The three panels an object row can open. Indented and ruled so it is
+   obvious they belong to the row above rather than to the list. */
+.detail,.editor,.mover{margin:.35rem 0 .2rem .6rem;padding:.45rem .6rem;
+     border-left:2px solid var(--line);background:#0f1114;border-radius:0 4px 4px 0}
+.detail .sub{margin-top:.5rem}
+.detail .list{margin-bottom:0}
+.fact{display:flex;justify-content:space-between;gap:1rem;font-size:12px;padding:.1rem 0}
+.editor .row,.mover .row{margin-bottom:.35rem}
+.editor .row:last-child,.mover .row:last-child{margin-bottom:0}
+.editor input{margin-bottom:0}
+/* The action buttons sit at the right of a row, not stretched across
+   it: .row makes children flex:1 and these are not that kind of row. */
+.item .head button.tiny{flex:0 0 auto}
 
 #log{flex:1;overflow-y:auto;background:#0f1114;border:1px solid var(--line);
      border-radius:4px;padding:.6rem;

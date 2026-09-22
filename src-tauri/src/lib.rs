@@ -1071,6 +1071,8 @@ pub fn run() {
             commands::inventory::drop_object,
             commands::inventory::take_object,
             commands::inventory::rename_object,
+            commands::inventory::edit_object,
+            commands::inventory::clone_object,
             commands::inventory::destroy_object,
             commands::locations::list_locations,
             commands::locations::create_location,

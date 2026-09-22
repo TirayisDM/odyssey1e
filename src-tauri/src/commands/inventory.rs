@@ -263,3 +263,115 @@ pub fn destroy_object(state: State<AppState>, object_id: String) -> Result<(), S
     let token = state.token()?;
     supabase::rest_delete(&token, "objects", &[("id", &format!("eq.{}", object_id))])
 }
+
+/// Change what a thing is called and how many of it there are.
+///
+/// ONE COMMAND FOR BOTH because they constrain each other. `may_name`
+/// refuses a name on a stack of seven, so setting the name and setting
+/// the quantity in two calls means an order that works and an order
+/// that does not - and whichever the screen picked, the other would be
+/// a bug waiting for somebody to edit both at once.
+///
+/// Checked against the NEW quantity, not the old one. Naming a lone
+/// dagger and raising it to three in the same breath is the case that
+/// has to be refused, and only the new number can refuse it.
+///
+/// Omitting a field leaves it alone. A blank NAME is not omission - it
+/// is "call it by its type again", which `clean_name` turns into NULL.
+#[tauri::command]
+pub fn edit_object(
+    state: State<AppState>,
+    object_id: String,
+    name: Option<String>,
+    quantity: Option<i64>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let obj = objects::load_object(&token, &object_id)?;
+
+    let qty = match quantity {
+        Some(q) => objects::check_quantity(q)?,
+        None => obj.quantity,
+    };
+
+    let mut patch = json!({ "quantity": qty });
+    if let Some(raw) = name.as_deref() {
+        let clean = objects::clean_name(raw);
+        if clean.is_some() {
+            objects::may_name(qty)?;
+        }
+        patch["name"] = json!(clean);
+    } else if obj.name.is_some() {
+        // The name is being kept, so it still has to survive the new
+        // quantity. Raising a named sword to three is the same refusal
+        // from the other direction.
+        objects::may_name(qty)?;
+    }
+
+    supabase::rest_update(
+        &token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &patch,
+    )
+}
+
+/// Make another one.
+///
+/// THE COPY IS ANONYMOUS. A named object is a particular thing - 026
+/// built naming so that Dawnbreaker is not one of seven longswords -
+/// and two of them would make the name a lie. The clone comes off the
+/// same catalogue key with no name, and the DM can christen it.
+///
+/// A CLONED CONTAINER IS EMPTY. 032's trigger gives the new row its own
+/// entity because the catalogue says the key is a container, so the copy
+/// really is a second chest rather than a second door onto the first -
+/// which is what copying `entity_id` would have made, and what the
+/// unique constraint on it would have refused anyway. Nothing inside
+/// comes with it.
+///
+/// It stacks where stacking is what the rules say. An anonymous copy
+/// landing in a holder who already has a plain stack of the same key
+/// joins it, by `merge_into` - the same decision `give_item` makes,
+/// because three daggers and a fourth is four daggers.
+#[tauri::command]
+pub fn clone_object(
+    state: State<AppState>,
+    object_id: String,
+    quantity: Option<i64>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let obj = objects::load_object(&token, &object_id)?;
+    let qty = objects::check_quantity(quantity.unwrap_or(1))?;
+
+    // Only a held thing has a holder to stack within. One lying in a
+    // room or nowhere at all simply gets a second row.
+    if let Some(holder) = obj.holder_id.as_deref() {
+        let held = objects::load_held(&token, holder)?;
+        if let Some(id) = objects::merge_into(&held, &obj.item_key, None) {
+            let have = held
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.quantity)
+                .unwrap_or(0);
+            return supabase::rest_update(
+                &token,
+                "objects",
+                &[("id", &format!("eq.{}", id))],
+                &json!({ "quantity": have + qty }),
+            );
+        }
+    }
+
+    supabase::rest_insert(
+        &token,
+        "objects",
+        &json!({
+            "game_id": obj.game_id,
+            "holder_id": obj.holder_id,
+            "item_key": obj.item_key,
+            "quantity": qty,
+            // Deliberately absent. See the header.
+            "name": Value::Null,
+        }),
+    )
+}

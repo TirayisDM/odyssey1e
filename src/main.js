@@ -1435,11 +1435,17 @@ async function loadObjects() {
   panel.hidden = false;
   document.querySelector("#objects-who").textContent = "you run this game";
 
-  state.objects = (await call("list_objects", { gameId: state.gameId })) || [];
-  paintObjects();
+  // THE CATALOGUE FIRST. Every row's detail panel reads it to say what
+  // a thing IS - damage, properties, the AC it sets - and painting
+  // before it arrives would print objects with no facts attached.
+  const [cat, objs] = await Promise.all([
+    call("list_catalogue", { gameId: state.gameId }),
+    call("list_objects", { gameId: state.gameId }),
+  ]);
+  state.catalogue = cat || [];
+  state.objects = objs || [];
 
-  const cat = (await call("list_catalogue", { gameId: state.gameId })) || [];
-  state.catalogue = cat;
+  paintObjects();
   paintCatalogue();
 }
 
@@ -1462,69 +1468,240 @@ function paintObjects() {
     );
   });
 
-  // The count is of EVERYTHING, not of what survived the filter - a
-  // tab label that changes as you type says nothing about the game.
+  // The count is of EVERYTHING, not of what survived the filter - a tab
+  // label that changes as you type says nothing about the game.
   setCount("#n-objs", (state.objects || []).length);
 
   if (!shown.length) {
     ul.append(row(find || where ? "nothing matches" : "no objects yet", "", null));
     return;
   }
-
-  for (const o of shown) {
-    const li = document.createElement("li");
-    li.className = "flat item";
-    const head = document.createElement("div");
-    head.className = "head";
-
-    const nm = document.createElement("span");
-    nm.className = "nm";
-    nm.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
-    head.append(nm);
-
-    for (const [text, cls] of [
-      [o.holder_name, "tag"],
-      [o.equipped ? "worn" : null, "tag"],
-      [o.is_container ? "container" : null, "tag"],
-    ]) {
-      if (!text) continue;
-      const t = document.createElement("span");
-      t.className = cls;
-      t.textContent = text;
-      head.append(t);
-    }
-
-    // PUT IT SOMEWHERE REAL. Which command depends on whether anybody
-    // is holding it: drop_here takes it out of a pair of hands and
-    // splits a stack, place_object moves a whole loose row. Both end
-    // with the thing resting in a place; they are not interchangeable
-    // and the difference is whose it was.
-    const to = document.createElement("select");
-    fillPlaces(to, "\u2014 move to \u2014");
-    const go = document.createElement("button");
-    go.className = "tiny ghost";
-    go.textContent = "move";
-    go.addEventListener("click", async () => {
-      if (!to.value) return dmSay("pick somewhere to put it", true);
-      const held = o.holder_kind === "character" || o.holder_kind === "container";
-      const r = await tryCall(held ? "drop_here" : "place_object", {
-        objectId: o.id,
-        locationId: to.value,
-      });
-      dmSay(r.ok ? (o.name || o.item_key) + " moved" : r.error, !r.ok);
-      await loadObjects();
-    });
-    head.append(to, go);
-    li.append(head);
-    ul.append(li);
-  }
+  for (const o of shown) ul.append(objectRow(o));
 }
 
-// What CAN exist, as opposed to what does.
+// One object, with everything you can do to it.
 //
-// Read only. 027 seeds the shared rows by migration and a campaign's
-// own rows shadow them by key; authoring an item has never had a
-// screen and does not get one here by accident.
+// FOUR ACTIONS AND THREE PANELS. The move picker used to sit open on
+// every row, which put a select box and a button on thirty lines to
+// serve the one being moved. Each action opens its own panel instead,
+// and opening one closes the others - a row is doing one thing at a
+// time.
+function objectRow(o) {
+  const li = document.createElement("li");
+  li.className = "flat item";
+
+  const head = document.createElement("div");
+  head.className = "head";
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
+  head.append(nm);
+
+  for (const text of [
+    o.holder_name,
+    o.equipped ? "worn" : null,
+    o.is_container ? "container" : null,
+  ]) {
+    if (!text) continue;
+    const t = document.createElement("span");
+    t.className = "tag";
+    t.textContent = text;
+    head.append(t);
+  }
+
+  const detail = panel("detail");
+  const editor = panel("editor");
+  const mover = panel("mover");
+  const panels = [detail, editor, mover];
+
+  function toggle(which, fill) {
+    const opening = which.hidden;
+    for (const p of panels) p.hidden = true;
+    if (!opening) return;
+    which.hidden = false;
+    if (fill) fill();
+  }
+
+  head.append(
+    action("view", () => toggle(detail, () => fillDetail(detail, o))),
+    action("edit", () => toggle(editor, () => fillEditor(editor, o))),
+    // Immediate. There is nothing to ask: the copy is anonymous and,
+    // for a container, empty - both decided in clone_object, not here.
+    action("clone", async () => {
+      const r = await tryCall("clone_object", { objectId: o.id, quantity: 1 });
+      dmSay(r.ok ? "another " + (o.item_key) + " made" : r.error, !r.ok);
+      await loadObjects();
+    }),
+    action("move", () => toggle(mover, () => fillMover(mover, o)))
+  );
+
+  li.append(head, detail, editor, mover);
+  return li;
+}
+
+function panel(cls) {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.hidden = true;
+  return d;
+}
+
+function action(label, fn) {
+  const b = document.createElement("button");
+  b.className = "tiny ghost";
+  b.textContent = label;
+  b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    await fn();
+  });
+  return b;
+}
+
+// What a thing IS, as opposed to where it is.
+//
+// The catalogue half comes from state.catalogue rather than a fetch:
+// it is already loaded, it does not change while the tab is open, and
+// asking again per row would be thirty requests to say "dagger".
+async function fillDetail(el, o) {
+  el.innerHTML = "";
+  const item = (state.catalogue || []).find((i) => i.key === o.item_key);
+
+  const facts = [
+    ["key", o.item_key],
+    ["quantity", String(o.quantity)],
+    ["held by", o.holder_name + " (" + o.holder_kind + ")"],
+    ["kind", item ? item.kind : "not in the catalogue"],
+  ];
+  if (item && item.damage_number && item.damage_denomination) {
+    facts.push([
+      "damage",
+      item.damage_number + "d" + item.damage_denomination +
+        (item.damage_types && item.damage_types.length ? " " + item.damage_types.join("/") : ""),
+    ]);
+  }
+  if (item && item.base_ac != null) facts.push(["armour", "AC " + item.base_ac]);
+  if (item && item.properties && item.properties.length) {
+    facts.push(["properties", item.properties.join(", ")]);
+  }
+  if (o.equipped) facts.push(["worn", "yes"]);
+
+  for (const [k, v] of facts) {
+    const line = document.createElement("div");
+    line.className = "fact";
+    const a = document.createElement("span");
+    a.className = "muted";
+    a.textContent = k;
+    const b = document.createElement("span");
+    b.textContent = v;
+    line.append(a, b);
+    el.append(line);
+  }
+
+  // A CONTAINER IS A DOOR. What is inside is a live question rather
+  // than a property of the row, so it is asked when the row is opened.
+  if (!o.is_container) return;
+  const inside = await call("list_contents", { containerId: o.id });
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = "Inside";
+  el.append(sub);
+  const ul = document.createElement("ul");
+  ul.className = "list";
+  if (!inside || !inside.length) {
+    ul.append(row("empty", "", null));
+  } else {
+    for (const c of inside) {
+      ul.append(row(c.name || c.item_key, c.quantity > 1 ? "x" + c.quantity : "", null));
+    }
+  }
+  el.append(ul);
+}
+
+// Rename it, change how many there are, or destroy it.
+//
+// NAME AND QUANTITY GO TOGETHER in one write, because they constrain
+// each other: a stack of seven cannot carry a name. edit_object checks
+// the name against the NEW quantity, which is the only order that can
+// refuse naming one dagger and raising it to three in the same breath.
+function fillEditor(el, o) {
+  el.innerHTML = "";
+
+  const nameIn = document.createElement("input");
+  nameIn.value = o.name || "";
+  nameIn.placeholder = "name (blank = call it a " + o.item_key + ")";
+
+  const qtyIn = document.createElement("input");
+  qtyIn.type = "number";
+  qtyIn.min = "1";
+  qtyIn.value = String(o.quantity);
+  qtyIn.className = "narrow";
+
+  const line = document.createElement("div");
+  line.className = "row";
+  line.append(nameIn, qtyIn);
+
+  const save = document.createElement("button");
+  save.className = "tiny ghost";
+  save.textContent = "save";
+  save.addEventListener("click", async () => {
+    const r = await tryCall("edit_object", {
+      objectId: o.id,
+      name: nameIn.value,
+      quantity: Number(qtyIn.value) || o.quantity,
+    });
+    dmSay(r.ok ? "saved" : r.error, !r.ok);
+    if (r.ok) await loadObjects();
+  });
+
+  const kill = document.createElement("button");
+  kill.className = "tiny ghost danger";
+  kill.textContent = "destroy";
+  kill.addEventListener("click", async () => {
+    // ASKS FIRST. There is no undo and no soft delete - 030 keeps an
+    // object alive when its HOLDER dies precisely so that losing one
+    // is always somebody's decision.
+    if (!confirm("Destroy " + (o.name || o.item_key) + "? This cannot be undone.")) return;
+    const r = await tryCall("destroy_object", { objectId: o.id });
+    dmSay(r.ok ? (o.name || o.item_key) + " destroyed" : r.error, !r.ok);
+    if (r.ok) await loadObjects();
+  });
+
+  const buttons = document.createElement("div");
+  buttons.className = "row";
+  buttons.append(save, kill);
+  el.append(line, buttons);
+}
+
+// Put it somewhere real.
+//
+// WHICH COMMAND DEPENDS ON WHOSE IT IS. drop_here takes a thing out of
+// a pair of hands and splits a stack on the way; place_object moves a
+// whole loose row that nobody is holding. Both end with the thing
+// resting in a place, and they are not interchangeable.
+function fillMover(el, o) {
+  el.innerHTML = "";
+  const to = document.createElement("select");
+  fillPlaces(to, "\u2014 move to \u2014");
+  const go = document.createElement("button");
+  go.className = "tiny ghost";
+  go.textContent = "put it there";
+  go.addEventListener("click", async () => {
+    if (!to.value) return dmSay("pick somewhere to put it", true);
+    const held = o.holder_kind === "character" || o.holder_kind === "container";
+    const r = await tryCall(held ? "drop_here" : "place_object", {
+      objectId: o.id,
+      locationId: to.value,
+    });
+    dmSay(r.ok ? (o.name || o.item_key) + " moved" : r.error, !r.ok);
+    if (r.ok) await loadObjects();
+  });
+  const line = document.createElement("div");
+  line.className = "row";
+  line.append(to, go);
+  el.append(line);
+}
+
+
 function paintCatalogue() {
   const ul = document.querySelector("#cat-list");
   ul.innerHTML = "";

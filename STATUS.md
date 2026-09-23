@@ -1,6 +1,7 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after locations.**
+**Written 2026-09-17, updated after sizes, reach and the manager
+screens.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -207,11 +208,52 @@ where it happens.
 
 UNHELD NO LONGER MEANS NOWHERE. Every drop control offers a place;
 blank still means nowhere, but as a choice rather than the only
-outcome. What went nowhere before there was anywhere to go is
-recoverable from "Lying nowhere" in the World panel - a lost and found
-that should stay empty from here, and can go the day it does.
+outcome. The "Lying nowhere" lost-and-found that 033 added for the
+things dropped before there was anywhere to drop them is GONE, and not
+because it emptied - the Objects tab shows every object in the game
+with where it is, and "nowhere" is one of the answers, so a second list
+for that one case was a second place to look. `loose_objects` went with
+it: a registered command with no caller is a defect, not a spare.
 
-**236 tests, zero warnings.** `cd src-tauri && cargo test`.
+AND THE SCREEN IS FIVE TABS. Play is the one a player lives in; Run,
+World, Characters and Objects are DM tools, split by what they are
+ABOUT rather than by when they get used. Before this the rig showed
+every panel for every role in one column and stopped being navigable
+somewhere around the DM screen.
+
+  Play        the sheet, equipment, rolls
+  Run         encounters, enrolment, the roster, challenges
+  World       the map, and a scene: who is here, what is happening
+              here, what is lying here
+  Characters  PCs and NPCs, the statblock library, and the individuals
+              made from it
+  Objects     every object in the game and who is holding it, plus the
+              catalogue
+
+EDITING A CREATURE IS THE SHEET. Since 022 an NPC is a character in
+every mechanical respect, so "open sheet" opens a goblin in the same
+screen as a player. A second editor would be a second place for the
+same rules to be wrong.
+
+THINGS HAVE A SIZE AND CONTAINERS HAVE A REACH. Four questions gate
+putting something in a container, and they are four different
+questions:
+
+  reach        can anybody touch both of these at once
+  accepts      a purse takes coins, and that is not a coin  (032)
+  size         nothing bigger than Tiny goes in, and that is Large (036)
+  room         it would go in, but there is no space left    (032)
+
+Reach is first because no answer to the other three matters if the
+chest is in another building. Size is before room because it is the
+objection a person reaches for and it gives the better sentence.
+
+How full a container is shows as a bar and a number on every row, and
+the number comes from the same sum that refuses the next thing - one
+`slot_total`, so the gauge cannot read half empty while the container
+says no.
+
+**288 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -274,6 +316,10 @@ and not after.
     the whole hierarchy
 034 encounters in places - a fight happens somewhere, and cancelled
     becomes its own word
+035 characters stand somewhere - where a person is, which is a fact and
+    not a derivation
+036 things have a size - a greatsword does not go in a coin purse, and
+    the ladder is the one creatures already use
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -430,6 +476,56 @@ pattern (global rows with `game_id IS NULL`, overrides with it set)
 needs a surrogate id plus two *partial* unique indexes - `NULL != NULL`
 in a unique constraint, so without the partial index two global rows
 both pass. Every reference table from 006 on hits this. (005)
+
+**A FAULT WEARING THE COSTUME OF AN ORDINARY ANSWER. THREE TIMES NOW.**
+This is the shape of defect this codebase keeps producing, and it is
+worth naming as a class rather than as three incidents:
+
+  016  an RLS-blocked UPDATE succeeded and did nothing
+  031  a renamed parameter still compiled, so every inventory read came
+       back empty and PRESENTED AS A WRITE FAILURE
+  036  a `\n` in a select emptied the entire object manager, and the
+       empty list rendered as "no objects yet"
+
+Every one of them produced a plausible, calm, wrong answer instead of
+an error. None was caught by a test, because none of them is wrong in
+isolation - the failure is that the failure path and the ordinary path
+render identically.
+
+The general fix, applied twice so far: MAKE THE TWO PATHS DIFFERENT.
+`supabase::rest_get` now refuses a query parameter holding a control
+character before it sends anything, because no select, filter or order
+has a use for a newline - one is always a typo. And the object and
+character managers use `tryCall` and say what went wrong rather than
+painting an empty state over it.
+
+**THREE SHAPES OF "AN OBJECT" REACH THE FRONTEND AND THEY DO NOT NAME
+THE ITEM THE SAME WAY.**
+
+  objects::Stack     item_key, the bare key
+  holders::Located   item_key, the bare key
+  equipment::Owned   item, the whole catalogue row
+
+Reading `o.item_key` off an `Owned` gives undefined, so a contained
+object with no given NAME rendered as a blank row - and a named one
+rendered fine, which made it look like one missing item rather than a
+broken field. Every frontend function taking "an object" has to know
+which of the three it holds, and getting it wrong produces a blank
+rather than an error. Unifying them is a contained refactor nobody has
+done.
+
+**A RULE ENFORCED IN ONE COMMAND IS NOT ENFORCED.** `put_in_container`
+asked the three capacity questions and was the only thing that did,
+because it was the only command that MOVED anything. `clone_object`
+copies a row into the same holder and `edit_object` sets a quantity
+outright - neither moves anything, so neither ever reached the check,
+and both could put a twenty-sixth coin in a purse that holds
+twenty-five. Clone is a button on every row and quantity is a box in
+every editor; neither is exotic.
+
+The gate is now one function every way in calls. When adding a rule,
+the question is not "does the obvious command check it" but "what else
+writes to this table".
 
 **A BUNDLED ROOT STORE BREAKS ON ANY MACHINE RUNNING ANTIVIRUS, AND THE
 ERROR POINTS THE WRONG WAY.** `reqwest`'s `rustls-tls` compiles a copy
@@ -1232,10 +1328,10 @@ Guardhouse. One concept instead of two.
 that a dropped object had no location because the alternative was
 deleting what people let go of - and a handaxe dropped on the 21st then
 sat invisible for a day, because nothing renders nowhere. Every drop
-control now offers a place, and `loose_objects` plus `place_object` are
-the way back for the ones that went nowhere before there was anywhere
-to go. That pair is a lost and found: it should stay empty from here,
-and the day it does it can go.
+control now offers a place. The lost-and-found that shipped with 033
+is already retired - superseded rather than emptied, which is better:
+the Objects tab lists every object in the game with where it is, and
+"nowhere" is one of the answers.
 
 **Guards, all verified firing:** a place inside itself, a cycle through
 any chain, a parent in another game, and deleting a place that still
@@ -1324,14 +1420,22 @@ Roughly in order:
    which is the same copy `instantiate_npc` does, pointed the other way
    - and it is worth doing, because building an interesting goblin in
    play and keeping it is how a DM actually works.
-3. ACCESS CONTROL, which is the next subsystem and the one with
-   something already waiting for it. `acquire.rs` has held the Take
-   rule - tested - since the 22nd and nothing calls it. Locations are
-   what give it somewhere to apply: a locked room, an owner, a witness,
-   a crime. It is also what NARROWS 033's deliberately generous rule
-   that anything loose is anyone's to take, which is stated in the
-   migration as a starting point rather than a decision that theft is
-   free.
+3. ACCESS CONTROL, which is the next subsystem, the one with
+   something already waiting for it, and now the one with a named first
+   piece. `acquire.rs` has held the Take rule - tested - since the 22nd
+   and nothing calls it. Locations are what give it somewhere to apply:
+   a locked room, an owner, a witness, a crime. It is also what NARROWS
+   033's deliberately generous rule that anything loose is anyone's to
+   take, stated in the migration as a starting point rather than a
+   decision that theft is free.
+
+   **START WITH LOCKED AND OPEN ON CONTAINERS.** `containers.rs` has
+   listed them as missing since 032 and they are the gate that makes "a
+   container in a location a player can access" mean more than "a
+   container in a location" - right now an unlocked chest and a locked
+   one behave identically. Reach was the half that could be built
+   without them and is done; this is the other half. It is a small
+   migration and one more question in `guard_capacity`.
 4. The roll-to-challenge payoff. `actions.target_challenge_id` is
    written and nothing reads it, so the iron lock still cannot say
    whether it has been picked. The derivation is a query away: a
@@ -1360,8 +1464,18 @@ Roughly in order:
    factor rather than the only one, and pin.rs changes from "where the
    token lives" to "what unlocks it". Read pin.rs before trusting the
    PIN with anything.
-9. A real phone-first UI. What exists is a desktop test rig.
-10. Android via `npm run tauri android init`. iOS needs a Mac.
+9. ENCUMBRANCE, which is what `weight` is actually for. Every one of
+   the 68 catalogue rows has carried a weight in pounds since 027 and
+   032 and nothing read it until the manager screens printed it. 036
+   deliberately did NOT give containers a weight capacity, because
+   `slots` is already the "how much fits" measure and is already
+   fractional for exactly that purpose - a coin is 0.2 of a slot, so a
+   5-slot purse holds 25. Two numbers meaning almost the same thing is
+   two numbers to keep in agreement. Weight's own job is what a PERSON
+   can carry, which is STR x 15 in 5e and is a rule about a person
+   rather than about a sack.
+10. A real phone-first UI. What exists is a desktop test rig.
+11. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
 calls `load_sheet`, so hovering a button reads the whole pack it has no

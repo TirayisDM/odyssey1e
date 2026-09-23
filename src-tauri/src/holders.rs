@@ -49,6 +49,11 @@ pub struct Obj {
     pub name: Option<String>,
     pub quantity: i64,
     pub equipped: bool,
+    /// Attuned, which is a fact about the CARRIER rather than about
+    /// where the thing is - three across everything somebody holds, at
+    /// any depth. Carried here because this is the only loader that
+    /// walks a whole game's objects, which is what counting them needs.
+    pub attuned: bool,
     /// The entity it rests in. None is nowhere at all, which 033 kept as
     /// a real answer rather than a gap.
     pub holder_id: Option<String>,
@@ -484,7 +489,7 @@ pub fn load_world(
         token,
         "objects",
         &[
-            ("select", "id,item_key,name,quantity,equipped,holder_id,entity_id,size_override,holds_size_override"),
+            ("select", "id,item_key,name,quantity,equipped,attuned,holder_id,entity_id,size_override,holds_size_override"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "item_key.asc,acquired_at.asc"),
         ],
@@ -581,6 +586,7 @@ mod tests {
         Obj {
             id: id.into(),
             item_key: key.into(),
+            attuned: false,
             name: None,
             quantity: 1,
             equipped: false,

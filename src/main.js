@@ -611,6 +611,20 @@ async function loadInventory() {
 
   if (sheet.game_id) await fillCatalogue(document.querySelector("#add-what"), sheet.game_id);
 
+  // WHAT THEY ARE CARRYING. Asked here rather than read off the sheet:
+  // it walks everything held at any depth, which is the right cost for
+  // an inventory screen and the wrong one ahead of a d20.
+  const load = await call("encumbrance", { characterId: state.characterId });
+  const burdenEl = document.querySelector("#burden");
+  if (load) {
+    burdenEl.textContent = "carrying " + load.carried + " lb of " + load.capacity +
+                           " · " + load.burden;
+    burdenEl.className = "muted trained burden " +
+      (load.burden === "unencumbered" ? "ok" : "over");
+  } else {
+    burdenEl.textContent = "";
+  }
+
   if (!Array.isArray(items) || items.length === 0) {
     const li = document.createElement("li");
     li.className = "flat muted";
@@ -796,6 +810,27 @@ function objectControls(it, onDone) {
     if (r.value && r.value.said) log("drop", r.value.said, false);
     await onDone();
   });
+
+  // ATTUNEMENT, and only where it could apply. Offered on anything
+  // flagged `mgc` and on anything already attuned - the catalogue has
+  // no "requires attunement" column, so `mgc` is the closest honest
+  // signal and an already-attuned thing must always be releasable.
+  const magical = (it.item.properties || []).includes("mgc");
+  if (magical || it.attuned) {
+    const att = document.createElement("button");
+    att.className = "tiny ghost";
+    att.textContent = it.attuned ? "break attunement" : "attune";
+    att.title = "three at once, across everything you carry";
+    att.addEventListener("click", async () => {
+      const r = await tryCall("set_item_attuned", {
+        objectId: it.id,
+        attuned: !it.attuned,
+      });
+      if (!r.ok) { alert(r.error); return; }
+      await onDone();
+    });
+    wrap.append(att);
+  }
 
   const killBtn = document.createElement("button");
   killBtn.className = "tiny ghost";

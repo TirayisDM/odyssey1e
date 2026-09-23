@@ -295,7 +295,7 @@ pub fn check_one_armor(equipped: &[&Item]) -> Result<(), String> {
     Ok(())
 }
 
-fn is_shield(item: &Item) -> bool {
+pub(crate) fn is_shield(item: &Item) -> bool {
     item.kind == "armor" && item.armor_category.as_deref() == Some("shl")
 }
 

@@ -1355,6 +1355,64 @@ property, coordinates. The original defined all of them up front and
 
 ---
 
+## The three free rules - BUILT (carry.rs)
+
+Three things the schema could always express and nothing enforced. Each
+fact had been in the catalogue since 008 - the `attuned` flag, the `two`
+property, the `weight` column - with no rule reading it. That is the
+quiet kind of gap: it does not fail, it permits something the rulebook
+forbids.
+
+They live in `carry.rs` rather than `equipment.rs` because that file
+answers what a character can DO with what they hold and is 862
+production lines against an 800 ceiling. These ask what a BODY can bear.
+
+**ATTUNEMENT, capped at three.** There was no way to attune at all -
+`objects.attuned` has existed since 008, is read onto every sheet, and
+nothing in the command surface ever wrote it. The Ember has been attuned
+since the seed and could not have been released. So the rule and the
+only door to it arrived together in `set_item_attuned`.
+
+Counted across everything a character ultimately holds, not just what is
+equipped: a wand at the bottom of a backpack is still one of your three.
+Unlike equipping, attunement does not require a thing be in hand.
+
+**HANDS, and it is the general rule rather than the case asked for.** A
+budget of two, with a two-handed weapon costing both and a shield one.
+That covers the greatsword-and-shield case and three nobody had written
+down: two greatswords, three weapons, and a two-hander sharing a grip.
+Armour costs nothing, which is why this cannot be a count of equipped
+rows.
+
+IT IS A TIGHTENING. 008 left `equipped` unconstrained on purpose, noting
+several weapons may be held at once - right while nothing modelled
+hands, and a licence rather than a rule.
+
+**CRUMBS IS ALREADY ILLEGAL and that is left alone deliberately.** It
+holds a handaxe, a scimitar and a sickle - three hands, from the sickle
+handed to it while testing 028. Unequipping is not checked, so the state
+is self-correcting; equipping a fourth thing, or re-equipping the
+sickle, is now refused with the arithmetic shown. Fixing the row by hand
+would hide the one live demonstration that the rule works.
+
+**ENCUMBRANCE, reported and not refused.** Fifteen pounds a point of
+Strength, multiplied by size - a Large creature carries twice a Medium
+one, which is why an ogre shifts a portcullis a halfling of the same
+Strength cannot. Tiers at 5x, 10x and 15x.
+
+The base rule forbids going over capacity outright and the variant lets
+you and slows you down. They are different games, so the engine says
+which side of each line somebody is on and leaves the consequence to a
+rule the campaign picks.
+
+It is a COMMAND, not a sheet field. `load_sheet` runs on every roll and
+this walks everything held at any depth to sum it - a backpack weighs
+what it weighs plus what is in it. That is the right cost for an
+inventory screen and the wrong one ahead of a d20.
+
+Live, on Character1: 113 lb of 180, STR 12 - encumbered, past the 60
+that 5x buys.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

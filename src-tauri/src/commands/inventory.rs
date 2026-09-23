@@ -331,6 +331,155 @@ pub fn rename_object(
     )
 }
 
+/// Attune to something, or break an attunement.
+///
+/// THERE WAS NO WAY TO DO THIS AT ALL. `objects.attuned` has existed
+/// since 008 and is read onto every sheet, and nothing in the command
+/// surface ever wrote it - The Ember has been attuned since the seed
+/// and could not have been un-attuned. So this is the rule and the only
+/// door to it arriving together.
+///
+/// THREE IS THE CAP and it is counted across everything the character
+/// ultimately holds, not just what is equipped: a wand attuned at the
+/// bottom of a backpack is still one of your three.
+///
+/// DIRECTLY HELD OR NOT, attunement does not care - unlike equipping,
+/// which 031 restricted to things in hand. You attune to a thing you
+/// carry, and a rod in a pack is carried.
+#[tauri::command]
+pub fn set_item_attuned(
+    state: State<AppState>,
+    object_id: String,
+    attuned: bool,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    if attuned {
+        let obj = objects::load_object(&token, &object_id)?;
+        let holder = obj
+            .holder_id
+            .clone()
+            .ok_or_else(|| "nobody is holding that - it cannot be attuned".to_string())?;
+
+        // Whose is it, through however many bags.
+        let (world, holder_rows, kinds) =
+            crate::holders::load_world(&token, &obj.game_id)?;
+        let root = crate::holders::root_of(Some(&holder), &world, &holder_rows);
+        let mine = match root {
+            crate::holders::Root::Character { entity, .. } => entity,
+            _ => return Err("only a creature carrying it can attune to it".to_string()),
+        };
+
+        let name_of = |key: &str| {
+            kinds
+                .iter()
+                .find(|k| k.key == key)
+                .map(|_| key.to_string())
+                .unwrap_or_else(|| key.to_string())
+        };
+
+        // Everything they hold, at any depth, that is already attuned.
+        let already: Vec<String> = world
+            .iter()
+            .filter(|o| o.attuned && o.id != object_id)
+            .filter(|o| {
+                matches!(
+                    crate::holders::root_of(o.holder_id.as_deref(), &world, &holder_rows),
+                    crate::holders::Root::Character { ref entity, .. } if *entity == mine
+                )
+            })
+            .map(|o| o.name.clone().unwrap_or_else(|| name_of(&o.item_key)))
+            .collect();
+
+        let incoming = obj.name.clone().unwrap_or_else(|| name_of(&obj.item_key));
+        crate::carry::check_attunement(&already, &incoming)?;
+    }
+
+    supabase::rest_update(
+        &token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "attuned": attuned }),
+    )
+}
+
+/// How much this character is carrying, and what that costs them.
+///
+/// NOT ON THE SHEET, on purpose. `load_sheet` runs on every roll, and
+/// this walks everything a character holds at any depth to sum it -
+/// which is the right cost for an inventory screen and the wrong one
+/// ahead of a d20. A panel asks when it paints.
+///
+/// EVERYTHING, AT ANY DEPTH. A backpack weighs what it weighs PLUS what
+/// is in it, which is why this cannot be a sum over the loadout.
+///
+/// REPORTED, NOT REFUSED. See carry::burden - the base rule forbids
+/// going over capacity and the variant slows you down instead, and
+/// picking between them is a campaign's decision.
+#[tauri::command]
+pub fn encumbrance(state: State<AppState>, character_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    let p = crate::character::load_profile(&token, &character_id)?;
+    let (world, holder_rows, kinds) = crate::holders::load_world(&token, &p.game_id)?;
+
+    let mut carried = 0.0_f64;
+    for o in &world {
+        let mine = matches!(
+            crate::holders::root_of(o.holder_id.as_deref(), &world, &holder_rows),
+            crate::holders::Root::Character { ref entity, .. } if *entity == p.entity_id
+        );
+        if !mine {
+            continue;
+        }
+        // PostgREST sends numeric as a string - the same trap
+        // containers::as_f64 documents.
+        let each = kinds
+            .iter()
+            .find(|k| k.key == o.item_key)
+            .and_then(|k| k.weight.as_deref())
+            .and_then(|w| w.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        carried += each * (o.quantity as f64);
+    }
+
+    let str_score = load_ability_score(&token, &character_id, "str")?;
+    let size = p.vitals.size.as_deref();
+    let capacity = crate::carry::carry_capacity(str_score, size);
+    let state_ = crate::carry::burden(carried, str_score, size);
+
+    Ok(json!({
+        "carried": (carried * 100.0).round() / 100.0,
+        "capacity": capacity,
+        "strength": str_score,
+        "burden": state_.as_str(),
+        "said": format!(
+            "{} lb of {} - {}",
+            (carried * 100.0).round() / 100.0,
+            capacity,
+            state_.as_str()
+        ),
+    }))
+}
+
+/// One ability score, without loading a sheet to get it.
+fn load_ability_score(token: &str, character_id: &str, code: &str) -> Result<i64, String> {
+    let rows = supabase::rest_get(
+        token,
+        "character_abilities",
+        &[
+            ("select", "score"),
+            ("character_id", &format!("eq.{}", character_id)),
+            ("ability", &format!("eq.{}", code)),
+        ],
+    )?;
+    Ok(rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("score"))
+        .and_then(|x| x.as_i64())
+        .unwrap_or(10))
+}
+
 /// Destroy an object outright.
 ///
 /// Separate from dropping, because they are different events and only

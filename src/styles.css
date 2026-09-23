@@ -238,3 +238,7 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .inside-row{display:flex;align-items:center;justify-content:space-between;
        gap:.4rem;margin-bottom:.2rem}
 .inside-row button{margin:0}
+
+/* Encumbrance. Only coloured when it is costing you something — an
+   unencumbered character does not need a green badge to say so. */
+.burden.over{color:var(--bad)}

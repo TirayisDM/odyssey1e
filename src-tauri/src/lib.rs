@@ -21,6 +21,7 @@
 
 mod acquire;
 mod attack;
+mod carry;
 mod character;
 mod containers;
 mod commands;
@@ -427,21 +428,31 @@ fn set_item_equipped(
         let incoming = equipment::load_item(&token, &sheet.game_id, &obj.item_key)?
             .ok_or_else(|| format!("no item with key '{}'", obj.item_key))?;
 
-        // Only an armor can break the rule, so nothing else pays for
-        // the check. Filtering THIS object out first means re-equipping
-        // what is already worn is not read as a second armor - and it
-        // filters the object, not the key, because since 026 the other
+        // WHAT THE LOADOUT WOULD BE AFTER. Built once and asked twice,
+        // because both rules are about the set rather than the item.
+        // Filtering THIS object out first means re-equipping what is
+        // already worn is not read as a second anything - and it filters
+        // the object, not the key, because since 026 the other
         // breastplate is a different thing rather than the same row.
+        let mut after: Vec<&equipment::Item> = sheet
+            .loadout
+            .iter()
+            .filter(|e| e.id != object_id)
+            .map(|e| &e.item)
+            .collect();
+        after.push(&incoming);
+
+        // Only an armor can break the one-suit rule, so nothing else
+        // pays for that check.
         if incoming.kind == "armor" {
-            let mut after: Vec<&equipment::Item> = sheet
-                .loadout
-                .iter()
-                .filter(|e| e.id != object_id)
-                .map(|e| &e.item)
-                .collect();
-            after.push(&incoming);
             equipment::check_one_armor(&after)?;
         }
+
+        // HANDS, which nothing counted until now. The `two` property has
+        // been on eight weapons since 027 and did nothing, so a
+        // greatsword and a shield were both up at once. Armour costs no
+        // hands, which is why this cannot be a count of equipped rows.
+        carry::check_hands(&after)?;
     }
 
     supabase::rest_update(
@@ -1067,6 +1078,8 @@ pub fn run() {
             commands::containers::put_in_container,
             commands::containers::take_from_container,
             commands::inventory::list_catalogue,
+            commands::inventory::set_item_attuned,
+            commands::inventory::encumbrance,
             commands::inventory::give_item,
             commands::inventory::drop_object,
             commands::inventory::take_object,

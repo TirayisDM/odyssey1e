@@ -349,6 +349,11 @@ async function selectGame(id) {
   // which is the leak this fixes rather than a cosmetic gap.
   await loadPlaces();
   await loadDM();
+  // AFTER the roster loads, because the two pickers are built from it.
+  // Not inside loadDM: trading is not a DM-only act, and a player
+  // swapping a rope with another player is the case that would have
+  // been quietly locked behind the DM panel.
+  await loadTrade();
 }
 
 // The places, for anybody. loadWorld paints the DM's editor on top of
@@ -1088,6 +1093,184 @@ function chip(text, kind) {
   s.className = "chip " + kind;
   s.textContent = text;
   return s;
+}
+
+
+/* ---------- trade ---------- */
+
+// TWO SIDES, ONE SCREEN. Buy, sell, barter and give are the same
+// exchange with different columns filled in, so there are no modes
+// here - what makes it a purchase is that only the right column has
+// anything in it, and what makes it a shop is that the counterparty
+// has a markup.
+//
+// Nothing is priced on this side. Every number comes from quote_trade,
+// because the valuation is asymmetric (a shop buys at 0.40 and sells at
+// markup) and a screen that worked that out for itself would be a
+// second pricing rule to keep in step.
+
+function tradeSay(text, isError) {
+  const el = document.querySelector("#trade-msg");
+  el.textContent = text || "";
+  el.className = "dm-msg" + (isError ? " err" : "");
+  el.hidden = !text;
+}
+
+async function loadTrade() {
+  if (!state.gameId) return;
+  const who = (await call("who_is_where", { gameId: state.gameId })) || [];
+  for (const id of ["#trade-a", "#trade-b"]) {
+    const sel = document.querySelector(id);
+    const keep = sel.value;
+    sel.innerHTML = "";
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = id === "#trade-a" ? "— who is trading —" : "— with whom —";
+    sel.append(blank);
+    for (const c of who) {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      sel.append(o);
+    }
+    if (keep) sel.value = keep;
+  }
+  await paintTrade();
+}
+
+// One side's goods, as things to offer.
+//
+// Reuses list_inventory, which is the same call the equipment panel
+// makes - a merchant's stock is an inventory like anyone else's, which
+// is the whole reason a shop needed almost no new schema.
+async function paintTradeSide(listId, characterId) {
+  const host = document.querySelector(listId);
+  host.innerHTML = "";
+  if (!characterId) return;
+  const items = (await call("list_inventory", { characterId })) || [];
+  if (!items.length) {
+    const li = document.createElement("li");
+    li.className = "flat muted";
+    li.textContent = "carrying nothing";
+    host.append(li);
+    return;
+  }
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.className = "flat offer";
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.dataset.object = it.id;
+    box.addEventListener("change", refreshBalance);
+
+    const name = document.createElement("span");
+    name.className = "nm";
+    name.textContent = it.name || it.item.name;
+
+    // A stack can be offered in part - eight of twenty arrows, six of
+    // eighteen gold. A sword cannot, and does not get the box.
+    const qty = document.createElement("input");
+    qty.type = "number";
+    qty.min = "1";
+    qty.max = String(it.quantity);
+    qty.value = String(it.quantity);
+    qty.className = "narrow";
+    qty.hidden = it.quantity <= 1;
+    qty.dataset.count = "1";
+    qty.addEventListener("change", refreshBalance);
+
+    li.append(box, name, qty);
+    host.append(li);
+  }
+}
+
+// What each side has ticked.
+function offersFrom(listId) {
+  const out = [];
+  for (const li of document.querySelectorAll(listId + " li")) {
+    const box = li.querySelector("input[type=checkbox]");
+    if (!box || !box.checked) continue;
+    const qty = li.querySelector("input[type=number]");
+    out.push({
+      object: box.dataset.object,
+      count: qty && !qty.hidden ? Number(qty.value) : null,
+    });
+  }
+  return out;
+}
+
+async function paintTrade() {
+  const a = val("#trade-a");
+  const b = val("#trade-b");
+  document.querySelector("#trade-a-name").textContent =
+    a ? (document.querySelector("#trade-a").selectedOptions[0].textContent + " gives") : "this side gives";
+  document.querySelector("#trade-b-name").textContent =
+    b ? (document.querySelector("#trade-b").selectedOptions[0].textContent + " gives") : "that side gives";
+  await paintTradeSide("#trade-a-items", a);
+  await paintTradeSide("#trade-b-items", b);
+  state.haggle = null;
+  document.querySelector("#haggle-said").textContent = "";
+  await refreshBalance();
+}
+
+// The balance, from the engine.
+//
+// Called on every tick and every quantity change, which is a round trip
+// per click - acceptable on a screen somebody is deliberating over, and
+// the alternative is this file learning what a shop's margin is.
+async function refreshBalance() {
+  const a = val("#trade-a");
+  const b = val("#trade-b");
+  const el = document.querySelector("#trade-balance");
+  const kind = document.querySelector("#trade-kind");
+  if (!a || !b) {
+    el.textContent = "pick two sides";
+    el.className = "balance";
+    kind.textContent = "";
+    return;
+  }
+  const r = await tryCall("quote_trade", {
+    aId: a,
+    bId: b,
+    aGives: offersFrom("#trade-a-items"),
+    bGives: offersFrom("#trade-b-items"),
+    haggleMargin: state.haggle,
+  });
+  if (!r.ok) {
+    el.textContent = r.error;
+    el.className = "balance err";
+    kind.textContent = "";
+    return;
+  }
+  const q = r.value;
+  kind.textContent = q.counterparty === "merchant"
+    ? "a shop · " + q.disposition
+    : "between two people — list price both ways";
+  el.textContent = q.said;
+  el.className = "balance " + (q.owed_cp > 0 ? "owe" : q.owed_cp < 0 ? "gain" : "even");
+  // Haggling only means something against a shop.
+  document.querySelector("#haggle-row").hidden = q.counterparty !== "merchant";
+}
+
+async function doTrade(free) {
+  const a = val("#trade-a");
+  const b = val("#trade-b");
+  if (!a || !b) return tradeSay("pick two sides first", true);
+  tradeSay("");
+  const r = await tryCall("execute_trade", {
+    aId: a,
+    bId: b,
+    aGives: offersFrom("#trade-a-items"),
+    bGives: offersFrom("#trade-b-items"),
+    haggleMargin: state.haggle,
+    free: !!free,
+  });
+  if (!r.ok) return tradeSay(r.error, true);
+  tradeSay(r.value.said);
+  await paintTrade();
+  // The sheet's purse and weight both moved.
+  await loadSheet();
 }
 
 /* ---------- the DM side ---------- */
@@ -3116,6 +3299,27 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
     if (r.ok) await loadSheet();
   });
+
+  /* ---------- trade ---------- */
+
+  document.querySelector("#trade-a").addEventListener("change", paintTrade);
+  document.querySelector("#trade-b").addEventListener("change", paintTrade);
+
+  document.querySelector("#do-haggle").addEventListener("click", async () => {
+    const p = Number(val("#haggle-persuasion"));
+    const i = Number(val("#haggle-insight"));
+    if (!p || !i) return tradeSay("both totals are needed to haggle", true);
+    const r = await call("haggle_margin", { persuasion: p, insight: i });
+    if (!r) return;
+    state.haggle = r.margin;
+    document.querySelector("#haggle-said").textContent = r.said;
+    await refreshBalance();
+  });
+
+  // Guarded: a double-click is a second trade, and the second one
+  // would price against an inventory the first one already changed.
+  guarded("#do-trade", async () => { await doTrade(false); });
+  guarded("#do-give", async () => { await doTrade(true); });
 
   /* ---------- the DM side ---------- */
   // All writes, so all guarded: a double-click on Enrol is a second

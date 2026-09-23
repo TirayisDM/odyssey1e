@@ -192,6 +192,65 @@ pub fn haggle_margin(persuasion: i64, insight: i64) -> i64 {
     (persuasion - insight).clamp(-HAGGLE_CAP, HAGGLE_CAP)
 }
 
+/* ============================ BOTH WAYS ============================ */
+
+/// Who is on the other side of the table.
+///
+/// THE SELL RATIO IS A MERCHANT'S, NOT A LAW. A shop buys at 0.40
+/// because it has to make a living reselling. Two players swapping a
+/// sword each are not making a living off one another, and valuing both
+/// sides at 40% would mean an even trade left both of them poorer - the
+/// goods would evaporate on the way across the table.
+///
+/// So a peer values goods at LIST in both directions. An even swap is
+/// even, which is the only answer that lets a party divide loot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Counterparty {
+    Merchant,
+    Peer,
+}
+
+/// What one thing is worth in this trade, in the direction it moves.
+///
+/// `toward_you` is the whole asymmetry. The same sword is worth its buy
+/// price coming from a shop and its sell price going back, and the gap
+/// between those is the shop's trade.
+pub fn worth(q: &Quote, toward_you: bool, with: Counterparty) -> i64 {
+    match (with, toward_you) {
+        (Counterparty::Merchant, true) => q.buy_cp,
+        (Counterparty::Merchant, false) => q.sell_cp,
+        (Counterparty::Peer, _) => q.base_cp,
+    }
+}
+
+/// Where a two-sided trade lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Balance {
+    /// What is coming to you, valued in the direction it moves.
+    pub incoming_cp: i64,
+    /// What is going the other way.
+    pub outgoing_cp: i64,
+    /// Positive means YOU owe coin. Negative means they do. Zero means
+    /// the goods balanced and no money changes hands, which is what a
+    /// straight swap looks like.
+    pub owed_cp: i64,
+}
+
+/// Settle a trade.
+///
+/// Deliberately trivial, and deliberately its own function. The
+/// arithmetic is a subtraction; what it carries is the SIGN CONVENTION,
+/// and a sign convention invented separately at three call sites is
+/// three chances to pay somebody for taking your sword.
+pub fn settle(incoming_cp: i64, outgoing_cp: i64) -> Balance {
+    Balance {
+        incoming_cp,
+        outgoing_cp,
+        owed_cp: incoming_cp - outgoing_cp,
+    }
+}
+
 /* ============================ TESTS ============================ */
 
 #[cfg(test)]
@@ -317,6 +376,71 @@ mod tests {
     fn a_landslide_still_respects_the_cap() {
         assert_eq!(haggle_margin(30, 1), HAGGLE_CAP);
         assert_eq!(haggle_margin(1, 30), -HAGGLE_CAP);
+    }
+
+    /* ---------------- two-sided ------------------------------------- */
+
+    #[test]
+    fn a_shop_buys_low_and_sells_high() {
+        let q = list(1_000);
+        assert_eq!(worth(&q, true, Counterparty::Merchant), 1_000);
+        assert_eq!(worth(&q, false, Counterparty::Merchant), 400);
+    }
+
+    #[test]
+    fn a_peer_values_it_the_same_both_ways() {
+        // THE CASE THAT MATTERS. At a merchant's 0.40, two players
+        // swapping a sword each would both come away poorer - the goods
+        // would evaporate crossing the table.
+        let q = list(1_000);
+        assert_eq!(worth(&q, true, Counterparty::Peer), 1_000);
+        assert_eq!(worth(&q, false, Counterparty::Peer), 1_000);
+    }
+
+    #[test]
+    fn an_even_swap_between_peers_costs_nothing() {
+        let mine = worth(&list(1_000), false, Counterparty::Peer);
+        let theirs = worth(&list(1_000), true, Counterparty::Peer);
+        assert_eq!(settle(theirs, mine).owed_cp, 0);
+    }
+
+    #[test]
+    fn positive_means_you_pay() {
+        // Buying: goods come in, nothing goes out.
+        let b = settle(1_425, 0);
+        assert_eq!(b.owed_cp, 1_425);
+    }
+
+    #[test]
+    fn negative_means_they_pay() {
+        // Selling: goods go out, nothing comes in.
+        let b = settle(0, 600);
+        assert_eq!(b.owed_cp, -600);
+    }
+
+    #[test]
+    fn a_part_exchange_settles_the_difference() {
+        // Their 15gp longsword for your 10gp mace, at a shop: you pay
+        // 1500 and they credit you 400 (0.40 of the mace's 1000).
+        let theirs = worth(&list(1_500), true, Counterparty::Merchant);
+        let yours = worth(&list(1_000), false, Counterparty::Merchant);
+        let b = settle(theirs, yours);
+        assert_eq!(b.incoming_cp, 1_500);
+        assert_eq!(b.outgoing_cp, 400);
+        assert_eq!(b.owed_cp, 1_100);
+    }
+
+    #[test]
+    fn the_same_part_exchange_between_peers_is_nearly_even() {
+        let theirs = worth(&list(1_500), true, Counterparty::Peer);
+        let yours = worth(&list(1_000), false, Counterparty::Peer);
+        assert_eq!(settle(theirs, yours).owed_cp, 500);
+    }
+
+    #[test]
+    fn giving_costs_the_receiver_nothing_and_the_giver_everything() {
+        // Give is a trade where one side offers nothing back.
+        assert_eq!(settle(0, 0).owed_cp, 0);
     }
 
     #[test]

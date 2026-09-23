@@ -9,19 +9,20 @@
 //! THREE LAYERS, AND EACH KNOWS ONE THING.
 //!   store.rs     what it costs
 //!   currency.rs  which coins pay for it
-//!   buy_object   that all of it lands or none of it does
+//!   trade        that all of it lands or none of it does
 //!
 //! Nothing here decides any of those. What it does is find the
 //! merchant, gather the purse, and put the three together.
 
 use std::collections::HashMap;
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::State;
 
 use crate::currency::{self, Coin};
 use crate::holders::{self, Root};
-use crate::store::{self, Disposition};
+use crate::store::{self, Counterparty, Disposition};
 use crate::supabase::{self, AppState};
 
 /// Who is selling this, or an error saying nobody is.
@@ -46,10 +47,8 @@ fn seller_of(
 /// A character's coins, as stacks AND as the rows they live in.
 ///
 /// TWO SHAPES OF THE SAME MONEY. `currency::pay` decides in kinds -
-/// four gold, six silver - and `buy_object` moves rows. The map is what
-/// turns one into the other, and it is built here rather than inside
-/// `pay` because a rule that knows about object ids is a rule that has
-/// started doing plumbing.
+/// four gold, six silver - and `trade` moves rows. `currency::allocate`
+/// turns one into the other; this gathers what it needs.
 fn purse(
     profile_entity: &str,
     minted: &[(String, String, i64)],
@@ -82,36 +81,6 @@ fn purse(
         where_.entry(key.clone()).or_default().push((o.id.clone(), o.quantity));
     }
     (stacks, where_)
-}
-
-/// Turn "four gold" into "two from this row, two from that one".
-///
-/// Coins of a kind may be split across a purse, a pocket and a pack,
-/// and `pay` neither knows nor should. Taken in the order found, which
-/// is `acquired_at` - oldest money first, which is as good a rule as
-/// any and at least a stable one.
-fn allocate(
-    taken: &[(String, i64)],
-    where_: &HashMap<String, Vec<(String, i64)>>,
-) -> Result<Vec<Value>, String> {
-    let mut plan: Vec<Value> = Vec::new();
-    for (key, mut owed) in taken.iter().map(|(k, n)| (k.clone(), *n)) {
-        let rows = where_
-            .get(&key)
-            .ok_or_else(|| format!("no {} found to pay with", key))?;
-        for (object, have) in rows {
-            if owed == 0 {
-                break;
-            }
-            let take = owed.min(*have);
-            plan.push(json!({ "object": object, "count": take }));
-            owed -= take;
-        }
-        if owed > 0 {
-            return Err(format!("{} short of {}", owed, key));
-        }
-    }
-    Ok(plan)
 }
 
 /// What one thing costs here.
@@ -226,75 +195,239 @@ pub fn haggle_margin(persuasion: i64, insight: i64) -> Value {
     })
 }
 
-/// Buy it.
+/* ============================ BOTH WAYS ============================ */
+
+/// One thing somebody is putting on the table.
 ///
-/// Quote, find the coins, hand them over and take the goods - and the
-/// last three happen inside `buy_object`, which is a single statement
-/// as far as Postgres is concerned. Over REST they would be three round
-/// trips, and the gap between the first and the second is a free item.
+/// `count` of None means the whole row, which is what a sword is.
+/// Arrows and coins are the reason it is an option at all.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Offer {
+    pub object: String,
+    pub count: Option<i64>,
+}
+
+/// What kind of table this is, and at whose prices.
+///
+/// A MARKUP IS WHAT MAKES SOMEBODY A SHOP. No markup column, no
+/// merchant - so two players trading get `Peer` with no configuration,
+/// which is the case that would otherwise need a flag somebody forgets
+/// to set.
+fn counterparty(
+    token: &str,
+    character_id: &str,
+) -> Result<(Counterparty, f64, Disposition), String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "markup,disposition"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let r = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .ok_or_else(|| "no such creature, or they are not visible to you".to_string())?;
+    let markup = r
+        .get("markup")
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
+    let disposition = Disposition::parse(r.get("disposition").and_then(|v| v.as_str()));
+    match markup {
+        Some(m) => Ok((Counterparty::Merchant, m, disposition)),
+        None => Ok((Counterparty::Peer, 1.0, Disposition::Neutral)),
+    }
+}
+
+/// Value one side's offering, in the direction it is moving.
+#[allow(clippy::too_many_arguments)]
+fn value_side(
+    token: &str,
+    game_id: &str,
+    offers: &[Offer],
+    world: &[holders::Obj],
+    toward_a: bool,
+    with: Counterparty,
+    markup: f64,
+    disposition: Disposition,
+    haggle_margin: Option<i64>,
+) -> Result<(i64, Vec<Value>), String> {
+    let mut total = 0;
+    let mut lines: Vec<Value> = Vec::new();
+    for off in offers {
+        let o = world
+            .iter()
+            .find(|x| x.id == off.object)
+            .ok_or_else(|| "something in that trade is not visible to you".to_string())?;
+        let n = off.count.unwrap_or(o.quantity);
+        if n <= 0 || n > o.quantity {
+            return Err(format!("cannot offer {} of {} {}", n, o.quantity, o.item_key));
+        }
+        let base = base_price(token, game_id, &o.item_key)?;
+        let mut q = store::quote(base, markup, 1.0, disposition)?;
+        if let Some(m) = haggle_margin {
+            q = store::haggle(&q, m);
+        }
+        let each = store::worth(&q, toward_a, with);
+        total += each * n;
+        lines.push(json!({
+            "object": o.id,
+            "item": o.name.clone().unwrap_or_else(|| o.item_key.clone()),
+            "count": n,
+            "each_cp": each,
+            "line_cp": each * n,
+        }));
+    }
+    Ok((total, lines))
+}
+
+/// What a proposed trade comes to, without doing it.
+///
+/// `a` is the side asking - usually a player - and the sign convention
+/// is theirs: a positive `owed_cp` means A pays. See `store::settle`,
+/// which exists to hold that convention in one place.
 #[tauri::command]
-pub fn buy(
+pub fn quote_trade(
     state: State<AppState>,
-    object_id: String,
-    buyer_id: String,
+    a_id: String,
+    b_id: String,
+    a_gives: Vec<Offer>,
+    b_gives: Vec<Offer>,
     haggle_margin: Option<i64>,
 ) -> Result<Value, String> {
     let token = state.token()?;
-    let quoted = quote_object(state.clone(), object_id.clone(), haggle_margin)?;
-    let price = quoted.get("buy_cp").and_then(|v| v.as_i64()).unwrap_or(0);
-    let merchant_id = quoted
-        .get("merchant_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    if a_id == b_id {
+        return Err("a trade needs two sides".to_string());
+    }
+    let a = crate::character::load_profile(&token, &a_id)?;
+    let (kind, markup, disposition) = counterparty(&token, &b_id)?;
+    // A sworn enemy declines before anything is priced.
+    disposition
+        .factor()
+        .ok_or_else(|| "they will not trade with you".to_string())?;
 
-    let buyer = crate::character::load_profile(&token, &buyer_id)?;
-    let minted = currency::load_coins(&token, &buyer.game_id)?;
-    let (world, rows, _) = holders::load_world(&token, &buyer.game_id)?;
+    let (world, _, _) = holders::load_world(&token, &a.game_id)?;
 
-    let (mine, my_rows) = purse(&buyer.entity_id, &minted, &world, &rows);
-    // Refuses before anything moves, and says what it costs against
-    // what they have.
-    let payment = currency::pay(&mine, price)?;
-    let pay_plan = allocate(&payment.taken, &my_rows)?;
+    let (incoming, in_lines) = value_side(
+        &token, &a.game_id, &b_gives, &world, true, kind, markup, disposition, haggle_margin,
+    )?;
+    let (outgoing, out_lines) = value_side(
+        &token, &a.game_id, &a_gives, &world, false, kind, markup, disposition, haggle_margin,
+    )?;
 
-    // CHANGE COMES OUT OF THE TILL, so a shop that cannot break a gold
-    // piece cannot take one. That is the merchant's problem to solve by
-    // keeping small coin, which is what makes `make_change` refusing a
-    // real event rather than a bug.
-    let mut change_plan: Vec<Value> = Vec::new();
-    if payment.overpaid_cp > 0 {
-        let seller = crate::character::load_profile(&token, &merchant_id)?;
-        let (till, till_rows) = purse(&seller.entity_id, &minted, &world, &rows);
-        let owed = currency::make_change(&till, payment.overpaid_cp)?;
-        change_plan = allocate(&owed, &till_rows)?;
+    let bal = store::settle(incoming, outgoing);
+    Ok(json!({
+        "counterparty": match kind {
+            Counterparty::Merchant => "merchant",
+            Counterparty::Peer => "peer",
+        },
+        "disposition": disposition.as_str(),
+        "incoming_cp": bal.incoming_cp,
+        "outgoing_cp": bal.outgoing_cp,
+        "owed_cp": bal.owed_cp,
+        "receiving": in_lines,
+        "giving": out_lines,
+        "said": match bal.owed_cp {
+            0 => "an even trade".to_string(),
+            n if n > 0 => format!("you pay {}", currency::format_cp(n)),
+            n => format!("they pay you {}", currency::format_cp(-n)),
+        },
+    }))
+}
+
+/// Do it.
+///
+/// ONE PLAN, ONE CALL. The goods both ways, the coin that settles the
+/// difference, and the change - assembled here and handed to `trade`,
+/// which lands all of it or none. Over REST these would be six round
+/// trips and the gap between any two of them is somebody robbed.
+///
+/// `free` is a gift: the goods move and no money does. A parameter
+/// rather than a separate command, because a gift IS a trade where both
+/// sides agree nothing is owed, and giving it its own path would be a
+/// second place for the moves to be assembled.
+#[tauri::command]
+pub fn execute_trade(
+    state: State<AppState>,
+    a_id: String,
+    b_id: String,
+    a_gives: Vec<Offer>,
+    b_gives: Vec<Offer>,
+    haggle_margin: Option<i64>,
+    free: Option<bool>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let quoted = quote_trade(
+        state.clone(),
+        a_id.clone(),
+        b_id.clone(),
+        a_gives.clone(),
+        b_gives.clone(),
+        haggle_margin,
+    )?;
+    let owed = quoted.get("owed_cp").and_then(|v| v.as_i64()).unwrap_or(0);
+    let gift = free.unwrap_or(false);
+
+    let a = crate::character::load_profile(&token, &a_id)?;
+    let b = crate::character::load_profile(&token, &b_id)?;
+    let minted = currency::load_coins(&token, &a.game_id)?;
+    let (world, rows, _) = holders::load_world(&token, &a.game_id)?;
+
+    // The goods, both directions.
+    let mut moves: Vec<Value> = Vec::new();
+    for off in &a_gives {
+        moves.push(json!({ "object": off.object, "count": off.count, "to": "b" }));
+    }
+    for off in &b_gives {
+        moves.push(json!({ "object": off.object, "count": off.count, "to": "a" }));
+    }
+
+    let mut paid = 0;
+    let mut change = 0;
+    if !gift && owed != 0 {
+        // WHOEVER OWES, PAYS. The only asymmetry left, and it is decided
+        // by a sign rather than by which argument came first.
+        let (debtor, creditor, to_creditor, to_debtor) =
+            if owed > 0 { (&a, &b, "b", "a") } else { (&b, &a, "a", "b") };
+        let amount = owed.abs();
+
+        let (funds, fund_rows) = purse(&debtor.entity_id, &minted, &world, &rows);
+        let payment = currency::pay(&funds, amount)?;
+        for (object, count) in currency::allocate(&payment.taken, &fund_rows)? {
+            moves.push(json!({ "object": object, "count": count, "to": to_creditor }));
+        }
+        paid = payment.paid_cp;
+
+        if payment.overpaid_cp > 0 {
+            let (till, till_rows) = purse(&creditor.entity_id, &minted, &world, &rows);
+            let owed_back = currency::make_change(&till, payment.overpaid_cp)?;
+            for (object, count) in currency::allocate(&owed_back, &till_rows)? {
+                moves.push(json!({ "object": object, "count": count, "to": to_debtor }));
+            }
+            change = payment.overpaid_cp;
+        }
     }
 
     supabase::rpc(
         &token,
-        "buy_object",
-        &json!({
-            "p_object": object_id,
-            "p_buyer": buyer_id,
-            "p_merchant": merchant_id,
-            "p_pay": pay_plan,
-            "p_change": change_plan,
-        }),
+        "trade",
+        &json!({ "p_a": a_id, "p_b": b_id, "p_moves": moves }),
     )?;
 
     Ok(json!({
-        "said": format!(
-            "bought {} for {}{}",
-            quoted.get("item").and_then(|v| v.as_str()).unwrap_or("it"),
-            currency::format_cp(price),
-            if payment.overpaid_cp > 0 {
-                format!(", {} change", currency::format_cp(payment.overpaid_cp))
-            } else {
-                String::new()
+        "said": if gift {
+            "given".to_string()
+        } else {
+            match owed {
+                0 => "traded, even".to_string(),
+                n if n > 0 => format!("traded, paid {}", currency::format_cp(n)),
+                n => format!("traded, received {}", currency::format_cp(-n)),
             }
-        ),
-        "paid_cp": price,
-        "change_cp": payment.overpaid_cp,
-        "haggled": quoted.get("haggled").cloned().unwrap_or(json!(0)),
+        },
+        "owed_cp": owed,
+        "coins_handed_over_cp": paid,
+        "change_cp": change,
+        "moves": moves.len(),
     }))
 }

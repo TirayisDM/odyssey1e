@@ -88,6 +88,7 @@
         <button class="tab" data-tab="world">World</button>
         <button class="tab" data-tab="chars">Characters</button>
         <button class="tab" data-tab="objects">Objects</button>
+        <button class="tab" data-tab="trade">Trade</button>
       </nav>
 
       <!-- One message line for the whole DM side, in the strip rather
@@ -319,6 +320,45 @@
             <ul id="cat-list" class="list"></ul>
           </div>
         </section>
+      </div>
+
+      <!-- TRADE. Not a merchant screen - a two-sided exchange, which
+           is what buy, sell, barter and give all are with different
+           columns filled in. The counterparty being a shop or a person
+           is decided by whether they have a markup, not by a mode. -->
+      <div class="pane" data-pane="trade" hidden>
+        <div class="row">
+          <select id="trade-a"></select>
+          <select id="trade-b"></select>
+        </div>
+        <div id="trade-kind" class="muted trained"></div>
+
+        <div class="cols2">
+          <div>
+            <div class="sub" id="trade-a-name">this side gives</div>
+            <ul id="trade-a-items" class="list"></ul>
+          </div>
+          <div>
+            <div class="sub" id="trade-b-name">that side gives</div>
+            <ul id="trade-b-items" class="list"></ul>
+          </div>
+        </div>
+
+        <!-- Haggling is a contest like any other, so the totals come
+             from the roll box rather than being rolled here. -->
+        <div class="row" id="haggle-row">
+          <input id="haggle-persuasion" type="number" placeholder="Persuasion" class="narrow" />
+          <input id="haggle-insight" type="number" placeholder="their Insight" class="narrow" />
+          <button id="do-haggle" class="tiny ghost">haggle</button>
+          <span id="haggle-said" class="muted"></span>
+        </div>
+
+        <div id="trade-balance" class="balance">nothing offered</div>
+        <div class="row">
+          <button id="do-trade">Trade</button>
+          <button id="do-give" class="ghost">Give &mdash; no coin</button>
+        </div>
+        <div id="trade-msg" class="dm-msg" hidden></div>
       </div>
 
       <div class="pane" data-pane="world" hidden>

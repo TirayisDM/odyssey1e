@@ -1481,6 +1481,84 @@ balance to the copper and the sword changed hands.
 Buy works. SELL DOES NOT EXIST YET - the price is quoted (`shop_pays`)
 and nothing acts on it.
 
+## Trade - BUILT (041, store.rs, commands/store.rs, the Trade tab)
+
+**ONE EXCHANGE, IN BOTH DIRECTIONS.** 040's `buy_object` was the
+asymmetric special case and 041 replaced it. It had a buyer and a
+merchant baked into its signature, goods moving one way and coins
+moving two - which is half a bidirectional trade with the other half
+hidden behind role names.
+
+`trade(a, b, moves)` is SIMPLER than what it replaced. Four things
+became one function and four callers:
+
+    buy     one side gives coin
+    sell    the same with the columns swapped
+    barter  both sides give goods, the difference settled in coin
+    give    one side gives nothing
+
+**A VALIDATING EXECUTOR, NOT A RULEBOOK.** Every decision is made in
+Rust and arrives as a plan: which coins pay is `currency::pay`, what it
+costs is `store::quote`, whether a stack merges or splits is
+`objects::merge_into`. None of it is repeated in SQL, because a rule in
+two places is a rule that will disagree with itself - proved four times
+in this repo, most expensively in 028.
+
+What SQL owns is the two things Rust cannot: that all of it lands or
+none of it does, and that the plan is not lying. Moves name a SIDE
+rather than an entity, so a plan cannot quietly deliver to a third
+party who was never in the conversation.
+
+**THE PEER CASE IS THE ONE WORTH NAMING.** A shop buys at 0.40 because
+it resells for a living. Two players swapping a sword each are not, and
+valuing both sides at 40% would mean an even trade left both of them
+poorer - the goods would evaporate crossing the table. So
+`store::worth` values a peer's goods at LIST in both directions, and an
+even swap is even. That is what lets a party divide loot.
+
+A MARKUP IS WHAT MAKES SOMEBODY A SHOP. No markup column, no merchant,
+so two players get peer pricing with no flag anybody has to remember to
+set.
+
+**Verified in sections, each before the next was built:**
+
+- The transaction: goods both ways in one call; whole rows moving with
+  name and overrides intact; partial stacks splitting; arrivals merging
+  into an interchangeable stack (5 arrows + 8 = 13 in ONE row); a
+  failed move undoing its predecessors; third-party destinations
+  refused; self-trade refused; named stacks refusing to split but
+  moving whole.
+- The pricing: 25 tests, including that a peer swap costs nothing and a
+  merchant part-exchange settles the difference.
+- `currency::allocate` MOVED OUT of the command file and tested. It was
+  a rule wearing a wrapper - the step between deciding in KINDS and
+  moving ROWS - and getting it wrong means paying with coins somebody
+  does not have. Seven tests, including gold scattered across a purse,
+  a pocket and a pack.
+- End to end on live data, rolled back: Character1 traded a mace for a
+  longsword at Halla's. 1500 in, 280 out (the mace at 0.40), 1220
+  owed; paid 8 sp then 12 gp = 1280, with 6 sp change. Gold 18 to 6,
+  silver 8 to 6, Halla 12 gold and 42 silver. Balances to the copper.
+- The tab, through the stubbed rig: both sides populate, a purchase
+  reads "you pay" in red, haggling sends its margin, switching to a
+  peer hides haggling and says list price both ways, and Give sends
+  `free: true`.
+
+**CONSENT IS NOT MODELLED.** Both sides' rows move on one party's call,
+because the DM runs the table and RLS already stops a player touching
+what is not theirs. A player-to-player trade mediated by neither needs
+an offer-and-accept handshake, and 041's header says so rather than
+leaving it to be discovered.
+
+**`trade` TRUSTS ITS CALLER ABOUT THE PRICE**, carried over from
+`buy_object` and for the same reason - store.rs holds those rules and
+duplicating them in SQL is the two-places problem. Safe while the DM
+runs the table; not safe the day a player client calls it directly.
+
+`buy` was DELETED rather than kept working. It called the dropped
+`buy_object`, and it is a trade with one column filled - a second path
+to the same place would be a second place to get it wrong.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

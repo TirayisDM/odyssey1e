@@ -33,6 +33,8 @@
 // make that worth doing rather than deferring.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /* ============================ THE LADDER ============================ */
@@ -253,6 +255,47 @@ pub fn make_change(till: &[Coin], amount_cp: i64) -> Result<Vec<(String, i64)>, 
     Ok(out)
 }
 
+
+/// Spread "four gold" across the rows the gold actually lives in.
+///
+/// A RULE WEARING A WRAPPER, which is why it is here. It lived in
+/// `commands/store.rs` and had no tests, because that directory's own
+/// header says nothing in it should want one - and anything that does
+/// belongs a level up. This wants one: it is the step between deciding
+/// in KINDS, which `pay` does, and moving ROWS, which the database
+/// does, and getting it wrong means paying with coins somebody does not
+/// have.
+///
+/// `held` maps a coin key to the rows holding it, each with its count.
+/// Taken in the order given, which is `acquired_at` - oldest money
+/// first. As good a rule as any and, more usefully, a stable one.
+pub fn allocate(
+    taken: &[(String, i64)],
+    held: &HashMap<String, Vec<(String, i64)>>,
+) -> Result<Vec<(String, i64)>, String> {
+    let mut plan: Vec<(String, i64)> = Vec::new();
+    for (key, want) in taken {
+        let mut owed = *want;
+        let rows = held
+            .get(key)
+            .ok_or_else(|| format!("no {} found to pay with", key))?;
+        for (object, have) in rows {
+            if owed == 0 {
+                break;
+            }
+            let take = owed.min(*have);
+            if take > 0 {
+                plan.push((object.clone(), take));
+                owed -= take;
+            }
+        }
+        if owed > 0 {
+            return Err(format!("{} short of {}", owed, key));
+        }
+    }
+    Ok(plan)
+}
+
 /* ============================ NETWORK ============================ */
 
 /// Every coin this campaign mints, and what each is worth in copper.
@@ -309,6 +352,86 @@ mod tests {
 
     fn purse() -> Vec<Coin> {
         vec![coin("coin_cp", 1, 7), coin("coin_sp", 10, 3), coin("coin_gp", 100, 2)]
+    }
+
+    /* ---------------- allocating across rows ------------------------ */
+
+    fn rows(pairs: &[(&str, &str, i64)]) -> HashMap<String, Vec<(String, i64)>> {
+        let mut m: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+        for (key, object, n) in pairs {
+            m.entry((*key).into()).or_default().push(((*object).into(), *n));
+        }
+        m
+    }
+
+    #[test]
+    fn coins_come_out_of_one_row_when_one_row_has_them() {
+        let held = rows(&[("coin_gp", "purse", 18)]);
+        assert_eq!(
+            allocate(&[("coin_gp".into(), 15)], &held),
+            Ok(vec![("purse".to_string(), 15)])
+        );
+    }
+
+    #[test]
+    fn and_across_several_when_they_are_scattered() {
+        // Gold in a purse, a pocket and a pack - which is the ordinary
+        // case once containers exist, and the reason this function does.
+        let held = rows(&[
+            ("coin_gp", "purse", 5),
+            ("coin_gp", "pocket", 3),
+            ("coin_gp", "pack", 10),
+        ]);
+        assert_eq!(
+            allocate(&[("coin_gp".into(), 12)], &held),
+            Ok(vec![
+                ("purse".to_string(), 5),
+                ("pocket".to_string(), 3),
+                ("pack".to_string(), 4),
+            ])
+        );
+    }
+
+    #[test]
+    fn it_stops_as_soon_as_the_debt_is_covered() {
+        let held = rows(&[("coin_gp", "purse", 5), ("coin_gp", "pack", 10)]);
+        assert_eq!(
+            allocate(&[("coin_gp".into(), 5)], &held),
+            Ok(vec![("purse".to_string(), 5)])
+        );
+    }
+
+    #[test]
+    fn more_than_is_held_is_refused_rather_than_part_paid() {
+        let held = rows(&[("coin_gp", "purse", 2)]);
+        let e = allocate(&[("coin_gp".into(), 5)], &held).unwrap_err();
+        assert!(e.contains("3 short"), "{}", e);
+    }
+
+    #[test]
+    fn a_coin_nobody_holds_is_refused() {
+        let e = allocate(&[("coin_pp".into(), 1)], &rows(&[])).unwrap_err();
+        assert!(e.contains("no coin_pp"), "{}", e);
+    }
+
+    #[test]
+    fn several_kinds_are_planned_together() {
+        let held = rows(&[("coin_gp", "purse", 2), ("coin_sp", "purse2", 9)]);
+        let plan = allocate(
+            &[("coin_gp".into(), 1), ("coin_sp".into(), 7)],
+            &held,
+        )
+        .unwrap();
+        assert_eq!(plan, vec![("purse".to_string(), 1), ("purse2".to_string(), 7)]);
+    }
+
+    #[test]
+    fn empty_rows_in_the_map_are_skipped_not_counted() {
+        let held = rows(&[("coin_gp", "spent", 0), ("coin_gp", "purse", 4)]);
+        assert_eq!(
+            allocate(&[("coin_gp".into(), 3)], &held),
+            Ok(vec![("purse".to_string(), 3)])
+        );
     }
 
     #[test]

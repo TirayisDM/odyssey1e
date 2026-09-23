@@ -248,3 +248,21 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    stretches children by default; the buttons should sit at their own
    height whatever their number. */
 .item .actions{align-items:flex-start}
+
+/* TRADE. Two columns facing each other with the balance beneath, which
+   is the shape of the transaction rather than a layout choice: what
+   each side is giving has to be readable at a glance against the other.
+   One column on a narrow window, because two 150px columns are worse
+   than scrolling. */
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+@media (max-width:820px){.cols2{grid-template-columns:1fr}}
+.offer{display:flex;align-items:center;gap:.45rem}
+.offer .nm{flex:1}
+.offer input[type=checkbox]{margin:0;cursor:pointer;flex:none;width:auto}
+.offer input[type=number]{margin:0;padding:.14rem .3rem;font-size:11px;text-align:center}
+.balance{margin:.5rem 0;padding:.4rem .6rem;border:1px solid var(--line);
+       border-radius:4px;font:13px ui-monospace,Menlo,monospace}
+.balance.owe{color:var(--bad);border-color:var(--bad)}
+.balance.gain{color:var(--ok);border-color:var(--ok)}
+.balance.even{color:var(--accent);border-color:var(--accent)}
+.balance.err{color:var(--bad)}

@@ -45,6 +45,9 @@ pub struct SkillDef {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
+    /// Where they are standing - 035, carried out so a screen can name
+    /// the floor a drop is about to land on before it asks.
+    pub location_id: Option<String>,
     /// NONE FOR A MONSTER. A goblin rolls from a sheet like everyone
     /// else — scores, a proficiency bonus, a loadout — but it is not a
     /// character and has no row in `characters`. `rolls.character_id` is
@@ -328,6 +331,10 @@ pub struct Profile {
     /// This character AS A HOLDER - 031. What their objects point at,
     /// and the thing every inventory read filters on now.
     pub entity_id: String,
+    /// Where they are standing - 035. NULL is a real answer and the
+    /// default: a character between scenes is not misfiled. What a drop
+    /// needs, so a thing put down lands on a floor rather than in limbo.
+    pub location_id: Option<String>,
     /// NULL means derive from level. A statblock states one; a player
     /// character does not have one to state. See 022.
     pub prof_bonus: Option<i64>,
@@ -373,7 +380,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         &[
             (
                 "select",
-                "id,entity_id,game_id,name,level,narrative_pack,weapon_profs,armor_profs,                 hp_max,hp_temp,hp_temp_max,ac_mode,ac_override,                 death_successes,death_failures,exhaustion,inspiration,size",
+                "id,entity_id,location_id,game_id,name,level,narrative_pack,weapon_profs,armor_profs,                 hp_max,hp_temp,hp_temp_max,ac_mode,ac_override,                 death_successes,death_failures,exhaustion,inspiration,size",
             ),
             ("id", &format!("eq.{}", character_id)),
         ],
@@ -393,6 +400,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
     Ok(Profile {
         character_id: as_str(c, "id"),
         entity_id: as_str(c, "entity_id"),
+        location_id: as_opt_str_char(c, "location_id"),
         prof_bonus: c.get("prof_bonus").and_then(|x| x.as_i64()),
         is_npc: c.get("is_npc").and_then(|x| x.as_bool()).unwrap_or(false),
         game_id: as_str(c, "game_id"),
@@ -581,6 +589,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     );
 
     Ok(Sheet {
+        location_id: profile.location_id,
         character_id: Some(profile.character_id),
         game_id,
         name: profile.name,
@@ -634,6 +643,7 @@ mod tests {
         profs.insert("ste".into(), 0.5);
 
         Sheet {
+            location_id: None,
             character_id: Some("c1".into()),
             game_id: "g1".into(),
             prof_bonus: None,

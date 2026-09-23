@@ -112,20 +112,30 @@ pub fn give_item(
     )
 }
 
-/// Let go of something. It stays in the campaign with no holder.
+/// Put something down where you are standing.
 ///
-/// `quantity` of None means all of it, which is what dropping one thing
-/// means. A partial drop SPLITS: the held row keeps the remainder and a
-/// second, unheld row carries what left. That second row is a new
-/// object and not the same one moved, because the seven rations were
-/// never seven objects to begin with.
+/// IT LANDS ON A FLOOR NOW, not in limbo. Until 033 there was nowhere
+/// for a dropped thing to BE, so this wrote NULL and 026 accepted that
+/// as loot in limbo. Locations arrived and this did not follow, which
+/// left the one command a player actually clicks still dropping things
+/// out of the world.
 ///
-/// A dropped thing is unequipped on the way out, and since 030 that is
-/// the DATABASE's job rather than this one's. A cascade runs inside
-/// Postgres where no command does, so the rule had to move somewhere
-/// that sees every route to being unheld - `unheld_is_unequipped`. It
-/// is not restated here, because two copies of one rule is two answers
-/// to keep in agreement and only one of them would run.
+/// THE PLACE IS DERIVED, NOT ASKED FOR. `drop_here` takes a location
+/// and is the DM's tool for putting something in an arbitrary room.
+/// This one is the player's: you drop what you are holding where you
+/// are, and a character already knows where that is. Asking the caller
+/// would let them drop a torch into a room they are not standing in.
+///
+/// A CHARACTER WHO IS NOWHERE DROPS INTO NOWHERE, and that is not a
+/// failure. 035 made `location_id` nullable on purpose - a character
+/// between scenes is not misfiled - so this keeps the old behaviour for
+/// them and says plainly that is what happened.
+///
+/// THE SPLIT AND THE MERGE ARE `move_into`'s. This used to insert a
+/// fresh row for the part that travelled, which lost `size_override`
+/// and, worse, would hit `objects_stack_idx` the second time anybody
+/// dropped the same plain thing in the same room - that index is on
+/// (holder_id, item_key), and a floor is a holder.
 #[tauri::command]
 pub fn drop_object(
     state: State<AppState>,
@@ -138,38 +148,110 @@ pub fn drop_object(
         return Err("nobody is holding that".to_string());
     }
 
-    let (keep, moved) = objects::split(obj.quantity, quantity)?;
+    // WHO is putting it down - through however many bags. Something in
+    // a purse in a backpack is still Rodnar's to drop.
+    let (world, holder_rows, _) = crate::holders::load_world(&token, &obj.game_id)?;
+    let root = crate::holders::root_of(obj.holder_id.as_deref(), &world, &holder_rows);
+    let carrier = match root {
+        crate::holders::Root::Character { entity, .. } => entity,
+        crate::holders::Root::Location { name, .. } => {
+            return Err(format!("that is already lying in {} - nobody is carrying it", name))
+        }
+        _ => return Err("nobody is holding that".to_string()),
+    };
 
-    if keep == 0 {
-        // The whole row goes, holder and all. Its name and its charges
-        // travel with it, which is the reason it is not deleted and
-        // re-inserted.
-        return supabase::rest_update(
-            &token,
-            "objects",
-            &[("id", &format!("eq.{}", object_id))],
-            // equipped and attuned are cleared by the trigger, not here.
-            &json!({ "holder_id": null }),
-        );
-    }
+    let (who, here) = standing(&token, &carrier)?;
+    let (place_entity, place_name) = match here {
+        Some(loc) => {
+            let (e, n) = place(&token, &loc)?;
+            (Some(e), n)
+        }
+        None => (None, "nowhere in particular".to_string()),
+    };
 
-    supabase::rest_update(
+    let (_, moved) = objects::split(obj.quantity, quantity)?;
+    let thing = match equipment::load_item(&token, &obj.game_id, &obj.item_key)? {
+        Some(i) => obj.name.clone().unwrap_or(i.name),
+        None => obj.name.clone().unwrap_or_else(|| obj.item_key.clone()),
+    };
+
+    // A floor is a holder like any other, so what is already lying
+    // there is what a merge looks at.
+    let there = match &place_entity {
+        Some(e) => objects::load_held(&token, e)?,
+        None => Vec::new(),
+    };
+    crate::commands::containers::move_into(
         &token,
-        "objects",
-        &[("id", &format!("eq.{}", object_id))],
-        &json!({ "quantity": keep }),
+        &obj,
+        &object_id,
+        &there,
+        place_entity.as_deref(),
+        quantity,
     )?;
 
-    supabase::rest_insert(
-        &token,
-        "objects",
-        &json!({
-            "game_id": obj.game_id,
-            "holder_id": null,
-            "item_key": obj.item_key,
-            "quantity": moved,
-        }),
-    )
+    // WHAT HAPPENED, in a sentence. The command says it rather than the
+    // screen guessing: only this side knows which floor it landed on,
+    // and a drop that quietly went somewhere else is exactly the kind of
+    // thing nobody notices until an item cannot be found.
+    Ok(json!({
+        "said": format!(
+            "{} is dropping {}{} at {}",
+            who,
+            if moved > 1 { format!("{} ", moved) } else { String::new() },
+            thing,
+            place_name
+        ),
+        "character": who,
+        "item": thing,
+        "quantity": moved,
+        "location": place_name,
+        "placed": place_entity.is_some(),
+    }))
+}
+
+/// A character's name and where they are standing, from their entity.
+fn standing(token: &str, entity_id: &str) -> Result<(String, Option<String>), String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "name,location_id"),
+            ("entity_id", &format!("eq.{}", entity_id)),
+        ],
+    )?;
+    let r = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| "nobody is holding that".to_string())?;
+    Ok((
+        r.get("name").and_then(|v| v.as_str()).unwrap_or("Someone").to_string(),
+        r.get("location_id").and_then(|v| v.as_str()).map(str::to_string),
+    ))
+}
+
+/// A place's holder identity and what it is called.
+fn place(token: &str, location_id: &str) -> Result<(String, String), String> {
+    let rows = supabase::rest_get(
+        token,
+        "locations",
+        &[
+            ("select", "entity_id,name"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    let r = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| "that place is not visible to you".to_string())?;
+    let entity = r
+        .get("entity_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "that place has no holder identity".to_string())?;
+    Ok((
+        entity.to_string(),
+        r.get("name").and_then(|v| v.as_str()).unwrap_or("somewhere").to_string(),
+    ))
 }
 
 /// Pick up something nobody is holding, merging it if it stacks.

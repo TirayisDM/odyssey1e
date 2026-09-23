@@ -260,7 +260,7 @@ pub fn take_from_container(
 /// A NAMED THING CANNOT BE SPLIT and needs no guard here: `may_name`
 /// refuses a name on a stack of more than one, so a named row is always
 /// a single thing and every split of it takes the whole.
-fn move_into(
+pub(crate) fn move_into(
     token: &str,
     obj: &objects::ObjectRow,
     object_id: &str,

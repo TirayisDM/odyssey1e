@@ -700,6 +700,31 @@ async function fillCatalogue(sel, gameId) {
 // in the campaign with nobody holding it and can be picked back up; a
 // destroyed one is gone, which is why it is the only control here that
 // asks first.
+// "Rodnar is dropping 3 Rations at The Frostvalley Inn."
+//
+// A GUESS, and the engine's own sentence replaces it in the log once
+// the drop lands. This one exists to be read BEFORE, which means it has
+// to be composed from what the screen already has - the sheet's name
+// and location, and the place picker's own labels.
+function dropLine(it, where, n) {
+  const sheet = state.sheet || {};
+  const who = sheet.name || "This character";
+  const thing = it.name || it.item.name;
+  const many = n && n > 1 ? n + " " : "";
+
+  let place;
+  if (where.value) {
+    place = where.selectedOptions[0] ? where.selectedOptions[0].textContent : "there";
+  } else if (sheet.location_id) {
+    // The picker lists every place, so the character's own is in it.
+    const mine = [...where.options].find((o) => o.value === sheet.location_id);
+    place = mine ? mine.textContent : "where they are standing";
+  } else {
+    place = "nowhere in particular";
+  }
+  return who + " is dropping " + many + thing + " at " + place.trim() + ".";
+}
+
 function objectControls(it, onDone) {
   const wrap = document.createElement("div");
   wrap.className = "row obj-controls";
@@ -735,26 +760,40 @@ function objectControls(it, onDone) {
   // object nobody holds and no place contains is not in the world, it
   // is only in the table.
   //
-  // Blank still means nowhere. It is a real answer - the DM has not
-  // built the room yet - but it is now a CHOICE rather than the only
-  // outcome, and the lost-and-found in the World panel is where those
-  // end up rather than nothing at all.
+  // BLANK NOW MEANS "WHERE I AM STANDING", not nowhere. drop_object
+  // derives the floor from the character rather than being told, so the
+  // default is the thing a player actually means when they put
+  // something down. Picking a place is still there and is the DM's
+  // tool: it puts a thing in a room nobody is standing in.
+  //
+  // A character with no location still drops into nowhere, which 035
+  // says is a real answer rather than a misfiling.
   const where = document.createElement("select");
   where.className = "wheretodrop";
-  fillPlaces(where, "— nowhere —");
+  fillPlaces(where, "— where I am —");
 
   const dropBtn = document.createElement("button");
   dropBtn.className = "tiny ghost";
   dropBtn.textContent = "drop";
-  dropBtn.title = "put it down — pick a place, or nowhere";
+  dropBtn.title = "put it down where you are, or pick a place";
   dropBtn.addEventListener("click", async () => {
     const n = it.quantity > 1 ? Number(qty.value) : null;
+
+    // SAY IT BEFORE DOING IT. A drop moves a thing out of somebody's
+    // hands and onto a floor that may not be the floor they pictured -
+    // the engine derives it - so the sentence is read back first.
+    if (!confirm(dropLine(it, where, n))) return;
+
     // Two commands because they are two events: drop_here puts it in a
-    // place, drop_object lets it go. Both split the same way.
+    // named place, drop_object puts it down where the character is.
+    // Both split the same way.
     const r = where.value
       ? await tryCall("drop_here", { objectId: it.id, locationId: where.value, quantity: n })
       : await tryCall("drop_object", { objectId: it.id, quantity: n });
-    if (!r.ok) log("drop", r.error, true);
+    if (!r.ok) { log("drop", r.error, true); return; }
+    // What the ENGINE says happened, which is the authority on which
+    // floor it landed on. The line above was this screen's guess.
+    if (r.value && r.value.said) log("drop", r.value.said, false);
     await onDone();
   });
 

@@ -316,39 +316,23 @@ pub fn drop_here(
     if obj.holder_id.is_none() {
         return Err("nobody is holding that".to_string());
     }
-    let (keep, moved) = objects::split(obj.quantity, quantity)?;
 
-    if keep == 0 {
-        // The whole row travels, name and charges with it - which is why
-        // it is moved rather than deleted and re-inserted.
-        return supabase::rest_update(
-            &token,
-            "objects",
-            &[("id", &format!("eq.{}", object_id))],
-            // equipped and attuned are cleared by 031's trigger, because
-            // a sword on the floor is not worn.
-            &json!({ "holder_id": here }),
-        );
-    }
-
-    supabase::rest_update(
+    // THE MERGE IS NOT OPTIONAL. This used to insert a fresh row for
+    // whatever travelled, and `objects_stack_idx` is unique on
+    // (holder_id, item_key) where the name is null - a floor is a
+    // holder, so the SECOND time anybody dropped rations in the same
+    // room it came back as a constraint violation. `move_into` merges
+    // into what is already lying there, and carries size_override
+    // across a split, which the old insert here did by hand and
+    // drop_object did not do at all.
+    let there = objects::load_held(&token, &here)?;
+    crate::commands::containers::move_into(
         &token,
-        "objects",
-        &[("id", &format!("eq.{}", object_id))],
-        &json!({ "quantity": keep }),
-    )?;
-
-    supabase::rest_insert(
-        &token,
-        "objects",
-        &json!({
-            "game_id": obj.game_id,
-            "holder_id": here,
-            "item_key": obj.item_key,
-            "quantity": moved,
-            // Travels with the split - see move_into.
-            "size_override": obj.size_override,
-        }),
+        &obj,
+        &object_id,
+        &there,
+        Some(&here),
+        quantity,
     )
 }
 

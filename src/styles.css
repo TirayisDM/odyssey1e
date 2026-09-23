@@ -242,3 +242,9 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 /* Encumbrance. Only coloured when it is costing you something — an
    unencumbered character does not need a green badge to say so. */
 .burden.over{color:var(--bad)}
+
+/* A row with ONE action button had it stretch to the full height of the
+   detail block — the Heavy Crossbow, whose only mode is ranged. Flex
+   stretches children by default; the buttons should sit at their own
+   height whatever their number. */
+.item .actions{align-items:flex-start}

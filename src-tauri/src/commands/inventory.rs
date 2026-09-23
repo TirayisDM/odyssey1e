@@ -403,6 +403,60 @@ pub fn set_item_attuned(
     )
 }
 
+/// What this character has in coin.
+///
+/// EVERYTHING THEY HOLD, AT ANY DEPTH, which is the only reading that
+/// works: coins live in a purse, and a purse lives in a backpack. A sum
+/// over what is directly in hand would say a character with a full
+/// purse is penniless.
+///
+/// The value of each coin is `currency::to_cp` of its own price and
+/// denomination - nothing new is stored, because a gold piece being
+/// worth a gold piece is not a fact worth a column.
+#[tauri::command]
+pub fn wallet(state: State<AppState>, character_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    let p = crate::character::load_profile(&token, &character_id)?;
+    let minted = crate::currency::load_coins(&token, &p.game_id)?;
+    let (world, holder_rows, _) = crate::holders::load_world(&token, &p.game_id)?;
+
+    let mut purse: Vec<crate::currency::Coin> = Vec::new();
+    for o in &world {
+        let Some((key, denom, value_cp)) = minted.iter().find(|(k, _, _)| *k == o.item_key) else {
+            continue;
+        };
+        let mine = matches!(
+            crate::holders::root_of(o.holder_id.as_deref(), &world, &holder_rows),
+            crate::holders::Root::Character { ref entity, .. } if *entity == p.entity_id
+        );
+        if !mine {
+            continue;
+        }
+        // Stacks of the same coin in different pockets are one pile for
+        // the purpose of paying with them.
+        match purse.iter_mut().find(|c| c.key == *key) {
+            Some(c) => c.count += o.quantity,
+            None => purse.push(crate::currency::Coin {
+                key: key.clone(),
+                denom: denom.clone(),
+                value_cp: *value_cp,
+                count: o.quantity,
+            }),
+        }
+    }
+
+    purse.sort_by_key(|c| -c.value_cp);
+    let total = crate::currency::total(&purse);
+    Ok(json!({
+        "total_cp": total,
+        // What is in the purse, and what it is worth. Two different
+        // questions - see currency::held.
+        "said": crate::currency::held(&purse),
+        "worth": crate::currency::format_cp(total),
+        "coins": purse,
+    }))
+}
+
 /// How much this character is carrying, and what that costs them.
 ///
 /// NOT ON THE SHEET, on purpose. `load_sheet` runs on every roll, and

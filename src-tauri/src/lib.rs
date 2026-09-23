@@ -25,6 +25,7 @@ mod carry;
 mod character;
 mod containers;
 mod commands;
+mod currency;
 mod death;
 mod dice;
 mod encounter;
@@ -1080,6 +1081,7 @@ pub fn run() {
             commands::inventory::list_catalogue,
             commands::inventory::set_item_attuned,
             commands::inventory::encumbrance,
+            commands::inventory::wallet,
             commands::inventory::give_item,
             commands::inventory::drop_object,
             commands::inventory::take_object,

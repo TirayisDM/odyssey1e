@@ -614,6 +614,17 @@ async function loadInventory() {
   // WHAT THEY ARE CARRYING. Asked here rather than read off the sheet:
   // it walks everything held at any depth, which is the right cost for
   // an inventory screen and the wrong one ahead of a d20.
+  // COIN, beside the weight. Both are sums over everything held at any
+  // depth, and a purse in a backpack is the case that makes them worth
+  // asking the engine for rather than adding up on screen.
+  const money = await call("wallet", { characterId: state.characterId });
+  const purseEl = document.querySelector("#purse");
+  // What is in it, with what it is worth on hover. Two different
+  // questions - 18 gp and 8 sp is 1880 cp, which normalises to "1 pp,
+  // 8 gp, 8 sp" and names a coin nobody is carrying.
+  purseEl.textContent = money ? "purse: " + money.said : "";
+  if (money) purseEl.title = "worth " + money.worth;
+
   const load = await call("encumbrance", { characterId: state.characterId });
   const burdenEl = document.querySelector("#burden");
   if (load) {

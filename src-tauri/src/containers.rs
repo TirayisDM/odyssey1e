@@ -262,8 +262,14 @@ pub fn load_bulk(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Bulk
 }
 
 fn as_f64(v: &Value) -> Option<f64> {
-    // PostgREST sends `numeric` as a JSON string, not a number, so a
-    // plain as_f64 returns None on every one of these.
+    // THE OTHER WAY ROUND, and this comment used to say so wrongly.
+    // Postgres serialises `numeric` to a JSON NUMBER, so `as_f64` is
+    // the branch that fires and the string fallback is defensiveness.
+    //
+    // Being wrong here cost nothing because both branches are present.
+    // The same belief written into holders.rs and equipment.rs, where
+    // only the string branch was, meant every weight and every
+    // container capacity in the game read as None.
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 

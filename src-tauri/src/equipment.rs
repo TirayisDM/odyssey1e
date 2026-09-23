@@ -426,6 +426,25 @@ fn as_str(v: &Value, key: &str) -> String {
     v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
 }
 
+/// A `numeric` column, as text for display.
+///
+/// NOT `as_opt_str`. Postgres serialises numeric to a JSON NUMBER -
+/// `to_json(2.5::numeric)` is `2.5`, not `"2.5"` - so reading one as a
+/// string returns None every time. That is why weight and container
+/// capacity never appeared on a single screen, and why encumbrance
+/// reported that a character carrying fourteen items weighed nothing.
+///
+/// Accepts a string too. Nothing should send one, but this repo held
+/// two contradictory comments about which arrives and only one of them
+/// was ever true, so the parse takes both and the comment states which
+/// is real.
+fn numeric_text(v: &Value, key: &str) -> Option<String> {
+    let f = v.get(key)?;
+    f.as_f64()
+        .map(|n| n.to_string())
+        .or_else(|| f.as_str().map(str::to_string))
+}
+
 fn as_opt_str(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(|x| x.as_str())
@@ -472,9 +491,9 @@ fn item_from_row(r: &Value) -> Item {
         // rather than parsed, because nothing here does arithmetic on
         // it and a parse would turn "0.05" into a rounding question
         // that only the screen has to answer.
-        weight: as_opt_str(r, "weight"),
+        weight: numeric_text(r, "weight"),
         accepts: as_strings(r, "accepts"),
-        capacity_slots: as_opt_str(r, "capacity_slots"),
+        capacity_slots: numeric_text(r, "capacity_slots"),
     }
 }
 

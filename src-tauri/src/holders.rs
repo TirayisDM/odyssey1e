@@ -471,6 +471,37 @@ fn num(v: Option<&serde_json::Value>) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
+/// One catalogue row, as the fields the world needs.
+///
+/// SPLIT OUT BECAUSE IT HAD A BUG AND NO TEST. `weight` was read with
+/// `as_str()` alone, and Postgres serialises `numeric` to a JSON
+/// NUMBER - `to_json(2.5::numeric)` is `2.5`, not `"2.5"`. So every
+/// weight in the game came back None and encumbrance reported that a
+/// character carrying fourteen items weighed nothing.
+///
+/// The comment that used to sit here said the opposite, and so does one
+/// in containers.rs; both were wrong and both were written by me. What
+/// saved containers.rs was `as_f64().or_else(as_str)` - defensiveness
+/// rather than knowledge - which is why the wrong belief survived long
+/// enough to break something else.
+///
+/// The tests below feed the shape PostgREST actually sends.
+fn kind_from_row(key: String, r: &serde_json::Value) -> Kind {
+    Kind {
+        key,
+        size: r.get("size").and_then(|v| v.as_str()).unwrap_or("med").to_string(),
+        holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
+        // Kept as a string because it is printed rather than summed by
+        // most callers, but parsed on the way in so a JSON number
+        // survives. `num` accepts both, which is the only honest thing
+        // to do while two comments in this repo disagreed about which
+        // arrives.
+        weight: num(r.get("weight")).map(|w| w.to_string()),
+        slots: num(r.get("slots")).unwrap_or(1.0),
+        capacity_slots: num(r.get("capacity_slots")),
+    }
+}
+
 /// Every object in a game, everything that can hold one, and what the
 /// catalogue says about each key.
 ///
@@ -558,19 +589,7 @@ pub fn load_world(
         if types.iter().any(|t| t.key == key) {
             continue;
         }
-        types.push(Kind {
-            key,
-            size: r.get("size").and_then(|v| v.as_str()).unwrap_or("med").to_string(),
-            holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
-            // numeric arrives as a string; see Located::weight.
-            weight: r.get("weight").and_then(|v| v.as_str()).map(str::to_string),
-            // THESE TWO ARE PARSED, unlike weight, because they are
-            // summed and compared rather than printed. PostgREST sends
-            // numeric as a JSON string, so as_f64 alone returns None on
-            // every one of them - the trap containers::as_f64 documents.
-            slots: num(r.get("slots")).unwrap_or(1.0),
-            capacity_slots: num(r.get("capacity_slots")),
-        });
+        types.push(kind_from_row(key, r));
     }
 
     Ok((objects, holders, types))
@@ -747,6 +766,47 @@ vec![
         o.name = Some("   ".into());
         assert_eq!(label(&o), "longsword");
     }
+    /* ---------- the catalogue row, as PostgREST sends it ---------- */
+
+    #[test]
+    fn a_numeric_weight_arrives_as_a_json_number() {
+        // THE BUG. Postgres serialises numeric to a JSON number, so
+        // as_str() returned None for every weight in the game and a
+        // character carrying fourteen items weighed nothing.
+        let row = serde_json::json!({
+            "key": "scale_mail", "size": "med",
+            "weight": 45, "slots": 1
+        });
+        let k = kind_from_row("scale_mail".into(), &row);
+        assert_eq!(k.weight.as_deref(), Some("45"));
+        assert_eq!(k.slots, 1.0);
+    }
+
+    #[test]
+    fn a_fractional_weight_survives() {
+        let row = serde_json::json!({ "key": "coin_gp", "weight": 0.02, "slots": 0.2 });
+        let k = kind_from_row("coin_gp".into(), &row);
+        assert_eq!(k.weight.as_deref(), Some("0.02"));
+        assert_eq!(k.slots, 0.2);
+    }
+
+    #[test]
+    fn a_weight_sent_as_a_string_still_works() {
+        // Defensive rather than expected: nothing should send this, but
+        // the repo held two contradictory beliefs about which arrives
+        // and only one of them was ever true.
+        let row = serde_json::json!({ "key": "dagger", "weight": "1" });
+        assert_eq!(kind_from_row("dagger".into(), &row).weight.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn a_missing_weight_is_none_not_zero() {
+        // None means the catalogue did not say. Zero would mean
+        // weightless, and a hoard of them would still weigh nothing.
+        let row = serde_json::json!({ "key": "the_ember" });
+        assert_eq!(kind_from_row("the_ember".into(), &row).weight, None);
+    }
+
     /* ---------- size and weight, 036 ---------- */
 
     #[test]

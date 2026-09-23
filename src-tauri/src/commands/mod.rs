@@ -56,6 +56,7 @@
 //!   inventory.rs         list the catalogue, give, drop, take,
 //!                        name and destroy an object                DONE
 //!   containers.rs        what is inside, put in, take out          DONE
+//!   store.rs             what it costs here, and buying it         DONE
 //!   locations.rs         build the world, and put things down in it DONE
 //!   initiative.rs        rolling for it, reading turn order        (item 1)
 //!   challenges.rs        whether the iron lock has been picked     (item 3)
@@ -79,6 +80,7 @@ pub mod dm;
 pub mod inventory;
 pub mod locations;
 pub mod session;
+pub mod store;
 
 /// Everything a command needs from the session, resolved once.
 ///

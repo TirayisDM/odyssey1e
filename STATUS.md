@@ -1413,6 +1413,74 @@ inventory screen and the wrong one ahead of a d20.
 Live, on Character1: 113 lb of 180, STR 12 - encumbered, past the 60
 that 5x buys.
 
+## Money and shops - BUILT (039, 040, currency.rs, store.rs)
+
+**COINS ARE ITEMS**, which 032 stumbled into by seeding a dummy:
+HOPPER's `is_coin()` is `has_content_tag("coin")`, so the placeholder
+was already the right shape and only needed rules written against it. A
+coin is carried, dropped, stolen, weighed and put in a purse like
+anything else, because it IS anything else.
+
+**The ladder is 5e's**: cp 1, sp 10, gp 100, pp 1,000. NO ELECTRUM, and
+there is a better reason than taste - `make_change` is greedy, and
+greedy change is only optimal when each denomination divides the next.
+1/10/100/1000 does; inserting 50 breaks it, and a till could then hold
+enough to make change and fail to find it. `cp_per` still knows electrum
+so a price written that way resolves, and no `coin_ep` row exists.
+
+**The algorithm is HOPPER's**, ported unchanged from
+odyssey-engine's `merchant.rs`: pay smallest-denomination-first (you
+spend coppers before breaking gold, which also leaves the purse able to
+afford the NEXT thing), change largest-first, overpayment recorded
+rather than the sale refused.
+
+HELD AND WORTH ARE DIFFERENT QUESTIONS, which live data surfaced: 18
+gold and 8 silver is 1880 copper, and `format_cp` renders that as "1 pp,
+8 gp, 8 sp" - right, and naming a coin nobody carries. Both exist.
+
+**A SHOP IS A CHARACTER**, and almost all of it already existed - the
+keeper is a characters row (022), the stock a container (032), the till
+coins (039), standing in a place (033), with `move_into` already
+transferring under a reach check. 040 adds two columns and one
+transaction.
+
+    markup       NULL MEANS NOT A MERCHANT. Nullable rather than
+                 defaulting to 1, or every goblin is a shop.
+    disposition  allied 0.80 .. hostile 1.25, sworn_enemy refuses.
+                 NULL reads as neutral.
+
+Prices are `base x condition x markup x disposition`, floored at a
+copper, and merchants pay **0.40** of what they charge - HOPPER's
+number, kept over 5e's informal half. CONDITION IS A PARAMETER NOTHING
+FEEDS: no column records wear, so every live caller passes 1.0. The
+seam is real and the subsystem is honestly absent, the same way
+`acquire.rs` takes `trapped` before traps exist.
+
+Haggling is **Persuasion against Insight**, the difference becoming the
+percentage, capped at 25 either way - without a cap a lucky roll halves
+a suit of plate, which is worse than losing. A tie moves nothing, the
+same rule every contest here uses.
+
+**THE PURCHASE IS A POSTGRES FUNCTION**, because buying is three moves -
+goods across, coins out, change back - and over REST that is three round
+trips with no transaction, where the gap between the first and second is
+a free item. 012 settled that shape for actions and this is the same
+claim about goods and money.
+
+`buy_object` TRUSTS ITS CALLER ABOUT THE PRICE. store.rs holds those
+rules and duplicating them in SQL would be the two-places problem this
+repo keeps meeting - which is safe while the DM runs the table and is
+NOT safe the day a player client calls it directly. The function's own
+comment carries that warning.
+
+Verified live and rolled back: Halla the Outfitter, markup 1.0 and warm,
+sold Character1 a longsword. Buyer 18 gold and 8 silver became 3 and 15;
+the keeper took 15 gold and gave 7 silver from a till of 40. Both sides
+balance to the copper and the sword changed hands.
+
+Buy works. SELL DOES NOT EXIST YET - the price is quoted (`shop_pays`)
+and nothing acts on it.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

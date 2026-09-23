@@ -36,6 +36,7 @@ mod narrative;
 mod objects;
 mod pin;
 mod resolution;
+mod store;
 mod supabase;
 mod vitality;
 
@@ -1082,6 +1083,9 @@ pub fn run() {
             commands::inventory::set_item_attuned,
             commands::inventory::encumbrance,
             commands::inventory::wallet,
+            commands::store::quote_object,
+            commands::store::haggle_margin,
+            commands::store::buy,
             commands::inventory::give_item,
             commands::inventory::drop_object,
             commands::inventory::take_object,

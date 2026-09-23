@@ -236,19 +236,22 @@ pub fn take_from_container(
 
 /// Move an object to a holder, merging into a stack already there.
 ///
+/// Move a thing, or some of it, into a holder.
+///
 /// The merge is the whole reason this is shared: ten gold into a purse
 /// holding five is fifteen in one row, not a second row the stack index
 /// would refuse anyway.
-/// Move a thing, or some of it, into a holder.
 ///
 /// FOUR OUTCOMES, from two independent questions. Does all of it go, or
 /// only part? And is there already a stack at the destination for it to
 /// join?
 ///
-///                      nothing to join          a stack to join
-///   all of it          the row changes hands    merge, and the row goes
-///   part of it         the source keeps the     merge, and the source
-///                      rest, a new row travels  keeps the rest
+/// ```text
+///                    nothing to join          a stack to join
+/// all of it          the row changes hands    merge, and the row goes
+/// part of it         the source keeps the     merge, and the source
+///                    rest, a new row travels  keeps the rest
+/// ```
 ///
 /// `quantity` of None means all of it, which is what moving a thing
 /// means. `objects::split` refuses zero and refuses more than there is,

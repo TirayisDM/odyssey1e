@@ -1657,9 +1657,11 @@ async function loadChars() {
 // and left nothing that could write them, so every merchant existed
 // only inside a rolled-back probe. This is that door.
 //
-// NPCs ONLY, not because a player character cannot run a shop - nothing
-// stops it - but because every PC row carrying a price control is
-// clutter for a case nobody has yet. Move it when somebody does.
+// ON EVERY ROW. This was NPC-only for one commit, on the reasoning
+// that a player character running a shop was a case nobody had. The
+// first thing that happened was a character called Merchant 1, made
+// through "Create character" - which is the obvious way to make a
+// person, and a shopkeeper is a person. The guess cost one screenshot.
 //
 // A BLANK MARKUP IS THE OFF SWITCH, matching 040's nullable column:
 // "not a merchant" is the absence of a price, not a price of zero.
@@ -1760,22 +1762,21 @@ function paintFolk(listSel, countSel, folk) {
     });
     li.append(open);
 
-    // A shop is worth seeing at a glance, and worth setting where you
-    // are already looking at who exists.
-    if (c.is_npc) {
-      if (c.markup !== null && c.markup !== undefined) {
-        const tag = document.createElement("span");
-        tag.className = "tag shop-tag";
-        tag.textContent = "shop " + c.markup + "x";
-        li.append(tag);
-      }
-      const wrap = document.createElement("div");
-      wrap.className = "folk-row";
-      wrap.append(li, shopControl(c, loadChars));
-      ul.append(wrap);
-      continue;
+    // EVERY row, not just monsters. This was NPC-only for one commit on
+    // the reasoning that a player character running a shop was a case
+    // nobody had - and the first thing anybody did was make a character
+    // called Merchant 1. A shopkeeper is a person before they are a
+    // monster, and "Create character" is the obvious way to make one.
+    if (c.markup !== null && c.markup !== undefined) {
+      const tag = document.createElement("span");
+      tag.className = "tag shop-tag";
+      tag.textContent = "shop " + c.markup + "x";
+      li.append(tag);
     }
-    ul.append(li);
+    const wrap = document.createElement("div");
+    wrap.className = "folk-row";
+    wrap.append(li, shopControl(c, loadChars));
+    ul.append(wrap);
   }
 }
 

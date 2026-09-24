@@ -1544,7 +1544,7 @@ set.
   peer hides haggling and says list price both ways, and Give sends
   `free: true`.
 
-**SETTING UP A SHOP** is the Characters tab, NPCs, the row itself: a
+**SETTING UP A SHOP** is the Characters tab, on any row - PC or NPC: a
 markup box and a disposition list under each name. 040 added those two
 columns to serve `store::quote` and left no door, so every merchant
 existed only inside a rolled-back probe - the same gap attunement had.

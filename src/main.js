@@ -1711,9 +1711,14 @@ function shopControl(c, onDone) {
         disposition: disp.value || null,
       });
       if (!r.ok) { dmSay(r.error, true); return; }
+      const m = Number(markup.value);
       dmSay(markup.value === ""
         ? (c.name + " is no longer a merchant")
         : (c.name + " sells at " + markup.value + "x" +
+           // A markup under 1 is a DISCOUNT on list, which is legal and
+           // is usually a slip for 1.0. Said out loud rather than
+           // refused: a charitable shop is a real thing.
+           (m < 1 ? " — " + Math.round((1 - m) * 100) + "% BELOW list" : "") +
            (disp.value ? " · " + disp.value : "")));
       await onDone();
     } finally { busy = false; save.disabled = false; }

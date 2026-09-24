@@ -275,5 +275,9 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
       padding-left:.5rem;border-left:2px solid var(--line)}
 .shop select{width:auto;flex:1;margin:0;padding:.14rem .3rem;font-size:11px;max-width:11rem}
 .shop input[type=number]{width:4.2rem;flex:none;margin:0;padding:.14rem .3rem;font-size:11px}
-.shop button{margin:0}
+.shop button{margin:0;flex:none}
+/* flex:none because `.row button{flex:1}` catches anything using the
+   row class - the same trap `input{width:100%}` set for the item rows.
+   A blanket rule on an element inside a layout class will find every
+   component added later. */
 .shop-tag{color:var(--accent);border-color:var(--accent)}

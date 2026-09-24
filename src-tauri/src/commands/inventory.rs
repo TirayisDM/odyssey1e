@@ -549,6 +549,40 @@ pub fn destroy_object(state: State<AppState>, object_id: String) -> Result<(), S
     supabase::rest_delete(&token, "objects", &[("id", &format!("eq.{}", object_id))])
 }
 
+/// Say outright whether the holder is proficient with THIS object, or
+/// stop saying and let the rule decide.
+///
+/// THE TRI-STATE, REACHABLE AT LAST. `objects.proficient_override` has
+/// been read by `is_proficient` since 008 and written by exactly one
+/// thing: `instantiate_npc`, which stamps TRUE on every item in a
+/// statblock's kit. So a DM could give a goblin a weapon it was
+/// mysteriously proficient with and had no way to say otherwise.
+///
+/// NULL IS NOT FALSE and that is the whole reason this takes an Option.
+/// `None` clears the override and hands the question back to
+/// `weapon_profs` - which is a different answer from `Some(false)`, and
+/// the difference is whether the character being trained later changes
+/// anything. Treating them as one would make "not proficient today"
+/// mean "never proficient", silently, forever.
+///
+/// The escape hatch rather than the main road. Training belongs on the
+/// character - see `set_proficiencies` - and this is for the single
+/// weapon that does not follow from it.
+#[tauri::command]
+pub fn set_object_proficient(
+    state: State<AppState>,
+    object_id: String,
+    proficient: Option<bool>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "proficient_override": proficient }),
+    )
+}
+
 /// Change what a thing is called and how many of it there are.
 ///
 /// ONE COMMAND FOR BOTH because they constrain each other. `may_name`

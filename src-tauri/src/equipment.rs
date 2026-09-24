@@ -196,6 +196,32 @@ pub fn modes(item: &Item) -> Vec<Mode> {
     out
 }
 
+/// The tokens in a weapon-proficiency list that grant nothing.
+///
+/// `parse_weapon_profs` accepts any word it does not recognise as a
+/// near-miss, because 008's column comment says a bare baseItem is a
+/// legitimate entry: `mace` grants that one weapon the way `sim` grants
+/// a class. That is deliberate and it leaves a hole - a typo is also a
+/// word it does not recognise, so `light_hammer` parses cleanly, grants
+/// nothing, and the character is quietly not proficient.
+///
+/// The same silent wrong answer `check_item_keys` exists to catch for
+/// techniques, and the same fix: compare against what the catalogue
+/// actually has. The base items are spelled without separators -
+/// `lighthammer`, `handcrossbow` - which is exactly the shape somebody
+/// gets wrong.
+///
+/// `sim` and `mar` are always legal and are never reported; they are
+/// classes rather than grants and belong to no item.
+pub fn unknown_grants(profs: &[String], known_base_items: &[String]) -> Vec<String> {
+    profs
+        .iter()
+        .filter(|p| p.as_str() != "sim" && p.as_str() != "mar")
+        .filter(|p| !known_base_items.iter().any(|b| b == *p))
+        .cloned()
+        .collect()
+}
+
 /// Is the holder proficient with this item?
 ///
 /// AN EXPLICIT ANSWER WINS. `proficient_override` is tri-state and the
@@ -1514,4 +1540,78 @@ mod tests {
         // Anything unrecognised computes rather than inventing a number.
         assert_eq!(AcMode::parse("natural"), AcMode::Default);
     }
+    /* ---------- bare grants that grant nothing ---------- */
+
+    fn catalogue_bases() -> Vec<String> {
+        ["lighthammer", "mace", "rapier", "handcrossbow", "longsword"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn profs(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    // THE CLASSES ARE ALWAYS LEGAL. They belong to no item, so looking
+    // for them in the catalogue would report both of them as unknown.
+    #[test]
+    fn a_class_is_never_an_unknown_grant() {
+        assert!(unknown_grants(&profs(&["sim", "mar"]), &catalogue_bases()).is_empty());
+        // Even against an empty catalogue.
+        assert!(unknown_grants(&profs(&["sim"]), &[]).is_empty());
+    }
+
+    #[test]
+    fn a_real_base_item_passes() {
+        assert!(unknown_grants(&profs(&["mar", "lighthammer"]), &catalogue_bases()).is_empty());
+    }
+
+    // THE CASE THIS EXISTS FOR. 008 spells base items without
+    // separators, so the natural way to type one is the wrong way - and
+    // parse_weapon_profs cannot tell it from a legitimate grant.
+    #[test]
+    fn the_separator_typo_is_caught() {
+        let bad = unknown_grants(&profs(&["sim", "light_hammer"]), &catalogue_bases());
+        assert_eq!(bad, vec!["light_hammer".to_string()]);
+    }
+
+    #[test]
+    fn several_are_all_reported_not_just_the_first() {
+        let bad = unknown_grants(
+            &profs(&["sim", "raper", "greatsward", "mace"]),
+            &catalogue_bases(),
+        );
+        assert_eq!(bad, vec!["raper".to_string(), "greatsward".to_string()]);
+    }
+
+    #[test]
+    fn nothing_trained_reports_nothing_wrong() {
+        assert!(unknown_grants(&[], &catalogue_bases()).is_empty());
+    }
+
+    // CASING IS NOT THIS FUNCTION'S PROBLEM, and saying so keeps the
+    // pair honest: parse_weapon_profs lowercases on the way in, so
+    // "LightHammer" is already "lighthammer" before it arrives here.
+    // Asserting that capitals are caught would describe a pipeline that
+    // does not exist.
+    #[test]
+    fn the_parser_has_already_folded_the_case() {
+        let parsed = parse_weapon_profs("Sim, LightHammer").unwrap();
+        assert_eq!(parsed, vec!["sim".to_string(), "lighthammer".to_string()]);
+        assert!(unknown_grants(&parsed, &catalogue_bases()).is_empty());
+    }
+
+    // The pair this is really protecting: one grants a weapon and one
+    // grants nothing, and they read almost identically.
+    #[test]
+    fn the_two_spellings_get_opposite_answers() {
+        let good = parse_weapon_profs("lighthammer").unwrap();
+        let bad = parse_weapon_profs("light hammer").unwrap();
+        assert!(unknown_grants(&good, &catalogue_bases()).is_empty());
+        // "light hammer" splits on the SPACE into two words, neither of
+        // which is a weapon - so it is caught twice over.
+        assert_eq!(unknown_grants(&bad, &catalogue_bases()).len(), 2);
+    }
+
 }

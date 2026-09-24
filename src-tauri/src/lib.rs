@@ -300,6 +300,83 @@ fn set_level(state: State<AppState>, character_id: String, level: i64) -> Result
 
 /// Upsert one ability. The row always exists — the database seeds six on
 /// character creation — so this is an update, not an insert.
+/// What this character is TRAINED with.
+///
+/// THE COLUMN HAS BEEN READ SINCE 008 AND WRITTEN BY NOTHING. A
+/// statblock gets its proficiencies at authoring, and `instantiate_npc`
+/// copies them onto the goblin it makes - but a player character has
+/// only ever had whatever 006 seeded, and three characters in this game
+/// are carrying weapons with an EMPTY list. Every one of them reads as
+/// not proficient, which is a wrong to-hit with nothing on screen to
+/// explain it.
+///
+/// Two vocabularies, both 008's, both parsed by the same functions the
+/// statblock form uses:
+///
+///   weapons  `sim` and `mar` for whole classes, or a bare base item
+///            like `rapier` granting that one weapon
+///   armour   `lgt` `med` `hvy` `shl`, and nothing else
+///
+/// A BARE GRANT IS CHECKED AGAINST THE CATALOGUE. `parse_weapon_profs`
+/// cannot tell a base item from a typo - both are just words it does
+/// not recognise - so the check happens here, where the catalogue is
+/// reachable. Without it `light_hammer` saves cleanly, grants nothing,
+/// and looks exactly like `lighthammer`, which grants a weapon.
+///
+/// WHO MAY DO IT is 001's "characters: owner or dm updates", unchanged
+/// and not restated. A player may train their own character and the DM
+/// may train anybody's, which is the right answer for a thing that
+/// happens at level-up.
+#[tauri::command]
+fn set_proficiencies(
+    state: State<AppState>,
+    character_id: String,
+    weapon_profs: String,
+    armor_profs: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let weapons = equipment::parse_weapon_profs(&weapon_profs)?;
+    let armour = equipment::parse_armor_profs(&armor_profs)?;
+
+    if !weapons.is_empty() {
+        let profile = character::load_profile(&token, &character_id)?;
+        let rows = supabase::rest_get(
+            &token,
+            "items",
+            &[
+                ("select", "base_item"),
+                ("kind", "eq.weapon"),
+                ("base_item", "not.is.null"),
+                ("or", &format!("(game_id.is.null,game_id.eq.{})", profile.game_id)),
+            ],
+        )?;
+        let known: Vec<String> = rows
+            .as_array()
+            .map(|a| a.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|r| r.get("base_item").and_then(|v| v.as_str()))
+            .map(str::to_string)
+            .collect();
+
+        let unknown = equipment::unknown_grants(&weapons, &known);
+        if !unknown.is_empty() {
+            return Err(format!(
+                "{} {} no weapon in this game - use sim, mar, or a base item spelled as the catalogue spells it, like lighthammer",
+                unknown.join(" and "),
+                if unknown.len() == 1 { "matches" } else { "match" }
+            ));
+        }
+    }
+
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "weapon_profs": weapons, "armor_profs": armour }),
+    )
+}
+
 #[tauri::command]
 fn set_ability(
     state: State<AppState>,
@@ -1091,6 +1168,7 @@ pub fn run() {
             commands::inventory::drop_object,
             commands::inventory::take_object,
             commands::inventory::rename_object,
+            commands::inventory::set_object_proficient,
             commands::inventory::edit_object,
             commands::inventory::clone_object,
             commands::inventory::destroy_object,
@@ -1132,6 +1210,7 @@ pub fn run() {
             death_save,
             get_sheet,
             set_level,
+            set_proficiencies,
             set_ability,
             set_skill_prof,
             list_inventory,

@@ -136,6 +136,10 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .gauge-fill.over{background:var(--bad)}
 .gauge-text{font-size:10px;color:var(--muted);white-space:nowrap}
 .tag.warn{color:#e0b341;border-color:#e0b341}
+/* Trained with nothing. Not an error - a character can legitimately be
+   untrained - but it explains every short to-hit on the sheet, so it
+   should not read as ordinary grey text. */
+.trained .warn{color:#e0b341}
 .editor .row,.mover .row{margin-bottom:.35rem}
 /* "how many of 18" - a label and a small box, not two stretched halves
    the way .row treats its children by default. */

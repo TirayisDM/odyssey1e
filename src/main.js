@@ -610,9 +610,23 @@ async function loadInventory() {
   list.innerHTML = "";
 
   const sheet = state.sheet || {};
-  document.querySelector("#equip-profs").textContent =
-    "trained: weapons " + ((sheet.weapon_profs || []).join(", ") || "none") +
-    " · armor " + ((sheet.armor_profs || []).join(", ") || "none");
+  // NONE IS WORTH SAYING LOUDLY. A character trained with nothing is
+  // not proficient with anything they pick up, and every attack comes
+  // back short by the proficiency bonus with no explanation on screen.
+  // Three characters in this game were in that state.
+  const weapons = sheet.weapon_profs || [];
+  const armour = sheet.armor_profs || [];
+  const text = document.querySelector("#profs-text");
+  text.textContent =
+    "trained: weapons " + (weapons.join(", ") || "none") +
+    " \u00b7 armor " + (armour.join(", ") || "none");
+  text.classList.toggle("warn", !weapons.length && !armour.length);
+
+  // The boxes hold what is there, so editing is a correction rather
+  // than a retype.
+  document.querySelector("#prof-weapons").value = weapons.join(" ");
+  document.querySelector("#prof-armour").value = armour.join(" ");
+  profSay("");
 
   if (sheet.game_id) await fillCatalogue(document.querySelector("#add-what"), sheet.game_id);
 
@@ -998,8 +1012,32 @@ function inventoryRow(it) {
     // not derive anything; the tri-state column is the whole reason
     // those two cases must not look alike.
     const why = it.proficient_override === null ? "derived" : "flagged";
-    tags.append(chip((it.proficient ? "proficient" : "not proficient") + " · " + why,
+    tags.append(chip((it.proficient ? "proficient" : "not proficient") + " \u00b7 " + why,
                      it.proficient ? "yes" : "no"));
+
+    // THE ESCAPE HATCH, cycling through all THREE states rather than
+    // toggling two. instantiate_npc stamps TRUE on every item in a
+    // statblock's kit, so without a way back to "derive" a goblin's
+    // weapon is proficient for ever - and "derive" is not the same
+    // answer as "no", because training the character later changes one
+    // and not the other.
+    const next =
+      it.proficient_override === null ? true : it.proficient_override ? false : null;
+    const word = next === null ? "derive" : next ? "yes" : "no";
+    const cycle = document.createElement("button");
+    cycle.className = "tiny ghost";
+    cycle.textContent = "set " + word;
+    cycle.title = "override this one item, or hand the question back to the rule";
+    cycle.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const r = await tryCall("set_object_proficient", {
+        objectId: it.id,
+        proficient: next,
+      });
+      if (!r.ok) return profSay(r.error, true);
+      await loadInventory();
+    });
+    tags.append(cycle);
   }
 
   if (it.attuned) tags.append(chip("attuned", "att"));
@@ -2048,6 +2086,13 @@ function moved(o, n) {
   const all = n == null || n >= o.quantity;
   if (all && o.quantity === 1) return what;
   return (all ? o.quantity : n) + " " + what;
+}
+
+function profSay(text, isError) {
+  const el = document.querySelector("#profs-msg");
+  el.textContent = text || "";
+  el.className = "dm-msg" + (isError ? " err" : "");
+  el.hidden = !text;
 }
 
 function panel(cls) {
@@ -3596,6 +3641,30 @@ window.addEventListener("DOMContentLoaded", async () => {
     // the scene reads it, so both halves have to come back.
     await loadDM();
     await selectEncounter(state.dmEncounterId);
+  });
+
+  document.querySelector("#edit-profs").addEventListener("click", () => {
+    const row = document.querySelector("#profs-edit");
+    row.hidden = !row.hidden;
+  });
+
+  guarded("#save-profs", async () => {
+    if (!state.characterId) return profSay("pick a character first", true);
+    // BOTH FIELDS ALWAYS, because this REPLACES the lists rather than
+    // adding to them - and an empty box is a legitimate answer meaning
+    // "trained with none of it".
+    const r = await tryCall("set_proficiencies", {
+      characterId: state.characterId,
+      weaponProfs: val("#prof-weapons"),
+      armorProfs: val("#prof-armour"),
+    });
+    if (!r.ok) return profSay(r.error, true);
+    profSay("trained");
+    // The SHEET carries the lists and the inventory reads proficiency
+    // off them, so both have to come back or the chips still say what
+    // was true a moment ago.
+    await loadSheet();
+    await loadInventory();
   });
 
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {

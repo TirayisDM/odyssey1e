@@ -109,7 +109,21 @@
 
       <section id="equipment-panel" hidden>
         <h2>Equipment <button id="check-keys" class="tiny ghost">check keys</button></h2>
-        <div id="equip-profs" class="muted trained"></div>
+        <!-- TRAINED WITH WHAT. Read since 008 and written by nothing
+             until now: a statblock got its proficiencies at authoring
+             and a player character got whatever 006 seeded, so a
+             character with an empty list read as not proficient with
+             everything and had no way to say otherwise. -->
+        <div id="equip-profs" class="muted trained">
+          <span id="profs-text"></span>
+          <button id="edit-profs" class="tiny ghost">edit</button>
+        </div>
+        <div class="row" id="profs-edit" hidden>
+          <input id="prof-weapons" placeholder="weapons: sim, mar, or a base item like rapier" />
+          <input id="prof-armour" placeholder="armour: lgt med hvy shl" class="narrow" />
+          <button id="save-profs" class="ghost">Save</button>
+        </div>
+        <div id="profs-msg" class="dm-msg" hidden></div>
         <div id="burden" class="muted trained burden"></div>
         <div id="purse" class="muted trained"></div>
         <!-- The designed way to acquire something. Until 026 there was

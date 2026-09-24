@@ -814,6 +814,57 @@ fn load_ability(token: &str, character_id: &str, code: &str) -> Result<i64, Stri
         .unwrap_or(10))
 }
 
+
+/// Make somebody a shopkeeper, or stop them being one.
+///
+/// THE COLUMNS EXISTED AND NOTHING COULD WRITE THEM. 040 added `markup`
+/// and `disposition` to serve `store::quote`, and left no door - so
+/// every merchant in this codebase existed only inside a rolled-back
+/// probe. This is the same gap attunement had: a fact the schema could
+/// hold, the rules could read, and no command could set.
+///
+/// A NULL MARKUP IS THE OFF SWITCH, which is why it is an Option rather
+/// than a number with a sentinel. 040 made the column nullable so that
+/// "not a merchant" is the absence of a price rather than a price of
+/// zero - and clearing it here has to mean the same thing, or the two
+/// halves disagree.
+///
+/// DM ONLY, and not because this says so. `characters` carries an
+/// owner-or-DM policy from 001, and deciding what a shop charges is
+/// world-building rather than play.
+#[tauri::command]
+pub fn set_merchant(
+    state: State<AppState>,
+    character_id: String,
+    markup: Option<f64>,
+    disposition: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let markup = match markup {
+        None => Value::Null,
+        Some(m) if m > 0.0 => json!(m),
+        // Zero would make everything free and negative would pay people
+        // to take stock away. Both are almost certainly a slip.
+        Some(_) => return Err("a markup has to be greater than zero - 1.0 is list price".to_string()),
+    };
+
+    // Strict, unlike the read path: a typo here would silently become
+    // neutral and leave a DM wondering why the discount never applied.
+    let disposition = match disposition.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => Value::Null,
+        Some(d) => json!(crate::store::Disposition::parse_strict(d)?.as_str()),
+    };
+
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "markup": markup, "disposition": disposition }),
+    )
+    .map_err(|e| denied(e, "set who runs a shop"))
+}
+
 #[tauri::command]
 pub fn rename_actor(
     state: State<AppState>,

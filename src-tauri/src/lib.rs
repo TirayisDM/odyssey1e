@@ -1127,6 +1127,7 @@ pub fn run() {
             commands::dm::npc_attack,
             commands::dm::view_actor,
             commands::dm::rename_actor,
+            commands::dm::set_merchant,
             commands::dm::set_actor_level,
             death_save,
             get_sheet,

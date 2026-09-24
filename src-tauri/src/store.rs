@@ -88,6 +88,32 @@ impl Disposition {
         }
     }
 
+    /// The same words, but a typo is refused rather than quietly
+    /// becoming neutral.
+    ///
+    /// TWO PARSERS ON PURPOSE. `parse` is for READING the database,
+    /// where an unexpected value is somebody else's problem and neutral
+    /// is the safe reading. This is for WRITING, where "freindly"
+    /// silently becoming neutral would leave a DM wondering why their
+    /// discount never applied. 028 is what that looks like when it goes
+    /// unnoticed.
+    pub fn parse_strict(s: &str) -> Result<Disposition, String> {
+        match s.trim().to_lowercase().as_str() {
+            "allied" => Ok(Disposition::Allied),
+            "friendly" => Ok(Disposition::Friendly),
+            "warm" => Ok(Disposition::Warm),
+            "neutral" => Ok(Disposition::Neutral),
+            "unfriendly" => Ok(Disposition::Unfriendly),
+            "hostile" => Ok(Disposition::Hostile),
+            "sworn_enemy" => Ok(Disposition::SwornEnemy),
+            other => Err(format!(
+                "'{}' is not a disposition - use allied, friendly, warm, \
+                 neutral, unfriendly, hostile or sworn_enemy",
+                other
+            )),
+        }
+    }
+
     /// NULL in the database means neutral - a shopkeeper nobody has an
     /// opinion about is a shopkeeper who charges list.
     pub fn parse(s: Option<&str>) -> Disposition {
@@ -441,6 +467,19 @@ mod tests {
     fn giving_costs_the_receiver_nothing_and_the_giver_everything() {
         // Give is a trade where one side offers nothing back.
         assert_eq!(settle(0, 0).owed_cp, 0);
+    }
+
+    #[test]
+    fn writing_a_disposition_refuses_a_typo() {
+        // The difference between the two parsers. Reading tolerates;
+        // writing does not, because a silent neutral leaves a DM
+        // wondering why their discount never applied.
+        assert_eq!(Disposition::parse_strict("warm"), Ok(Disposition::Warm));
+        assert_eq!(Disposition::parse_strict("  HOSTILE "), Ok(Disposition::Hostile));
+        assert!(Disposition::parse_strict("freindly").is_err());
+        assert!(Disposition::parse_strict("").is_err());
+        // ...whereas reading the same typo gives neutral and moves on.
+        assert_eq!(Disposition::parse(Some("freindly")), Disposition::Neutral);
     }
 
     #[test]

@@ -364,7 +364,7 @@ pub fn who_is_where(state: State<AppState>, game_id: String) -> Result<Value, St
         &token,
         "characters",
         &[
-            ("select", "id,name,token_name,is_npc,dead,is_active,location_id,entity_id"),
+            ("select", "id,name,token_name,is_npc,dead,is_active,location_id,entity_id,markup,disposition"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "is_npc.asc,name.asc"),
         ],

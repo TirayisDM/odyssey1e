@@ -1544,6 +1544,24 @@ set.
   peer hides haggling and says list price both ways, and Give sends
   `free: true`.
 
+**SETTING UP A SHOP** is the Characters tab, NPCs, the row itself: a
+markup box and a disposition list under each name. 040 added those two
+columns to serve `store::quote` and left no door, so every merchant
+existed only inside a rolled-back probe - the same gap attunement had.
+`set_merchant` is that door. A BLANK MARKUP IS THE OFF SWITCH, matching
+040's nullable column: not a merchant is the absence of a price rather
+than a price of zero.
+
+Two parsers for disposition, on purpose. `parse` is for READING, where
+an unexpected value is somebody else's problem and neutral is the safe
+reading; `parse_strict` is for WRITING, where "freindly" silently
+becoming neutral would leave a DM wondering why the discount never
+applied.
+
+Stocking one needs no new path: open sheet on the NPC makes them the
+selected character, and the equipment panel's Add fills their shelves
+and their till.
+
 **CONSENT IS NOT MODELLED.** Both sides' rows move on one party's call,
 because the DM runs the table and RLS already stops a player touching
 what is not theirs. A player-to-player trade mediated by neither needs

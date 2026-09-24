@@ -266,3 +266,14 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .balance.gain{color:var(--ok);border-color:var(--ok)}
 .balance.even{color:var(--accent);border-color:var(--accent)}
 .balance.err{color:var(--bad)}
+
+/* A shopkeeper's terms, under the row that names them. The control sits
+   with WHO somebody is rather than on a separate screen, because a
+   markup is a fact about the person the way a location is. */
+.folk-row{margin-bottom:.35rem}
+.shop{display:flex;align-items:center;gap:.3rem;margin:.15rem 0 .1rem .6rem;
+      padding-left:.5rem;border-left:2px solid var(--line)}
+.shop select{width:auto;flex:1;margin:0;padding:.14rem .3rem;font-size:11px;max-width:11rem}
+.shop input[type=number]{width:4.2rem;flex:none;margin:0;padding:.14rem .3rem;font-size:11px}
+.shop button{margin:0}
+.shop-tag{color:var(--accent);border-color:var(--accent)}

@@ -1650,6 +1650,77 @@ async function loadChars() {
   }
 }
 
+
+// SHOPKEEPING, on the row where you'd look for it.
+//
+// 040 gave characters a markup and a disposition to serve store::quote
+// and left nothing that could write them, so every merchant existed
+// only inside a rolled-back probe. This is that door.
+//
+// NPCs ONLY, not because a player character cannot run a shop - nothing
+// stops it - but because every PC row carrying a price control is
+// clutter for a case nobody has yet. Move it when somebody does.
+//
+// A BLANK MARKUP IS THE OFF SWITCH, matching 040's nullable column:
+// "not a merchant" is the absence of a price, not a price of zero.
+function shopControl(c, onDone) {
+  const wrap = document.createElement("div");
+  wrap.className = "row shop";
+
+  const markup = document.createElement("input");
+  markup.type = "number";
+  markup.step = "0.05";
+  markup.min = "0";
+  markup.className = "narrow";
+  markup.placeholder = "markup";
+  markup.title = "1.0 is list price · blank means not a merchant";
+  if (c.markup !== null && c.markup !== undefined) markup.value = c.markup;
+
+  const disp = document.createElement("select");
+  for (const [v, label] of [
+    ["", "— neutral —"],
+    ["allied", "allied · 0.80"],
+    ["friendly", "friendly · 0.90"],
+    ["warm", "warm · 0.95"],
+    ["neutral", "neutral · 1.00"],
+    ["unfriendly", "unfriendly · 1.10"],
+    ["hostile", "hostile · 1.25"],
+    ["sworn_enemy", "sworn enemy · refuses"],
+  ]) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = label;
+    disp.append(o);
+  }
+  if (c.disposition) disp.value = c.disposition;
+
+  const save = document.createElement("button");
+  save.className = "tiny ghost";
+  save.textContent = "shop";
+  let busy = false;
+  save.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true; save.disabled = true;
+    try {
+      dmSay("");
+      const r = await tryCall("set_merchant", {
+        characterId: c.id,
+        markup: markup.value === "" ? null : Number(markup.value),
+        disposition: disp.value || null,
+      });
+      if (!r.ok) { dmSay(r.error, true); return; }
+      dmSay(markup.value === ""
+        ? (c.name + " is no longer a merchant")
+        : (c.name + " sells at " + markup.value + "x" +
+           (disp.value ? " · " + disp.value : "")));
+      await onDone();
+    } finally { busy = false; save.disabled = false; }
+  });
+
+  wrap.append(markup, disp, save);
+  return wrap;
+}
+
 // One list painter for both sub-tabs. They differ by a filter, not by
 // shape, and two copies would drift the moment one gained a column.
 function paintFolk(listSel, countSel, folk) {
@@ -1688,6 +1759,22 @@ function paintFolk(listSel, countSel, folk) {
       showTab("play");
     });
     li.append(open);
+
+    // A shop is worth seeing at a glance, and worth setting where you
+    // are already looking at who exists.
+    if (c.is_npc) {
+      if (c.markup !== null && c.markup !== undefined) {
+        const tag = document.createElement("span");
+        tag.className = "tag shop-tag";
+        tag.textContent = "shop " + c.markup + "x";
+        li.append(tag);
+      }
+      const wrap = document.createElement("div");
+      wrap.className = "folk-row";
+      wrap.append(li, shopControl(c, loadChars));
+      ul.append(wrap);
+      continue;
+    }
     ul.append(li);
   }
 }

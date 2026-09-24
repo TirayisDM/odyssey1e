@@ -140,6 +140,13 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    untrained - but it explains every short to-hit on the sheet, so it
    should not read as ordinary grey text. */
 .trained .warn{color:#e0b341}
+/* The two proficiency boxes. `narrow` cropped the armour one below its
+   own placeholder, so the field that lists four codes could not show
+   what they were. Weapons gets the wider share because a list of base
+   items runs long; armour never exceeds "lgt med hvy shl". */
+#profs-edit #prof-weapons{flex:2}
+#profs-edit #prof-armour{flex:1.3}
+#profs-edit button{flex:0 0 auto}
 .editor .row,.mover .row{margin-bottom:.35rem}
 /* "how many of 18" - a label and a small box, not two stretched halves
    the way .row treats its children by default. */

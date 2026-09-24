@@ -1805,6 +1805,29 @@ function paintFolk(listSel, countSel, folk) {
     });
     li.append(open);
 
+    // WHICH LIST IT BELONGS IN, and it is a label rather than a rule -
+    // 022 is explicit about that. A merchant can be a shopkeeper the DM
+    // runs or somebody's character who keeps a shop, and nothing but
+    // this sorts them.
+    const move = document.createElement("button");
+    move.className = "tiny ghost";
+    move.textContent = c.is_npc ? "make a PC" : "make an NPC";
+    move.title = c.is_npc
+      ? "show in every player's character picker"
+      : "hide from every player's character picker";
+    move.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const r = await tryCall("set_is_npc", { characterId: c.id, isNpc: !c.is_npc });
+      if (!r.ok) return dmSay(r.error, true);
+      dmSay((c.token_name || c.name) + (c.is_npc ? " is a player character" : " is an NPC"));
+      // A character that just became an NPC leaves list_characters, so
+      // the strip picker has to be repainted or it keeps offering one
+      // that is no longer there.
+      await loadCharacters();
+      await loadChars();
+    });
+    li.append(move);
+
     // EVERY row, not just monsters. This was NPC-only for one commit on
     // the reasoning that a player character running a shop was a case
     // nobody had - and the first thing anybody did was make a character

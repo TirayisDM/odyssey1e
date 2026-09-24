@@ -377,6 +377,45 @@ fn set_proficiencies(
     )
 }
 
+/// Move a character between the two lists.
+///
+/// A LABEL, NOT A STRUCTURE - 022 said so when it added the column, and
+/// this is what follows from it. An NPC instance is a character in
+/// every mechanical respect; `is_npc` exists so a player's picker does
+/// not fill with goblins, and it changes no rule. Something that
+/// changes no rule should be flippable.
+///
+/// WRITTEN BY NOTHING UNTIL NOW. `instantiate_npc` sets it true and
+/// `create_character` leaves it false, so whichever list a character
+/// was born into was the one it stayed in. A merchant can be either - a
+/// shopkeeper the DM runs, or somebody's character who keeps a shop -
+/// and that is a decision about the campaign rather than about the row,
+/// so it has to be changeable after the fact.
+///
+/// The two consequences, both intended and neither a rule:
+///
+///   true   leaves `list_characters`, so it stops appearing in every
+///          player's character picker
+///   false  joins it, and the DM's NPC list loses it
+///
+/// WHO MAY DO IT is 001's "characters: owner or dm updates", unchanged.
+/// The screen that offers it is DM-gated, which is a courtesy rather
+/// than the guard.
+#[tauri::command]
+fn set_is_npc(
+    state: State<AppState>,
+    character_id: String,
+    is_npc: bool,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "is_npc": is_npc }),
+    )
+}
+
 #[tauri::command]
 fn set_ability(
     state: State<AppState>,
@@ -1211,6 +1250,7 @@ pub fn run() {
             get_sheet,
             set_level,
             set_proficiencies,
+            set_is_npc,
             set_ability,
             set_skill_prof,
             list_inventory,

@@ -1577,6 +1577,58 @@ runs the table; not safe the day a player client calls it directly.
 `buy_object`, and it is a trade with one column filled - a second path
 to the same place would be a second place to get it wrong.
 
+## The armoury - BUILT (042, 043)
+
+**57 WEAPONS, 190 TECHNIQUES.** 027 seeded the SRD tables, which are
+deliberately short - 5e collapses a century of European polearms into
+glaive, halberd and pike. 042 adds the twenty the SRD leaves out, all
+low tech and all historical: the AD&D polearm family (bardiche, voulge,
+guisarme, ranseur, bec de corbin, military fork, war scythe), four
+swords that answer four different armours (falchion, khopesh, gladius,
+estoc), and the rest.
+
+MECHANICALLY THEY ARE 5e WEAPONS. Same classes, same properties, same
+damage shapes - what makes them distinct is what they DO, which is
+techniques rather than numbers. 2d4 appears here and not in the SRD on
+purpose: it averages what 1d8 does and clusters harder, which is right
+for a weapon whose point is reliable leverage rather than a lucky edge.
+
+**043 gave every weapon at least three special attacks**, which was the
+floor asked for. Before it, three weapons had techniques and fifty-four
+had a damage die - so the item panel offered the Mace of the Deep Song
+ten buttons and everything else one.
+
+THREE TIERS, AND NOT THREE SIZES OF THE SAME HIT:
+
+    level 1   the signature move - what the weapon is FOR
+    level 3   a control effect - a save, a condition, a disarm
+    level 5   the decisive one - bigger dice, better crits, or a cost
+
+Built from what each weapon actually solved. A guisarme pulls riders
+off horses; a ranseur traps blades in its side prongs; an estoc goes
+through maille a falchion would only dent; a bec de corbin has a hammer
+on one side and a spike on the other because plate respects one and
+joints respect the other.
+
+**MODES WERE VALIDATED, NOT ASSUMED.** A technique naming a mode the
+engine never generates is not an error anywhere - it is simply never
+offered, which is the worst kind of bug to find. The generator checked
+every row against its weapon's own class before writing it, and the
+live count of unreachable modes came back 0, dangling item keys 0, and
+the fewest techniques on any armed weapon exactly 3.
+
+**THE NET HAS NONE**, the one deliberate gap. It deals no damage at
+all; its whole function is `spc`, meaning restrain, and there is no
+condition system to restrain anybody with. Three special attacks
+rolling damage for a weapon with no damage would be worse than the
+honest absence - the same call that kept the blowgun out of 027.
+
+**SPECIAL TEXT IS PROSE THE ENGINE DOES NOT READ.** Bleed, stun, armour
+reduction and forced movement are written for the table to adjudicate,
+exactly as 006's rows are. The dice, the crit range and the fumble
+range ARE mechanical and do fire. Nothing here pretends a condition
+system exists.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

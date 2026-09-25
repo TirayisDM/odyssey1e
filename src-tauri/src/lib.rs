@@ -1241,6 +1241,7 @@ pub fn run() {
             commands::dm::add_challenge,
             commands::dm::set_challenge_active,
             commands::dm::list_challenges,
+            commands::dm::encounter_objects,
             commands::dm::list_skill_keys,
             // A monster acts. Both go through the same `swing` a
             // character's attack does — see 019.

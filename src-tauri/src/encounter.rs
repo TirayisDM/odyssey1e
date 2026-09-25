@@ -46,7 +46,13 @@ pub struct Target {
     /// label and value as its own record, but keeps this so "has the
     /// lock been picked?" is answerable without trusting a snapshot.
     pub id: String,
-    /// `actor` or `challenge`. What the UI groups by.
+    /// `actor`, `object` or `challenge`. What the UI groups by.
+    ///
+    /// AN OBJECT IS A CHALLENGE THAT POINTS AT ONE. 052 chose that over
+    /// a third target kind: a door answers with a DC like any other
+    /// difficulty, and `resolution.rs` still makes exactly one
+    /// distinction. Only the grouping differs, which is what this field
+    /// is for.
     pub row: &'static str,
     /// `ac` or `dc`. What the roll needs, and the only distinction the
     /// resolver makes.
@@ -118,6 +124,38 @@ fn as_opt_str(v: &Value, key: &str) -> Option<String> {
 }
 
 /// Every active target in an encounter, actors and challenges together.
+/// What each of these objects is called, by id.
+///
+/// Its given name if it has one, otherwise the catalogue key - the same
+/// precedence `holders::label` uses, because a door called one thing on
+/// the target list and another in the Objects tab is a door nobody can
+/// find.
+fn load_object_names(
+    token: &str,
+    ids: &[String],
+) -> Result<HashMap<String, String>, String> {
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let rows = supabase::rest_get(
+        token,
+        "objects",
+        &[
+            ("select", "id,name,item_key"),
+            ("id", &format!("in.({})", ids.join(","))),
+        ],
+    )?;
+    for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+        let id = as_str(r, "id");
+        let name = as_opt_str(r, "name")
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| as_str(r, "item_key"));
+        out.insert(id, name);
+    }
+    Ok(out)
+}
+
 pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, String> {
     let encs = supabase::rest_get(
         token,
@@ -153,7 +191,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         token,
         "encounter_challenges",
         &[
-            ("select", "id,label,dc,skill_key"),
+            ("select", "id,label,dc,skill_key,object_id"),
             ("encounter_id", &format!("eq.{}", encounter_id)),
             ("active", "is.true"),
             ("order", "created_at.asc"),
@@ -252,17 +290,43 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
         }
     }
 
+    // The things any of these challenges are ABOUT, named in one read
+    // rather than one per door.
+    let thing_ids: Vec<String> = challenge_rows
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|r| as_opt_str(r, "object_id"))
+        .collect();
+    let things = load_object_names(token, &thing_ids)?;
+
     for r in challenge_rows.as_array().unwrap_or(&Vec::new()) {
         let skill = as_opt_str(r, "skill_key");
+        let about = as_opt_str(r, "object_id");
+        let thing = about.as_ref().and_then(|id| things.get(id));
         out.push(Target {
             id: as_str(r, "id"),
-            row: "challenge",
+            // GROUPED BY WHAT IT IS ABOUT, not by which table it came
+            // from. A door and a tripwire are both challenges and a
+            // player picking a target thinks of one as a thing in the
+            // room and the other as a feat of attention.
+            row: if thing.is_some() { "object" } else { "challenge" },
             target_kind: "dc",
-            label: as_str(r, "label"),
+            // The label carries the ACT - "force the door" - and the
+            // object carries the thing. Two challenges can point at one
+            // door, so the act is what distinguishes them and the thing
+            // is what they have in common.
+            label: match thing {
+                Some(name) => format!("{} — {}", as_str(r, "label"), name),
+                None => as_str(r, "label"),
+            },
             value: r.get("dc").and_then(|x| x.as_i64()).unwrap_or(10),
-            source: match skill {
-                Some(k) => format!("DM-set, suggests {}", k),
-                None => "DM-set".to_string(),
+            source: match (skill, thing) {
+                (Some(k), Some(_)) => format!("DM-set on a thing here, suggests {}", k),
+                (Some(k), None) => format!("DM-set, suggests {}", k),
+                (None, Some(_)) => "DM-set on a thing here".to_string(),
+                (None, None) => "DM-set".to_string(),
             },
             // A lock has no hit points and no character behind it.
             character_id: None,

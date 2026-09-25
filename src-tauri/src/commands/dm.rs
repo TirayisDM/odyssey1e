@@ -454,6 +454,7 @@ pub fn add_challenge(
     label: String,
     dc: i64,
     skill_key: Option<String>,
+    object_id: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     if label.trim().is_empty() {
@@ -471,6 +472,10 @@ pub fn add_challenge(
             "label": label.trim(),
             "dc": dc,
             "skill_key": name_or_null(skill_key),
+            // 052. The thing it is about, when it is about something
+            // real - which makes it group as an object on the target
+            // list rather than as a bare difficulty.
+            "object_id": name_or_null(object_id),
         }),
     )
     .map_err(|e| denied(e, "add a challenge"))
@@ -508,6 +513,66 @@ pub fn list_challenges(state: State<AppState>, encounter_id: String) -> Result<V
             ("select", "id,label,dc,skill_key,active,created_at"),
             ("encounter_id", &format!("eq.{}", encounter_id)),
             ("order", "created_at.asc"),
+        ],
+    )
+}
+
+/// The things lying where this fight is happening.
+///
+/// SO A DIFFICULTY CAN BE ABOUT ONE. 034 gave an encounter a location
+/// and 033 gave a location contents, and until 052 nothing joined them
+/// - the iron door was a challenge somebody typed the name of, while
+/// the actual door sat in `objects` invisible to the fight standing
+/// around it.
+///
+/// EMPTY IS ORDINARY AND NOT AN ERROR. An encounter with no location is
+/// allowed by 034, and a room can be bare. Either way the challenge
+/// form still works; the picker simply offers nothing.
+#[tauri::command]
+pub fn encounter_objects(state: State<AppState>, encounter_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let encs = supabase::rest_get(
+        &token,
+        "encounters",
+        &[
+            ("select", "id,location_id"),
+            ("id", &format!("eq.{}", encounter_id)),
+        ],
+    )?;
+    let Some(place) = encs
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|e| e.get("location_id"))
+        .and_then(|v| v.as_str())
+    else {
+        return Ok(json!([]));
+    };
+
+    // One step, not a search: what is ON THE FLOOR here. A chest in the
+    // room holds its own contents and forcing the chest is a challenge
+    // about the chest, not about what is inside it.
+    let rows = supabase::rest_get(
+        &token,
+        "locations",
+        &[("select", "entity_id"), ("id", &format!("eq.{}", place))],
+    )?;
+    let Some(entity) = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("entity_id"))
+        .and_then(|v| v.as_str())
+    else {
+        return Ok(json!([]));
+    };
+
+    supabase::rest_get(
+        &token,
+        "objects",
+        &[
+            ("select", "id,name,item_key,quantity"),
+            ("holder_id", &format!("eq.{}", entity)),
+            ("order", "item_key.asc"),
         ],
     )
 }

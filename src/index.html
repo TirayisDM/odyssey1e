@@ -199,22 +199,18 @@
                picker since 034 and nothing could move an encounter
                afterwards, which left every encounter made before that
                migration stranded nowhere with no way back. -->
-          <div class="sub">Where</div>
-          <div class="row">
-            <select id="enc-place"></select>
+          <div class="row cells">
+            <label class="cell wide"><span>where it happens</span>
+              <select id="enc-place"></select></label>
             <button id="set-enc-place" class="ghost">Move here</button>
           </div>
 
-          <div class="sub">Enrol</div>
-          <select id="enrol-what"></select>
-          <input id="enrol-name" placeholder="name (blank = auto, e.g. Goblin 0003)" />
-          <button id="enrol">Enrol</button>
           <!-- THE TURN. 011 created `initiative` and said nothing read
                it; 012 built actions as the turn-sized unit waiting for
                a turn to sit in; 015 left death saves on demand "until
                initiative arrives". 051 stores the round and whose turn
                it is - the order itself is derived. -->
-          <div class="sub">Turn order</div>
+          <div class="sub">Who is in this</div>
           <div class="row turnbar">
             <span id="turn-now" class="muted"></span>
             <button id="next-turn" class="ghost">Begin</button>
@@ -222,13 +218,38 @@
           </div>
           <ul id="roster" class="list"></ul>
 
-          <div class="sub">Challenge</div>
-          <div class="row">
-            <input id="chal-label" placeholder="the iron lock" />
-            <input id="chal-dc" type="number" min="1" placeholder="DC" class="narrow" />
+          <div class="row cells">
+            <label class="cell wide"><span>bring in</span>
+              <select id="enrol-what"></select></label>
+            <label class="cell wide"><span>called</span>
+              <input id="enrol-name" placeholder="blank = auto, e.g. Goblin 0003" /></label>
+            <button id="enrol" class="ghost">Enrol</button>
           </div>
-          <select id="chal-skill"></select>
-          <button id="add-challenge" class="ghost">Add challenge</button>
+
+          <!-- WHAT CAN BE AIMED AT, all three kinds together. A creature
+               answers with an AC, a difficulty with a DC, and since 052
+               so does a THING in the room - a challenge that points at
+               an object, rather than a third kind resolution.rs would
+               have to learn. -->
+          <div class="sub">What can be aimed at</div>
+          <ul id="targets" class="list"></ul>
+
+          <div class="sub">Add a difficulty</div>
+          <div class="row cells">
+            <label class="cell wide"><span>what you are doing</span>
+              <input id="chal-label" placeholder="force the door" /></label>
+            <label class="cell"><span>DC</span>
+              <input id="chal-dc" type="number" min="1" /></label>
+          </div>
+          <div class="row cells">
+            <label class="cell wide"><span>suggests the skill</span>
+              <select id="chal-skill"></select></label>
+            <!-- 052: the thing it is about, if it is about one. The
+                 list is what is lying where the fight is happening. -->
+            <label class="cell wide"><span>about this thing</span>
+              <select id="chal-object"></select></label>
+            <button id="add-challenge" class="ghost">Add</button>
+          </div>
           <ul id="challenges" class="list"></ul>
 
         </div>

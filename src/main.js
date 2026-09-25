@@ -2387,6 +2387,88 @@ function withSign(n) {
   return (n < 0 ? "" : "+") + n;
 }
 
+// Everything in this fight that a roll can be aimed at.
+//
+// THREE GROUPS, ONE RESOLVER. A creature answers with an AC, a
+// difficulty with a DC, and since 052 so does a THING in the room - a
+// challenge that points at an object rather than a third kind
+// resolution.rs would have to learn. Only the grouping differs, which
+// is what `row` is for.
+//
+// The DM already had all of this; it was spread across a roster that
+// showed names, a challenge list that showed difficulties, and nothing
+// at all for the objects. One list is what makes "who can hit what"
+// answerable at a glance.
+function paintTargets(encounterId) {
+  const ul = document.querySelector("#targets");
+  ul.innerHTML = "";
+  const all = state.dmTargets || [];
+  if (!all.length) {
+    ul.append(row("nothing to aim at yet", "", null));
+    return;
+  }
+
+  const groups = [
+    ["creatures", "actor"],
+    ["things here", "object"],
+    ["difficulties", "challenge"],
+  ];
+  for (const [title, row_kind] of groups) {
+    const mine = all.filter((t) => t.row === row_kind);
+    if (!mine.length) continue;
+
+    const head = document.createElement("li");
+    head.className = "flat group";
+    head.textContent = title;
+    ul.append(head);
+
+    for (const t of mine) {
+      const li = row(
+        t.label,
+        (t.target_kind === "ac" ? "AC " : "DC ") + t.value,
+        null
+      );
+      // WHERE THE NUMBER CAME FROM, which load_targets has always
+      // returned and nothing ever showed - "why is the goblin 15 and
+      // Rodnar 16" was a question you had to open the database for.
+      const why = document.createElement("span");
+      why.className = "tag";
+      why.textContent = t.source;
+      li.append(why);
+      if (t.condition && t.condition !== "conscious") {
+        const c = document.createElement("span");
+        c.className = "tag warn";
+        c.textContent = t.condition;
+        li.append(c);
+      }
+      ul.append(li);
+    }
+  }
+}
+
+// The things lying where the fight is happening, for the difficulty
+// form. Empty is ordinary: 034 lets an encounter have no location, and
+// a room can be bare.
+async function fillEncounterObjects(encounterId) {
+  const sel = document.querySelector("#chal-object");
+  if (!sel) return;
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "\u2014 nothing in particular \u2014";
+  sel.append(none);
+
+  const things = await call("encounter_objects", { encounterId });
+  for (const o of things || []) {
+    const opt = document.createElement("option");
+    opt.value = o.id;
+    opt.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
+    sel.append(opt);
+  }
+  sel.disabled = !(things || []).length;
+  if (!(things || []).length) none.textContent = "nothing lying here";
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -3081,6 +3163,8 @@ async function selectEncounter(id) {
   // than reusing the first is the same lesson dmEncounterId taught.
   const dmTargets = await call("list_targets", { encounterId: id });
   state.dmTargets = Array.isArray(dmTargets) ? dmTargets : [];
+  paintTargets(id);
+  fillEncounterObjects(id);
 
   const rl = document.querySelector("#roster");
   rl.innerHTML = "";
@@ -3107,6 +3191,31 @@ async function selectEncounter(id) {
         ? "not rolled"
         : a.initiative + (a.dex_mod ? " (dex " + withSign(a.dex_mod) + ")" : "");
     head.append(score);
+
+    // WHAT IT TAKES TO HIT IT, AND HOW IT IS DOING. Both were already
+    // loaded for the target list and the roster showed neither, so the
+    // DM had two places to look at one creature.
+    const t = (state.dmTargets || []).find((x) => x.id === a.id);
+    if (t) {
+      const ac = document.createElement("span");
+      ac.className = "tag";
+      ac.textContent = "AC " + t.value;
+      head.append(ac);
+      if (t.hp_max != null) {
+        const hp = document.createElement("span");
+        hp.className = "tag hp";
+        hp.textContent = t.hp_current + "/" + t.hp_max;
+        head.append(hp);
+      }
+      // conscious is the ordinary case and saying so on every row is
+      // noise; the other three are the ones a DM is watching for.
+      if (t.condition && t.condition !== "conscious") {
+        const c = document.createElement("span");
+        c.className = "tag warn";
+        c.textContent = t.condition;
+        head.append(c);
+      }
+    }
 
     // Roll for this one. A monster already rolled on enrolment, so in
     // practice this is the players' button and the DM's re-roll.
@@ -3914,6 +4023,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       label: val("#chal-label"),
       dc: Number(val("#chal-dc") || 0),
       skillKey: document.querySelector("#chal-skill").value || null,
+      // 052. Blank means the difficulty is about nothing in particular,
+      // which is most of them - "notice the tripwire" has no object.
+      objectId: document.querySelector("#chal-object").value || null,
     });
     if (!r.ok) dmSay(r.error, true);
     if (r.ok) {

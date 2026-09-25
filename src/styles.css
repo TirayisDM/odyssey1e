@@ -142,6 +142,11 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .item.acting{border-color:var(--accent);background:#141b26}
 .item.acting .nm{color:var(--accent);font-weight:700}
 .tag.init{font-variant-numeric:tabular-nums}
+/* A group heading inside a list. Not a .sub, because that is a heading
+   for a whole section and these divide one. */
+.list li.group{background:transparent;border:0;padding:.35rem .1rem .1rem;
+     font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.tag.hp{font-variant-numeric:tabular-nums}
 .turnbar{align-items:center;gap:.5rem;margin-bottom:.5rem}
 .turnbar #turn-now{flex:1;font-size:11px}
 .turnbar button{flex:0 0 auto}

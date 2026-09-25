@@ -1208,6 +1208,7 @@ pub fn run() {
             commands::inventory::take_object,
             commands::inventory::rename_object,
             commands::inventory::set_object_proficient,
+            commands::inventory::object_techniques,
             commands::inventory::edit_object,
             commands::inventory::clone_object,
             commands::inventory::destroy_object,

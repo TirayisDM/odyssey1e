@@ -42,6 +42,12 @@ pub struct Technique {
     pub dice: String,
     pub crit_min: i64,
     pub fumble_max: i64,
+    /// What the table adjudicates. 043 calls it "prose the engine does
+    /// not read", which was true of the engine and also of every
+    /// screen - a hundred and fifty-nine of these were written and
+    /// nothing rendered one. The engine still does not read it; the
+    /// viewer does.
+    pub special_text: Option<String>,
 }
 
 /// A resolved attack, with the evidence for every number in it.
@@ -291,7 +297,8 @@ pub fn load_techniques(
         &[
             (
                 "select",
-                "key,game_id,name,roll_name,item_key,mode,min_level,dice,crit_min,fumble_max",
+                "key,game_id,name,roll_name,item_key,mode,min_level,dice,crit_min,fumble_max,\
+                 special_text",
             ),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("item_key", &format!("in.({})", quoted_keys.join(","))),
@@ -320,6 +327,11 @@ pub fn load_techniques(
             dice: r.get("dice").and_then(|x| x.as_str()).unwrap_or("").to_string(),
             crit_min: r.get("crit_min").and_then(|x| x.as_i64()).unwrap_or(20),
             fumble_max: r.get("fumble_max").and_then(|x| x.as_i64()).unwrap_or(1),
+            special_text: r
+                .get("special_text")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string),
         };
         match out.iter().position(|e| e.key == key) {
             Some(i) if scoped => out[i] = t,
@@ -410,6 +422,8 @@ mod tests {
             dice: "1d8".into(),
             crit_min: 20,
             fumble_max: 2,
+            // Not what these fixtures are about.
+            special_text: None,
         }
     }
 
@@ -424,6 +438,7 @@ mod tests {
             dice: "1d14".into(),
             crit_min: 18,
             fumble_max: 1,
+            special_text: None,
         }
     }
 

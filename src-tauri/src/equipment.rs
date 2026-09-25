@@ -47,11 +47,14 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// Not called until the attack key lands in resolve_request and has
-    /// to match `techniques.mode`. Kept rather than deleted because it
-    /// is the one place the enum and the check constraint are written
-    /// down together, and the test below is what holds them equal.
-    #[allow(dead_code)]
+    /// The spelling `techniques.mode` uses, and the one place the enum
+    /// and that check constraint are written down together - the test
+    /// below is what holds them equal.
+    ///
+    /// Kept through a long stretch of having no caller, on the grounds
+    /// that it was the only thing tying the two vocabularies together.
+    /// `object_techniques` calls it now, to say which mode a technique
+    /// needs when the object can no longer reach it.
     pub fn as_str(self) -> &'static str {
         match self {
             Mode::Melee => "melee",

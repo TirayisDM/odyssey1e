@@ -140,6 +140,16 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    untrained - but it explains every short to-hit on the sheet, so it
    should not read as ordinary grey text. */
 .trained .warn{color:#e0b341}
+/* A technique this particular object can no longer reach. Dimmed rather
+   than hidden: 043's whole warning is that a move nobody is offered is
+   the worst kind of bug to find, so an edit that costs one should say
+   so. */
+.item.unreachable .nm{color:var(--muted)}
+.item.unreachable{opacity:.7}
+/* 043 wrote prose for a hundred and fifty-nine techniques and nothing
+   rendered a word of it. */
+.prose-line{color:var(--muted);font:italic 11px/1.5 Georgia,"Times New Roman",serif;
+            margin:.15rem 0 .1rem .2rem}
 /* The two proficiency boxes. `narrow` cropped the armour one below its
    own placeholder, so the field that lists four codes could not show
    what they were. Weapons gets the wider share because a list of base

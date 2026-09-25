@@ -2118,6 +2118,77 @@ function profSay(text, isError) {
   el.hidden = !text;
 }
 
+// The special attacks this weapon offers, and whether THIS one can
+// still reach them.
+//
+// THE TECHNIQUES BELONG TO THE TYPE AND THE MODES BELONG TO THE OBJECT.
+// 043 pinned every technique to a mode; equipment::modes derives an
+// object's modes from its properties; and 049 lets an object override
+// those. So a greatsword reforged without `thr` really loses its thrown
+// techniques, and object_techniques works that out with the same merge
+// the sheet and the manager use.
+//
+// UNREACHABLE ONES ARE SHOWN, NOT HIDDEN, which is 043's own argument
+// turned into a screen: "a technique written in an unreachable mode is
+// not an error anywhere - it is simply never offered, which is the
+// worst kind of bug to find." A DM who edits a weapon out of a mode
+// should see what it cost rather than watch three buttons quietly go.
+//
+// AND THE PROSE FINALLY APPEARS. 043 wrote special_text for a hundred
+// and fifty-nine techniques and called it "prose the engine does not
+// read" - true of the engine, and until now true of every screen too.
+async function fillMoves(el, o) {
+  const moves = await call("object_techniques", { objectId: o.id });
+  if (!moves || !moves.length) return;
+
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = "Special attacks";
+  el.append(sub);
+
+  const ul = document.createElement("ul");
+  ul.className = "list";
+  for (const m of moves) {
+    const t = m.technique;
+    const li = document.createElement("li");
+    li.className = "flat item" + (m.offered ? "" : " unreachable");
+
+    const head = document.createElement("div");
+    head.className = "head";
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = t.name;
+    head.append(nm);
+
+    for (const [text, cls] of [
+      [t.dice, "tag"],
+      ["level " + t.min_level, "tag"],
+      [m.needs, "tag"],
+      // Only when the house rule has moved them off 20 and 1, because
+      // "crit 20+, fumble 1-" on every row is noise.
+      [t.crit_min < 20 ? "crit " + t.crit_min + "+" : null, "tag"],
+      [t.fumble_max > 1 ? "fumble " + t.fumble_max + "-" : null, "tag"],
+      [m.offered ? null : "this one cannot: no " + m.needs, "tag warn"],
+    ]) {
+      if (!text) continue;
+      const g = document.createElement("span");
+      g.className = cls;
+      g.textContent = text;
+      head.append(g);
+    }
+    li.append(head);
+
+    if (t.special_text) {
+      const prose = document.createElement("div");
+      prose.className = "prose-line";
+      prose.textContent = t.special_text;
+      li.append(prose);
+    }
+    ul.append(li);
+  }
+  el.append(ul);
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -2228,6 +2299,11 @@ async function fillDetail(el, o) {
     line.append(k, gauge(o.used_slots || 0, o.capacity_slots));
     el.append(line);
   }
+
+  // WHAT IT CAN DO. Painted before the container block, which returns
+  // early - a weapon is never a container, and doing this first makes
+  // that irrelevant rather than lucky.
+  await fillMoves(el, o);
 
   // A CONTAINER IS A DOOR. What is inside is a live question rather
   // than a property of the row, so it is asked when the row is opened.

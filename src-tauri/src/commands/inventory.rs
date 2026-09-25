@@ -820,3 +820,85 @@ pub fn clone_object(
         }),
     )
 }
+
+/// What this object can DO: every special attack its type offers, and
+/// whether this particular one can still reach it.
+///
+/// THE TECHNIQUES BELONG TO THE TYPE AND THE MODES BELONG TO THE
+/// OBJECT, which is the whole reason this is a command rather than a
+/// query. 043 wrote three techniques for every weapon, each pinned to a
+/// `mode`; `equipment::modes` derives the modes a weapon has from its
+/// class and properties; and 049 lets an object override those
+/// properties. So a greatsword reforged without `thr` really loses its
+/// thrown techniques, and a viewer that listed the type's rows would
+/// promise moves this object cannot make.
+///
+/// The unreachable ones are SHOWN, not filtered. 043's header says why
+/// the opposite is dangerous: "a technique written in an unreachable
+/// mode is not an error anywhere - it is simply never offered, which is
+/// the worst kind of bug to find." A DM who edits a weapon out of a
+/// mode should see what it cost, not watch three buttons quietly
+/// disappear.
+///
+/// THE SAME MERGE BOTH OTHER SCREENS USE. `Overrides::apply` runs here
+/// before the modes are derived, exactly as it does in `load_loadout`
+/// and `holders::resolve` - three screens, one function, which is the
+/// point 049 made about the two that used to disagree.
+#[derive(serde::Serialize)]
+pub struct WeaponMove {
+    pub technique: crate::attack::Technique,
+    /// False when this object cannot be used in that technique's mode.
+    pub offered: bool,
+    /// Which mode it needs, for saying so on screen.
+    pub needs: String,
+}
+
+#[tauri::command]
+pub fn object_techniques(
+    state: State<AppState>,
+    object_id: String,
+) -> Result<Vec<WeaponMove>, String> {
+    let token = state.token()?;
+
+    // The whole row, because the override columns are what decide the
+    // modes and `load_object` carries only a few of them.
+    let rows = supabase::rest_get(
+        &token,
+        "objects",
+        &[
+            ("select", "*"),
+            ("id", &format!("eq.{}", object_id)),
+        ],
+    )?;
+    let row = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| "no such object, or it is not visible to you".to_string())?;
+
+    let game_id = row.get("game_id").and_then(|v| v.as_str()).unwrap_or("");
+    let item_key = row.get("item_key").and_then(|v| v.as_str()).unwrap_or("");
+
+    let Some(base) = equipment::load_item(&token, game_id, item_key)? else {
+        return Err(format!("no item with key '{}' in this game", item_key));
+    };
+    // AS THIS ONE ACTUALLY IS, not as the catalogue describes the type.
+    let item = objects::overrides_from_row(row).apply(&base);
+
+    // Nothing that is not a weapon has techniques, and saying so is
+    // cheaper than a query that returns nothing.
+    if item.kind != "weapon" {
+        return Ok(Vec::new());
+    }
+
+    let mine = equipment::modes(&item);
+    let techniques = crate::attack::load_techniques(&token, game_id, &[item_key.to_string()])?;
+
+    Ok(techniques
+        .into_iter()
+        .map(|t| WeaponMove {
+            offered: mine.contains(&t.mode),
+            needs: t.mode.as_str().to_string(),
+            technique: t,
+        })
+        .collect())
+}

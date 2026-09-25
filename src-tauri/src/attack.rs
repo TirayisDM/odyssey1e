@@ -53,6 +53,17 @@ pub struct Technique {
     /// rulebook's" look identical once merged and a DM editing one
     /// should know which they are about to change.
     pub scope: String,
+    /// WHOSE LIST THIS ENTRY IS IN - not where the definition came
+    /// from, which is `scope`. The two differ constantly: the rulebook's
+    /// Zwerchhau appears in a particular sword's list as scope "global"
+    /// and object_id that sword.
+    ///
+    /// Set for everything the SHEET loads, because a technique that is
+    /// not bound to an object cannot be told apart from the same
+    /// technique on a second weapon of the same type - which is the
+    /// collision that kept per-object moves out of the roll path until
+    /// now. None only for a type-level read.
+    pub object_id: Option<String>,
 }
 
 /// One row as it arrived, before the scopes are collapsed.
@@ -188,9 +199,18 @@ pub fn resolve(
         if t.min_level > level {
             return None;
         }
-        let owned = loadout
-            .iter()
-            .find(|o| o.item.key == t.item_key && o.modes.contains(&t.mode))?;
+        // BOUND TO ONE OBJECT WHEN IT SAYS SO. A move the sheet
+        // loaded names the weapon it belongs to, which is what lets two
+        // greatswords carry different versions of it. A type-level
+        // technique - anything not loaded through expand_for_objects -
+        // still matches any equipped weapon of its kind.
+        let owned = loadout.iter().find(|o| {
+            o.modes.contains(&t.mode)
+                && match t.object_id.as_deref() {
+                    Some(id) => o.id == id,
+                    None => o.item.key == t.item_key,
+                }
+        })?;
 
         let (ability, ability_mod) =
             ability_for(&owned.item.properties, t.mode, str_mod, dex_mod);
@@ -378,6 +398,10 @@ fn scoped_from_row(r: &serde_json::Value) -> Option<ScopedTechnique> {
                 .filter(|s| !s.trim().is_empty())
                 .map(str::to_string),
             scope: scope.to_string(),
+            // Filled by whoever expands these into a list; a raw row
+            // knows which object it BELONGS to, not whose list it is
+            // about to appear in.
+            object_id: r.get("object_id").and_then(|x| x.as_str()).map(str::to_string),
         },
     })
 }
@@ -399,15 +423,72 @@ const TECHNIQUE_COLUMNS: &str = "key,game_id,object_id,removed,name,roll_name,it
 /// sheet. Closing it means `Sheet.techniques` carrying which object
 /// each move came from, which is a change to the attack path rather
 /// than to this query.
-pub fn load_techniques(
+/// Every equipped weapon's own list of moves, each one bound to the
+/// object it belongs to.
+///
+/// THE COLLISION THIS EXISTS TO REMOVE. A flat list keyed by technique
+/// cannot hold two greatswords with different versions of one move -
+/// one silently wins, which is the failure this repo keeps meeting. So
+/// nothing here is keyed by technique: the list is expanded PER OBJECT,
+/// and two greatswords contribute two Zwerchhaus that differ in nothing
+/// but `object_id` if neither is overridden, and in their dice if one
+/// is.
+///
+/// A TOMBSTONE NEEDS NO REPRESENTATION, which is the other reason to
+/// expand rather than merge. A sword that struck out Zwerchhau simply
+/// has no Zwerchhau in its own list - there is no type-level entry left
+/// over for the resolver to find and wrongly apply. A merged list would
+/// have needed a suppression rule beside it, which is a second
+/// mechanism for an absence that 050 already represents.
+///
+/// `weapons` is (object id, item key) for the EQUIPPED weapons, which
+/// is what a loadout is.
+pub fn expand_for_objects(
+    rows: &[ScopedTechnique],
+    weapons: &[(String, String)],
+) -> Vec<Technique> {
+    let mut out: Vec<Technique> = Vec::new();
+    for (object_id, item_key) in weapons {
+        // This object's own rows and its type's, and no other object's.
+        let mine: Vec<ScopedTechnique> = rows
+            .iter()
+            .filter(|r| {
+                r.technique.item_key == *item_key
+                    && match r.technique.object_id.as_deref() {
+                        Some(id) => id == object_id,
+                        None => true,
+                    }
+            })
+            .cloned()
+            .collect();
+
+        for mut t in collapse_scopes(&mine) {
+            // WHOSE LIST, not where it came from. `scope` keeps the
+            // second answer.
+            t.object_id = Some(object_id.clone());
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// Every equipped weapon's moves, for the sheet.
+///
+/// Replaces the type-scoped read that could not see an object's own -
+/// see `expand_for_objects` for why a flat list could not hold them.
+pub fn load_for_loadout(
     token: &str,
     game_id: &str,
-    item_keys: &[String],
+    weapons: &[(String, String)],
 ) -> Result<Vec<Technique>, String> {
-    if item_keys.is_empty() {
+    if weapons.is_empty() {
         return Ok(Vec::new());
     }
-    let quoted_keys: Vec<String> = item_keys.iter().map(|k| crate::narrative::quoted(k)).collect();
+    let keys: Vec<String> = weapons
+        .iter()
+        .map(|(_, k)| crate::narrative::quoted(k))
+        .collect();
+    let ids: Vec<String> = weapons.iter().map(|(id, _)| id.clone()).collect();
 
     let rows = crate::supabase::rest_get(
         token,
@@ -415,8 +496,13 @@ pub fn load_techniques(
         &[
             ("select", TECHNIQUE_COLUMNS),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            ("object_id", "is.null"),
-            ("item_key", &format!("in.({})", quoted_keys.join(","))),
+            // The types' rows plus these objects' own, and no other
+            // object's - which the second half is what excludes.
+            (
+                "or",
+                &format!("(object_id.is.null,object_id.in.({}))", ids.join(",")),
+            ),
+            ("item_key", &format!("in.({})", keys.join(","))),
         ],
     )?;
 
@@ -427,7 +513,7 @@ pub fn load_techniques(
         .iter()
         .filter_map(scoped_from_row)
         .collect();
-    Ok(collapse_scopes(&scoped))
+    Ok(expand_for_objects(&scoped, weapons))
 }
 
 /// Everything ONE object can do: its type's moves, with its own on top.
@@ -464,7 +550,12 @@ pub fn load_for_object(
         .iter()
         .filter_map(scoped_from_row)
         .collect();
-    Ok(collapse_scopes(&scoped))
+    // The same expansion the sheet uses, for one object - so both
+    // screens agree that object_id means "whose list this is in".
+    Ok(expand_for_objects(
+        &scoped,
+        &[(object_id.to_string(), item_key.to_string())],
+    ))
 }
 
 /* ============================ TESTS ============================ */
@@ -550,6 +641,7 @@ mod tests {
             // Not what these fixtures are about.
             special_text: None,
             scope: "global".into(),
+            object_id: None,
         }
     }
 
@@ -566,6 +658,7 @@ mod tests {
             fumble_max: 1,
             special_text: None,
             scope: "global".into(),
+            object_id: None,
         }
     }
 
@@ -744,6 +837,10 @@ mod tests {
                 fumble_max: 1,
                 special_text: None,
                 scope: match rank { 2 => "object", 1 => "game", _ => "global" }.into(),
+                // The scope fixture is about precedence, not about
+                // whose list the answer lands in - expand_for_objects
+                // fills that, and has its own tests below.
+                object_id: if rank == 2 { Some("sword-a".into()) } else { None },
             },
         }
     }
@@ -828,6 +925,102 @@ mod tests {
     #[test]
     fn nothing_in_nothing_out() {
         assert!(collapse_scopes(&[]).is_empty());
+    }
+
+    /* ---------- two swords of one kind ---------- */
+
+    fn owned_by(key: &str, rank: u8, dice: &str, object: Option<&str>) -> ScopedTechnique {
+        let mut st = scoped(key, rank, dice, 1, false);
+        st.technique.object_id = object.map(str::to_string);
+        st
+    }
+
+    fn two_greatswords() -> Vec<(String, String)> {
+        vec![
+            ("sword-a".into(), "greatsword".into()),
+            ("sword-b".into(), "greatsword".into()),
+        ]
+    }
+
+    // THE COLLISION THE WHOLE CHANGE EXISTS TO REMOVE. One type-level
+    // move, two swords: the list holds it twice, bound to each, so
+    // neither can silently win the other's.
+    #[test]
+    fn one_type_move_becomes_one_entry_per_object() {
+        let out = expand_for_objects(
+            &[owned_by("zwerchhau", 0, "2d6", None)],
+            &two_greatswords(),
+        );
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].object_id.as_deref(), Some("sword-a"));
+        assert_eq!(out[1].object_id.as_deref(), Some("sword-b"));
+        assert!(out.iter().all(|t| t.dice == "2d6"));
+    }
+
+    // One sword enchanted, the other not. Both keep the move; only one
+    // has the better dice.
+    #[test]
+    fn an_override_reaches_only_its_own_sword() {
+        let out = expand_for_objects(
+            &[
+                owned_by("zwerchhau", 0, "2d6", None),
+                owned_by("zwerchhau", 2, "2d10", Some("sword-a")),
+            ],
+            &two_greatswords(),
+        );
+        let a = out.iter().find(|t| t.object_id.as_deref() == Some("sword-a")).unwrap();
+        let b = out.iter().find(|t| t.object_id.as_deref() == Some("sword-b")).unwrap();
+        assert_eq!(a.dice, "2d10");
+        assert_eq!(a.scope, "object");
+        assert_eq!(b.dice, "2d6");
+        assert_eq!(b.scope, "global");
+    }
+
+    // A TOMBSTONE NEEDS NO SUPPRESSION RULE, which is the other reason
+    // to expand rather than merge: the struck sword simply has no entry,
+    // and there is no type-level leftover for the resolver to find.
+    #[test]
+    fn a_struck_move_is_absent_from_that_sword_only() {
+        let mut gone = owned_by("zwerchhau", 2, "2d6", Some("sword-a"));
+        gone.removed = true;
+        let out = expand_for_objects(
+            &[owned_by("zwerchhau", 0, "2d6", None), gone],
+            &two_greatswords(),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].object_id.as_deref(), Some("sword-b"));
+    }
+
+    // An addition belongs to its sword and to no other, even when the
+    // other is the same kind of weapon.
+    #[test]
+    fn an_addition_does_not_spread_to_the_other_sword() {
+        let out = expand_for_objects(
+            &[owned_by("emberfall", 2, "3d8", Some("sword-a"))],
+            &two_greatswords(),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key, "emberfall");
+        assert_eq!(out[0].object_id.as_deref(), Some("sword-a"));
+    }
+
+    // A row for a weapon nobody is holding contributes nothing.
+    #[test]
+    fn another_weapons_moves_are_not_borrowed() {
+        let out = expand_for_objects(
+            &[{
+                let mut t = owned_by("cleave", 0, "1d12", None);
+                t.technique.item_key = "greataxe".into();
+                t
+            }],
+            &two_greatswords(),
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn nothing_equipped_is_nothing_to_roll() {
+        assert!(expand_for_objects(&[owned_by("zwerchhau", 0, "2d6", None)], &[]).is_empty());
     }
 
 }

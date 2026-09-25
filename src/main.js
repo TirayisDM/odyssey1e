@@ -2262,20 +2262,35 @@ function moveForm(o, t, done) {
   const form = document.createElement("div");
   form.className = "editor";
 
-  const field = (ph, value, cls) => {
+  // A LABELLED CELL. Four number boxes reading "1 20 1" say nothing
+  // about which is the level and which is the crit - a placeholder
+  // cannot help, because a box with a value in it does not show one.
+  // So the label sits above the box and stays visible while it is
+  // filled.
+  const cell = (label, value, cls) => {
+    const wrap = document.createElement("label");
+    wrap.className = "cell" + (cls ? " " + cls : "");
+    const cap = document.createElement("span");
+    cap.textContent = label;
     const i = document.createElement("input");
-    i.placeholder = ph;
     i.value = value == null ? "" : String(value);
-    if (cls) i.className = cls;
-    return i;
+    wrap.append(cap, i);
+    wrap.input = i;
+    return wrap;
   };
 
-  const name = field("name, e.g. Descending Cut", t ? t.name : "");
-  const dice = field("dice, e.g. 2d6", t ? t.dice : "", "narrow");
+  const name = cell("name", t ? t.name : "", "wide");
+  name.input.placeholder = "e.g. Descending Cut";
+  const dice = cell("dice", t ? t.dice : "");
+  dice.input.placeholder = "2d6";
   const one = document.createElement("div");
-  one.className = "row";
+  one.className = "row cells";
   one.append(name, dice);
 
+  const modeWrap = document.createElement("label");
+  modeWrap.className = "cell";
+  const modeCap = document.createElement("span");
+  modeCap.textContent = "mode";
   const mode = document.createElement("select");
   for (const val of ["melee", "thrown", "ranged"]) {
     const opt = document.createElement("option");
@@ -2284,16 +2299,20 @@ function moveForm(o, t, done) {
     mode.append(opt);
   }
   mode.value = t ? t.mode : "melee";
-  const level = field("level", t ? t.min_level : 1, "narrow");
-  const crit = field("crit", t ? t.crit_min : 20, "narrow");
-  const fumble = field("fumble", t ? t.fumble_max : 1, "narrow");
-  const two = document.createElement("div");
-  two.className = "row";
-  two.append(mode, level, crit, fumble);
+  modeWrap.append(modeCap, mode);
 
-  const prose = field("what the table adjudicates", t ? t.special_text : "");
+  // The three that were unreadable. "crit 19+" and "fumble 1-" are how
+  // they read everywhere else, so the labels say which end each is.
+  const level = cell("from level", t ? t.min_level : 1);
+  const crit = cell("crit on", t ? t.crit_min : 20);
+  const fumble = cell("fumble up to", t ? t.fumble_max : 1);
+  const two = document.createElement("div");
+  two.className = "row cells";
+  two.append(modeWrap, level, crit, fumble);
+
+  const prose = cell("what the table adjudicates", t ? t.special_text : "", "wide");
   const three = document.createElement("div");
-  three.className = "row";
+  three.className = "row cells";
   three.append(prose);
 
   const save = action("save", async () => {
@@ -2303,15 +2322,15 @@ function moveForm(o, t, done) {
       // to mint, so a new move named after an old one does not quietly
       // replace it.
       key: t ? t.key : null,
-      name: name.value,
+      name: name.input.value,
       mode: mode.value,
-      dice: dice.value,
-      minLevel: Number(level.value) || 1,
-      critMin: Number(crit.value) || 20,
-      fumbleMax: Number(fumble.value) || 1,
-      specialText: prose.value,
+      dice: dice.input.value,
+      minLevel: Number(level.input.value) || 1,
+      critMin: Number(crit.input.value) || 20,
+      fumbleMax: Number(fumble.input.value) || 1,
+      specialText: prose.input.value,
     });
-    dmSay(r.ok ? (t ? name.value + " changed for this one" : name.value + " added") : r.error, !r.ok);
+    dmSay(r.ok ? (t ? name.input.value + " changed for this one" : name.input.value + " added") : r.error, !r.ok);
     if (r.ok) await done();
   });
   const four = document.createElement("div");

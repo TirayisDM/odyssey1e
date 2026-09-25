@@ -150,6 +150,17 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    rendered a word of it. */
 .prose-line{color:var(--muted);font:italic 11px/1.5 Georgia,"Times New Roman",serif;
             margin:.15rem 0 .1rem .2rem}
+/* A labelled cell. Four number boxes reading "1 20 1" say nothing about
+   which is the level and which is the crit, and a placeholder cannot
+   help because a filled box does not show one. The caption sits above
+   and stays. */
+.row.cells{align-items:flex-end;gap:.4rem}
+.cell{display:flex;flex-direction:column;gap:.15rem;flex:0 0 auto}
+.cell.wide{flex:1}
+.cell > span{font-size:9px;text-transform:uppercase;letter-spacing:.07em;
+             color:var(--muted)}
+.cell input,.cell select{margin-bottom:0;width:100%}
+.cell:not(.wide) input{width:6.5rem}
 /* The two proficiency boxes. `narrow` cropped the armour one below its
    own placeholder, so the field that lists four codes could not show
    what they were. Weapons gets the wider share because a list of base

@@ -571,12 +571,15 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // turn rather than at the next reseed.
     // Only the weapons: armour and gear have no techniques, and asking
     // for their keys would widen the query for nothing.
-    let weapon_keys: Vec<String> = loadout
+    // (object, type) PAIRS, not just the keys. 050 lets one sword
+    // disagree with another of the same kind about what it can do, and
+    // a list of keys cannot tell them apart - see expand_for_objects.
+    let weapons: Vec<(String, String)> = loadout
         .iter()
         .filter(|o| o.item.kind == "weapon")
-        .map(|o| o.item.key.clone())
+        .map(|o| (o.id.clone(), o.item.key.clone()))
         .collect();
-    let techniques = crate::attack::load_techniques(token, &game_id, &weapon_keys)?;
+    let techniques = crate::attack::load_for_loadout(token, &game_id, &weapons)?;
 
     let worn: Vec<&equipment::Item> = loadout.iter().map(|o| &o.item).collect();
     let armor_class = equipment::armor_class(

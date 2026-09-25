@@ -209,6 +209,17 @@
           <select id="enrol-what"></select>
           <input id="enrol-name" placeholder="name (blank = auto, e.g. Goblin 0003)" />
           <button id="enrol">Enrol</button>
+          <!-- THE TURN. 011 created `initiative` and said nothing read
+               it; 012 built actions as the turn-sized unit waiting for
+               a turn to sit in; 015 left death saves on demand "until
+               initiative arrives". 051 stores the round and whose turn
+               it is - the order itself is derived. -->
+          <div class="sub">Turn order</div>
+          <div class="row turnbar">
+            <span id="turn-now" class="muted"></span>
+            <button id="next-turn" class="ghost">Begin</button>
+            <button id="reset-order" class="tiny ghost">reset</button>
+          </div>
           <ul id="roster" class="list"></ul>
 
           <div class="sub">Challenge</div>

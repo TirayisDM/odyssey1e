@@ -2342,6 +2342,51 @@ function labelledCell(label, value, cls) {
   return labelledControl(label, i, cls);
 }
 
+// Whose turn, which round, and what the button will do.
+//
+// THE BUTTON NAMES THE ACT rather than the state: "Begin" before the
+// order starts and "Next: Goblin 2" after, because a button that says
+// "next turn" makes you look at the list to find out what that means.
+function paintTurnBar(encounterId, turns) {
+  const say = document.querySelector("#turn-now");
+  const next = document.querySelector("#next-turn");
+  const enc = (turns && turns.encounter) || {};
+  const order = (turns && turns.order) || [];
+  const up = turns && turns.up_next;
+
+  const current = order.find((a) => a.is_current);
+  // ROUND 0 IS NOT ROUND 1. 051 keeps them apart because an encounter
+  // that is built and rolled for but not started is a real state, and
+  // claiming round one would be a claim nobody made.
+  say.textContent = !enc.round
+    ? order.length
+      ? "not started"
+      : "nobody enrolled"
+    : "round " + enc.round + " \u00b7 " + (current ? current.label : "nobody");
+
+  const waiting = order.filter((a) => a.initiative == null).length;
+  if (waiting) {
+    say.textContent += " \u00b7 " + waiting + " still to roll";
+  }
+
+  if (!up) {
+    next.textContent = "Begin";
+    next.disabled = true;
+    next.title = "nobody can take a turn — roll for initiative first";
+    return;
+  }
+  next.disabled = false;
+  const who = order.find((a) => a.id === up.actor_id);
+  next.textContent = !enc.round
+    ? "Begin with " + (who ? who.label : "the top")
+    : "Next: " + (who ? who.label : "?") + (up.new_round ? " (round " + (enc.round + 1) + ")" : "");
+  next.title = "hand the turn on";
+}
+
+function withSign(n) {
+  return (n < 0 ? "" : "+") + n;
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -3020,7 +3065,13 @@ async function selectEncounter(id) {
     banner.hidden = true;
   }
 
-  const roster = await call("list_roster", { encounterId: id });
+  // IN ORDER, not in enrolment order. turn_order returns the same
+  // rows list_roster did, sorted by initiative.rs and carrying three
+  // derived fields: the DEX that broke the tie, whether this one takes
+  // turns at all, and whether it is up now.
+  const turns = await call("turn_order", { encounterId: id });
+  const roster = (turns && turns.order) || [];
+  paintTurnBar(id, turns);
 
   // Targets for THIS encounter, not the active one.
   //
@@ -3033,9 +3084,10 @@ async function selectEncounter(id) {
 
   const rl = document.querySelector("#roster");
   rl.innerHTML = "";
-  for (const a of roster || []) {
+  for (const a of roster) {
     const li = document.createElement("li");
-    li.className = "flat item" + (a.active ? " on" : "");
+    li.className =
+      "flat item" + (a.active ? " on" : "") + (a.is_current ? " acting" : "");
 
     const head = document.createElement("div");
     head.className = "head";
@@ -3043,6 +3095,42 @@ async function selectEncounter(id) {
     nm.className = "nm";
     nm.textContent = a.label;
     head.append(nm);
+
+    // THE NUMBER, AND THE DIFFERENCE BETWEEN NONE AND ZERO. 011 is
+    // explicit that NULL means "has not rolled" and is not a rolled
+    // zero, so the two must not print alike - one is a prompt and the
+    // other is a bad result somebody has to live with.
+    const score = document.createElement("span");
+    score.className = "tag init" + (a.initiative == null ? " warn" : "");
+    score.textContent =
+      a.initiative == null
+        ? "not rolled"
+        : a.initiative + (a.dex_mod ? " (dex " + withSign(a.dex_mod) + ")" : "");
+    head.append(score);
+
+    // Roll for this one. A monster already rolled on enrolment, so in
+    // practice this is the players' button and the DM's re-roll.
+    head.append(
+      action(a.initiative == null ? "roll" : "re-roll", async () => {
+        const r = await tryCall("roll_initiative", { actorId: a.id });
+        dmSay(r.ok ? a.label + ": " + r.value.said : r.error, !r.ok);
+        if (r.ok) await selectEncounter(id);
+      })
+    );
+
+    // And typing one, because the table rolled real dice and 051 stores
+    // no tiebreak for the DM to adjudicate with.
+    const byHand = document.createElement("input");
+    byHand.className = "narrow";
+    byHand.type = "number";
+    byHand.placeholder = "set";
+    byHand.addEventListener("change", async () => {
+      const v = byHand.value === "" ? null : Number(byHand.value);
+      const r = await tryCall("set_initiative", { actorId: a.id, initiative: v });
+      dmSay(r.ok ? a.label + " set to " + (v == null ? "not rolled" : v) : r.error, !r.ok);
+      if (r.ok) await selectEncounter(id);
+    });
+    head.append(byHand);
 
     // Deactivate rather than delete for anything that has rolled: the
     // rolls point at it. Delete is for a mis-click during setup, and the
@@ -3989,6 +4077,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     // was true a moment ago.
     await loadSheet();
     await loadInventory();
+  });
+
+  guarded("#next-turn", async () => {
+    if (!state.dmEncounterId) return dmSay("pick an encounter first", true);
+    const r = await tryCall("advance_turn", { encounterId: state.dmEncounterId });
+    if (!r.ok) return dmSay(r.error, true);
+    await selectEncounter(state.dmEncounterId);
+  });
+
+  guarded("#reset-order", async () => {
+    if (!state.dmEncounterId) return dmSay("pick an encounter first", true);
+    // The initiatives SURVIVE a reset - re-rolling is a separate
+    // decision, and losing everyone's number because the DM wanted to
+    // restart the order would be the expensive kind of helpful.
+    if (!confirm("Put the fight back before the first turn? Initiatives are kept.")) return;
+    const r = await tryCall("reset_order", { encounterId: state.dmEncounterId });
+    dmSay(r.ok ? "back before the first turn" : r.error, !r.ok);
+    if (r.ok) await selectEncounter(state.dmEncounterId);
   });
 
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {

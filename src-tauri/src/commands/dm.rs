@@ -362,7 +362,7 @@ pub fn enrol_actor(
         None => chr.unwrap_or_default().to_string(),
     };
 
-    supabase::rest_insert(
+    let made = supabase::rest_insert(
         &token,
         "encounter_actors",
         &json!({
@@ -375,7 +375,29 @@ pub fn enrol_actor(
             "label": name_or_null(label),
         }),
     )
-    .map_err(|e| denied(e, "enrol an actor"))
+    .map_err(|e| denied(e, "enrol an actor"))?;
+
+    // A MONSTER ROLLS ITS OWN INITIATIVE ON THE WAY IN. Nobody wants to
+    // roll for eight goblins, and 011 said the prompt was for PLAYERS -
+    // "players will be prompted to roll on enrollment". A player
+    // character enrolled here is left unrolled on purpose: NULL means
+    // "has not rolled", which is what puts them at the bottom of the
+    // order with a button beside their name.
+    //
+    // Best effort. A goblin with no initiative is a goblin the DM can
+    // roll for by hand, so a failure here must not undo an enrolment
+    // that otherwise worked.
+    if npc.is_some() {
+        if let Some(id) = made
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|r| r.get("id"))
+            .and_then(|v| v.as_str())
+        {
+            let _ = crate::commands::initiative::roll_for(&token, id);
+        }
+    }
+    Ok(made)
 }
 
 /// Take one out again.
@@ -472,32 +494,10 @@ pub fn set_challenge_active(
 
 /* ============================ ROSTER ============================ */
 
-/// Everything enrolled, including the inactive — what the DM manages, as
-/// opposed to `list_targets`, which is what a player can aim at.
-///
-/// Two different questions, so two different reads. A fled goblin is
-/// absent from one and present in the other, and collapsing them would
-/// mean the DM could never bring it back.
-#[tauri::command]
-pub fn list_roster(state: State<AppState>, encounter_id: String) -> Result<Value, String> {
-    let token = state.token()?;
-    supabase::rest_get(
-        &token,
-        "encounter_actors",
-        &[
-            (
-                "select",
-                "id,label,npc_key,character_id,active,dead,initiative,\
-                 name_base,name_ordinal,death_successes,death_failures,enrolled_at",
-            ),
-            ("encounter_id", &format!("eq.{}", encounter_id)),
-            ("order", "enrolled_at.asc"),
-        ],
-    )
-}
-
-/// The challenges in an encounter, active or not. Same reasoning as
-/// `list_roster`.
+/// The challenges in an encounter, active or not. Inactive ones are
+/// returned too, for the same reason the roster returns hidden
+/// creatures: a list that silently omits what the DM switched off is a
+/// list they cannot switch back on.
 #[tauri::command]
 pub fn list_challenges(state: State<AppState>, encounter_id: String) -> Result<Value, String> {
     let token = state.token()?;

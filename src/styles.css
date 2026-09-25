@@ -136,6 +136,15 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .gauge-fill.over{background:var(--bad)}
 .gauge-text{font-size:10px;color:var(--muted);white-space:nowrap}
 .tag.warn{color:#e0b341;border-color:#e0b341}
+/* Whose turn it is. The lit row is the one thing on this screen a DM
+   looks for between every roll, so it gets the accent rather than a
+   border nobody finds. */
+.item.acting{border-color:var(--accent);background:#141b26}
+.item.acting .nm{color:var(--accent);font-weight:700}
+.tag.init{font-variant-numeric:tabular-nums}
+.turnbar{align-items:center;gap:.5rem;margin-bottom:.5rem}
+.turnbar #turn-now{flex:1;font-size:11px}
+.turnbar button{flex:0 0 auto}
 /* Trained with nothing. Not an error - a character can legitimately be
    untrained - but it explains every short to-hit on the sheet, so it
    should not read as ordinary grey text. */

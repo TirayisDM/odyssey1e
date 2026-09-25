@@ -31,6 +31,7 @@ mod dice;
 mod encounter;
 mod equipment;
 mod holders;
+mod initiative;
 mod locations;
 mod narrative;
 mod objects;
@@ -1239,7 +1240,6 @@ pub fn run() {
             commands::dm::set_actor_active,
             commands::dm::add_challenge,
             commands::dm::set_challenge_active,
-            commands::dm::list_roster,
             commands::dm::list_challenges,
             commands::dm::list_skill_keys,
             // A monster acts. Both go through the same `swing` a
@@ -1250,6 +1250,11 @@ pub fn run() {
             commands::dm::rename_actor,
             commands::dm::set_merchant,
             commands::dm::set_actor_level,
+            commands::initiative::turn_order,
+            commands::initiative::roll_initiative,
+            commands::initiative::set_initiative,
+            commands::initiative::advance_turn,
+            commands::initiative::reset_order,
             death_save,
             get_sheet,
             set_level,

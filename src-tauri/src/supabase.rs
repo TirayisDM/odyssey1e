@@ -256,11 +256,12 @@ fn rest_url(path: &str) -> String {
 /// filter syntax, e.g. [("select", "*"), ("game_id", "eq.<uuid>")].
 pub fn rest_get(token: &str, path: &str, query: &[(&str, &str)]) -> Result<Value, String> {
     check_query(query)?;
+    let query = tidy_select(query);
     let resp = http()
         .get(rest_url(path))
         .header("apikey", SUPABASE_ANON_KEY)
         .header("Authorization", format!("Bearer {}", token))
-        .query(query)
+        .query(&query)
         .send()
         .map_err(|e| format!("could not reach Supabase: {}", e))?;
 
@@ -288,39 +289,64 @@ pub fn rest_get(token: &str, path: &str, query: &[(&str, &str)]) -> Result<Value
 /// query.
 ///
 /// So the failure is moved forward to where it can name itself. No
-/// legitimate filter, select or order contains a newline, a tab or a
-/// carriage return; PostgREST's grammar has no use for one.
+/// legitimate filter or order contains a newline, a tab or a carriage
+/// return; PostgREST's grammar has no use for one.
+///
+/// A SELECT IS THE EXCEPTION, and only for whitespace. Its whitespace
+/// is always a wrapping accident and never changes what was asked for,
+/// so `tidy_select` removes it instead - repairing the request rather
+/// than refusing it, for the reason written there. Anything else
+/// control-shaped in a select is still a typo and still refused.
 fn check_query(query: &[(&str, &str)]) -> Result<(), String> {
     for (k, v) in query {
-        if let Some(bad) = v.chars().find(|c| c.is_control()) {
+        let repairable = |c: &char| *k == "select" && c.is_whitespace();
+        if let Some(bad) = v.chars().find(|c| c.is_control() && !repairable(c)) {
             return Err(format!(
                 "the '{}' parameter contains {:?}, which is a typo rather than a filter \
                  - a wrapped string needs a line continuation, not an escape",
                 k, bad
             ));
         }
-
-        // AND THE SAME TYPO WITH THE NEWLINE ALREADY EATEN. Two wrapped
-        // lines joined into one leave a run of indentation in the
-        // middle of the list — "...,face_outcome,        action_id" —
-        // which holds no control character at all and so walked
-        // straight past the check above. It was sitting in `list_rolls`
-        // and was found by reading the line, not by anything failing.
-        //
-        // A SELECT IS THE ONE PARAMETER WITH NO USE FOR A SPACE: column
-        // names, commas, and the parentheses of an embedded resource. A
-        // filter is the opposite and must stay permissive — `label=eq.
-        // Goblin Scout` is an ordinary filter on a name with a space in
-        // it, and refusing that would break every search by name.
-        if *k == "select" && v.chars().any(|c| c.is_whitespace()) {
-            return Err(format!(
-                "the select list contains whitespace, so a column name has picked up \
-                 the indentation of the line it was wrapped onto: {}",
-                v
-            ));
-        }
     }
     Ok(())
+}
+
+/// The same typo with the newline already eaten — repaired rather than
+/// refused.
+///
+/// Two wrapped lines joined into one leave a run of indentation in the
+/// middle of a column list: "...,face_outcome,        action_id". It
+/// holds no control character, so `check_query` never saw it, and it
+/// was sitting in `list_rolls` AND in `load_profile`.
+///
+/// REFUSING IT WAS THE WRONG FIX, and it took about a minute to find
+/// out: the guard shipped, `list_npc_attacks` went red, and every
+/// goblin on the Run tab read "no weapon". PostgREST had been
+/// tolerating those spaces all along. Turning a harmless typo into a
+/// hard failure is not making the two paths different - it is a third
+/// path, and the one the DM sees.
+///
+/// So it is normalised. A SELECT IS THE ONE PARAMETER WITH NO USE FOR
+/// WHITESPACE - column names, commas, and the parentheses of an
+/// embedded resource - so removing it cannot change what was asked
+/// for, and the request becomes exactly what the author meant. It also
+/// repairs 036's original case, where a real newline made PostgREST
+/// refuse the lot and every object vanished.
+///
+/// EVERY OTHER PARAMETER IS LEFT ALONE. `label=eq.Goblin Scout` is an
+/// ordinary filter on a name with a space in it, and stripping that
+/// would break searching by name.
+fn tidy_select<'a>(query: &[(&'a str, &'a str)]) -> Vec<(&'a str, String)> {
+    query
+        .iter()
+        .map(|(k, v)| {
+            if *k == "select" && v.chars().any(|c| c.is_whitespace()) {
+                (*k, v.chars().filter(|c| !c.is_whitespace()).collect())
+            } else {
+                (*k, v.to_string())
+            }
+        })
+        .collect()
 }
 
 /// INSERT. Prefer: return=representation so the caller gets the row
@@ -466,23 +492,30 @@ mod tests {
         .is_ok());
     }
 
-    // THE ONE THAT GOT THROUGH. An escaped \n where a line continuation
-    // was meant, which compiles, tests clean, and empties a screen.
+    // THE ONE THAT GOT THROUGH, 036's. An escaped \n where a line
+    // continuation was meant, which compiles, tests clean, and empties
+    // a screen. It is now REPAIRED rather than refused: the request
+    // that goes out is the one the author meant.
     #[test]
-    fn a_wrapped_select_with_a_real_newline_is_refused() {
-        let e = check_query(&[(
+    fn a_wrapped_select_with_a_real_newline_is_repaired() {
+        let q = [(
             "select",
             "id,item_key,holder_id,entity_id,\n                        size_override",
-        )])
-        .unwrap_err();
-        assert!(e.contains("select"), "{}", e);
-        assert!(e.contains("typo"), "{}", e);
+        )];
+        assert!(check_query(&q).is_ok());
+        assert_eq!(
+            tidy_select(&q)[0].1,
+            "id,item_key,holder_id,entity_id,size_override"
+        );
     }
 
+    // Outside a select, a control character has nothing to repair it
+    // into - an order or a filter can hold a real value with a space,
+    // so guessing at what was meant would be guessing.
     #[test]
-    fn tabs_and_returns_too() {
-        assert!(check_query(&[("select", "a,\tb")]).is_err());
+    fn tabs_and_returns_are_still_refused_elsewhere() {
         assert!(check_query(&[("order", "name.asc\r")]).is_err());
+        assert!(check_query(&[("name", "eq.Goblin\tScout")]).is_err());
     }
 
     // A SPACE IS NOT A CONTROL CHARACTER and must stay legal: a name
@@ -495,28 +528,38 @@ mod tests {
     // THE SECOND ONE THAT GOT THROUGH, and it got through the fix for
     // the first. Same wrapped-string mistake with the newline already
     // removed, leaving only indentation — no control character, so the
-    // check above had nothing to catch. This is the exact string that
-    // was in `list_rolls`.
+    // check had nothing to catch. This is the exact string that was in
+    // `list_rolls`, and `load_profile` carried one just like it.
     #[test]
-    fn a_select_carrying_indentation_is_refused() {
-        let e = check_query(&[(
+    fn a_select_carrying_indentation_is_repaired() {
+        let q = [(
             "select",
             "id,created_at,total,margin,face_outcome,                 action_id,role",
-        )])
-        .unwrap_err();
-        assert!(e.contains("select"), "{}", e);
-        assert!(e.contains("indentation"), "{}", e);
+        )];
+        assert_eq!(
+            tidy_select(&q)[0].1,
+            "id,created_at,total,margin,face_outcome,action_id,role"
+        );
+    }
+
+    // EVERY OTHER PARAMETER IS LEFT EXACTLY AS IT WAS. Stripping a
+    // filter's spaces would turn a search for a named goblin into a
+    // search for a different string - this is why tidying is scoped to
+    // the one parameter that can never want whitespace.
+    #[test]
+    fn a_filters_spaces_survive_the_tidy() {
+        let q = [("select", "id,name"), ("label", "eq.Goblin Scout")];
+        let out = tidy_select(&q);
+        assert_eq!(out[1].1, "eq.Goblin Scout");
     }
 
     // The select the encounter log actually sends: an embedded resource
-    // in parentheses, which must stay legal.
+    // in parentheses, which must pass untouched.
     #[test]
     fn an_embedded_resource_is_still_an_ordinary_select() {
-        assert!(check_query(&[(
-            "select",
-            "id,round,key,rolls(id,role,total,success,margin)",
-        )])
-        .is_ok());
+        let q = [("select", "id,round,key,rolls(id,role,total,success,margin)")];
+        assert!(check_query(&q).is_ok());
+        assert_eq!(tidy_select(&q)[0].1, q[0].1);
     }
 
     /* ------------------------- numeric ------------------------- */

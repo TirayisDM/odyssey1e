@@ -605,6 +605,13 @@ pub fn edit_object(
     quantity: Option<i64>,
     size_override: Option<String>,
     holds_size_override: Option<String>,
+    weight_override: Option<String>,
+    price_override: Option<String>,
+    damage_number_override: Option<String>,
+    damage_denomination_override: Option<String>,
+    damage_types_override: Option<String>,
+    properties_override: Option<String>,
+    base_ac_override: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
@@ -665,6 +672,69 @@ pub fn edit_object(
                 "" => Value::Null,
                 v => json!(v),
             };
+        }
+    }
+
+
+    // 049'S SEVEN, on the same convention as 036's two: an empty string
+    // CLEARS the override and an absent field leaves it alone. The
+    // difference matters - "as the catalogue says" and "the same as the
+    // catalogue happens to say today" are different facts, and only the
+    // first follows the catalogue when it changes.
+    //
+    // NUMBERS ARE PARSED HERE AND CHECKED IN POSTGRES. A word where a
+    // die size belongs gets a sentence from this side, because "invalid
+    // input syntax for type integer" is not one; the RANGES are 049's
+    // CHECK constraints, because items has the same ones and a rule
+    // written twice is 028.
+    for (field, given) in [
+        ("price_override", &price_override),
+        ("damage_number_override", &damage_number_override),
+        ("damage_denomination_override", &damage_denomination_override),
+        ("base_ac_override", &base_ac_override),
+    ] {
+        let Some(raw) = given.as_deref().map(str::trim) else { continue };
+        if raw.is_empty() {
+            patch[field] = Value::Null;
+            continue;
+        }
+        let n: i64 = raw
+            .parse()
+            .map_err(|_| format!("{} wants a whole number, not '{}'", field, raw))?;
+        patch[field] = json!(n);
+    }
+
+    if let Some(raw) = weight_override.as_deref().map(str::trim) {
+        if raw.is_empty() {
+            patch["weight_override"] = Value::Null;
+        } else {
+            let w: f64 = raw
+                .parse()
+                .map_err(|_| format!("a weight wants a number, not '{}'", raw))?;
+            patch["weight_override"] = json!(w);
+        }
+    }
+
+    // LISTS REPLACE, so an empty one is a real answer and needs a way
+    // to be said. Blank clears the override; the word `none` sets it to
+    // nothing at all - which is how a greatsword loses `hvy`, and the
+    // reason objects::Overrides holds Option<Vec> rather than Vec.
+    for (field, given) in [
+        ("damage_types_override", &damage_types_override),
+        ("properties_override", &properties_override),
+    ] {
+        let Some(raw) = given.as_deref().map(str::trim) else { continue };
+        if raw.is_empty() {
+            patch[field] = Value::Null;
+        } else if raw.eq_ignore_ascii_case("none") {
+            patch[field] = json!(Vec::<String>::new());
+        } else {
+            let list: Vec<String> = raw
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty())
+                .collect();
+            patch[field] = json!(list);
         }
     }
 

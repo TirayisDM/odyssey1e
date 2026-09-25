@@ -64,6 +64,16 @@ pub struct Obj {
     /// 036. None means take it from the catalogue, which is what almost
     /// every object does.
     pub size_override: Option<String>,
+    /// The rest of 049's overrides, carried raw so `resolve` can apply
+    /// them with the SAME function the sheet uses. A screen that merged
+    /// these itself would be a second copy of the rule.
+    pub weight_override: Option<String>,
+    pub price_override: Option<i64>,
+    pub damage_number_override: Option<i64>,
+    pub damage_denomination_override: Option<i64>,
+    pub damage_types_override: Option<Vec<String>>,
+    pub properties_override: Option<Vec<String>>,
+    pub base_ac_override: Option<i64>,
     /// 036, containers only. None means ask the type - and the TYPE's
     /// own None is what means unrestricted. Two different absences, one
     /// behind the other.
@@ -80,6 +90,14 @@ pub struct Kind {
     pub size: String,
     pub holds_size: Option<String>,
     pub weight: Option<String>,
+    /// What the TYPE does, so `resolve` has something for an override
+    /// to replace. The screen reads the resolved values off `Located`
+    /// rather than looking the type up again.
+    pub damage_number: Option<i64>,
+    pub damage_denomination: Option<i64>,
+    pub damage_types: Vec<String>,
+    pub properties: Vec<String>,
+    pub base_ac: Option<i64>,
     /// How much room one of these takes up inside something. Fractional
     /// on purpose - a coin is 0.2 of a slot, so a 5-slot purse holds 25.
     pub slots: f64,
@@ -134,6 +152,18 @@ pub struct Located {
     /// Pounds for ONE of them. The screen multiplies by quantity,
     /// because a stack's weight is a rendering and not a fact.
     pub weight: Option<String>,
+    /// WHAT THIS ONE DOES, overrides applied. The manager used to read
+    /// these off the catalogue, which meant an edited object displayed
+    /// its type's damage while the sheet rolled its own - the two
+    /// places problem, on screen.
+    pub damage_number: Option<i64>,
+    pub damage_denomination: Option<i64>,
+    pub damage_types: Vec<String>,
+    pub properties: Vec<String>,
+    pub base_ac: Option<i64>,
+    /// True when anything about this one differs from its type, so a
+    /// row can say so without the reader comparing nine fields.
+    pub edited: bool,
     /// WHERE THIS ULTIMATELY IS, as one comparable string - see
     /// Root::token. Two objects sharing it are within reach of each
     /// other, which is what lets a picker offer only the containers a
@@ -299,6 +329,12 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                     )
                 }
             };
+            // What this one actually is, type and overrides together.
+            // None when the catalogue has no row for the key, which is
+            // a broken object rather than a blank one.
+            let overrides = overrides_of(o);
+            let resolved = t.map(|t| overrides.apply(&as_item(t)));
+
             Located {
                 id: o.id.clone(),
                 item_key: o.item_key.clone(),
@@ -314,16 +350,27 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                 // anybody else, and the override is the only way to say
                 // so while there is no screen for writing a catalogue
                 // row.
-                size: o
-                    .size_override
-                    .clone()
-                    .or_else(|| t.map(|t| t.size.clone()))
+                //
+                // Resolved by the SAME function the sheet uses - see
+                // `as_it_is` below. This block used to merge size and
+                // holds_size by hand, which was fine while there were
+                // two of them and would have become a second copy of
+                // Overrides::apply the moment there were nine.
+                size: resolved.as_ref().map(|i| i.size.clone()).unwrap_or_default(),
+                holds_size: resolved.as_ref().and_then(|i| i.holds_size.clone()),
+                weight: resolved.as_ref().and_then(|i| i.weight.clone()),
+                damage_number: resolved.as_ref().and_then(|i| i.damage_number),
+                damage_denomination: resolved.as_ref().and_then(|i| i.damage_denomination),
+                damage_types: resolved
+                    .as_ref()
+                    .map(|i| i.damage_types.clone())
                     .unwrap_or_default(),
-                holds_size: o
-                    .holds_size_override
-                    .clone()
-                    .or_else(|| t.and_then(|t| t.holds_size.clone())),
-                weight: t.and_then(|t| t.weight.clone()),
+                properties: resolved
+                    .as_ref()
+                    .map(|i| i.properties.clone())
+                    .unwrap_or_default(),
+                base_ac: resolved.as_ref().and_then(|i| i.base_ac),
+                edited: !overrides.none(),
                 reach: root.token(),
                 reach_name: root.name().to_string(),
                 used_slots: used,
@@ -331,6 +378,54 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
             }
         })
         .collect()
+}
+
+
+/// A `Kind` as an `equipment::Item`, so one merge function serves both
+/// the sheet and the manager.
+///
+/// THE UNUSED FIELDS ARE NOT LIES, they are absences. `Kind` carries
+/// what a screen needs and `Item` carries what a rule needs; the gap is
+/// things like range and weapon class, which no override touches and no
+/// caller of this reads. Filling them from nowhere would be the lie.
+fn as_item(t: &Kind) -> crate::equipment::Item {
+    crate::equipment::Item {
+        key: t.key.clone(),
+        name: t.key.clone(),
+        kind: String::new(),
+        base_item: None,
+        weapon_class: None,
+        damage_number: t.damage_number,
+        damage_denomination: t.damage_denomination,
+        damage_types: t.damage_types.clone(),
+        properties: t.properties.clone(),
+        range_reach: None,
+        range_value: None,
+        range_long: None,
+        armor_category: None,
+        base_ac: t.base_ac,
+        dex_cap: None,
+        size: t.size.clone(),
+        holds_size: t.holds_size.clone(),
+        weight: t.weight.clone(),
+        accepts: Vec::new(),
+        capacity_slots: t.capacity_slots.map(|c| c.to_string()),
+    }
+}
+
+/// The overrides an `Obj` is carrying.
+fn overrides_of(o: &Obj) -> crate::objects::Overrides {
+    crate::objects::Overrides {
+        size: o.size_override.clone(),
+        holds_size: o.holds_size_override.clone(),
+        weight: o.weight_override.clone(),
+        price: o.price_override,
+        damage_number: o.damage_number_override,
+        damage_denomination: o.damage_denomination_override,
+        damage_types: o.damage_types_override.clone(),
+        properties: o.properties_override.clone(),
+        base_ac: o.base_ac_override,
+    }
 }
 
 /// What to call an object. Its given name if it has one, otherwise the
@@ -466,6 +561,12 @@ pub fn within_reach(
 /// PostgREST sends `numeric` as a JSON STRING, not a number, so a plain
 /// `as_f64` returns None on every slot and capacity in the catalogue.
 /// The same trap containers::as_f64 exists for, and the same fix.
+fn strs(v: Option<&serde_json::Value>) -> Vec<String> {
+    v.and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
 fn num(v: Option<&serde_json::Value>) -> Option<f64> {
     let v = v?;
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
@@ -497,6 +598,11 @@ fn kind_from_row(key: String, r: &serde_json::Value) -> Kind {
         // to do while two comments in this repo disagreed about which
         // arrives.
         weight: num(r.get("weight")).map(|w| w.to_string()),
+        damage_number: r.get("damage_number").and_then(|v| v.as_i64()),
+        damage_denomination: r.get("damage_denomination").and_then(|v| v.as_i64()),
+        damage_types: strs(r.get("damage_types")),
+        properties: strs(r.get("properties")),
+        base_ac: r.get("base_ac").and_then(|v| v.as_i64()),
         slots: num(r.get("slots")).unwrap_or(1.0),
         capacity_slots: num(r.get("capacity_slots")),
     }
@@ -520,7 +626,7 @@ pub fn load_world(
         token,
         "objects",
         &[
-            ("select", "id,item_key,name,quantity,equipped,attuned,holder_id,entity_id,size_override,holds_size_override"),
+            ("select", "id,item_key,name,quantity,equipped,attuned,holder_id,entity_id,size_override,holds_size_override,weight_override,price_override,damage_number_override,damage_denomination_override,damage_types_override,properties_override,base_ac_override"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "item_key.asc,acquired_at.asc"),
         ],
@@ -575,7 +681,7 @@ pub fn load_world(
         token,
         "items",
         &[
-            ("select", "key,game_id,size,holds_size,weight,slots,capacity_slots"),
+            ("select", "key,game_id,size,holds_size,weight,slots,capacity_slots,damage_number,damage_denomination,damage_types,properties,base_ac"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             // This campaign's row first, so the de-duplication below
             // keeps the override - the same precedence
@@ -606,6 +712,13 @@ mod tests {
             id: id.into(),
             item_key: key.into(),
             attuned: false,
+            weight_override: None,
+            price_override: None,
+            damage_number_override: None,
+            damage_denomination_override: None,
+            damage_types_override: None,
+            properties_override: None,
+            base_ac_override: None,
             name: None,
             quantity: 1,
             equipped: false,
@@ -896,6 +1009,11 @@ vec![
             size: size.into(),
             holds_size: holds.map(str::to_string),
             weight: weight.map(str::to_string),
+            damage_number: None,
+            damage_denomination: None,
+            damage_types: Vec::new(),
+            properties: Vec::new(),
+            base_ac: None,
             slots,
             capacity_slots: capacity,
         }

@@ -292,3 +292,14 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    A blanket rule on an element inside a layout class will find every
    component added later. */
 .shop-tag{color:var(--accent);border-color:var(--accent)}
+
+/* Object overrides. A grid rather than a row, because seven controls
+   on one line is seven controls nobody can read — and each carries its
+   own label, since "2" means nothing without "dice" beside it. */
+.overrides{display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));
+       gap:.3rem;margin:.3rem 0}
+.ov{display:flex;align-items:center;gap:.3rem;font-size:11px;color:var(--muted)}
+.ov span{flex:none;min-width:3.2rem}
+.ov input{margin:0;padding:.14rem .3rem;font-size:11px;width:100%}
+.ov input.wide{min-width:5rem}
+.ov-note{grid-column:1/-1;font-size:10px;margin-top:.1rem}

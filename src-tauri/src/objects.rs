@@ -134,6 +134,114 @@ pub fn check_quantity(n: i64) -> Result<i64, String> {
     Ok(n)
 }
 
+
+/* ============================ OVERRIDES ============================ */
+
+/// What THIS one says about itself, where it differs from its type.
+///
+/// EVERY FIELD IS None BY DEFAULT and None means "as the catalogue
+/// says". That is not the same as holding a copy of the default: the
+/// catalogue can change underneath, and a longsword that was never
+/// edited should follow it while one that was should not. Same
+/// tri-state `proficient_override` has used since 008.
+///
+/// WHY NOT A SECOND CATALOGUE ROW. 008 wrote "a +1 sword is not a
+/// sword", meaning a new `items` entry per enchanted weapon, and 026
+/// called that the wrong shape - it makes the rulebook grow every time
+/// one weapon in one campaign gets improved. An edited object is a
+/// unique OBJECT, which is what 026 built identity for.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Overrides {
+    pub size: Option<String>,
+    pub holds_size: Option<String>,
+    pub weight: Option<String>,
+    pub price: Option<i64>,
+    pub damage_number: Option<i64>,
+    pub damage_denomination: Option<i64>,
+    pub damage_types: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+    pub base_ac: Option<i64>,
+}
+
+impl Overrides {
+    /// Whether this object is ordinary after all.
+    pub fn none(&self) -> bool {
+        *self == Overrides::default()
+    }
+
+    /// The type as this one actually is.
+    ///
+    /// PROPERTIES AND DAMAGE TYPES REPLACE rather than merge, and that
+    /// is the only reading that can REMOVE one. A greatsword reforged
+    /// light has lost `hvy`, and a list that only adds could never say
+    /// so - so an override carries the whole set or none of it.
+    pub fn apply(&self, item: &crate::equipment::Item) -> crate::equipment::Item {
+        let mut out = item.clone();
+        if let Some(v) = &self.size {
+            out.size = v.clone();
+        }
+        if self.holds_size.is_some() {
+            out.holds_size = self.holds_size.clone();
+        }
+        if self.weight.is_some() {
+            out.weight = self.weight.clone();
+        }
+        if let Some(v) = self.damage_number {
+            out.damage_number = Some(v);
+        }
+        if let Some(v) = self.damage_denomination {
+            out.damage_denomination = Some(v);
+        }
+        if let Some(v) = &self.damage_types {
+            out.damage_types = v.clone();
+        }
+        if let Some(v) = &self.properties {
+            out.properties = v.clone();
+        }
+        if let Some(v) = self.base_ac {
+            out.base_ac = Some(v);
+        }
+        out
+    }
+}
+
+/// Every override column, in one place so a select cannot drift from
+/// the struct that reads it.
+pub const OVERRIDE_COLUMNS: &str = "size_override,holds_size_override,weight_override,\
+price_override,damage_number_override,damage_denomination_override,\
+damage_types_override,properties_override,base_ac_override";
+
+/// Read them off an `objects` row.
+pub fn overrides_from_row(r: &Value) -> Overrides {
+    Overrides {
+        size: str_or_none(r, "size_override"),
+        holds_size: str_or_none(r, "holds_size_override"),
+        // numeric arrives as a JSON NUMBER - the trap 58fdc30 fixed in
+        // three places at once. Kept as text because it is printed.
+        weight: r.get("weight_override").and_then(num_text),
+        price: r.get("price_override").and_then(|v| v.as_i64()),
+        damage_number: r.get("damage_number_override").and_then(|v| v.as_i64()),
+        damage_denomination: r.get("damage_denomination_override").and_then(|v| v.as_i64()),
+        damage_types: strings_or_none(r, "damage_types_override"),
+        properties: strings_or_none(r, "properties_override"),
+        base_ac: r.get("base_ac_override").and_then(|v| v.as_i64()),
+    }
+}
+
+fn num_text(v: &Value) -> Option<String> {
+    v.as_f64()
+        .map(|n| n.to_string())
+        .or_else(|| v.as_str().map(str::to_string))
+}
+
+fn strings_or_none(v: &Value, key: &str) -> Option<Vec<String>> {
+    v.get(key)?.as_array().map(|a| {
+        a.iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect()
+    })
+}
+
 /* ============================ NETWORK ============================ */
 
 /// One object by id: who holds it, what type it is, what it is called.
@@ -263,6 +371,101 @@ mod tests {
             stack("b", "handaxe", None, 1),
             stack("c", "handaxe", Some("Runt's Axe"), 1),
         ]
+    }
+
+    /* ---------------- overrides ------------------------------------- */
+
+    fn plain() -> crate::equipment::Item {
+        crate::equipment::Item {
+            key: "longsword".into(),
+            name: "Longsword".into(),
+            kind: "weapon".into(),
+            base_item: None,
+            weapon_class: Some("martialM".into()),
+            damage_number: Some(1),
+            damage_denomination: Some(8),
+            damage_types: vec!["slashing".into()],
+            properties: vec!["ver".into()],
+            range_reach: None,
+            range_value: None,
+            range_long: None,
+            armor_category: None,
+            base_ac: None,
+            dex_cap: None,
+            size: "med".into(),
+            holds_size: None,
+            weight: Some("3".into()),
+            accepts: Vec::new(),
+            capacity_slots: None,
+        }
+    }
+
+    #[test]
+    fn an_unedited_object_changes_nothing() {
+        let o = Overrides::default();
+        assert!(o.none());
+        assert_eq!(o.apply(&plain()), plain());
+    }
+
+    #[test]
+    fn a_plus_one_sword_is_still_a_longsword() {
+        // The case 008 wanted a second catalogue row for.
+        let o = Overrides { damage_denomination: Some(10), ..Default::default() };
+        let it = o.apply(&plain());
+        assert_eq!(it.key, "longsword");
+        assert_eq!(it.damage_denomination, Some(10));
+        assert_eq!(it.damage_number, Some(1), "untouched fields stay");
+    }
+
+    #[test]
+    fn a_flaming_sword_replaces_its_damage_types() {
+        let o = Overrides {
+            damage_types: Some(vec!["slashing".into(), "fire".into()]),
+            ..Default::default()
+        };
+        assert_eq!(o.apply(&plain()).damage_types, vec!["slashing", "fire"]);
+    }
+
+    #[test]
+    fn properties_replace_so_that_one_can_be_removed() {
+        // THE REASON IT REPLACES. A list that only added could never
+        // take `hvy` off a reforged greatsword.
+        let o = Overrides { properties: Some(Vec::new()), ..Default::default() };
+        assert!(o.apply(&plain()).properties.is_empty());
+    }
+
+    #[test]
+    fn an_empty_list_is_not_the_same_as_no_override() {
+        // Some(vec![]) means "it has none"; None means "ask the type".
+        let cleared = Overrides { properties: Some(Vec::new()), ..Default::default() };
+        let absent = Overrides::default();
+        assert!(cleared.apply(&plain()).properties.is_empty());
+        assert_eq!(absent.apply(&plain()).properties, vec!["ver"]);
+        assert!(!cleared.none());
+        assert!(absent.none());
+    }
+
+    #[test]
+    fn a_numeric_override_arrives_as_a_json_number() {
+        // 58fdc30's trap, which cost every weight in the game.
+        let row = serde_json::json!({ "weight_override": 12.5, "price_override": 400 });
+        let o = overrides_from_row(&row);
+        assert_eq!(o.weight.as_deref(), Some("12.5"));
+        assert_eq!(o.price, Some(400));
+    }
+
+    #[test]
+    fn a_row_with_no_overrides_reads_as_ordinary() {
+        let row = serde_json::json!({ "id": "x", "item_key": "longsword" });
+        assert!(overrides_from_row(&row).none());
+    }
+
+    #[test]
+    fn size_and_armour_come_through() {
+        let row = serde_json::json!({ "size_override": "lg", "base_ac_override": 16 });
+        let it = overrides_from_row(&row).apply(&plain());
+        assert_eq!(it.size, "lg");
+        assert_eq!(it.base_ac, Some(16));
     }
 
     #[test]

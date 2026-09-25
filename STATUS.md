@@ -1629,6 +1629,52 @@ exactly as 006's rows are. The dice, the crit range and the fumble
 range ARE mechanical and do fire. Nothing here pretends a condition
 system exists.
 
+## Editing one object - BUILT (049)
+
+The viewer showed nine facts and the editor reached three. You could
+rename a greatsword, change how many there were and call it unusually
+large, while the panel beside it reported weight, damage and properties
+nothing could touch.
+
+**AN EDITED OBJECT IS A UNIQUE OBJECT, NOT A NEW CATALOGUE ROW.** The
+obvious move is a campaign-scoped `items` row per edited thing - 008
+did exactly that and said "a +1 sword is not a sword". 026 called it
+the wrong shape and it still is: the catalogue stops being a list of
+what EXISTS and becomes a list of what has ever happened.
+
+**SEVEN COLUMNS, NOT A JSONB BAG.** A bag takes any fact with no
+migration and was the first instinct. Two things argued it down. It is
+untyped - `damage_denomination` is checked >= 2 on `items` and a bag
+would carry 0 happily until something divided by it, so every
+constraint would need rewriting in Rust, which is 028. And 036 ALREADY
+CHOSE with `size_override` and `holds_size_override`; a bag beside them
+is two mechanisms for one idea, and folding them in means rewriting
+twenty-two call sites across six files written the day before.
+
+If the list ever passes ten, the bag wins, and 049's header carries the
+argument for switching.
+
+**LISTS REPLACE RATHER THAN MERGE**, which is the only reading that can
+REMOVE something. A greatsword reforged light has lost `hvy`, and a
+list that only adds could never say so - so an override carries the
+whole set or none of it. Blank clears the override; the word `none`
+sets it to empty. Those are different facts and both are needed.
+
+**ONE MERGE FUNCTION, TWO SCREENS.** `Overrides::apply` runs in
+`load_loadout` before proficiency and modes are derived, so a greatsword
+that lost `hvy` really stops being heavy rather than merely displaying
+as light. `holders::resolve` calls the SAME function - the manager used
+to read damage and properties off the catalogue, which meant an edited
+object displayed its type's numbers while the sheet rolled its own. The
+two-places problem, on screen.
+
+Verified live and rolled back: a greatsword at 2d6 slashing [hvy, two]
+became 2d8 slashing/fire [two] at 4.5 lb worth 400 - with `hvy` gone,
+which is the case a merge could not express. The editor was driven
+through the rig: seven fields carrying their values with the type as
+placeholder, and a save sending blank to clear, `none` to empty and a
+value to set.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

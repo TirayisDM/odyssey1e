@@ -2168,14 +2168,22 @@ async function fillDetail(el, o) {
       o.quantity > 1 ? pounds + " lb for " + o.quantity : pounds + " lb",
     ]);
   }
-  if (item && item.damage_number && item.damage_denomination) {
+  // FROM THE OBJECT, NOT THE TYPE. These used to read off the
+  // catalogue, so an edited greatsword displayed 2d6 while the sheet
+  // rolled the 2d8 somebody gave it - the two places problem, on
+  // screen. holders::resolve applies the overrides with the same
+  // function the sheet uses and reports the result.
+  if (o.damage_number && o.damage_denomination) {
     facts.push([
       "damage",
-      item.damage_number + "d" + item.damage_denomination +
-        (item.damage_types && item.damage_types.length ? " " + item.damage_types.join("/") : ""),
+      o.damage_number + "d" + o.damage_denomination +
+        (o.damage_types && o.damage_types.length ? " " + o.damage_types.join("/") : "") +
+        (item && (o.damage_number !== item.damage_number ||
+                  o.damage_denomination !== item.damage_denomination)
+          ? " (set on this one)" : ""),
     ]);
   }
-  if (item && item.base_ac != null) facts.push(["armour", "AC " + item.base_ac]);
+  if (o.base_ac != null) facts.push(["armour", "AC " + o.base_ac]);
   if (o.is_container) {
     // THREE THINGS A CONTAINER REFUSES ON, and they are not the same
     // question: what it takes, how big, and how much. 036 added the
@@ -2187,8 +2195,12 @@ async function fillDetail(el, o) {
       facts.push(["takes only", item.accepts.join(", ")]);
     }
   }
-  if (item && item.properties && item.properties.length) {
-    facts.push(["properties", item.properties.join(", ")]);
+  if (o.properties && o.properties.length) {
+    facts.push(["properties", o.properties.join(", ")]);
+  } else if (item && item.properties && item.properties.length) {
+    // The type has some and this one has none, which is an override
+    // saying so rather than a gap.
+    facts.push(["properties", "none (set on this one)"]);
   }
   if (o.equipped) facts.push(["worn", "yes"]);
 
@@ -2252,6 +2264,57 @@ async function fillDetail(el, o) {
   el.append(ul);
 }
 
+
+// The seven fields of 049, with their current values and the type's
+// underneath as placeholder.
+//
+// PLACEHOLDER IS THE TYPE, VALUE IS THE OVERRIDE. An empty box showing
+// "2d6" means "as a greatsword"; typing 8 into the die box means this
+// one is different. That is the whole tri-state, made visible without
+// a second control saying whether the first one counts.
+function editorOverrides(o, item) {
+  const wrap = document.createElement("div");
+  wrap.className = "overrides";
+
+  function box(label, value, hint, wide) {
+    const b = document.createElement("input");
+    b.value = value === null || value === undefined ? "" : String(value);
+    b.placeholder = hint;
+    b.title = label + " — blank is as the catalogue says";
+    b.className = wide ? "wide" : "narrow";
+    const cell = document.createElement("label");
+    cell.className = "ov";
+    const tag = document.createElement("span");
+    tag.textContent = label;
+    cell.append(tag, b);
+    wrap.append(cell);
+    return b;
+  }
+
+  const t = item || {};
+  const fields = {
+    el: wrap,
+    weight: box("weight", o.weight_override, t.weight != null ? t.weight + " lb" : "lb"),
+    price:  box("price",  o.price_override,  t.price != null ? String(t.price) : "cost"),
+    dmgN:   box("dice",   o.damage_number_override, t.damage_number != null ? String(t.damage_number) : "n"),
+    dmgD:   box("die",    o.damage_denomination_override, t.damage_denomination != null ? "d" + t.damage_denomination : "dN"),
+    dmgT:   box("damage", o.damage_types_override ? o.damage_types_override.join(", ") : "",
+                (t.damage_types || []).join(", ") || "slashing, fire", true),
+    props:  box("props",  o.properties_override ? o.properties_override.join(", ") : "",
+                (t.properties || []).join(", ") || "hvy, two", true),
+    ac:     box("AC",     o.base_ac_override, t.base_ac != null ? String(t.base_ac) : "armour"),
+  };
+
+  // `none` is how a list is emptied, because blank already means
+  // "revert to the type" and an empty override is a different fact -
+  // it is how a greatsword loses `hvy`.
+  const note = document.createElement("div");
+  note.className = "muted ov-note";
+  note.textContent = "blank = as the catalogue says · type none to empty a list";
+  wrap.append(note);
+  return fields;
+}
+
 // Rename it, change how many there are, or destroy it.
 //
 // NAME AND QUANTITY GO TOGETHER in one write, because they constrain
@@ -2302,6 +2365,14 @@ function fillEditor(el, o) {
     sizeLine.append(holdsIn);
   }
 
+  // EVERYTHING ELSE ABOUT THIS ONE. 049's overrides, all on the same
+  // convention as 036's two: blank CLEARS and reverts to the type, a
+  // value sets it on this object alone. A greatsword given 2d8 here is
+  // still a greatsword - 026 settled that an edited thing is a unique
+  // OBJECT rather than a new catalogue row.
+  const over = editorOverrides(o, item);
+  el.append(over.el);
+
   const save = document.createElement("button");
   save.className = "tiny ghost";
   save.textContent = "save";
@@ -2313,6 +2384,13 @@ function fillEditor(el, o) {
       // Always sent, because "" is how the command is told to CLEAR an
       // override rather than leave it alone. Omitting the field is what
       // means "do not touch".
+      weightOverride: over.weight.value,
+      priceOverride: over.price.value,
+      damageNumberOverride: over.dmgN.value,
+      damageDenominationOverride: over.dmgD.value,
+      damageTypesOverride: over.dmgT.value,
+      propertiesOverride: over.props.value,
+      baseAcOverride: over.ac.value,
       sizeOverride: sizeIn.value,
       holdsSizeOverride: holdsIn ? holdsIn.value : null,
     });

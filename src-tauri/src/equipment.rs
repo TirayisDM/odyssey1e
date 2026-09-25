@@ -65,7 +65,7 @@ impl Mode {
 /// whoever is holding it — see 008. Only the columns a rule reads are
 /// carried; price, weight and art stay in the database until a screen
 /// wants them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub key: String,
     pub name: String,
@@ -570,9 +570,13 @@ pub fn load_loadout(
     let mut query: Vec<(&str, String)> = vec![
         (
             "select",
-            // No spaces: PostgREST reads this verbatim.
-            "id,name,item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max"
-                .to_string(),
+            // No spaces: PostgREST reads this verbatim. The override
+            // columns come from objects.rs so the select cannot drift
+            // from the struct that reads them.
+            format!(
+                "id,name,item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max,{}",
+                crate::objects::OVERRIDE_COLUMNS
+            ),
         ),
         ("holder_id", format!("eq.{}", holder_id)),
         ("order", "acquired_at.asc".to_string()),
@@ -616,6 +620,13 @@ pub fn load_loadout(
             Some(i) => i.clone(),
             None => continue,
         };
+
+        // AS THIS ONE ACTUALLY IS. Applied before proficiency and modes
+        // are derived, so a greatsword reforged without `hvy` really
+        // stops being heavy rather than merely displaying as light -
+        // everything downstream reads the overridden item and none of
+        // it needs to know an override happened.
+        let item = crate::objects::overrides_from_row(r).apply(&item);
 
         let proficient_override = r.get("proficient_override").and_then(|x| x.as_bool());
         out.push(Owned {

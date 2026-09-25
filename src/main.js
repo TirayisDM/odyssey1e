@@ -2254,22 +2254,7 @@ function moveForm(o, t, done) {
   const form = document.createElement("div");
   form.className = "editor";
 
-  // A LABELLED CELL. Four number boxes reading "1 20 1" say nothing
-  // about which is the level and which is the crit - a placeholder
-  // cannot help, because a box with a value in it does not show one.
-  // So the label sits above the box and stays visible while it is
-  // filled.
-  const cell = (label, value, cls) => {
-    const wrap = document.createElement("label");
-    wrap.className = "cell" + (cls ? " " + cls : "");
-    const cap = document.createElement("span");
-    cap.textContent = label;
-    const i = document.createElement("input");
-    i.value = value == null ? "" : String(value);
-    wrap.append(cap, i);
-    wrap.input = i;
-    return wrap;
-  };
+  const cell = labelledCell;
 
   const name = cell("name", t ? t.name : "", "wide");
   name.input.placeholder = "e.g. Descending Cut";
@@ -2279,10 +2264,6 @@ function moveForm(o, t, done) {
   one.className = "row cells";
   one.append(name, dice);
 
-  const modeWrap = document.createElement("label");
-  modeWrap.className = "cell";
-  const modeCap = document.createElement("span");
-  modeCap.textContent = "mode";
   const mode = document.createElement("select");
   for (const val of ["melee", "thrown", "ranged"]) {
     const opt = document.createElement("option");
@@ -2291,7 +2272,7 @@ function moveForm(o, t, done) {
     mode.append(opt);
   }
   mode.value = t ? t.mode : "melee";
-  modeWrap.append(modeCap, mode);
+  const modeWrap = labelledControl("mode", mode);
 
   // The three that were unreadable. "crit 19+" and "fumble 1-" are how
   // they read everywhere else, so the labels say which end each is.
@@ -2331,6 +2312,34 @@ function moveForm(o, t, done) {
 
   form.append(one, two, three, four);
   return form;
+}
+
+// A LABELLED CONTROL. The caption sits ABOVE the box and stays there.
+//
+// The object editor had captions to the LEFT with a 3.2rem gutter, and
+// at four fields a row that reads as the caption belonging to the
+// PREVIOUS box: "6 lb  price" looks like a price of six pounds. A
+// placeholder cannot rescue it either, because a box with a value in it
+// stops showing one.
+//
+// One helper for both editors rather than two conventions, since the
+// second one is how the two drift.
+function labelledControl(label, control, cls) {
+  const wrap = document.createElement("label");
+  wrap.className = "cell" + (cls ? " " + cls : "");
+  const cap = document.createElement("span");
+  cap.textContent = label;
+  wrap.append(cap, control);
+  // The control itself, so a caller reads .input.value rather than
+  // reaching through the wrapper.
+  wrap.input = control;
+  return wrap;
+}
+
+function labelledCell(label, value, cls) {
+  const i = document.createElement("input");
+  i.value = value == null ? "" : String(value);
+  return labelledControl(label, i, cls);
 }
 
 function panel(cls) {
@@ -2497,18 +2506,13 @@ function editorOverrides(o, item) {
   wrap.className = "overrides";
 
   function box(label, value, hint, wide) {
-    const b = document.createElement("input");
-    b.value = value === null || value === undefined ? "" : String(value);
-    b.placeholder = hint;
-    b.title = label + " — blank is as the catalogue says";
-    b.className = wide ? "wide" : "narrow";
-    const cell = document.createElement("label");
-    cell.className = "ov";
-    const tag = document.createElement("span");
-    tag.textContent = label;
-    cell.append(tag, b);
+    const cell = labelledCell(label, value, wide ? "wide" : null);
+    // The TYPE's answer as the placeholder, so an empty box still says
+    // what leaving it empty will mean.
+    cell.input.placeholder = hint;
+    cell.input.title = label + " — blank is as the catalogue says";
     wrap.append(cell);
-    return b;
+    return cell.input;
   }
 
   const t = item || {};
@@ -2544,19 +2548,18 @@ function editorOverrides(o, item) {
 function fillEditor(el, o) {
   el.innerHTML = "";
 
-  const nameIn = document.createElement("input");
-  nameIn.value = o.name || "";
-  nameIn.placeholder = "name (blank = call it a " + o.item_key + ")";
+  const nameCell = labelledCell("name", o.name || "", "wide");
+  nameCell.input.placeholder = "blank = call it a " + o.item_key;
+  const nameIn = nameCell.input;
 
-  const qtyIn = document.createElement("input");
-  qtyIn.type = "number";
-  qtyIn.min = "1";
-  qtyIn.value = String(o.quantity);
-  qtyIn.className = "narrow";
+  const qtyCell = labelledCell("how many", o.quantity);
+  qtyCell.input.type = "number";
+  qtyCell.input.min = "1";
+  const qtyIn = qtyCell.input;
 
   const line = document.createElement("div");
-  line.className = "row";
-  line.append(nameIn, qtyIn);
+  line.className = "row cells";
+  line.append(nameCell, qtyCell);
 
   // THE OVERRIDES, and the blank option is the point of them. 036 puts
   // size on the TYPE; this says THIS ONE is different - a giant's
@@ -2568,21 +2571,21 @@ function fillEditor(el, o) {
   const item = (state.catalogue || []).find((i) => i.key === o.item_key);
   const sizeIn = sizeSelect(
     item && o.size === item.size ? "" : o.size,
-    "size: as a " + o.item_key + (item ? " (" + sizeWord(item.size) + ")" : "")
+    "as a " + o.item_key + (item ? " (" + sizeWord(item.size) + ")" : "")
   );
   const sizeLine = document.createElement("div");
-  sizeLine.className = "row";
-  sizeLine.append(sizeIn);
+  sizeLine.className = "row cells";
+  sizeLine.append(labelledControl("size", sizeIn, "wide"));
 
   let holdsIn = null;
   if (o.is_container) {
     const fromType = item && item.holds_size;
     holdsIn = sizeSelect(
       fromType && o.holds_size === fromType ? "" : o.holds_size || "",
-      "holds: as a " + o.item_key +
+      "as a " + o.item_key +
         " (" + (fromType ? sizeWord(fromType) : "any size") + ")"
     );
-    sizeLine.append(holdsIn);
+    sizeLine.append(labelledControl("holds up to", holdsIn, "wide"));
   }
 
   // EVERYTHING ELSE ABOUT THIS ONE. 049's overrides, all on the same

@@ -319,8 +319,10 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    own label, since "2" means nothing without "dice" beside it. */
 .overrides{display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));
        gap:.3rem;margin:.3rem 0}
-.ov{display:flex;align-items:center;gap:.3rem;font-size:11px;color:var(--muted)}
-.ov span{flex:none;min-width:3.2rem}
-.ov input{margin:0;padding:.14rem .3rem;font-size:11px;width:100%}
-.ov input.wide{min-width:5rem}
+/* The override grid holds the same labelled cells the technique editor
+   uses. They used to be `.ov`, captioned to the LEFT with a 3.2rem
+   gutter - which at four to a row read as the caption belonging to the
+   previous box: "6 lb  price". */
+.overrides .cell{flex:initial}
+.overrides .cell input{width:100%;padding:.14rem .3rem;font-size:11px}
 .ov-note{grid-column:1/-1;font-size:10px;margin-top:.1rem}

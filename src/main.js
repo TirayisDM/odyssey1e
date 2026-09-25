@@ -2469,6 +2469,163 @@ async function fillEncounterObjects(encounterId) {
   if (!(things || []).length) none.textContent = "nothing lying here";
 }
 
+// Looking at a fight and changing one are different jobs. One screen
+// doing both is how the forms came to outnumber the facts.
+// Open a fight, in one of its two modes.
+async function openEncounter(id, mode) {
+  showEncMode(mode);
+  await selectEncounter(id);
+}
+
+function showEncMode(name) {
+  showSub("enc-modes", "encmode", name);
+  state.encMode = name;
+}
+
+// The initiative order as one line, at the top, because it is what a DM
+// looks at between every roll. Names and numbers only - the roster
+// below carries the detail.
+// The Edit pane's forms, and the View pane's description.
+//
+// FILLED FROM THE ROW ALREADY IN HAND. state.encounters is what
+// loadDM read a moment ago, so opening a fight costs no request - the
+// same reason selectEncounter keeps that list at all.
+function paintEncounterEditor(e) {
+  if (!e) return;
+
+  document.querySelector("#enc-name").value = e.name || "";
+  document.querySelector("#enc-story").value = e.narrative || "";
+
+  // The description, in View. 053 is explicit that this is a human's
+  // prose and not narrative_lines - nothing generates it and the engine
+  // will never read it.
+  const told = document.querySelector("#enc-narrative");
+  told.textContent = e.narrative || "";
+  told.hidden = !e.narrative;
+
+  // STATUS, IN EDIT. It used to be a button on every row of the list,
+  // which made the list of fights the control panel for all of them.
+  const bar = document.querySelector("#enc-status");
+  bar.innerHTML = "";
+
+  const now = document.createElement("span");
+  now.className = "tag";
+  now.textContent = e.status;
+  bar.append(now);
+
+  // draft -> active -> ended, and both endings go back to draft: a
+  // finished fight and an abandoned one are equally re-openable, and
+  // 034 keeps the two words apart for what they will TRIGGER rather
+  // than for what they allow.
+  const next =
+    e.status === "draft" ? "active" : e.status === "active" ? "ended" : "draft";
+  bar.append(
+    action("\u2192 " + next, async () => {
+      const r = await tryCall("set_encounter_status", {
+        encounterId: e.id,
+        status: next,
+      });
+      // "Only one active per game" is the rule rather than a mistake,
+      // and the next move is obvious once it is said out loud.
+      dmSay(r.ok ? e.name + " is now " + next : r.error, !r.ok);
+      if (r.ok) {
+        await loadDM();
+        await loadTargets();
+      }
+    })
+  );
+
+  // CANCELLED IS NOT ENDED. 034: ended is what will trigger the
+  // experience review and the journal entry, and a called-off encounter
+  // must earn nobody anything. Offered only while there is something to
+  // call off.
+  if (e.status === "draft" || e.status === "active") {
+    bar.append(
+      action("cancel", async () => {
+        const r = await tryCall("set_encounter_status", {
+          encounterId: e.id,
+          status: "cancelled",
+        });
+        dmSay(r.ok ? e.name + " called off \u2014 nobody earns anything for it" : r.error, !r.ok);
+        if (r.ok) await loadDM();
+      })
+    );
+  }
+
+  paintBranches(e);
+}
+
+function paintOrderStrip(turns) {
+  const el = document.querySelector("#order-strip");
+  el.innerHTML = "";
+  const order = (turns && turns.order) || [];
+  if (!order.length) {
+    el.textContent = "nobody enrolled yet";
+    el.className = "orderstrip muted";
+    return;
+  }
+  el.className = "orderstrip";
+  order.forEach((a, i) => {
+    const chip = document.createElement("span");
+    chip.className =
+      "ochip" +
+      (a.is_current ? " now" : "") +
+      (a.takes_turns ? "" : " out");
+    chip.textContent =
+      (a.initiative == null ? "—" : a.initiative) + " " + a.label;
+    chip.title = a.takes_turns
+      ? a.is_current
+        ? "acting now"
+        : "in the order"
+      : a.initiative == null
+      ? "has not rolled"
+      : a.dead
+      ? "dead"
+      : "withdrawn";
+    el.append(chip);
+    if (i < order.length - 1) {
+      const sep = document.createElement("span");
+      sep.className = "osep";
+      sep.textContent = "\u203a";
+      el.append(sep);
+    }
+  });
+}
+
+// WHERE ELSE TO LOOK. An encounter points at a room, the creatures in
+// it are characters, and the things in it are objects - all three live
+// on other tabs, and until now finding them meant remembering the name
+// and going searching.
+function paintBranches(enc) {
+  const row = document.querySelector("#enc-branches");
+  row.innerHTML = "";
+
+  const place = (state.locations || []).find((l) => l.id === enc.location_id);
+  row.append(
+    action(place ? "the " + place.name + " \u2192 World" : "no place set", async () => {
+      if (!place) return dmSay("this encounter happens nowhere in particular", true);
+      showTab("world");
+      await selectPlace(place.id);
+    })
+  );
+
+  row.append(
+    action("who is here \u2192 Characters", () => {
+      showTab("chars");
+    }),
+    // The filter is set so the tab opens on the things in this room
+    // rather than on all thirty objects in the campaign.
+    action("things here \u2192 Objects", () => {
+      const find = document.querySelector("#obj-find");
+      if (find && place) {
+        find.value = place.name;
+        paintObjects();
+      }
+      showTab("objects");
+    })
+  );
+}
+
 function panel(cls) {
   const d = document.createElement("div");
   d.className = cls;
@@ -3022,14 +3179,22 @@ async function loadDM() {
   state.encounters = encounters || [];
   const ul = document.querySelector("#encounters");
   ul.innerHTML = "";
-  for (const e of encounters || []) {
-    const li = row(e.name, e.status, () => selectEncounter(e.id), e.id === state.dmEncounterId);
-    // The id rides on the element so selecting can re-mark the list
-    // without refetching it. Rebuilding on every click would work and
-    // would also throw away the DM's scroll position mid-setup.
+
+  // A SIMPLE LIST. Every encounter used to carry its own status button
+  // and a cancel beside it, so the list of fights was also the control
+  // panel for all of them - four buttons a row, and the names hard to
+  // read between them. Status now lives in Edit, where the fight being
+  // changed is the one that is open.
+  //
+  // ARCHIVED ONES ARE OFF IT, not gone. 053 has no delete because rolls
+  // point at encounters and actions point at rolls, so removing one
+  // would either cascade through a session or be refused - and the
+  // refusal is the honest answer, so the screen never asks.
+  const shelved = (encounters || []).filter((e) => e.archived);
+  for (const e of (encounters || []).filter((e) => !e.archived)) {
+    const li = row(e.name, e.status, null, e.id === state.dmEncounterId);
     li.dataset.encId = e.id;
 
-    // Where it happens, when it happens anywhere.
     if (e.location_id) {
       const at = (state.locations || []).find((l) => l.id === e.location_id);
       if (at) {
@@ -3039,52 +3204,34 @@ async function loadDM() {
         li.append(w);
       }
     }
-    // draft -> active -> ended, as a button rather than a dropdown: the
-    // next state is nearly always the obvious one.
-    // ended and cancelled both go back to draft: a finished fight and
-    // an abandoned one are equally re-openable, and 034 keeps the two
-    // words apart for what they will trigger, not for what they allow.
-    const next =
-      e.status === "draft" ? "active" : e.status === "active" ? "ended" : "draft";
-    const b = document.createElement("button");
-    b.className = "tiny ghost";
-    b.textContent = "→ " + next;
-    // CANCELLED IS NOT ENDED. 034 says why: ended is what will trigger
-    // the experience review and the journal entry, and a called-off
-    // encounter must earn nobody anything. Offered only while there is
-    // something to call off.
-    if (e.status === "draft" || e.status === "active") {
-      const x = document.createElement("button");
-      x.className = "tiny ghost";
-      x.textContent = "cancel";
-      x.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        const r = await tryCall("set_encounter_status", {
-          encounterId: e.id,
-          status: "cancelled",
-        });
-        dmSay(r.ok ? e.name + " called off — nobody earns anything for it" : r.error, !r.ok);
-        await loadDM();
-      });
-      li.append(x);
-    }
-    b.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      dmSay("");
-      const r = await tryCall("set_encounter_status", {
-        encounterId: e.id,
-        status: next,
-      });
-      // "Only one active per game" is not an error the DM caused by
-      // clicking wrong — it is the rule, and the next move is obvious
-      // once it is said out loud.
-      if (!r.ok) dmSay(r.error, true);
-      else dmSay(e.name + " is now " + next);
-      await loadDM();
-      await loadTargets();
-    });
-    li.append(b);
+
+    li.append(
+      action("view", () => openEncounter(e.id, "view")),
+      action("edit", () => openEncounter(e.id, "edit"))
+    );
     ul.append(li);
+  }
+
+  if (shelved.length) {
+    const head = document.createElement("li");
+    head.className = "flat group";
+    head.textContent = "retired (" + shelved.length + ")";
+    ul.append(head);
+    for (const e of shelved) {
+      const li = row(e.name, e.status, null, false);
+      li.classList.add("shelved");
+      li.append(
+        action("bring back", async () => {
+          const r = await tryCall("set_encounter_archived", {
+            encounterId: e.id,
+            archived: false,
+          });
+          dmSay(r.ok ? e.name + " is back on the list" : r.error, !r.ok);
+          if (r.ok) await loadDM();
+        })
+      );
+      ul.append(li);
+    }
   }
 
   await loadStatblockPicker();
@@ -3154,6 +3301,8 @@ async function selectEncounter(id) {
   const turns = await call("turn_order", { encounterId: id });
   const roster = (turns && turns.order) || [];
   paintTurnBar(id, turns);
+  paintOrderStrip(turns);
+  paintEncounterEditor(e);
 
   // Targets for THIS encounter, not the active one.
   //
@@ -3166,8 +3315,15 @@ async function selectEncounter(id) {
   paintTargets(id);
   fillEncounterObjects(id);
 
+  // TWO LISTS, ONE ROSTER. View shows who is in the fight and how they
+  // are doing; Edit shows the same creatures with the controls that
+  // change them. Painting one list and moving it between panes would
+  // mean the mode decided what a DM can SEE rather than what they can
+  // change.
   const rl = document.querySelector("#roster");
+  const el = document.querySelector("#edit-roster");
   rl.innerHTML = "";
+  el.innerHTML = "";
   for (const a of roster) {
     const li = document.createElement("li");
     li.className =
@@ -3217,49 +3373,10 @@ async function selectEncounter(id) {
       }
     }
 
-    // Roll for this one. A monster already rolled on enrolment, so in
-    // practice this is the players' button and the DM's re-roll.
-    head.append(
-      action(a.initiative == null ? "roll" : "re-roll", async () => {
-        const r = await tryCall("roll_initiative", { actorId: a.id });
-        dmSay(r.ok ? a.label + ": " + r.value.said : r.error, !r.ok);
-        if (r.ok) await selectEncounter(id);
-      })
-    );
-
-    // And typing one, because the table rolled real dice and 051 stores
-    // no tiebreak for the DM to adjudicate with.
-    const byHand = document.createElement("input");
-    byHand.className = "narrow";
-    byHand.type = "number";
-    byHand.placeholder = "set";
-    byHand.addEventListener("change", async () => {
-      const v = byHand.value === "" ? null : Number(byHand.value);
-      const r = await tryCall("set_initiative", { actorId: a.id, initiative: v });
-      dmSay(r.ok ? a.label + " set to " + (v == null ? "not rolled" : v) : r.error, !r.ok);
-      if (r.ok) await selectEncounter(id);
-    });
-    head.append(byHand);
-
-    // Deactivate rather than delete for anything that has rolled: the
-    // rolls point at it. Delete is for a mis-click during setup, and the
-    // foreign keys refuse it when it is not.
-    const tog = document.createElement("button");
-    tog.className = "tiny ghost";
-    tog.textContent = a.active ? "hide" : "show";
-    tog.addEventListener("click", async () => {
-      await call("set_actor_active", { actorId: a.id, active: !a.active });
-      await selectEncounter(id);
-      await loadTargets();
-    });
-    const del = document.createElement("button");
-    del.className = "tiny ghost";
-    del.textContent = "remove";
-    del.addEventListener("click", async () => {
-      await call("remove_actor", { actorId: a.id });
-      await selectEncounter(id);
-      await loadTargets();
-    });
+    // ROLLING, SETTING, HIDING AND REMOVING ARE EDITS and live in the
+    // other pane - see the edit roster below. What stays here is what
+    // RUNS the fight: looking at a creature, and a monster swinging.
+    //
     // View. Opens the same sheet a player gets, because since 022 a
     // goblin IS a character - see viewRow.
     const see = document.createElement("button");
@@ -3274,7 +3391,7 @@ async function selectEncounter(id) {
       }
     });
 
-    head.append(see, tog, del);
+    head.append(see);
     li.append(head);
 
     const tags = document.createElement("span");
@@ -3301,6 +3418,73 @@ async function selectEncounter(id) {
     li.append(view);
 
     rl.append(li);
+
+    /* ---------- the same creature, in Edit ---------- */
+
+    const er = document.createElement("li");
+    er.className = "flat item" + (a.active ? " on" : "");
+    const eh = document.createElement("div");
+    eh.className = "head";
+    const en = document.createElement("span");
+    en.className = "nm";
+    en.textContent = a.label;
+    eh.append(en);
+
+    const num = document.createElement("span");
+    num.className = "tag init" + (a.initiative == null ? " warn" : "");
+    num.textContent = a.initiative == null ? "not rolled" : String(a.initiative);
+    eh.append(num);
+
+    // A monster already rolled on enrolment, so in practice this is the
+    // players' button and the DM's re-roll.
+    eh.append(
+      action(a.initiative == null ? "roll" : "re-roll", async () => {
+        const r = await tryCall("roll_initiative", { actorId: a.id });
+        dmSay(r.ok ? a.label + ": " + r.value.said : r.error, !r.ok);
+        if (r.ok) await selectEncounter(id);
+      })
+    );
+
+    // And typing one, because the table rolled real dice and 051 stores
+    // no tiebreak for the DM to adjudicate with.
+    const byHand = document.createElement("input");
+    byHand.className = "narrow";
+    byHand.type = "number";
+    byHand.placeholder = "set";
+    byHand.addEventListener("change", async () => {
+      const v = byHand.value === "" ? null : Number(byHand.value);
+      const r = await tryCall("set_initiative", { actorId: a.id, initiative: v });
+      dmSay(r.ok ? a.label + " set to " + (v == null ? "not rolled" : v) : r.error, !r.ok);
+      if (r.ok) await selectEncounter(id);
+    });
+    eh.append(byHand);
+
+    // HIDDEN RATHER THAN REMOVED for anything that has rolled: the
+    // rolls point at it. Remove is for a mis-click during setup, and
+    // the foreign keys refuse it when it is not - 011 made the same
+    // call, and 053 made it again for the encounter itself.
+    eh.append(
+      action(a.active ? "hide" : "show", async () => {
+        await call("set_actor_active", { actorId: a.id, active: !a.active });
+        await selectEncounter(id);
+        await loadTargets();
+      }),
+      action("remove", async () => {
+        if (!confirm("Take " + a.label + " out of this fight?")) return;
+        const r = await tryCall("remove_actor", { actorId: a.id });
+        if (!r.ok) return dmSay(r.error, true);
+        await selectEncounter(id);
+        await loadTargets();
+      })
+    );
+
+    er.append(eh);
+    el.append(er);
+  }
+
+  if (!roster.length) {
+    rl.append(row("nobody in this fight yet", "", null));
+    el.append(row("nobody to change", "", null));
   }
 
   const challenges = await call("list_challenges", { encounterId: id });
@@ -4249,6 +4433,39 @@ window.addEventListener("DOMContentLoaded", async () => {
     const r = await tryCall("reset_order", { encounterId: state.dmEncounterId });
     dmSay(r.ok ? "back before the first turn" : r.error, !r.ok);
     if (r.ok) await selectEncounter(state.dmEncounterId);
+  });
+
+  for (const b of document.querySelectorAll("#enc-modes .tab")) {
+    b.addEventListener("click", () => showEncMode(b.dataset.encmode));
+  }
+
+  guarded("#save-encounter", async () => {
+    if (!state.dmEncounterId) return dmSay("open an encounter first", true);
+    const r = await tryCall("edit_encounter", {
+      encounterId: state.dmEncounterId,
+      name: val("#enc-name"),
+      narrative: document.querySelector("#enc-story").value,
+    });
+    dmSay(r.ok ? "saved" : r.error, !r.ok);
+    if (r.ok) await loadDM();
+  });
+
+  guarded("#archive-encounter", async () => {
+    if (!state.dmEncounterId) return dmSay("open an encounter first", true);
+    // RETIRED, NOT DELETED, and the wording says so. 053 has no delete
+    // because rolls point at encounters and actions point at rolls.
+    if (!confirm("Take this off the list? It is kept, with its rolls, and can be brought back.")) {
+      return;
+    }
+    const r = await tryCall("set_encounter_archived", {
+      encounterId: state.dmEncounterId,
+      archived: true,
+    });
+    if (!r.ok) return dmSay(r.error, true);
+    dmSay("retired from the list");
+    state.dmEncounterId = null;
+    await loadDM();
+    await selectEncounter(null);
   });
 
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {

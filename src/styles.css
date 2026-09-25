@@ -159,6 +159,25 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    weapon itself is findable in a line of fifteen. */
 .attacks button.tiny.technique{background:transparent;color:var(--accent);
      border:1px solid var(--line)}
+/* THE ORDER, AS ONE LINE AT THE TOP. It is what a DM looks at between
+   every roll, so it reads left to right like the turn does rather than
+   as a column you have to scan. */
+.orderstrip{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem;
+     margin:.2rem 0 .4rem;font-size:11px}
+.ochip{padding:.05rem .3rem;border-radius:3px;border:1px solid transparent;
+     font-variant-numeric:tabular-nums}
+.ochip.now{background:#141b26;border-color:var(--accent);color:var(--accent);
+     font-weight:700}
+/* Not rolled, withdrawn or dead - in the list so the DM can chase them,
+   dimmed because they are not in the turn. */
+.ochip.out{color:var(--muted);opacity:.65}
+.osep{color:var(--line)}
+/* A human's prose about the fight, read aloud rather than rolled. */
+.prose-block{color:var(--muted);font:italic 12px/1.55 Georgia,"Times New Roman",serif;
+     border-left:2px solid var(--line);padding:.3rem .6rem;margin:.3rem 0 .6rem}
+.list li.shelved{opacity:.6}
+#enc-story{width:100%;resize:vertical;font:inherit;background:#0f1114;
+     color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:.3rem}
 .turnbar{align-items:center;gap:.5rem;margin-bottom:.5rem}
 .turnbar #turn-now{flex:1;font-size:11px}
 .turnbar button{flex:0 0 auto}

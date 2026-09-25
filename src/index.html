@@ -195,35 +195,59 @@
         <div id="enc-detail" hidden>
           <div id="enc-editing" class="editing" hidden></div>
 
-          <!-- WHERE IT HAPPENS, changeable. The create form has had this
-               picker since 034 and nothing could move an encounter
-               afterwards, which left every encounter made before that
-               migration stranded nowhere with no way back. -->
-          <div class="row cells">
-            <label class="cell wide"><span>where it happens</span>
-              <select id="enc-place"></select></label>
-            <button id="set-enc-place" class="ghost">Move here</button>
-          </div>
-
-          <!-- THE TURN. 011 created `initiative` and said nothing read
-               it; 012 built actions as the turn-sized unit waiting for
-               a turn to sit in; 015 left death saves on demand "until
-               initiative arrives". 051 stores the round and whose turn
-               it is - the order itself is derived. -->
-          <div class="sub">Who is in this</div>
+          <!-- THE ORDER, AT THE TOP. It is the thing a DM looks at
+               between every roll, so it sits above everything that can
+               be edited rather than below the forms. -->
+          <div id="order-strip" class="orderstrip"></div>
           <div class="row turnbar">
             <span id="turn-now" class="muted"></span>
             <button id="next-turn" class="ghost">Begin</button>
             <button id="reset-order" class="tiny ghost">reset</button>
           </div>
-          <ul id="roster" class="list"></ul>
 
-          <div class="row cells">
-            <label class="cell wide"><span>bring in</span>
-              <select id="enrol-what"></select></label>
-            <label class="cell wide"><span>called</span>
-              <input id="enrol-name" placeholder="blank = auto, e.g. Goblin 0003" /></label>
-            <button id="enrol" class="ghost">Enrol</button>
+          <!-- TWO MODES. Looking at a fight and changing one are
+               different jobs, and one screen doing both is how the
+               forms came to outnumber the facts. -->
+          <nav class="tabs mini" id="enc-modes">
+            <button class="tab on" data-encmode="view">View</button>
+            <button class="tab" data-encmode="edit">Edit</button>
+          </nav>
+
+          <div class="encmode-pane" data-encmode="view">
+            <div id="enc-narrative" class="prose-block"></div>
+            <div class="sub">Who is in this</div>
+            <ul id="roster" class="list"></ul>
+          </div>
+
+          <div class="encmode-pane" data-encmode="edit" hidden>
+            <div class="row cells">
+              <label class="cell wide"><span>called</span>
+                <input id="enc-name" /></label>
+              <label class="cell wide"><span>where it happens</span>
+                <select id="enc-place"></select></label>
+              <button id="set-enc-place" class="ghost">Move here</button>
+            </div>
+            <div class="row cells">
+              <label class="cell wide"><span>what this encounter is</span>
+                <textarea id="enc-story" rows="3"
+                  placeholder="read aloud, or referred to — the engine never touches this"></textarea></label>
+            </div>
+            <div class="sub">What state it is in</div>
+            <div class="row" id="enc-status"></div>
+            <div class="row">
+              <button id="save-encounter" class="ghost">Save</button>
+              <button id="archive-encounter" class="ghost danger">Retire from the list</button>
+            </div>
+
+            <div class="sub">Bring somebody in</div>
+            <div class="row cells">
+              <label class="cell wide"><span>bring in</span>
+                <select id="enrol-what"></select></label>
+              <label class="cell wide"><span>called</span>
+                <input id="enrol-name" placeholder="blank = auto, e.g. Goblin 0003" /></label>
+              <button id="enrol" class="ghost">Enrol</button>
+            </div>
+            <ul id="edit-roster" class="list"></ul>
           </div>
 
           <!-- WHAT CAN BE AIMED AT, all three kinds together. A creature
@@ -231,9 +255,14 @@
                so does a THING in the room - a challenge that points at
                an object, rather than a third kind resolution.rs would
                have to learn. -->
-          <div class="sub">What can be aimed at</div>
-          <ul id="targets" class="list"></ul>
+          <div class="encmode-pane" data-encmode="view">
+            <div class="sub">What can be aimed at</div>
+            <ul id="targets" class="list"></ul>
+            <div class="sub">Go and look</div>
+            <div class="row" id="enc-branches"></div>
+          </div>
 
+          <div class="encmode-pane" data-encmode="edit" hidden>
           <div class="sub">Add a difficulty</div>
           <div class="row cells">
             <label class="cell wide"><span>what you are doing</span>
@@ -251,6 +280,7 @@
             <button id="add-challenge" class="ghost">Add</button>
           </div>
           <ul id="challenges" class="list"></ul>
+          </div>
 
         </div>
         </section>

@@ -975,3 +975,68 @@ pub fn rename_actor(
     )
     .map_err(|e| denied(e, "rename a creature"))
 }
+
+/// Rename an encounter, or write what it is.
+///
+/// 053 added `narrative`, which is a human's description of the fight
+/// and NOT `narrative_lines` - nothing generates it and the engine will
+/// never read it. The same kind of text as a technique's special_text.
+///
+/// Both fields in one call because a DM editing a fight edits the fight
+/// - two commands would be two writes and a window where the list and
+/// the panel disagree about what it is called. Same reasoning 025 gave
+/// for naming an actor and its character together.
+#[tauri::command]
+pub fn edit_encounter(
+    state: State<AppState>,
+    encounter_id: String,
+    name: String,
+    narrative: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    if name.trim().is_empty() {
+        return Err("an encounter needs a name".to_string());
+    }
+    supabase::rest_update(
+        &token,
+        "encounters",
+        &[("id", &format!("eq.{}", encounter_id))],
+        &json!({
+            "name": name.trim(),
+            // Blank clears it. An encounter with no description is the
+            // ordinary case and an empty string pretending to be one is
+            // a row somebody has to reason about later.
+            "narrative": narrative.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        }),
+    )
+    .map_err(|e| denied(e, "edit an encounter"))
+}
+
+/// Take an encounter off the list, or put it back.
+///
+/// NOT A DELETE, and 053's header argues why at length: rolls point at
+/// encounters and actions point at rolls, so removing one would either
+/// cascade through a session's history or be refused by the foreign
+/// keys. The refusal is the honest answer, so the screen never asks the
+/// question - it offers this instead.
+///
+/// ARCHIVING CHANGES NO STATUS. A cancelled fight can be archived and
+/// an archived one can still be `active`, which would be odd but is
+/// the DM's business - 034 gave ENDED and CANCELLED meanings the future
+/// XP review depends on, and tidying a screen must not quietly claim
+/// one of them happened.
+#[tauri::command]
+pub fn set_encounter_archived(
+    state: State<AppState>,
+    encounter_id: String,
+    archived: bool,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "encounters",
+        &[("id", &format!("eq.{}", encounter_id))],
+        &json!({ "archived": archived }),
+    )
+    .map_err(|e| denied(e, "archive an encounter"))
+}

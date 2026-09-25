@@ -147,6 +147,18 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .list li.group{background:transparent;border:0;padding:.35rem .1rem .1rem;
      font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .tag.hp{font-variant-numeric:tabular-nums}
+/* One line per weapon per mode. A light hammer carries seven melee
+   techniques and six thrown - 007 exists because of that split - and in
+   one undivided row they read as thirteen unrelated verbs. */
+.attack-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem;
+     margin:.25rem 0;padding-left:.1rem}
+.attack-of{flex:0 0 8.5rem;font-size:9px;text-transform:uppercase;
+     letter-spacing:.07em;color:var(--muted)}
+.attack-of.warn{color:#e0b341}
+/* The plain swing reads solid and its techniques read lighter, so the
+   weapon itself is findable in a line of fifteen. */
+.attacks button.tiny.technique{background:transparent;color:var(--accent);
+     border:1px solid var(--line)}
 .turnbar{align-items:center;gap:.5rem;margin-bottom:.5rem}
 .turnbar #turn-now{flex:1;font-size:11px}
 .turnbar button{flex:0 0 auto}

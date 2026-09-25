@@ -3599,10 +3599,52 @@ async function attackRow(actor, encounterId) {
   }
   wrap.append(pick);
 
+  // ONE BLOCK PER WEAPON PER MODE. A goblin with a light hammer has
+  // fifteen buttons, and they are one weapon in two modes - 007 exists
+  // because that hammer carries seven melee techniques and six thrown.
+  // In one undivided row they read as fifteen unrelated verbs.
+  //
+  // Grouped on what the command now says rather than on a guess:
+  // `weapon` used to carry the TECHNIQUE'S name, so every button
+  // claimed a different weapon and no grouping was possible.
+  const groups = [];
   for (const atk of attacks) {
+    const key = atk.weapon + "\u0000" + atk.mode;
+    let g = groups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, weapon: atk.weapon, mode: atk.mode, attacks: [] };
+      groups.push(g);
+    }
+    g.attacks.push(atk);
+  }
+
+  for (const g of groups) {
+    const line = document.createElement("div");
+    line.className = "attack-line";
+
+    const cap = document.createElement("span");
+    cap.className = "attack-of";
+    // The mode only when it is not the ordinary one - "Light Hammer"
+    // and "Light Hammer thrown" rather than "Light Hammer melee".
+    cap.textContent = g.weapon + (g.mode === "melee" ? "" : " " + g.mode);
+    // The plain swing carries the proficiency; a technique inherits it
+    // from the same weapon, so asking the first is asking all of them.
+    if (g.attacks.some((a) => a.proficient === false)) {
+      cap.classList.add("warn");
+      cap.title = "not proficient — no proficiency bonus";
+    }
+    line.append(cap);
+
+    for (const atk of g.attacks) line.append(buildAttackButton(atk));
+    wrap.append(line);
+  }
+
+  // A closure over the picker and the actor, which is why it is nested
+  // rather than a sibling of attackRow.
+  function buildAttackButton(atk) {
     const b = document.createElement("button");
-    b.className = "tiny";
-    b.textContent = atk.request;
+    b.className = "tiny" + (atk.technique ? " technique" : "");
+    b.textContent = atk.label || atk.request;
     if (atk.proficient === false) b.title = "not proficient — no proficiency bonus";
     let busy = false;
     b.addEventListener("click", async () => {
@@ -3634,7 +3676,7 @@ async function attackRow(actor, encounterId) {
         b.disabled = false;
       }
     });
-    wrap.append(b);
+    return b;
   }
 
   return wrap;

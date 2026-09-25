@@ -621,8 +621,17 @@ pub fn list_npc_attacks(state: State<AppState>, actor_id: String) -> Result<Valu
         for mode in &owned.modes {
             out.push(json!({
                 "request": crate::attack::weapon_request_name(&owned.item.name, *mode),
+                // THE WEAPON, for grouping. A goblin with a light
+                // hammer has fifteen buttons and they are all one
+                // weapon in two modes - without this the screen cannot
+                // say so.
                 "weapon": owned.item.name,
+                "object_id": owned.id,
                 "mode": mode.as_str(),
+                // WHAT THE BUTTON SAYS. The plain swing is named after
+                // the weapon; a technique is named after itself.
+                "label": crate::attack::weapon_request_name(&owned.item.name, *mode),
+                "technique": false,
                 "proficient": owned.proficient,
             }));
         }
@@ -631,14 +640,33 @@ pub fn list_npc_attacks(state: State<AppState>, actor_id: String) -> Result<Valu
     // Techniques the statblock's weapons offer, gated by the level 019
     // gave it. Same list a character would get, same gate.
     for t in &sheet.techniques {
-        if t.min_level <= sheet.level {
-            out.push(json!({
-                "request": t.roll_name,
-                "weapon": t.name,
-                "mode": t.mode.as_str(),
-                "technique": true,
-            }));
+        if t.min_level > sheet.level {
+            continue;
         }
+        // WHICH WEAPON THIS BELONGS TO. `weapon` used to carry the
+        // TECHNIQUE'S name, so fifteen buttons arrived claiming fifteen
+        // different weapons and the screen had no way to group them -
+        // which is exactly how a light hammer came to look like a wall
+        // of unrelated verbs.
+        //
+        // Matched on the object since today's change binds a technique
+        // to the weapon it came off; the key is the fallback for a
+        // type-level list.
+        let from = sheet.loadout.iter().find(|o| match t.object_id.as_deref() {
+            Some(id) => o.id == id,
+            None => o.item.key == t.item_key,
+        });
+        out.push(json!({
+            "request": t.roll_name,
+            "weapon": from.map(|o| o.item.name.clone())
+                          .unwrap_or_else(|| t.item_key.clone()),
+            "object_id": from.map(|o| o.id.clone()),
+            "mode": t.mode.as_str(),
+            "label": t.name,
+            "technique": true,
+            "min_level": t.min_level,
+            "proficient": from.map(|o| o.proficient),
+        }));
     }
 
     Ok(json!(out))

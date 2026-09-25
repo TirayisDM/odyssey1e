@@ -67,7 +67,18 @@ pub struct Obj {
     /// The rest of 049's overrides, carried raw so `resolve` can apply
     /// them with the SAME function the sheet uses. A screen that merged
     /// these itself would be a second copy of the rule.
-    pub weight_override: Option<String>,
+    /// f64 AND NOT String, which is the third time this trap has fired.
+    /// `weight_override` is `numeric`, Postgres serialises numeric to a
+    /// JSON NUMBER, and `Obj` is deserialised by serde straight off the
+    /// row - so the DECLARED TYPE IS THE PARSER. A String here does not
+    /// read a number leniently, it refuses the whole array: "invalid
+    /// type: floating point `5.0`, expected a string", and the Objects
+    /// tab shows nothing at all because one sword was given a weight.
+    ///
+    /// 58fdc30 fixed this in three hand-written readers and wrote the
+    /// lesson down. It came back two commits later in a struct, because
+    /// a hand-written reader can be lenient and a derived one cannot.
+    pub weight_override: Option<f64>,
     pub price_override: Option<i64>,
     pub damage_number_override: Option<i64>,
     pub damage_denomination_override: Option<i64>,
@@ -418,7 +429,7 @@ fn overrides_of(o: &Obj) -> crate::objects::Overrides {
     crate::objects::Overrides {
         size: o.size_override.clone(),
         holds_size: o.holds_size_override.clone(),
-        weight: o.weight_override.clone(),
+        weight: o.weight_override.map(|w| w.to_string()),
         price: o.price_override,
         damage_number: o.damage_number_override,
         damage_denomination: o.damage_denomination_override,
@@ -879,6 +890,45 @@ vec![
         o.name = Some("   ".into());
         assert_eq!(label(&o), "longsword");
     }
+    /* ---------------- the row as PostgREST actually sends it -------- */
+
+    // THE DESERIALISER IS THE PARSER, and that is what makes this worth
+    // a test rather than a careful read. `Obj` comes off the wire
+    // through serde_json::from_value, so a wrong field type does not
+    // read leniently - it refuses the whole array and the Objects tab
+    // goes blank because one sword was given a weight.
+    #[test]
+    fn an_object_row_with_a_numeric_weight_override_deserialises() {
+        let row = serde_json::json!([{
+            "id": "o1", "item_key": "greatsword", "name": "Judge",
+            "quantity": 1, "equipped": true, "attuned": false,
+            "holder_id": "e1", "entity_id": null,
+            "size_override": null, "holds_size_override": null,
+            "weight_override": 5.0, "price_override": 400,
+            "damage_number_override": null, "damage_denomination_override": 8,
+            "damage_types_override": ["slashing", "fire"],
+            "properties_override": ["two"], "base_ac_override": null
+        }]);
+        let parsed: Vec<Obj> =
+            serde_json::from_value(row).expect("a numeric override must not refuse the row");
+        assert_eq!(parsed[0].weight_override, Some(5.0));
+        assert_eq!(parsed[0].price_override, Some(400));
+        assert_eq!(parsed[0].damage_denomination_override, Some(8));
+        assert_eq!(parsed[0].properties_override.as_deref(), Some(&["two".to_string()][..]));
+    }
+
+    #[test]
+    fn a_whole_numbered_weight_still_arrives_as_a_number() {
+        // 5 rather than 5.0 - Postgres prints numeric without a decimal
+        // when it has none, and a String field would refuse this too.
+        let row = serde_json::json!([{
+            "id": "o1", "item_key": "club", "quantity": 1,
+            "equipped": false, "attuned": false, "weight_override": 5
+        }]);
+        let parsed: Vec<Obj> = serde_json::from_value(row).expect("integers are numbers too");
+        assert_eq!(parsed[0].weight_override, Some(5.0));
+    }
+
     /* ---------- the catalogue row, as PostgREST sends it ---------- */
 
     #[test]

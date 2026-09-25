@@ -116,15 +116,12 @@ pub fn quote_object(
 
     // NULL markup is not a shop. A goblin carrying a scimitar is not
     // offering it at list price.
-    let markup = k
-        .get("markup")
-        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
-        .ok_or_else(|| {
-            format!(
-                "{} is not a merchant",
-                k.get("name").and_then(|v| v.as_str()).unwrap_or("that creature")
-            )
-        })?;
+    let markup = crate::supabase::numeric_at(&k, "markup").ok_or_else(|| {
+        format!(
+            "{} is not a merchant",
+            k.get("name").and_then(|v| v.as_str()).unwrap_or("that creature")
+        )
+    })?;
     let disposition = Disposition::parse(k.get("disposition").and_then(|v| v.as_str()));
 
     let item = crate::equipment::load_item(&token, &obj.game_id, &obj.item_key)?
@@ -230,9 +227,7 @@ fn counterparty(
         .and_then(|a| a.first())
         .cloned()
         .ok_or_else(|| "no such creature, or they are not visible to you".to_string())?;
-    let markup = r
-        .get("markup")
-        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
+    let markup = crate::supabase::numeric_at(&r, "markup");
     let disposition = Disposition::parse(r.get("disposition").and_then(|v| v.as_str()));
     match markup {
         Some(m) => Ok((Counterparty::Merchant, m, disposition)),

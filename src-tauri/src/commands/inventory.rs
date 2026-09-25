@@ -485,8 +485,9 @@ pub fn encumbrance(state: State<AppState>, character_id: String) -> Result<Value
         if !mine {
             continue;
         }
-        // PostgREST sends numeric as a string - the same trap
-        // containers::as_f64 documents.
+        // `Kind::weight` is already TEXT - holders parsed it on the way
+        // in, because most callers print a weight rather than sum one.
+        // This is one of the few that sums, so it parses back.
         let each = kinds
             .iter()
             .find(|k| k.key == o.item_key)

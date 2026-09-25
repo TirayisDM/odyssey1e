@@ -78,6 +78,12 @@ pub struct Obj {
     /// 58fdc30 fixed this in three hand-written readers and wrote the
     /// lesson down. It came back two commits later in a struct, because
     /// a hand-written reader can be lenient and a derived one cannot.
+    ///
+    /// So this one no longer relies on the declaration being right. The
+    /// deserialiser takes a number or a string and yields the same thing
+    /// either way - the same leniency every hand-written reader in the
+    /// repo now gets, from the same place.
+    #[serde(default, deserialize_with = "crate::supabase::de_numeric")]
     pub weight_override: Option<f64>,
     pub price_override: Option<i64>,
     pub damage_number_override: Option<i64>,
@@ -569,53 +575,41 @@ pub fn within_reach(
 
 /* ============================ LOADING ============================ */
 
-/// PostgREST sends `numeric` as a JSON STRING, not a number, so a plain
-/// `as_f64` returns None on every slot and capacity in the catalogue.
-/// The same trap containers::as_f64 exists for, and the same fix.
+/// The string arrays - damage types, properties. Not numeric, and so
+/// not supabase's problem.
 fn strs(v: Option<&serde_json::Value>) -> Vec<String> {
     v.and_then(|x| x.as_array())
         .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
         .unwrap_or_default()
 }
 
-fn num(v: Option<&serde_json::Value>) -> Option<f64> {
-    let v = v?;
-    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-}
-
 /// One catalogue row, as the fields the world needs.
 ///
 /// SPLIT OUT BECAUSE IT HAD A BUG AND NO TEST. `weight` was read with
-/// `as_str()` alone, and Postgres serialises `numeric` to a JSON
-/// NUMBER - `to_json(2.5::numeric)` is `2.5`, not `"2.5"`. So every
-/// weight in the game came back None and encumbrance reported that a
-/// character carrying fourteen items weighed nothing.
+/// `as_str()` alone and came back None for every item in the game, so
+/// encumbrance reported that a character carrying fourteen things
+/// weighed nothing. The comment that used to sit here explained the
+/// trap backwards, which is how it spread.
 ///
-/// The comment that used to sit here said the opposite, and so does one
-/// in containers.rs; both were wrong and both were written by me. What
-/// saved containers.rs was `as_f64().or_else(as_str)` - defensiveness
-/// rather than knowledge - which is why the wrong belief survived long
-/// enough to break something else.
-///
-/// The tests below feed the shape PostgREST actually sends.
+/// It now asks `supabase::numeric_at`, which is the only thing in the
+/// repo with a view on how `numeric` arrives. The tests below still
+/// feed the shape PostgREST actually sends, because a caller being
+/// right by delegation is worth checking too.
 fn kind_from_row(key: String, r: &serde_json::Value) -> Kind {
     Kind {
         key,
         size: r.get("size").and_then(|v| v.as_str()).unwrap_or("med").to_string(),
         holds_size: r.get("holds_size").and_then(|v| v.as_str()).map(str::to_string),
-        // Kept as a string because it is printed rather than summed by
-        // most callers, but parsed on the way in so a JSON number
-        // survives. `num` accepts both, which is the only honest thing
-        // to do while two comments in this repo disagreed about which
-        // arrives.
-        weight: num(r.get("weight")).map(|w| w.to_string()),
+        // Kept as text because it is printed rather than summed by most
+        // callers.
+        weight: crate::supabase::numeric_text_at(r, "weight"),
         damage_number: r.get("damage_number").and_then(|v| v.as_i64()),
         damage_denomination: r.get("damage_denomination").and_then(|v| v.as_i64()),
         damage_types: strs(r.get("damage_types")),
         properties: strs(r.get("properties")),
         base_ac: r.get("base_ac").and_then(|v| v.as_i64()),
-        slots: num(r.get("slots")).unwrap_or(1.0),
-        capacity_slots: num(r.get("capacity_slots")),
+        slots: crate::supabase::numeric_at(r, "slots").unwrap_or(1.0),
+        capacity_slots: crate::supabase::numeric_at(r, "capacity_slots"),
     }
 }
 

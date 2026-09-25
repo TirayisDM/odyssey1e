@@ -19,7 +19,7 @@
 //!   SERVICE ROLE key ever appears in this file, that is a bug: it
 //!   bypasses RLS entirely and must never reach a client.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::sync::{Mutex, OnceLock};
 
@@ -93,6 +93,70 @@ fn error_message(status: u16, body: &str) -> String {
     } else {
         format!("HTTP {}: {}", status, body)
     }
+}
+
+/* ============================ NUMERIC ============================ */
+
+// ONE PLACE TO BE RIGHT ABOUT `numeric`, because being wrong about it in
+// seven places cost three bugs and is still written down wrong in two.
+//
+// Postgres serialises `numeric` to a JSON NUMBER. `to_json(2.5::numeric)`
+// is `2.5`, not `"2.5"` - verified against the live database rather than
+// reasoned about, which is how this was settled the third time.
+//
+//   58fdc30  three readers took `as_str` alone, so every weight and
+//            every container capacity in the game read as None. The
+//            sheet said a character in scale mail weighed nothing.
+//   3e03c4e  holders::Obj declared Option<String>, and `Obj` is
+//            deserialised by serde, where the declared type IS the
+//            parser. It refused the whole array rather than one field,
+//            and the Objects tab went blank because one sword had been
+//            given a weight.
+//
+// A LENIENT READER HIDES A WRONG BELIEF until somebody writes a strict
+// one. containers::as_f64 took both representations and carried a
+// comment claiming the wrong one, and the comment was copied into files
+// where only that branch existed. So the leniency lives here now, once,
+// next to the sentence saying which representation is actually real -
+// and no caller gets to hold an opinion about it.
+
+/// A `numeric` column as a number.
+pub fn numeric(v: Option<&Value>) -> Option<f64> {
+    let v = v?;
+    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
+/// The same, by key off a row.
+pub fn numeric_at(row: &Value, key: &str) -> Option<f64> {
+    numeric(row.get(key))
+}
+
+/// A `numeric` column as text, for printing.
+///
+/// Separate because a weight is SHOWN far more often than it is summed,
+/// and `f64::to_string` gives `5` for a whole number rather than `5.0`,
+/// which is what a sheet should say.
+pub fn numeric_text_at(row: &Value, key: &str) -> Option<String> {
+    numeric_at(row, key).map(|n| n.to_string())
+}
+
+/// For a struct field serde deserialises directly.
+///
+/// THE STRUCT CASE IS THE DANGEROUS ONE. A hand-written reader that
+/// guesses wrong loses one field; a derived one refuses the entire
+/// response. This takes a number or a string either way, so declaring
+/// the field wrong cannot repeat 3e03c4e.
+///
+/// ```text
+/// #[serde(default, deserialize_with = "crate::supabase::de_numeric")]
+/// pub weight_override: Option<f64>,
+/// ```
+pub fn de_numeric<'de, D>(d: D) -> Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = Option::<Value>::deserialize(d)?;
+    Ok(numeric(v.as_ref()))
 }
 
 /* ============================ AUTH ============================ */
@@ -406,5 +470,74 @@ mod tests {
     #[test]
     fn a_space_is_allowed_because_names_have_them() {
         assert!(check_query(&[("name", "eq.Rodnar Shieldcrest")]).is_ok());
+    }
+
+    /* ------------------------- numeric ------------------------- */
+
+    #[test]
+    fn numeric_takes_the_json_number_that_actually_arrives() {
+        // to_json(2.5::numeric) is 2.5. This is the real case, and the
+        // one three hand-written readers used to miss.
+        let row = json!({ "weight": 45, "slots": 0.25, "capacity_slots": 2.5 });
+        assert_eq!(numeric_at(&row, "weight"), Some(45.0));
+        assert_eq!(numeric_at(&row, "slots"), Some(0.25));
+        assert_eq!(numeric_at(&row, "capacity_slots"), Some(2.5));
+    }
+
+    #[test]
+    fn and_a_string_too_because_this_repo_believed_that_for_weeks() {
+        let row = json!({ "weight": "45", "slots": "0.25" });
+        assert_eq!(numeric_at(&row, "weight"), Some(45.0));
+        assert_eq!(numeric_at(&row, "slots"), Some(0.25));
+    }
+
+    #[test]
+    fn a_missing_column_is_none_rather_than_zero() {
+        // None is "the row did not say". Zero would be weightless, and a
+        // sack of weightless things is how encumbrance broke.
+        let row = json!({ "key": "greatsword" });
+        assert_eq!(numeric_at(&row, "weight"), None);
+        assert_eq!(numeric_text_at(&row, "weight"), None);
+    }
+
+    #[test]
+    fn nonsense_is_none_and_does_not_panic() {
+        let row = json!({ "weight": "heavy", "slots": true, "price": null });
+        assert_eq!(numeric_at(&row, "weight"), None);
+        assert_eq!(numeric_at(&row, "slots"), None);
+        assert_eq!(numeric_at(&row, "price"), None);
+    }
+
+    #[test]
+    fn text_prints_a_whole_number_without_its_decimal() {
+        // 5 rather than 5.0, which is what belongs on a sheet.
+        let row = json!({ "weight": 5, "slots": 0.5 });
+        assert_eq!(numeric_text_at(&row, "weight").as_deref(), Some("5"));
+        assert_eq!(numeric_text_at(&row, "slots").as_deref(), Some("0.5"));
+    }
+
+    #[derive(Deserialize)]
+    struct NumRow {
+        #[serde(default, deserialize_with = "de_numeric")]
+        weight_override: Option<f64>,
+    }
+
+    // 3e03c4e: a String field here refused the WHOLE array, and the
+    // Objects tab showed nothing because one sword had a weight.
+    #[test]
+    fn the_struct_case_takes_a_number_a_string_or_nothing() {
+        let cases = [
+            (json!({ "weight_override": 5.0 }), Some(5.0)),
+            (json!({ "weight_override": 5 }), Some(5.0)),
+            (json!({ "weight_override": "5" }), Some(5.0)),
+            (json!({ "weight_override": 0.25 }), Some(0.25)),
+            (json!({ "weight_override": null }), None),
+            (json!({}), None),
+        ];
+        for (row, want) in cases {
+            let got: NumRow = serde_json::from_value(row.clone())
+                .unwrap_or_else(|e| panic!("refused {}: {}", row, e));
+            assert_eq!(got.weight_override, want, "for {}", row);
+        }
     }
 }

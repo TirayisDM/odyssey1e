@@ -96,9 +96,12 @@ pub struct Item {
     /// which is the opposite of what None means for a capacity - see
     /// containers::Profile, where the same pair is explained at length.
     pub holds_size: Option<String>,
-    /// Pounds, from the book, seeded by 027 and 032 and read by nothing
-    /// until now. PostgREST sends `numeric` as a STRING, which is why
-    /// this is not an f64 - see containers::as_f64 for the same trap.
+    /// Pounds, from the book, seeded by 027 and 032. TEXT rather than
+    /// f64 because a weight is printed far more often than it is summed
+    /// and `5` reads better than `5.0` on a sheet. The comment that used
+    /// to sit here justified it with a wrong claim about how `numeric`
+    /// arrives - supabase::numeric is now the only thing in the repo
+    /// with a view on that.
     pub weight: Option<String>,
     /// Containers only: the content_tags it admits. EMPTY MEANS
     /// ANYTHING. Enforced by containers::admits since 032 and shown
@@ -464,13 +467,6 @@ fn as_str(v: &Value, key: &str) -> String {
 /// two contradictory comments about which arrives and only one of them
 /// was ever true, so the parse takes both and the comment states which
 /// is real.
-fn numeric_text(v: &Value, key: &str) -> Option<String> {
-    let f = v.get(key)?;
-    f.as_f64()
-        .map(|n| n.to_string())
-        .or_else(|| f.as_str().map(str::to_string))
-}
-
 fn as_opt_str(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(|x| x.as_str())
@@ -517,9 +513,9 @@ fn item_from_row(r: &Value) -> Item {
         // rather than parsed, because nothing here does arithmetic on
         // it and a parse would turn "0.05" into a rounding question
         // that only the screen has to answer.
-        weight: numeric_text(r, "weight"),
+        weight: supabase::numeric_text_at(r, "weight"),
         accepts: as_strings(r, "accepts"),
-        capacity_slots: numeric_text(r, "capacity_slots"),
+        capacity_slots: supabase::numeric_text_at(r, "capacity_slots"),
     }
 }
 

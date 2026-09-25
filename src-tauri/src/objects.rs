@@ -216,9 +216,9 @@ pub fn overrides_from_row(r: &Value) -> Overrides {
     Overrides {
         size: str_or_none(r, "size_override"),
         holds_size: str_or_none(r, "holds_size_override"),
-        // numeric arrives as a JSON NUMBER - the trap 58fdc30 fixed in
-        // three places at once. Kept as text because it is printed.
-        weight: r.get("weight_override").and_then(num_text),
+        // Text because it is printed. How `numeric` arrives is
+        // supabase's business, not this file's - see 58fdc30.
+        weight: supabase::numeric_text_at(r, "weight_override"),
         price: r.get("price_override").and_then(|v| v.as_i64()),
         damage_number: r.get("damage_number_override").and_then(|v| v.as_i64()),
         damage_denomination: r.get("damage_denomination_override").and_then(|v| v.as_i64()),
@@ -226,12 +226,6 @@ pub fn overrides_from_row(r: &Value) -> Overrides {
         properties: strings_or_none(r, "properties_override"),
         base_ac: r.get("base_ac_override").and_then(|v| v.as_i64()),
     }
-}
-
-fn num_text(v: &Value) -> Option<String> {
-    v.as_f64()
-        .map(|n| n.to_string())
-        .or_else(|| v.as_str().map(str::to_string))
 }
 
 fn strings_or_none(v: &Value, key: &str) -> Option<Vec<String>> {

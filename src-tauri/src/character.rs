@@ -546,12 +546,10 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     let mut profs = HashMap::new();
     if let Some(rows) = prof_rows.as_array() {
         for r in rows {
-            // PostgREST returns numeric as a JSON string to preserve
-            // precision, so as_f64 alone is not enough.
-            let p = r
-                .get("prof")
-                .and_then(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
-                .unwrap_or(0.0);
+            // A half-proficiency is 0.5, so this is genuinely numeric
+            // rather than an integer. The comment that used to sit here
+            // had the representation backwards - see supabase::numeric.
+            let p = supabase::numeric_at(r, "prof").unwrap_or(0.0);
             profs.insert(as_str(r, "skill_key"), p);
         }
     }

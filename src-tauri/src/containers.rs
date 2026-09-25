@@ -208,7 +208,7 @@ pub fn load_profile(
     }
     Ok(Some(Profile {
         accepts: strings(r, "accepts"),
-        capacity_slots: r.get("capacity_slots").and_then(as_f64),
+        capacity_slots: supabase::numeric_at(r, "capacity_slots"),
         // Absent is no limit, which is why this is not defaulted to
         // anything. See the field.
         holds_size: r
@@ -245,7 +245,7 @@ pub fn load_bulk(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Bulk
         }
         out.push(Bulk {
             key,
-            slots: r.get("slots").and_then(as_f64).unwrap_or(1.0),
+            slots: supabase::numeric_at(r, "slots").unwrap_or(1.0),
             content_tags: strings(r, "content_tags"),
             // 036 makes the column NOT NULL with a default, so a row
             // without one has not been through that migration. "med" is
@@ -259,18 +259,6 @@ pub fn load_bulk(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Bulk
         });
     }
     Ok(out)
-}
-
-fn as_f64(v: &Value) -> Option<f64> {
-    // THE OTHER WAY ROUND, and this comment used to say so wrongly.
-    // Postgres serialises `numeric` to a JSON NUMBER, so `as_f64` is
-    // the branch that fires and the string fallback is defensiveness.
-    //
-    // Being wrong here cost nothing because both branches are present.
-    // The same belief written into holders.rs and equipment.rs, where
-    // only the string branch was, meant every weight and every
-    // container capacity in the game read as None.
-    v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
 fn strings(v: &Value, key: &str) -> Vec<String> {

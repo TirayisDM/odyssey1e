@@ -2474,7 +2474,11 @@ async function fillEncounterObjects(encounterId) {
 // Open a fight, in one of its two modes.
 async function openEncounter(id, mode) {
   showEncMode(mode);
-  await selectEncounter(id);
+  // THROUGH loadDM, because the list itself changes: opening a fight
+  // narrows it to that one. selectEncounter alone would fill the panel
+  // and leave the other names above it.
+  state.dmEncounterId = id;
+  await loadDM();
 }
 
 function showEncMode(name) {
@@ -3191,7 +3195,27 @@ async function loadDM() {
   // would either cascade through a session or be refused - and the
   // refusal is the honest answer, so the screen never asks.
   const shelved = (encounters || []).filter((e) => e.archived);
-  for (const e of (encounters || []).filter((e) => !e.archived)) {
+  const live = (encounters || []).filter((e) => !e.archived);
+
+  // ONE AT A TIME. With a fight open the other names sat above its
+  // order, its roster and its forms, so the longest thing on the screen
+  // was a list of encounters nobody was running. Opening one narrows
+  // the list to it; the way back is a button rather than a scroll.
+  const open = state.dmEncounterId;
+  if (open) {
+    const back = document.createElement("li");
+    back.className = "flat item back";
+    back.append(
+      action("← all encounters", async () => {
+        // loadDM ends by selecting whatever is left, which is nothing.
+        state.dmEncounterId = null;
+        await loadDM();
+      })
+    );
+    ul.append(back);
+  }
+
+  for (const e of open ? live.filter((e) => e.id === open) : live) {
     const li = row(e.name, e.status, null, e.id === state.dmEncounterId);
     li.dataset.encId = e.id;
 
@@ -3212,7 +3236,8 @@ async function loadDM() {
     ul.append(li);
   }
 
-  if (shelved.length) {
+  // The shelf is part of the list, so it goes away with the rest of it.
+  if (shelved.length && !open) {
     const head = document.createElement("li");
     head.className = "flat group";
     head.textContent = "retired (" + shelved.length + ")";
@@ -3248,12 +3273,19 @@ async function loadDM() {
   //
   // An explicit selection is never overridden: this only fires when
   // nothing is chosen, or when what was chosen has gone.
+  // NOTHING IS OPENED FOR YOU. This used to fall back to the active
+  // encounter, or failing that the first one, so the panel always had
+  // something in it. That was right when the list and the detail sat
+  // side by side; now that opening a fight NARROWS the list to it, an
+  // automatic selection would mean the list could never be seen at all.
+  //
+  // A selection that has gone - archived, or removed - is dropped, which
+  // is the one case that still has to be handled here.
   const list = encounters || [];
-  const stillThere = list.some((e) => e.id === state.dmEncounterId);
-  if (!stillThere) {
-    const active = list.find((e) => e.status === "active");
-    state.dmEncounterId = (active || list[0] || {}).id || null;
-  }
+  const stillThere = list.some(
+    (e) => e.id === state.dmEncounterId && !e.archived
+  );
+  if (!stillThere) state.dmEncounterId = null;
   await selectEncounter(state.dmEncounterId);
 }
 
@@ -4465,7 +4497,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     dmSay("retired from the list");
     state.dmEncounterId = null;
     await loadDM();
-    await selectEncounter(null);
   });
 
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {

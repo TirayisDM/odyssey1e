@@ -176,6 +176,9 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .prose-block{color:var(--muted);font:italic 12px/1.55 Georgia,"Times New Roman",serif;
      border-left:2px solid var(--line);padding:.3rem .6rem;margin:.3rem 0 .6rem}
 .list li.shelved{opacity:.6}
+/* The way back out of one fight. Left-aligned and quiet: it is
+   navigation, not an action on the encounter below it. */
+.list li.back{background:transparent;border:0;padding:.1rem 0;justify-content:flex-start}
 #enc-story{width:100%;resize:vertical;font:inherit;background:#0f1114;
      color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:.3rem}
 .turnbar{align-items:center;gap:.5rem;margin-bottom:.5rem}

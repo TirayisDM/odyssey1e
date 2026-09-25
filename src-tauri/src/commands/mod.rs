@@ -59,6 +59,7 @@
 //!   store.rs             what it costs here, and buying it         DONE
 //!   locations.rs         build the world, and put things down in it DONE
 //!   initiative.rs        rolling for it, reading turn order   (item 1) DONE
+//!   log.rs               what has happened in this fight           DONE
 //!   challenges.rs        whether the iron lock has been picked     (item 3)
 //!
 //!   dm.rs was the first real tenant and it never touched lib.rs, which
@@ -79,6 +80,7 @@ pub mod containers;
 pub mod dm;
 pub mod initiative;
 pub mod inventory;
+pub mod log;
 pub mod locations;
 pub mod session;
 pub mod store;

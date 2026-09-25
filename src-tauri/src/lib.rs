@@ -37,6 +37,7 @@ mod narrative;
 mod objects;
 mod pin;
 mod resolution;
+mod spent;
 mod store;
 mod supabase;
 mod vitality;
@@ -189,7 +190,7 @@ fn list_rolls(state: State<AppState>, game_id: String) -> Result<Value, String> 
                 "select",
                 "id,created_at,character_name,roller_name,label,request,detail,total,\
                  natural_roll,status,narrative,\
-                 target_value,target_kind,target_label,success,reason,margin,face_outcome,                 action_id,role",
+                 target_value,target_kind,target_label,success,reason,margin,face_outcome,action_id,role",
             ),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "created_at.desc"),
@@ -1258,6 +1259,7 @@ pub fn run() {
             commands::initiative::set_initiative,
             commands::initiative::advance_turn,
             commands::initiative::reset_order,
+            commands::log::encounter_log,
             death_save,
             get_sheet,
             set_level,

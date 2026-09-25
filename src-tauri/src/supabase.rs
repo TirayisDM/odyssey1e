@@ -299,6 +299,26 @@ fn check_query(query: &[(&str, &str)]) -> Result<(), String> {
                 k, bad
             ));
         }
+
+        // AND THE SAME TYPO WITH THE NEWLINE ALREADY EATEN. Two wrapped
+        // lines joined into one leave a run of indentation in the
+        // middle of the list — "...,face_outcome,        action_id" —
+        // which holds no control character at all and so walked
+        // straight past the check above. It was sitting in `list_rolls`
+        // and was found by reading the line, not by anything failing.
+        //
+        // A SELECT IS THE ONE PARAMETER WITH NO USE FOR A SPACE: column
+        // names, commas, and the parentheses of an embedded resource. A
+        // filter is the opposite and must stay permissive — `label=eq.
+        // Goblin Scout` is an ordinary filter on a name with a space in
+        // it, and refusing that would break every search by name.
+        if *k == "select" && v.chars().any(|c| c.is_whitespace()) {
+            return Err(format!(
+                "the select list contains whitespace, so a column name has picked up \
+                 the indentation of the line it was wrapped onto: {}",
+                v
+            ));
+        }
     }
     Ok(())
 }
@@ -470,6 +490,33 @@ mod tests {
     #[test]
     fn a_space_is_allowed_because_names_have_them() {
         assert!(check_query(&[("name", "eq.Rodnar Shieldcrest")]).is_ok());
+    }
+
+    // THE SECOND ONE THAT GOT THROUGH, and it got through the fix for
+    // the first. Same wrapped-string mistake with the newline already
+    // removed, leaving only indentation — no control character, so the
+    // check above had nothing to catch. This is the exact string that
+    // was in `list_rolls`.
+    #[test]
+    fn a_select_carrying_indentation_is_refused() {
+        let e = check_query(&[(
+            "select",
+            "id,created_at,total,margin,face_outcome,                 action_id,role",
+        )])
+        .unwrap_err();
+        assert!(e.contains("select"), "{}", e);
+        assert!(e.contains("indentation"), "{}", e);
+    }
+
+    // The select the encounter log actually sends: an embedded resource
+    // in parentheses, which must stay legal.
+    #[test]
+    fn an_embedded_resource_is_still_an_ordinary_select() {
+        assert!(check_query(&[(
+            "select",
+            "id,round,key,rolls(id,role,total,success,margin)",
+        )])
+        .is_ok());
     }
 
     /* ------------------------- numeric ------------------------- */

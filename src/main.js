@@ -2559,6 +2559,136 @@ function paintEncounterEditor(e) {
   paintBranches(e);
 }
 
+// WHAT HAS HAPPENED IN THIS FIGHT, newest first, grouped by round.
+//
+// The attack buttons are on this tab and their results were not: a DM
+// swung, the goblin lost hit points, and the only account of it was on
+// the Play tab behind the whole game's roll log. This is the same
+// material, cut to this encounter - which is also why it is a separate
+// read rather than a filter over `state.rolls`. That list is the newest
+// fifty rolls in the GAME, so a filter would quietly empty itself the
+// moment a fight scrolled off the end of it.
+function paintEncLog(done, turns) {
+  const ul = document.querySelector("#enc-log");
+  ul.innerHTML = "";
+
+  // A FAILED READ IS NOT AN EMPTY FIGHT. Saying "nothing yet" over a
+  // refused query is the fault this codebase keeps producing - a calm
+  // sentence about the game standing in for an error about the query.
+  if (!done.ok) {
+    const bad = row("could not read the log - " + done.error, "", null);
+    bad.classList.add("warn");
+    ul.append(bad);
+    return;
+  }
+
+  const actions = done.value.actions || [];
+  if (!actions.length) {
+    ul.append(row("nothing has been rolled in this encounter yet", "", null));
+    return;
+  }
+
+  const now = done.value.round;
+  let round;
+  let first = true;
+  for (const a of actions) {
+    if (first || a.round !== round) {
+      round = a.round;
+      first = false;
+      const head = document.createElement("li");
+      head.className = "flat group";
+      // THREE DIFFERENT ANSWERS, and they must not print alike.
+      //
+      //   null   written before 054 existed. Inside an encounter that
+      //          is the ONLY way to have no round, because the trigger
+      //          stamps every one since. 70 rows in this database.
+      //   0      051's "the order has not started" - swung before
+      //          anybody rolled, which is a real and ordinary thing.
+      //   n      a round.
+      //
+      // Filing the first two under "round 1" would invent a fight that
+      // had not begun, which is 054's whole argument for NULL.
+      head.textContent =
+        a.round == null
+          ? "before rounds were recorded"
+          : a.round === 0
+          ? "before the first turn"
+          : "round " + a.round + (a.round === now ? " · now" : "");
+      ul.append(head);
+    }
+    ul.append(logLine(a));
+  }
+}
+
+// One action: who, what, at whom, and how it went.
+//
+// READ OFF THE ROLLS, not off the action. `character_name` and
+// `target_label` are snapshots taken when the dice landed - see 001 and
+// 013 - so a creature renamed or removed since still reads correctly in
+// the account of what it did.
+function logLine(a) {
+  const rolls = a.rolls || [];
+  const hit = rolls.find((r) => r.role === "to_hit") || rolls.find((r) => r.role === "check");
+  const dmg = rolls.find((r) => r.role === "damage");
+
+  const li = document.createElement("li");
+  li.className = "flat item logline";
+  const head = document.createElement("div");
+  head.className = "head";
+
+  const who = document.createElement("span");
+  who.className = "nm";
+  who.textContent = (hit && hit.character_name) || "Someone";
+  head.append(who);
+
+  const what = document.createElement("span");
+  what.className = "tag";
+  what.textContent = a.label || a.request;
+  head.append(what);
+
+  if (hit && hit.total !== null && hit.total !== undefined) {
+    const n = document.createElement("span");
+    n.className = "tag";
+    n.textContent = "rolled " + hit.total;
+    n.title = hit.detail || "";
+    head.append(n);
+  }
+
+  // THE VERDICT ONLY WHERE THERE WAS ONE. An untargeted roll was not
+  // judged, and printing a MISS over it would invent a failure nobody
+  // claimed - the same distinction rollCard makes.
+  if (hit && hit.success !== null && hit.success !== undefined) {
+    const v = document.createElement("span");
+    v.className = "tag " + (hit.success ? "yes" : "no");
+    const at = hit.target_label
+      ? hit.target_label + " " + String(hit.target_kind).toUpperCase() + " " + hit.target_value
+      : String(hit.target_kind).toUpperCase() + " " + hit.target_value;
+    v.textContent = (hit.success ? "hit " : "missed ") + at;
+    v.title =
+      hit.reason === "auto_hit" ? "hit on a natural " + hit.natural_roll
+      : hit.reason === "auto_miss" ? "missed on a natural " + hit.natural_roll
+      : hit.margin === 0 ? "exactly"
+      : "by " + Math.abs(hit.margin);
+    head.append(v);
+  } else if (hit && hit.target_label) {
+    const at = document.createElement("span");
+    at.className = "tag";
+    at.textContent = "at " + hit.target_label;
+    head.append(at);
+  }
+
+  if (dmg && dmg.total !== null && dmg.total !== undefined) {
+    const d = document.createElement("span");
+    d.className = "tag hp";
+    d.textContent = dmg.total + " damage";
+    d.title = dmg.detail || "";
+    head.append(d);
+  }
+
+  li.append(head);
+  return li;
+}
+
 function paintOrderStrip(turns) {
   const el = document.querySelector("#order-strip");
   el.innerHTML = "";
@@ -2575,8 +2705,14 @@ function paintOrderStrip(turns) {
       "ochip" +
       (a.is_current ? " now" : "") +
       (a.takes_turns ? "" : " out");
+    // A count on the strip, because the strip is what a DM reads
+    // between swings and "who has already gone" is the question it is
+    // being read for.
+    const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
     chip.textContent =
-      (a.initiative == null ? "—" : a.initiative) + " " + a.label;
+      (a.initiative == null ? "—" : a.initiative) + " " + a.label +
+      (sp && sp.actions ? " ×" + sp.actions : "");
+    if (sp && sp.beyond_one_turn) chip.classList.add("again");
     chip.title = a.takes_turns
       ? a.is_current
         ? "acting now"
@@ -3333,8 +3469,19 @@ async function selectEncounter(id) {
   const turns = await call("turn_order", { encounterId: id });
   const roster = (turns && turns.order) || [];
   paintTurnBar(id, turns);
-  paintOrderStrip(turns);
   paintEncounterEditor(e);
+
+  // WHAT HAS BEEN DONE, and what each creature has spent doing it.
+  //
+  // tryCall rather than call: an empty log and a failed read look
+  // identical on screen, and "nothing has happened yet" is a sentence
+  // about the fight rather than about a broken query. That is the
+  // defect class STATUS.md names, and it has cost two screens already.
+  const done = await tryCall("encounter_log", { encounterId: id });
+  state.encLog = done.ok ? done.value.actions || [] : [];
+  state.encSpent = done.ok ? done.value.spent || [] : [];
+  paintOrderStrip(turns);
+  paintEncLog(done, turns);
 
   // Targets for THIS encounter, not the active one.
   //
@@ -3403,6 +3550,27 @@ async function selectEncounter(id) {
         c.textContent = t.condition;
         head.append(c);
       }
+    }
+
+    // WHAT THIS ONE HAS SPENT THIS ROUND. The count comes from Rust
+    // with the round already applied - see spent.rs - so the screen
+    // adds no arithmetic of its own.
+    //
+    // IT SAYS, IT DOES NOT REFUSE. Two actions in a round is normal:
+    // Extra Attack, haste, an action surge, or a DM allowing it. The
+    // ask was to be able to SEE that a character has swung again and
+    // again, which nothing anywhere could say before this.
+    const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
+    if (sp && sp.actions) {
+      const gone = document.createElement("span");
+      gone.className = "tag spent" + (sp.beyond_one_turn ? " warn" : "");
+      gone.textContent =
+        sp.actions === 1 ? "acted" : "acted " + sp.actions + " times";
+      gone.title =
+        sp.attacks + (sp.attacks === 1 ? " attack" : " attacks") +
+        " of " + sp.actions + " this round" +
+        (sp.beyond_one_turn ? " - more than one turn's worth" : "");
+      head.append(gone);
     }
 
     // ROLLING, SETTING, HIDING AND REMOVING ARE EDITS and live in the

@@ -2131,15 +2131,15 @@ function profSay(text, isError) {
 // UNREACHABLE ONES ARE SHOWN, NOT HIDDEN, which is 043's own argument
 // turned into a screen: "a technique written in an unreachable mode is
 // not an error anywhere - it is simply never offered, which is the
-// worst kind of bug to find." A DM who edits a weapon out of a mode
-// should see what it cost rather than watch three buttons quietly go.
+// worst kind of bug to find."
 //
-// AND THE PROSE FINALLY APPEARS. 043 wrote special_text for a hundred
-// and fifty-nine techniques and called it "prose the engine does not
-// read" - true of the engine, and until now true of every screen too.
+// AND 050 MADE THEM EDITABLE PER OBJECT. Three scopes - the rulebook,
+// this campaign, this sword - and the scope tag says which one is
+// answering, because "the global Zwerchhau" and "this sword's own" look
+// identical once merged and a DM about to change one should know which.
 async function fillMoves(el, o) {
   const moves = await call("object_techniques", { objectId: o.id });
-  if (!moves || !moves.length) return;
+  if (moves === null) return;
 
   const sub = document.createElement("div");
   sub.className = "sub";
@@ -2148,45 +2148,178 @@ async function fillMoves(el, o) {
 
   const ul = document.createElement("ul");
   ul.className = "list";
-  for (const m of moves) {
-    const t = m.technique;
-    const li = document.createElement("li");
-    li.className = "flat item" + (m.offered ? "" : " unreachable");
-
-    const head = document.createElement("div");
-    head.className = "head";
-    const nm = document.createElement("span");
-    nm.className = "nm";
-    nm.textContent = t.name;
-    head.append(nm);
-
-    for (const [text, cls] of [
-      [t.dice, "tag"],
-      ["level " + t.min_level, "tag"],
-      [m.needs, "tag"],
-      // Only when the house rule has moved them off 20 and 1, because
-      // "crit 20+, fumble 1-" on every row is noise.
-      [t.crit_min < 20 ? "crit " + t.crit_min + "+" : null, "tag"],
-      [t.fumble_max > 1 ? "fumble " + t.fumble_max + "-" : null, "tag"],
-      [m.offered ? null : "this one cannot: no " + m.needs, "tag warn"],
-    ]) {
-      if (!text) continue;
-      const g = document.createElement("span");
-      g.className = cls;
-      g.textContent = text;
-      head.append(g);
-    }
-    li.append(head);
-
-    if (t.special_text) {
-      const prose = document.createElement("div");
-      prose.className = "prose-line";
-      prose.textContent = t.special_text;
-      li.append(prose);
-    }
-    ul.append(li);
-  }
+  for (const m of moves) ul.append(moveRow(el, o, m));
+  if (!moves.length) ul.append(row("no special attacks", "", null));
   el.append(ul);
+
+  // A MOVE NOTHING ELSE HAS. The whole point of 050's third scope, and
+  // it needs its own control because every other button on this panel
+  // acts on a move that already exists.
+  const add = action("add a move", () => {
+    const form = el.querySelector(".move-new");
+    form.hidden = !form.hidden;
+  });
+  const wrap = document.createElement("div");
+  wrap.className = "row";
+  wrap.append(add);
+  el.append(wrap);
+
+  const form = moveForm(o, null, () => reopenDetail(el, o));
+  form.classList.add("move-new");
+  form.hidden = true;
+  el.append(form);
+}
+
+// Repaint the whole detail panel after a write, because a change to one
+// move can alter another - striking out an override restores the
+// inherited one underneath it, which is a different row.
+async function reopenDetail(el, o) {
+  await loadObjects();
+  const fresh = (state.objects || []).find((x) => x.id === o.id) || o;
+  el.innerHTML = "";
+  await fillDetail(el, fresh);
+}
+
+function moveRow(panelEl, o, m) {
+  const t = m.technique;
+  const li = document.createElement("li");
+  li.className = "flat item" + (m.offered ? "" : " unreachable");
+
+  const head = document.createElement("div");
+  head.className = "head";
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.textContent = t.name;
+  head.append(nm);
+
+  for (const [text, cls] of [
+    [t.dice, "tag"],
+    ["level " + t.min_level, "tag"],
+    [m.needs, "tag"],
+    // Only when the house rule has moved them off 20 and 1, because
+    // the default on every row is noise.
+    [t.crit_min < 20 ? "crit " + t.crit_min + "+" : null, "tag"],
+    [t.fumble_max > 1 ? "fumble " + t.fumble_max + "-" : null, "tag"],
+    // WHOSE ANSWER IT IS. Only worth saying when it is not the
+    // rulebook's - "global" on every row would be noise, and the two
+    // that matter are the ones somebody edited.
+    [t.scope === "object" ? "this one only" : t.scope === "game" ? "this campaign" : null, "tag"],
+    [m.offered ? null : "this one cannot: no " + m.needs, "tag warn"],
+  ]) {
+    if (!text) continue;
+    const g = document.createElement("span");
+    g.className = cls;
+    g.textContent = text;
+    head.append(g);
+  }
+
+  const form = moveForm(o, t, () => reopenDetail(panelEl, o));
+  form.hidden = true;
+
+  head.append(
+    action("edit", () => {
+      form.hidden = !form.hidden;
+    }),
+    action("remove", async () => {
+      if (!confirm("Take " + t.name + " away from this one?")) return;
+      const r = await tryCall("remove_object_technique", { objectId: o.id, key: t.key });
+      dmSay(r.ok ? t.name + " struck from this one" : r.error, !r.ok);
+      if (r.ok) await reopenDetail(panelEl, o);
+    })
+  );
+
+  // Only an overridden move has something to go back TO. Offering
+  // "revert" on the rulebook's own row would be a button that does
+  // nothing.
+  if (t.scope === "object") {
+    head.append(
+      action("revert", async () => {
+        const r = await tryCall("clear_object_technique", { objectId: o.id, key: t.key });
+        dmSay(r.ok ? t.name + " back to the type" : r.error, !r.ok);
+        if (r.ok) await reopenDetail(panelEl, o);
+      })
+    );
+  }
+
+  li.append(head);
+  if (t.special_text) {
+    const prose = document.createElement("div");
+    prose.className = "prose-line";
+    prose.textContent = t.special_text;
+    li.append(prose);
+  }
+  li.append(form);
+  return li;
+}
+
+// One form for editing a move and for adding one.
+//
+// `t` null means a new move: the key is left for the command to mint,
+// so naming it after an existing one ADDS rather than silently
+// overriding. Editing passes the key, which is what makes it an
+// override of exactly that move.
+function moveForm(o, t, done) {
+  const form = document.createElement("div");
+  form.className = "editor";
+
+  const field = (ph, value, cls) => {
+    const i = document.createElement("input");
+    i.placeholder = ph;
+    i.value = value == null ? "" : String(value);
+    if (cls) i.className = cls;
+    return i;
+  };
+
+  const name = field("name, e.g. Descending Cut", t ? t.name : "");
+  const dice = field("dice, e.g. 2d6", t ? t.dice : "", "narrow");
+  const one = document.createElement("div");
+  one.className = "row";
+  one.append(name, dice);
+
+  const mode = document.createElement("select");
+  for (const val of ["melee", "thrown", "ranged"]) {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = val;
+    mode.append(opt);
+  }
+  mode.value = t ? t.mode : "melee";
+  const level = field("level", t ? t.min_level : 1, "narrow");
+  const crit = field("crit", t ? t.crit_min : 20, "narrow");
+  const fumble = field("fumble", t ? t.fumble_max : 1, "narrow");
+  const two = document.createElement("div");
+  two.className = "row";
+  two.append(mode, level, crit, fumble);
+
+  const prose = field("what the table adjudicates", t ? t.special_text : "");
+  const three = document.createElement("div");
+  three.className = "row";
+  three.append(prose);
+
+  const save = action("save", async () => {
+    const r = await tryCall("save_object_technique", {
+      objectId: o.id,
+      // Editing overrides THIS key; adding leaves it for the command
+      // to mint, so a new move named after an old one does not quietly
+      // replace it.
+      key: t ? t.key : null,
+      name: name.value,
+      mode: mode.value,
+      dice: dice.value,
+      minLevel: Number(level.value) || 1,
+      critMin: Number(crit.value) || 20,
+      fumbleMax: Number(fumble.value) || 1,
+      specialText: prose.value,
+    });
+    dmSay(r.ok ? (t ? name.value + " changed for this one" : name.value + " added") : r.error, !r.ok);
+    if (r.ok) await done();
+  });
+  const four = document.createElement("div");
+  four.className = "row";
+  four.append(save);
+
+  form.append(one, two, three, four);
+  return form;
 }
 
 function panel(cls) {

@@ -891,7 +891,10 @@ pub fn object_techniques(
     }
 
     let mine = equipment::modes(&item);
-    let techniques = crate::attack::load_techniques(&token, game_id, &[item_key.to_string()])?;
+    // ALL THREE SCOPES, because this is the one screen that is about a
+    // particular object rather than about a type - see attack.rs, where
+    // load_techniques deliberately reads only the type's.
+    let techniques = crate::attack::load_for_object(&token, game_id, &object_id, item_key)?;
 
     Ok(techniques
         .into_iter()
@@ -901,4 +904,221 @@ pub fn object_techniques(
             technique: t,
         })
         .collect())
+}
+
+/* =================== ONE OBJECT'S OWN MOVES, 050 =================== */
+
+/// The object row every one of these needs: its game, its key, and the
+/// technique currently answering for `key`.
+///
+/// One helper because all three commands ask the same two questions and
+/// three copies would drift on the second one.
+fn object_and_move(
+    token: &str,
+    object_id: &str,
+    key: &str,
+) -> Result<(String, String, Option<crate::attack::Technique>), String> {
+    let obj = objects::load_object(token, object_id)?;
+    let current = crate::attack::load_for_object(token, &obj.game_id, object_id, &obj.item_key)?
+        .into_iter()
+        .find(|t| t.key == key);
+    Ok((obj.game_id, obj.item_key, current))
+}
+
+/// Give this one object a move, or change the one it has.
+///
+/// AN EMPTY `key` MEANS A NEW MOVE and one is minted from the name, so
+/// a named sword can carry something nothing else has. A key that is
+/// already answering - from the rulebook, this campaign, or this object
+/// - is OVERRIDDEN for this object alone: the row written here shadows
+/// it by 050's third scope and no other greatsword notices.
+///
+/// THE DICE ARE PARSED, NOT TRUSTED. `techniques.dice` is text and the
+/// database cannot tell "2d6" from "2d" or from a sentence. The roll
+/// engine would find out at the table, which is the worst moment. Every
+/// other field is checked by 001's constraints and is left to them -
+/// crit 2..20, fumble 0..19, level 1..20, and the three modes - because
+/// a second copy of a constraint is a second thing to keep true.
+///
+/// AN UNREACHABLE MODE IS ALLOWED. 043's header argues the point and
+/// the viewer now acts on it: a technique in a mode this weapon cannot
+/// use is not an error, it is simply never offered - so it is written,
+/// and shown dimmed with the reason, rather than refused here.
+#[tauri::command]
+pub fn save_object_technique(
+    state: State<AppState>,
+    object_id: String,
+    key: Option<String>,
+    name: String,
+    mode: String,
+    dice: String,
+    min_level: i64,
+    crit_min: i64,
+    fumble_max: i64,
+    special_text: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let obj = objects::load_object(&token, &object_id)?;
+
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a move needs a name".to_string());
+    }
+    // The engine's own parser, so what is saved is what it can roll.
+    crate::dice::roll_formula(&dice)
+        .map_err(|e| format!("'{}' is not dice the engine can roll: {}", dice, e))?;
+
+    let roll_name: String = name
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let key = match key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+        Some(k) => k.to_string(),
+        // A FRESH KEY, suffixed so naming a new move after an existing
+        // one adds rather than silently overriding it. The key is
+        // internal; the name is what anybody reads.
+        None => format!(
+            "{}_{}",
+            roll_name.replace(' ', "_"),
+            &uuid_like()[..6]
+        ),
+    };
+
+    let body = json!({
+        "key": key,
+        "game_id": obj.game_id,
+        "object_id": object_id,
+        "item_key": obj.item_key,
+        "name": name,
+        "roll_name": roll_name,
+        "mode": mode,
+        "dice": dice.trim(),
+        "min_level": min_level,
+        "crit_min": crit_min,
+        "fumble_max": fumble_max,
+        "special_text": special_text.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        // Saving a move un-removes it, which is the only sensible
+        // reading of editing something you had struck out.
+        "removed": false,
+    });
+
+    // Already this object's own, or new? 050's partial unique index is
+    // on (key, object_id), so an update has to target both.
+    let existing = supabase::rest_get(
+        &token,
+        "techniques",
+        &[
+            ("select", "id"),
+            ("key", &format!("eq.{}", key)),
+            ("object_id", &format!("eq.{}", object_id)),
+        ],
+    )?;
+    if existing.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+        return supabase::rest_update(
+            &token,
+            "techniques",
+            &[
+                ("key", &format!("eq.{}", key)),
+                ("object_id", &format!("eq.{}", object_id)),
+            ],
+            &body,
+        );
+    }
+    supabase::rest_insert(&token, "techniques", &body)
+}
+
+/// Take a move away from this one object.
+///
+/// TWO DIFFERENT WRITES, because there are two different situations and
+/// 050's header is about exactly this. A move this object ADDED is
+/// deleted - nothing else provides it, so the row going away is the
+/// whole answer. A move it INHERITS cannot be deleted, because that row
+/// belongs to the type and deleting it would take the move from every
+/// other greatsword; so a tombstone is written instead, copying the
+/// inherited numbers so that restoring it is one flag rather than a
+/// reconstruction.
+#[tauri::command]
+pub fn remove_object_technique(
+    state: State<AppState>,
+    object_id: String,
+    key: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let (game_id, item_key, current) = object_and_move(&token, &object_id, &key)?;
+    let Some(t) = current else {
+        return Err(format!("this one has no move called '{}'", key));
+    };
+
+    // Its own addition: the row is the move, so the row goes.
+    if t.scope == "object" {
+        supabase::rest_delete(
+            &token,
+            "techniques",
+            &[
+                ("key", &format!("eq.{}", key)),
+                ("object_id", &format!("eq.{}", object_id)),
+            ],
+        )?;
+        return Ok(json!({ "removed": key, "how": "deleted" }));
+    }
+
+    supabase::rest_insert(
+        &token,
+        "techniques",
+        &json!({
+            "key": key,
+            "game_id": game_id,
+            "object_id": object_id,
+            "item_key": item_key,
+            // Copied from what it is replacing. See 050.
+            "name": t.name,
+            "roll_name": t.roll_name,
+            "mode": t.mode.as_str(),
+            "dice": t.dice,
+            "min_level": t.min_level,
+            "crit_min": t.crit_min,
+            "fumble_max": t.fumble_max,
+            "special_text": t.special_text,
+            "removed": true,
+        }),
+    )
+}
+
+/// Stop overriding, and go back to whatever the type says.
+///
+/// Deletes this object's row for that key, whether it was an edit or a
+/// tombstone. An object's own ADDITION has no type to fall back to, so
+/// clearing it removes the move - which is the same outcome as
+/// `remove_object_technique` and is why that one deletes rather than
+/// striking out in that case.
+#[tauri::command]
+pub fn clear_object_technique(
+    state: State<AppState>,
+    object_id: String,
+    key: String,
+) -> Result<(), String> {
+    let token = state.token()?;
+    supabase::rest_delete(
+        &token,
+        "techniques",
+        &[
+            ("key", &format!("eq.{}", key)),
+            ("object_id", &format!("eq.{}", object_id)),
+        ],
+    )
+    .map(|_| ())
+}
+
+/// Random hex, for minting a key nothing else holds.
+///
+/// Not a real uuid and does not need to be: 050's index is unique on
+/// (key, object_id), so six hex digits beside a slug is a collision
+/// nobody will see. The same source the dice use.
+fn uuid_like() -> String {
+    (0..4).map(|_| format!("{:02x}", rand::random::<u8>())).collect()
 }

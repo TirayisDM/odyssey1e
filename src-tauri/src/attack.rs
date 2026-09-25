@@ -48,6 +48,25 @@ pub struct Technique {
     /// nothing rendered one. The engine still does not read it; the
     /// viewer does.
     pub special_text: Option<String>,
+    /// Which scope this row won at: "global", "game" or "object". The
+    /// screen says so, because "this sword's own move" and "the
+    /// rulebook's" look identical once merged and a DM editing one
+    /// should know which they are about to change.
+    pub scope: String,
+}
+
+/// One row as it arrived, before the scopes are collapsed.
+///
+/// A SEPARATE TYPE FROM `Technique` because it carries two things the
+/// merged answer must not: which scope it came from, and whether it is
+/// a tombstone. Once `collapse_scopes` has run, a removed row is gone
+/// rather than present-and-false - the absence is the answer.
+#[derive(Debug, Clone)]
+pub struct ScopedTechnique {
+    pub technique: Technique,
+    /// 0 global, 1 game, 2 object. Higher wins.
+    pub rank: u8,
+    pub removed: bool,
 }
 
 /// A resolved attack, with the evidence for every number in it.
@@ -281,6 +300,105 @@ fn mode_from(s: &str) -> Option<Mode> {
 /// An empty key list means no request at all - an empty `in.()` is not
 /// valid PostgREST, so the guard is load-bearing rather than tidiness.
 /// Same trap `load_loadout` documents.
+/// Collapse the three scopes into what this object actually has.
+///
+/// MOST SPECIFIC WINS, per key: an object row beats a game row beats a
+/// global one. That is 001's nullable-tenancy precedence with a third
+/// level, and the same rule `collapse_overrides` applies to items.
+///
+/// A TOMBSTONE DELETES THE KEY RATHER THAN WINNING IT. 050 added
+/// `removed` because deleting an object's row means "stop overriding"
+/// and restores the inherited move - there is no row to delete to say
+/// this sword does NOT have what its type has. So the flag wins the
+/// key and then removes it, and the caller sees an absence rather than
+/// a row it has to know to skip.
+///
+/// AN OBJECT ROW WITH NO ANCESTOR IS AN ADDITION, and nothing special
+/// happens for it: it wins its key because nothing else claims it.
+/// That is how a named sword carries a move nothing else has.
+///
+/// ORDER IS BY LEVEL THEN NAME, so a list reads as a progression rather
+/// than in whatever order three scopes happened to arrive.
+pub fn collapse_scopes(rows: &[ScopedTechnique]) -> Vec<Technique> {
+    let mut best: Vec<&ScopedTechnique> = Vec::new();
+    for r in rows {
+        match best.iter().position(|b| b.technique.key == r.technique.key) {
+            Some(i) => {
+                if r.rank >= best[i].rank {
+                    best[i] = r;
+                }
+            }
+            None => best.push(r),
+        }
+    }
+
+    let mut out: Vec<Technique> = best
+        .into_iter()
+        .filter(|b| !b.removed)
+        .map(|b| b.technique.clone())
+        .collect();
+    out.sort_by(|a, b| {
+        a.min_level
+            .cmp(&b.min_level)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    out
+}
+
+/// One row, whichever scope it came from.
+///
+/// Extracted so the two loaders below cannot disagree about what a
+/// technique row means - which is the failure this repo keeps meeting
+/// whenever one rule is written twice.
+fn scoped_from_row(r: &serde_json::Value) -> Option<ScopedTechnique> {
+    let mode = mode_from(r.get("mode").and_then(|x| x.as_str())?)?;
+    let has_game = r.get("game_id").and_then(|x| x.as_str()).is_some();
+    let has_object = r.get("object_id").and_then(|x| x.as_str()).is_some();
+    let (rank, scope) = match (has_object, has_game) {
+        (true, _) => (2u8, "object"),
+        (false, true) => (1, "game"),
+        (false, false) => (0, "global"),
+    };
+    Some(ScopedTechnique {
+        rank,
+        removed: r.get("removed").and_then(|x| x.as_bool()).unwrap_or(false),
+        technique: Technique {
+            key: r.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            name: r.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            roll_name: r.get("roll_name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            item_key: r.get("item_key").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            mode,
+            min_level: r.get("min_level").and_then(|x| x.as_i64()).unwrap_or(1),
+            dice: r.get("dice").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            crit_min: r.get("crit_min").and_then(|x| x.as_i64()).unwrap_or(20),
+            fumble_max: r.get("fumble_max").and_then(|x| x.as_i64()).unwrap_or(1),
+            special_text: r
+                .get("special_text")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string),
+            scope: scope.to_string(),
+        },
+    })
+}
+
+const TECHNIQUE_COLUMNS: &str = "key,game_id,object_id,removed,name,roll_name,item_key,mode,\
+     min_level,dice,crit_min,fumble_max,special_text";
+
+/// The techniques a TYPE offers, for the sheet.
+///
+/// TYPE SCOPES ONLY - global and game, never an object's own. The
+/// sheet's technique list is flat and keyed by technique, not by the
+/// object holding it, so two greatswords with different versions of one
+/// move would collide on the key and one would silently win. 050 made
+/// per-object moves possible and this is the loader that deliberately
+/// does not read them; `load_for_object` does.
+///
+/// THAT IS A STATED GAP, NOT A SILENT ONE. A per-object move is visible
+/// and editable in the object viewer and is NOT yet rollable from the
+/// sheet. Closing it means `Sheet.techniques` carrying which object
+/// each move came from, which is a change to the attack path rather
+/// than to this query.
 pub fn load_techniques(
     token: &str,
     game_id: &str,
@@ -295,51 +413,58 @@ pub fn load_techniques(
         token,
         "techniques",
         &[
-            (
-                "select",
-                "key,game_id,name,roll_name,item_key,mode,min_level,dice,crit_min,fumble_max,\
-                 special_text",
-            ),
+            ("select", TECHNIQUE_COLUMNS),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("object_id", "is.null"),
             ("item_key", &format!("in.({})", quoted_keys.join(","))),
-            ("order", "min_level.asc"),
         ],
     )?;
 
-    // A game-scoped technique shadows the global row sharing its key,
-    // same precedence as items and narrative lines.
-    let rows = rows.as_array().cloned().unwrap_or_default();
-    let mut out: Vec<Technique> = Vec::new();
-    for r in &rows {
-        let key = r.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let scoped = r.get("game_id").and_then(|x| x.as_str()).is_some();
-        let mode = match r.get("mode").and_then(|x| x.as_str()).and_then(mode_from) {
-            Some(m) => m,
-            None => continue,
-        };
-        let t = Technique {
-            key: key.clone(),
-            name: r.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            roll_name: r.get("roll_name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            item_key: r.get("item_key").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            mode,
-            min_level: r.get("min_level").and_then(|x| x.as_i64()).unwrap_or(1),
-            dice: r.get("dice").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            crit_min: r.get("crit_min").and_then(|x| x.as_i64()).unwrap_or(20),
-            fumble_max: r.get("fumble_max").and_then(|x| x.as_i64()).unwrap_or(1),
-            special_text: r
-                .get("special_text")
-                .and_then(|x| x.as_str())
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_string),
-        };
-        match out.iter().position(|e| e.key == key) {
-            Some(i) if scoped => out[i] = t,
-            Some(_) => {}
-            None => out.push(t),
-        }
-    }
-    Ok(out)
+    let scoped: Vec<ScopedTechnique> = rows
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(scoped_from_row)
+        .collect();
+    Ok(collapse_scopes(&scoped))
+}
+
+/// Everything ONE object can do: its type's moves, with its own on top.
+///
+/// All three scopes, collapsed by `collapse_scopes` - an object row
+/// beats a game row beats a global one, and a tombstone removes the key
+/// rather than winning it.
+pub fn load_for_object(
+    token: &str,
+    game_id: &str,
+    object_id: &str,
+    item_key: &str,
+) -> Result<Vec<Technique>, String> {
+    let rows = crate::supabase::rest_get(
+        token,
+        "techniques",
+        &[
+            ("select", TECHNIQUE_COLUMNS),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            // The type's rows, plus this object's own - and no other
+            // object's, which is what the second half excludes.
+            (
+                "or",
+                &format!("(object_id.is.null,object_id.eq.{})", object_id),
+            ),
+            ("item_key", &format!("eq.{}", item_key)),
+        ],
+    )?;
+
+    let scoped: Vec<ScopedTechnique> = rows
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(scoped_from_row)
+        .collect();
+    Ok(collapse_scopes(&scoped))
 }
 
 /* ============================ TESTS ============================ */
@@ -424,6 +549,7 @@ mod tests {
             fumble_max: 2,
             // Not what these fixtures are about.
             special_text: None,
+            scope: "global".into(),
         }
     }
 
@@ -439,6 +565,7 @@ mod tests {
             crit_min: 18,
             fumble_max: 1,
             special_text: None,
+            scope: "global".into(),
         }
     }
 
@@ -599,4 +726,108 @@ mod tests {
         let tech = resolve("heavy smash", &party(), &[heavy_smash()], 5, PB, STR, DEX).unwrap();
         assert_eq!(label(&tech), "Heavy Smash · Mace of the Deep Song (Melee)");
     }
+    /* ---------- three scopes, 050 ---------- */
+
+    fn scoped(key: &str, rank: u8, dice: &str, level: i64, removed: bool) -> ScopedTechnique {
+        ScopedTechnique {
+            rank,
+            removed,
+            technique: Technique {
+                key: key.into(),
+                name: key.into(),
+                roll_name: key.into(),
+                item_key: "greatsword".into(),
+                mode: Mode::Melee,
+                min_level: level,
+                dice: dice.into(),
+                crit_min: 20,
+                fumble_max: 1,
+                special_text: None,
+                scope: match rank { 2 => "object", 1 => "game", _ => "global" }.into(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_type_is_what_an_ordinary_object_has() {
+        let out = collapse_scopes(&[scoped("zwerchhau", 0, "2d6", 3, false)]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].dice, "2d6");
+        assert_eq!(out[0].scope, "global");
+    }
+
+    // MOST SPECIFIC WINS, and the order rows arrive in must not matter -
+    // PostgREST returns them however the index feels like.
+    #[test]
+    fn an_object_beats_a_game_beats_the_global() {
+        let g = scoped("zwerchhau", 0, "2d6", 3, false);
+        let c = scoped("zwerchhau", 1, "2d8", 3, false);
+        let o = scoped("zwerchhau", 2, "2d10", 3, false);
+
+        for order in [
+            vec![g.clone(), c.clone(), o.clone()],
+            vec![o.clone(), c.clone(), g.clone()],
+            vec![c.clone(), o.clone(), g.clone()],
+        ] {
+            let out = collapse_scopes(&order);
+            assert_eq!(out.len(), 1, "one key, one answer");
+            assert_eq!(out[0].dice, "2d10");
+            assert_eq!(out[0].scope, "object");
+        }
+    }
+
+    // THE CASE 050 EXISTS FOR. Deleting the object's row restores the
+    // inherited move, so the absence needs its own representation.
+    #[test]
+    fn a_tombstone_removes_the_key_rather_than_winning_it() {
+        let out = collapse_scopes(&[
+            scoped("zwerchhau", 0, "2d6", 3, false),
+            scoped("zwerchhau", 2, "2d6", 3, true),
+        ]);
+        assert!(out.is_empty(), "the sword does not have that move");
+    }
+
+    #[test]
+    fn a_tombstone_takes_only_its_own_key() {
+        let out = collapse_scopes(&[
+            scoped("zwerchhau", 0, "2d6", 3, false),
+            scoped("zwerchhau", 2, "2d6", 3, true),
+            scoped("descending_cut", 0, "2d6", 1, false),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key, "descending_cut");
+    }
+
+    // A NAMED SWORD WITH A MOVE NOTHING ELSE HAS. No ancestor, so it
+    // wins its key by being the only claim on it.
+    #[test]
+    fn an_object_move_with_no_ancestor_is_an_addition() {
+        let out = collapse_scopes(&[
+            scoped("descending_cut", 0, "2d6", 1, false),
+            scoped("emberfall", 2, "3d8", 5, false),
+        ]);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().any(|t| t.key == "emberfall" && t.scope == "object"));
+    }
+
+    // Level then name, so a list reads as a progression rather than in
+    // whatever order three scopes happened to arrive.
+    #[test]
+    fn the_order_is_the_progression() {
+        let out = collapse_scopes(&[
+            scoped("c", 0, "1d6", 5, false),
+            scoped("a", 0, "1d6", 1, false),
+            scoped("b", 0, "1d6", 3, false),
+        ]);
+        assert_eq!(
+            out.iter().map(|t| t.key.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn nothing_in_nothing_out() {
+        assert!(collapse_scopes(&[]).is_empty());
+    }
+
 }

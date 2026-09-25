@@ -1,7 +1,7 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after sizes, reach and the manager
-screens.**
+**Written 2026-09-17, updated after initiative, the turn and the
+encounter screen.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -253,7 +253,44 @@ the number comes from the same sum that refuses the next thing - one
 `slot_total`, so the gauge cannot read half empty while the container
 says no.
 
-**288 tests, zero warnings.** `cd src-tauri && cargo test`.
+AND THIS SWORD HAS ITS OWN MOVES. 050 lets a technique belong to an
+OBJECT instead of to an item key, so the Mace of the Deep Song's ten
+buttons can be given to one particular mace rather than to every mace
+in the game. The object viewer lists what a weapon can do, the editor
+adds and edits them on that object, and the character sheet ROLLS them
+- the same `swing` path, matching on the object when a technique names
+one and on the item key when it does not.
+
+Removing one is a tombstone rather than a delete, because 050's rows
+sit in the same table as 006's seeded catalogue: a per-object override
+that hides a catalogue technique has to survive, and a row that is
+simply gone would let the catalogue's version come back.
+
+AND A FIGHT HAS AN ORDER. `encounter_actors.initiative` had been a
+column nothing read since 011. 051 stores the round and whose turn it
+is; `initiative.rs` derives the rest - the order, who is eligible, and
+where the round rolls over - with 17 tests and no database in sight.
+The order strip sits at the top of the Run tab with the current actor
+lit, and the button names the creature it will hand the turn to rather
+than saying "next".
+
+Rolled live: Merchant 1 on 12, Goblin Scout on 7, Goblin Fighter 0004
+on 2, in that order, with the round advancing when it wraps.
+
+AND THE RUN TAB IS TWO SCREENS. A simple list of fights; opening one
+narrows the list to it and offers View or Edit. View is what a DM reads
+while running: the narrative, who is in it, what can be aimed at, and
+three buttons that jump to the room in World, the people in Characters
+or the things in Objects. Edit is everything that CHANGES the fight -
+name, place, prose, status, enrolment, rolling and setting initiative,
+hiding and removing.
+
+They were one screen, and the forms had come to outnumber the facts.
+A monster's attack buttons are grouped one line per weapon per mode
+for the same reason - a goblin with a light hammer has fifteen of them,
+and in one undivided row they read as fifteen unrelated verbs.
+
+**411 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -320,6 +357,33 @@ and not after.
     not a derivation
 036 things have a size - a greatsword does not go in a coin purse, and
     the ladder is the one creatures already use
+037 loose objects are everyone's - finishes 031's policies, which
+    assumed the only alternative to being held was being nowhere
+038 one depth cap - three walks up the same chain had three limits
+039 platinum - the fifth coin, so the 5e ladder is whole
+040 shops - what a merchant stocks and what it charges
+041 trade - one exchange that lands whole, in both directions
+042 the armoury - twenty weapons the SRD leaves out
+043 special attacks - every weapon gets at least three
+044 two misfiled sizes - trident and morningstar, filed by name rather
+    than by what they are
+045 weapons take room - slots off the size ladder, doubling each step
+046 a quiver holds ten - the arrow was 0.05 of a slot, so a quiver held
+    two hundred
+047 armour and gear take room - and two defects found on the way:
+    platinum too big for a coin purse, ring mail filed as medium
+048 review the armoury - every weapon read back against its own ladder;
+    the net gets a weighted rim and therefore three attacks
+049 this one is different - everything about one object, editable on
+    that object
+050 this sword has its own moves - a technique can belong to an OBJECT
+    rather than to an item key, and removal is a tombstone
+051 whose turn it is - the round and the current actor; the order
+    itself is derived
+052 a challenge can be about a thing - an object becomes targetable by
+    having a challenge attached, not by being a third kind of target
+053 an encounter has something to say - narrative prose, and retiring
+    an encounter instead of deleting one
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -1020,7 +1084,7 @@ mid-fight and last night's rolls must not change their minds.
 
 ---
 
-## Combat - BUILT, except the turn
+## Combat - BUILT, and the turn with it (051)
 
 The loop runs end to end. A DM enrols a goblin, a player picks it from
 a list, names a weapon or technique, and the app rolls to-hit, decides
@@ -1052,16 +1116,44 @@ goblin at 3 can say why.
 it. AC 0 while down, and hitting something already down costs it a
 failure rather than hit points.
 
-WHAT IS STILL MISSING, and it is two things rather than a list:
+**THE TURN IS BUILT, AND IT GATES NOTHING.** That is the decision, not
+an unfinished edge. The app shows the order and refuses nothing: anyone
+can act at any time, and the strip says whose turn it was meant to be.
+A DM overrules the order constantly - a held action, a surprise round,
+somebody who arrived late - and software that enforces it turns every
+one of those into an argument with the tool.
 
-**The turn.** `encounter_actors.initiative` is a column nothing reads. Death saves
-happen on a button because there is no turn for them to happen on, and
-that is the only place the current build departs from the rule as
-written.
+`initiative.rs` derives the order from numbers already on the actors:
+initiative, then DEX, then name, then id - two goblins can share a
+name, and the id is the only tiebreak guaranteed to differ - so the
+same roster always comes back in the same sequence. A creature
+that has not rolled, one that is hidden and one that is dead are all
+OUT of the order and still ON the screen saying why - taking them off
+would answer "where did the goblin go" with silence.
 
-**The DM side.** Encounters, actors, challenges and statblocks are all
-authored by hand in SQL. Every policy for doing it from the app is
-already in place; what is missing is the screen.
+**NPCs roll on enrolment, players roll their own.** Nobody is at the
+table to roll for a goblin. Both the roll and the location stamp are
+best effort: if either fails the enrolment still stands, because a
+goblin sitting at "not rolled" is recoverable and an enrolment that
+silently did not happen is not.
+
+**The DM side is built too.** Encounters, actors, challenges and
+statblocks all have screens - see "the Run tab is two screens" above.
+
+WHAT IS STILL MISSING:
+
+**Death saves still happen on a button.** 015 said "until initiative
+arrives". It has arrived, and hanging the save on the creature's own
+turn is now the only place the build departs from the rule as written.
+
+**Attacking a THING.** 052 makes an object targetable by hanging a
+challenge on it, and a challenge is a DC - a lock that can be picked, a
+door that can be forced. A door with an AC and hit points is a
+different claim and was deliberately not built: it wants vitals on
+objects, hp_events against a subject that is not a creature, and a rule
+for what a broken thing becomes. 052's header states what it refused to
+decide. Nothing in the live game has used it yet - zero challenges
+point at an object - so it is built and unproven.
 
 ---
 
@@ -1577,9 +1669,9 @@ runs the table; not safe the day a player client calls it directly.
 `buy_object`, and it is a trade with one column filled - a second path
 to the same place would be a second place to get it wrong.
 
-## The armoury - BUILT (042, 043)
+## The armoury - BUILT (042, 043, 044-048, 050)
 
-**57 WEAPONS, 190 TECHNIQUES.** 027 seeded the SRD tables, which are
+**57 WEAPONS, 193 TECHNIQUES.** 027 seeded the SRD tables, which are
 deliberately short - 5e collapses a century of European polearms into
 glaive, halberd and pike. 042 adds the twenty the SRD leaves out, all
 low tech and all historical: the AD&D polearm family (bardiche, voulge,
@@ -1617,11 +1709,32 @@ every row against its weapon's own class before writing it, and the
 live count of unreachable modes came back 0, dangling item keys 0, and
 the fewest techniques on any armed weapon exactly 3.
 
-**THE NET HAS NONE**, the one deliberate gap. It deals no damage at
-all; its whole function is `spc`, meaning restrain, and there is no
-condition system to restrain anybody with. Three special attacks
-rolling damage for a weapon with no damage would be worse than the
-honest absence - the same call that kept the blowgun out of 027.
+**THE NET HAS THREE NOW, and 043 was right to refuse it.** 043 left it
+empty because it deals no damage and its whole function is `spc`,
+meaning restrain, with no condition system to restrain anybody with -
+and three attacks rolling damage for a weapon with no damage would have
+been worse than the honest absence. 048 did not overrule that; it
+changed the weapon. A retiarius net was not a bedsheet, and giving it
+the lead weights real ones carried makes it a 1d4 thrown weapon whose
+damage is the rim rather than the mesh. The gap closed by fixing the
+premise, not by filling it in.
+
+The blowgun is still out, on the same reasoning, and nothing has
+changed its premise.
+
+**048 READ EVERY WEAPON BACK AGAINST ITS OWN LADDER**, which is what
+found four filed by weight rather than by what they are. 044 through
+047 are the same exercise on sizes and slots: the trident filed small
+beside a spear, a quiver that held two hundred arrows because an arrow
+was 0.05 of a slot, and platinum too big to go in a coin purse - which
+was 039 inheriting 036's `med` default and nobody noticing that a coin
+is tiny.
+
+**050 PUTS MOVES ON ONE OBJECT.** A technique can name an `object_id`
+instead of an item key, so a particular sword carries moves no other
+sword has. Two live so far. Removal is a tombstone rather than a
+delete, because these rows share a table with 006's catalogue and a row
+that is simply gone lets the catalogue's version reappear.
 
 **SPECIAL TEXT IS PROSE THE ENGINE DOES NOT READ.** Bleed, stun, armour
 reduction and forced movement are written for the table to adjudicate,
@@ -1688,8 +1801,8 @@ and destroyed.
 
 What AppSheet did that this still does not is *deliver*. `rolls.status`
 goes `pending -> resolved -> delivered` and nothing in this codebase
-moves a row to `delivered`. There is also no initiative, no die art, no
-rests, no spell slots, and the UI is a test rig. A PIN now saves you
+moves a row to `delivered`. There is no die art, no rests and no spell
+slots, and the UI is a test rig. A PIN now saves you
 retyping a password, but the session still lives in memory.
 
 006 is applied and every seeded table was checksum-verified against the
@@ -1728,12 +1841,16 @@ for what was settled, and "Combat" for the shape of what follows.
 
 Roughly in order:
 
-1. INITIATIVE, and with it the turn. `encounter_actors.initiative`
-   has been a column since 011 and nothing has read it yet. It is what
-   turns "roll a death save" from a button into something that happens
-   on a creature's own turn, which is how the rule is actually written.
-   Enrolment should prompt the players to roll for it. A miss spends a
-   slot exactly as a hit does, which is why every roll became an action.
+1. DEATH SAVES ON THE TURN, which is what initiative was for.
+   051 built the order and the round; 015's saves still happen on a
+   button, and that is now the only place the build departs from the
+   rule as written. The turn exists for them to happen on.
+
+   The other half left over from the encounter work is ATTACKING A
+   THING. 052 made an object targetable as a DC and deliberately
+   stopped there; a door with an AC and hit points wants vitals on
+   objects and hp_events against a subject that is not a creature. Read
+   052's header first - it states what it refused to decide.
 2. EDITING a creature, now that viewing one works. Renaming is done;
    the rest is scores, hit points, AC and kit, all of which are plain
    columns on a character the DM already owns. Then "save as template",
@@ -1818,6 +1935,31 @@ fixing yet, but that is where the latency is if it ever matters.
 - The old AppSheet system is still live and still has the outstanding
   items in `ISSUES_appsheet_audit.html`. Decide whether it is being
   maintained or retired.
+- **AN ENCOUNTER CANNOT BE DELETED, AND THAT IS THE DESIGN.** Rolls
+  point at encounters and actions point at rolls, so a delete would
+  either cascade through a session's history or be refused - and the
+  refusal is the honest answer, so 053 never offers it. "Retire from
+  the list" sets `archived` and the fight drops off the list with a
+  way back. Archived is NOT a status: 034's four words say what a
+  fight IS, and being off a list is housekeeping. Anything that reads
+  encounters and wants only the live ones has to filter `archived`
+  itself - `list_encounters` returns both.
+- **`encounters.narrative` is prose the engine will never read**, the
+  same contract as 043's special text and 006's lines. If a rule ever
+  needs to fire off what a fight is about, it needs its own column;
+  parsing that field would be the AppSheet mistake again.
+- **Nothing gates on the turn**, deliberately - see Combat. If a later
+  decision reverses that, `initiative.rs::next_turn` and the strip are
+  where the order lives, and every write path would need the gate, not
+  just the obvious one. See "A RULE ENFORCED IN ONE COMMAND IS NOT
+  ENFORCED".
+- **`take_object` is the last registered command with no caller**, and
+  an uncalled command is a defect rather than a spare. Five others were
+  settled on that rule: `set_encounter_location` and `destroy_object`
+  got the screens they were waiting for, and `loose_objects`,
+  `load_techniques` and `list_roster` were deleted. This one stays
+  because the Take rule in `acquire.rs` is the access-control work it
+  belongs to - wire it or retire it when that lands.
 - **Versatile weapons store their second die and nothing reads it.**
   027 added `items.versatile_number` / `versatile_denomination` so a
   longsword row is not a lie, but the engine still offers the 1d8. The

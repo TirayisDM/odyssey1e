@@ -290,7 +290,33 @@ A monster's attack buttons are grouped one line per weapon per mode
 for the same reason - a goblin with a light hammer has fifteen of them,
 and in one undivided row they read as fifteen unrelated verbs.
 
-**411 tests, zero warnings.** `cd src-tauri && cargo test`.
+AND THE FIGHT KEEPS ITS OWN ACCOUNT. The attack buttons are on the
+Run tab and their results were not: a DM swung, a goblin lost hit
+points, and the only record of it was on the Play tab behind the whole
+game's roll log. The View pane now carries what has happened in THIS
+encounter, newest first, grouped by round - who swung, at whom, what
+they rolled, hit or missed, and what it cost.
+
+A separate read rather than a filter over the Play tab's list, because
+that list is the newest fifty rolls in the GAME: a filter would quietly
+empty itself the moment a fight scrolled off the end of it. The rolls
+come back embedded under their action, which is what 012 made an action
+own its rolls for.
+
+AND A CREATURE'S ACTIONS ARE COUNTED. Nothing anywhere could say that a
+character had swung three times in one round. 054 stamps the round onto
+each action as it is written - by a trigger, for the reason 001 stamps
+character_name: a round the client sends is a round the client can get
+wrong, and a count built on it would be calmly false rather than
+visibly broken. `spent.rs` does the counting, with tests.
+
+The roster says "acted 3 times" and the order strip carries a x3, both
+amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
+051's decision unchanged: Extra Attack, haste, an action surge and a DM
+simply allowing it are all ordinary, and the ask was to be able to SEE
+it rather than to stop it.
+
+**423 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -384,6 +410,8 @@ and not after.
     having a challenge attached, not by being a third kind of target
 053 an encounter has something to say - narrative prose, and retiring
     an encounter instead of deleting one
+054 an action remembers its round - stamped by a trigger, because a
+    timestamp cannot say which round a swing belonged to
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -1141,6 +1169,13 @@ silently did not happen is not.
 statblocks all have screens - see "the Run tab is two screens" above.
 
 WHAT IS STILL MISSING:
+
+**The action economy.** 5e splits a turn into an action, a bonus
+action, a reaction and free interactions, and nothing in the schema
+knows which a technique costs. 054 counts ACTIONS, which is one honest
+number; four would mean inventing a classification for 193 catalogue
+rows. `techniques.action_cost` is the migration, and the seed data is
+the work.
 
 **Death saves still happen on a button.** 015 said "until initiative
 arrives". It has arrived, and hanging the save on the creature's own
@@ -1953,6 +1988,11 @@ fixing yet, but that is where the latency is if it ever matters.
   where the order lives, and every write path would need the gate, not
   just the obvious one. See "A RULE ENFORCED IN ONE COMMAND IS NOT
   ENFORCED".
+- **Two swings in one round are SHOWN, never refused.** If that is
+  ever reversed, the count is `spent.rs` and the gate belongs beside
+  it, in Rust, where it can be tested - not in a check constraint and
+  not on the screen. Every write path would need it, not just the
+  obvious one.
 - **`take_object` is the last registered command with no caller**, and
   an uncalled command is a defect rather than a spare. Five others were
   settled on that rule: `set_encounter_location` and `destroy_object`

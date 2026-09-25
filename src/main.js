@@ -3813,7 +3813,14 @@ async function attackRow(actor, encounterId) {
     pick.append(o);
     pick.disabled = true;
   }
-  wrap.append(pick);
+
+  // THE PICKER SAYS WHO IS SWINGING. Unlabelled, it sat in the row of
+  // the creature it belongs to and read as one more fact about that
+  // creature - a bare "Merchant 1 - AC 11" under the goblin, which is
+  // the opposite of what it means. Every button below sends THIS
+  // actor's attack at whatever is chosen here, so the caption names
+  // both ends of that sentence.
+  wrap.append(labelledControl(actor.label + " attacks", pick, "wide aim"));
 
   // ONE BLOCK PER WEAPON PER MODE. A goblin with a light hammer has
   // fifteen buttons, and they are one weapon in two modes - 007 exists

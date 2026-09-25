@@ -261,6 +261,8 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    from the statblock's weapons, one per mode. */
 .attacks{display:flex;gap:.25rem;flex-wrap:wrap;align-items:center;margin-top:.15rem}
 .attacks select{width:auto;flex:1;min-width:9rem;margin:0;padding:.18rem .3rem;font-size:11px}
+.attacks .cell.aim{flex:1 1 100%;min-width:9rem}
+.attacks .cell.aim select{width:100%;flex:initial}
 .attacks button.tiny{margin:0}
 
 /* An item's actions, revealed by clicking its name. A plain button is a

@@ -343,10 +343,12 @@ async function selectGame(id) {
   await loadRolls();
   await loadTargets();
   // BEFORE loadDM, and outside it. The places are member-readable by
-  // 033's policy, and a player dropping a torch needs somewhere to drop
-  // it as much as the DM does. Loading them only inside the DM panel
-  // would leave every player's drop offering nothing but "nowhere",
-  // which is the leak this fixes rather than a cosmetic gap.
+  // 033's policy and a player's own screen needs them: the drop
+  // confirmation names the room they are standing in, and it can only
+  // do that if the tree is loaded. It used to be needed for a place
+  // PICKER on every inventory row, which is gone - that listed every
+  // room in the world on a player's sheet, which is a DM act wearing a
+  // player's control.
   await loadPlaces();
   await loadDM();
   // AFTER the roster loads, because the two pickers are built from it.
@@ -750,23 +752,18 @@ async function fillCatalogue(sel, gameId) {
 // the drop lands. This one exists to be read BEFORE, which means it has
 // to be composed from what the screen already has - the sheet's name
 // and location, and the place picker's own labels.
-function dropLine(it, where, n) {
+function dropLine(it, n) {
   const sheet = state.sheet || {};
   const who = sheet.name || "This character";
   const thing = it.name || it.item.name;
   const many = n && n > 1 ? n + " " : "";
 
-  let place;
-  if (where.value) {
-    place = where.selectedOptions[0] ? where.selectedOptions[0].textContent : "there";
-  } else if (sheet.location_id) {
-    // The picker lists every place, so the character's own is in it.
-    const mine = [...where.options].find((o) => o.value === sheet.location_id);
-    place = mine ? mine.textContent : "where they are standing";
-  } else {
-    place = "nowhere in particular";
-  }
-  return who + " is dropping " + many + thing + " at " + place.trim() + ".";
+  // WHERE THEY STAND, and nowhere else. The only question left is
+  // whether they are standing anywhere at all, which 035 keeps as a
+  // real answer rather than a misfiling.
+  const here = (state.locations || []).find((l) => l.id === sheet.location_id);
+  const place = here ? here.path.join(" > ") : "nowhere in particular";
+  return who + " is dropping " + many + thing + " at " + place + ".";
 }
 
 function objectControls(it, onDone) {
@@ -804,36 +801,31 @@ function objectControls(it, onDone) {
   // object nobody holds and no place contains is not in the world, it
   // is only in the table.
   //
-  // BLANK NOW MEANS "WHERE I AM STANDING", not nowhere. drop_object
-  // derives the floor from the character rather than being told, so the
-  // default is the thing a player actually means when they put
-  // something down. Picking a place is still there and is the DM's
-  // tool: it puts a thing in a room nobody is standing in.
+  // DROPPING IS PUTTING IT DOWN WHERE YOU ARE. There used to be a
+  // place picker here and it listed EVERY room in the world, on a
+  // player's own sheet, beside the word "drop" - which reads as an
+  // offer to put a carried sword down in a tavern nobody is standing
+  // in. That is a DM act and it already has a home: Objects -> move,
+  // which does places, containers and quantities together.
   //
-  // A character with no location still drops into nowhere, which 035
-  // says is a real answer rather than a misfiling.
-  const where = document.createElement("select");
-  where.className = "wheretodrop";
-  fillPlaces(where, "— where I am —");
-
+  // So the picker is gone rather than defaulted. Two controls for one
+  // act, one of them on the wrong screen, is the duplication this repo
+  // keeps removing.
+  //
+  // A character standing nowhere still drops into nowhere, which 035
+  // keeps as a real answer.
   const dropBtn = document.createElement("button");
   dropBtn.className = "tiny ghost";
   dropBtn.textContent = "drop";
-  dropBtn.title = "put it down where you are, or pick a place";
+  dropBtn.title = "put it down where you are standing";
   dropBtn.addEventListener("click", async () => {
     const n = it.quantity > 1 ? Number(qty.value) : null;
 
-    // SAY IT BEFORE DOING IT. A drop moves a thing out of somebody's
-    // hands and onto a floor that may not be the floor they pictured -
-    // the engine derives it - so the sentence is read back first.
-    if (!confirm(dropLine(it, where, n))) return;
+    // SAY IT BEFORE DOING IT. The floor is derived from the character
+    // rather than chosen, so the sentence names it before the write.
+    if (!confirm(dropLine(it, n))) return;
 
-    // Two commands because they are two events: drop_here puts it in a
-    // named place, drop_object puts it down where the character is.
-    // Both split the same way.
-    const r = where.value
-      ? await tryCall("drop_here", { objectId: it.id, locationId: where.value, quantity: n })
-      : await tryCall("drop_object", { objectId: it.id, quantity: n });
+    const r = await tryCall("drop_object", { objectId: it.id, quantity: n });
     if (!r.ok) { log("drop", r.error, true); return; }
     // What the ENGINE says happened, which is the authority on which
     // floor it landed on. The line above was this screen's guess.
@@ -873,7 +865,7 @@ function objectControls(it, onDone) {
     await onDone();
   });
 
-  wrap.append(nameBox, nameBtn, qty, where, dropBtn, killBtn);
+  wrap.append(nameBox, nameBtn, qty, dropBtn, killBtn);
 
   // Into a container. Only rendered when there is one to choose, so an
   // inventory with no bags looks exactly as it did before 032.

@@ -23,6 +23,7 @@ mod acquire;
 mod attack;
 mod carry;
 mod character;
+mod class;
 mod containers;
 mod commands;
 mod currency;
@@ -135,47 +136,6 @@ fn list_members(state: State<AppState>, game_id: String) -> Result<Value, String
 }
 
 /* ============================ CHARACTERS ============================ */
-
-#[tauri::command]
-fn list_characters(state: State<AppState>, game_id: String) -> Result<Value, String> {
-    let token = state.token()?;
-    supabase::rest_get(
-        &token,
-        "characters",
-        &[
-            ("select", "id,name,token_name,owner_uid,is_active"),
-            ("game_id", &format!("eq.{}", game_id)),
-            // PEOPLE ONLY. Since 022 a monster is a character too, and
-            // without this a player's list fills with goblins. is_npc is
-            // a label rather than a structure - it changes no rule, it
-            // decides which list you are looking at.
-            ("is_npc", "is.false"),
-            ("order", "name.asc"),
-        ],
-    )
-}
-
-#[tauri::command]
-fn create_character(
-    state: State<AppState>,
-    game_id: String,
-    name: String,
-    token_name: Option<String>,
-) -> Result<Value, String> {
-    let session = state
-        .current()?
-        .ok_or_else(|| "not signed in".to_string())?;
-    supabase::rest_insert(
-        &session.access_token,
-        "characters",
-        &json!({
-            "game_id": game_id,
-            "owner_uid": session.user_id,
-            "name": name,
-            "token_name": token_name
-        }),
-    )
-}
 
 /* ============================ ROLLS ============================ */
 
@@ -1187,8 +1147,11 @@ pub fn run() {
             create_game,
             join_game,
             list_members,
-            list_characters,
-            create_character,
+            commands::characters::list_characters,
+            commands::characters::create_character,
+            // 055: what a character can BE, and therefore which
+            // die their hit points come from.
+            commands::characters::list_classes,
             list_rolls,
             list_encounters,
             list_targets,

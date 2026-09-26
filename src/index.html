@@ -310,6 +310,15 @@
             <ul id="pc-list" class="list"></ul>
             <div class="sub">New character</div>
             <input id="char-name" placeholder="character name" />
+            <!-- 055. A class is where a character's hit die comes from,
+                 so picking one here is what makes the character arrive
+                 with hit points instead of a null where their life
+                 goes. "No class" stays available because a blank sheet
+                 is a real thing to want. -->
+            <select id="char-class">
+              <option value="">no class yet</option>
+            </select>
+            <div class="muted" id="char-class-note"></div>
             <button id="create-char">Create character</button>
           </div>
 

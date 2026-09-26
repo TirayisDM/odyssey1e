@@ -34,7 +34,8 @@
 //!   session.rs           sign_up sign_in sign_out me                   35  me moved
 //!   games.rs             list_games create_game join_game
 //!                        list_members                                  50  in lib.rs
-//!   characters.rs        list_characters create_character              40  in lib.rs
+//!   characters.rs        list_characters create_character
+//!                        list_classes                                  60  DONE (055)
 //!   sheet.rs             get_sheet set_level set_ability
 //!                        set_skill_prof                                85  in lib.rs
 //!   equipment.rs         list_inventory set_item_equipped
@@ -76,6 +77,7 @@
 use crate::supabase::{AppState, Session};
 use tauri::State;
 
+pub mod characters;
 pub mod containers;
 pub mod dm;
 pub mod initiative;

@@ -20,6 +20,9 @@ const { invoke } = window.__TAURI__.core;
 // DM's selection back to the active encounter — and a roll taken in
 // between would have been attributed to the wrong one.
 let state = {
+  // 055. The class catalogue for this game, globals plus any the
+  // table has written for itself.
+  classes: [],
   user: null, gameId: null, characterId: null, sheet: null, rolls: [],
   games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
@@ -340,6 +343,9 @@ async function selectGame(id) {
   state.dmEncounterId = null;
   await loadGames();
   await loadCharacters();
+  // 055: twelve rows, so the creation picker is ready before
+  // anybody opens it.
+  await loadClasses();
   await loadRolls();
   await loadTargets();
   // BEFORE loadDM, and outside it. The places are member-readable by
@@ -460,6 +466,46 @@ function performerActorId() {
     (t) => t.row === "actor" && t.character_id === state.characterId
   );
   return mine ? mine.id : null;
+}
+
+/* ============================ CLASSES ============================ */
+
+// 055. Loaded once per game, because the catalogue is twelve rows that
+// only move when a DM writes their own.
+async function loadClasses() {
+  const sel = document.querySelector("#char-class");
+  if (!sel || !state.gameId) return;
+  const rows = await invoke("list_classes", { gameId: state.gameId }).catch(() => []);
+  state.classes = rows || [];
+  const keep = sel.value;
+  sel.innerHTML = "";
+  sel.append(new Option("no class yet", ""));
+  for (const c of state.classes) {
+    sel.append(new Option(c.name + " \u00b7 d" + c.hit_die, c.key));
+  }
+  // A repaint must not silently change what somebody already chose.
+  if (keep && state.classes.some((c) => c.key === keep)) sel.value = keep;
+  paintClassNote();
+}
+
+function paintClassNote() {
+  const note = document.querySelector("#char-class-note");
+  const sel = document.querySelector("#char-class");
+  if (!note || !sel) return;
+  const c = (state.classes || []).find((x) => x.key === sel.value);
+  if (!c) {
+    note.textContent = "no class means no hit die, and therefore no hit points";
+    return;
+  }
+  // The level-1 maximum, worked the same way vitality::pc_hp works it -
+  // the full die, because 5e maxes the first one. Constitution is not
+  // known until the row exists and its abilities are seeded, so this
+  // says what the die gives and the sheet says what they ended up with.
+  const saves = (c.saving_throws || []).join("/");
+  note.textContent =
+    "d" + c.hit_die + " \u00b7 " + c.hit_die + " hp at level 1 before CON" +
+    (saves ? " \u00b7 saves " + saves : "") +
+    (c.skill_choices ? " \u00b7 " + c.skill_choices + " skills" : "");
 }
 
 async function loadCharacters() {
@@ -4240,9 +4286,21 @@ window.addEventListener("DOMContentLoaded", async () => {
       gameId: state.gameId,
       name: val("#char-name") || "Unnamed",
       tokenName: null,
+      // Blank is a real answer - see the note in the markup. The
+      // command reads it as "no class decided" and leaves hp_max null
+      // rather than inventing a d8.
+      classKey: val("#char-class") || null,
+      // Nothing asks for size yet; the command defaults it to medium,
+      // which is the fix for what made Snot and Unnamed hollow.
+      size: null,
     });
     if (c) await loadCharacters();
   });
+
+  // Saying what the choice MEANS, at the moment it is made. A class is
+  // a die and two saves before it is a name, and the sheet would
+  // otherwise be the first place anybody learns what they picked.
+  document.querySelector("#char-class").addEventListener("change", paintClassNote);
 
   document.querySelector("#create-roll").addEventListener("click", async () => {
     if (!state.gameId) return log("create_roll", "select a game first", true);

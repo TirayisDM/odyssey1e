@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**423 tests, zero warnings.** `cd src-tauri && cargo test`.
+**439 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -412,6 +412,8 @@ and not after.
     an encounter instead of deleting one
 054 an action remembers its round - stamped by a trigger, because a
     timestamp cannot say which round a swing belonged to
+055 a character has a calling - the twelve classes, and the hit die a
+    player character's hit points actually come from
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -1822,6 +1824,82 @@ which is the case a merge could not express. The editor was driven
 through the rig: seven fields carrying their values with the type as
 placeholder, and a save sending blank to clear, `none` to empty and a
 value to set.
+
+## Classes - BUILT (055, class.rs, commands/characters.rs)
+
+**A character made through the app had no hit points.** Not zero -
+NULL, an empty space on the sheet where a life goes. `create_character`
+took a name and inserted a name; level defaulted to 1 and everything
+else to nothing. Snot and Unnamed stood that way for weeks and nothing
+complained, because nothing was asking.
+
+The chain was: no size, therefore no hit die, therefore no maximum.
+029 made the die come from SIZE, which is the Monster Manual's rule and
+right for monsters. `vitality.rs` has carried the other half as a
+comment since:
+
+> WHAT THIS IS NOT. A player character's hit points are not this. 5e
+> maxes a PC's first hit die and rolls the rest, and the die comes from
+> class rather than size.
+
+055 is the table that comment was waiting for.
+
+**TWO RULES, NOT ONE WITH AN EXCEPTION.** `vitality::average_hp` is the
+monster rule - level times the average of a size's die, floored.
+`vitality::pc_hp` is the character one, and it differs in both halves:
+the die comes from class, and the first level is MAXIMISED rather than
+averaged. They also round opposite ways - a monster's total floors, a
+character's per-level value is 5e's printed fixed number, which is the
+average rounded up. A test asserts they disagree, so nobody collapses
+them later: same d8, same level 5, no Constitution - a monster has 22
+and a character has 28.
+
+Levels after the first take `die / 2 + 1` rather than a roll, because a
+maximum has to be RECOMPUTABLE. A rolled maximum is a historical event;
+move the level and there is nothing to derive it from. That is 029's
+argument for monsters, applied to characters.
+
+**THE VOCABULARY WAS THE RISK, and it was checked rather than assumed.**
+`equipment::is_proficient` matches weapons on `sim`/`mar` or an exact
+item key, and armour on `lgt`/`med`/`hvy`/`shl`. A class row saying
+"simple" or "light" would make a Fighter proficient with NOTHING and
+report nothing anywhere - this codebase's most expensive defect class.
+All 12 seeded classes were verified against the live catalogue: every
+weapon token is a class prefix or a real item key, every armour token
+a real category, every skill option a real `skills.key`, every save a
+real ability code. Zero mismatches.
+
+**A character is now born finished.** Pick a class and the row arrives
+with a size, the class's weapon and armour proficiencies snapshotted
+onto it, and an `hp_max` derived from the die and the Constitution the
+seed trigger wrote. Picking no class is still allowed - a blank sheet
+is a real thing to want - and then `hp_max` stays NULL, which honestly
+says nobody has decided what this character is.
+
+Proficiencies are COPIED rather than looked up, on 001's principle: what
+a character is proficient with is a fact about the character, and a DM
+who rewrites the class catalogue next month has not retrained anybody.
+
+Size defaults to `med` rather than NULL. Every playable SRD species is
+Small or Medium, the difference changes no rule the sheet reads today,
+and the alternative is the absence that broke Snot.
+
+**WHAT 055 DELIBERATELY IS NOT.** No subclasses - they arrive at level 3
+and each is a bundle of features wanting its own table. No class
+features: Second Wind, Sneak Attack and Rage are rules with resources
+and timing, and a `features text[]` would be a list of words no code
+could act on. No spellcasting, with no spell table to point at. No
+multiclassing - `class_key` is one value, and 5e multiclassing needs
+levels per class, which is a join table. No ASIs and no starting
+equipment.
+
+`characters.class_key` references `classes.key` BY VALUE with no foreign
+key, for the reason 004 recorded: the two partial unique indexes that
+make nullable tenancy work cannot back one.
+
+`commands/characters.rs` also took `list_characters` and
+`create_character` out of lib.rs, which is commands/mod.rs's own rule -
+a group migrates when it is being worked on anyway.
 
 ## Pick up here
 

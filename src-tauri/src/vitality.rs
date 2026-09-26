@@ -107,6 +107,49 @@ pub fn average_hp(level: i64, die: i64, con_mod: i64) -> i64 {
     (from_dice + level * con_mod).max(1)
 }
 
+/// A PLAYER CHARACTER's hit points at this level.
+///
+/// THE OTHER RULE. `average_hp` above is the monster one - level times
+/// the average of a die that comes from SIZE. This is the character
+/// one, and it differs in both halves: the die comes from CLASS (055),
+/// and the first level is MAXIMISED rather than averaged.
+///
+/// The module header has promised this function since 029 and could
+/// not write it, because there was no class table to take a die from.
+///
+/// FIRST LEVEL IS THE FULL DIE. 5e is explicit and it matters more than
+/// it looks: a d6 wizard averaging 3 would spend level one dying to a
+/// housecat. The book hands out the maximum once, on purpose.
+///
+/// AFTER THAT, THE FIXED VALUE - `die / 2 + 1`, which is 4 on a d6, 5
+/// on a d8, 6 on a d10 and 7 on a d12. That is 5e's stated alternative
+/// to rolling, and it is what this uses because a character's maximum
+/// has to be RECOMPUTABLE. A rolled maximum is a historical event: move
+/// the level and there is nothing to derive it from again. 029 made
+/// exactly this argument for monsters, and it is the argument that
+/// turned `hp_max` from a magic number into a button.
+///
+/// ROUNDED UP, NOT DOWN, and this is the one place the two rules
+/// genuinely disagree rather than merely differing. A monster's total
+/// is floored (`average_hp`, and the ogre's 38.5 becomes 38); a
+/// character's per-level value is 5e's printed fixed number, which is
+/// the average rounded UP. They are different books talking about
+/// different things, and collapsing them would make one of them wrong.
+///
+/// CONSTITUTION APPLIES PER LEVEL, including the first - the same
+/// per-die rule `average_hp` documents.
+///
+/// FLOORED AT ONE, because a living character with no hit points is
+/// not a character.
+pub fn pc_hp(hit_die: i64, level: i64, con_mod: i64) -> i64 {
+    if level < 1 {
+        return 1;
+    }
+    let first = hit_die + con_mod;
+    let per_level = hit_die / 2 + 1 + con_mod;
+    (first + (level - 1) * per_level).max(1)
+}
+
 /// The proficiency bonus a creature of this level derives.
 ///
 /// The same `floor((level - 1) / 4) + 2` a character uses, stated here
@@ -258,5 +301,63 @@ mod tests {
         // prints +2; level derives +3. A statblock keeps the book's
         // answer by stating it - see prof_bonus_for.
         assert_eq!(prof_bonus_for(7), 3);
+    }
+
+    /* ------------------------ the PC rule ------------------------ */
+
+    // A first-level character has the WHOLE die. This is the half of
+    // the rule that differs most from the monster one, and the half a
+    // d6 class depends on to survive its first fight.
+    #[test]
+    fn first_level_is_the_maximum_not_the_average() {
+        assert_eq!(pc_hp(6, 1, 0), 6, "wizard");
+        assert_eq!(pc_hp(8, 1, 0), 8, "rogue");
+        assert_eq!(pc_hp(10, 1, 0), 10, "fighter");
+        assert_eq!(pc_hp(12, 1, 0), 12, "barbarian");
+    }
+
+    // The fixed values 5e prints: 4, 5, 6, 7.
+    #[test]
+    fn later_levels_take_the_fixed_value() {
+        assert_eq!(pc_hp(6, 2, 0) - pc_hp(6, 1, 0), 4);
+        assert_eq!(pc_hp(8, 2, 0) - pc_hp(8, 1, 0), 5);
+        assert_eq!(pc_hp(10, 2, 0) - pc_hp(10, 1, 0), 6);
+        assert_eq!(pc_hp(12, 2, 0) - pc_hp(12, 1, 0), 7);
+    }
+
+    // Worked by hand from the book: a level 5 Fighter with CON 14 is
+    // 10 + 2, then four lots of 6 + 2.
+    #[test]
+    fn a_level_five_fighter_with_con_fourteen() {
+        assert_eq!(pc_hp(10, 5, 2), 12 + 4 * 8);
+        assert_eq!(pc_hp(10, 5, 2), 44);
+    }
+
+    #[test]
+    fn constitution_applies_at_every_level_including_the_first() {
+        // +1 CON over five levels is five more hit points, not one.
+        assert_eq!(pc_hp(8, 5, 1) - pc_hp(8, 5, 0), 5);
+    }
+
+    // The two rules are NOT the same function with a different die,
+    // and a test says so rather than a comment alone.
+    #[test]
+    fn the_pc_rule_and_the_monster_rule_disagree_on_purpose() {
+        // Same die, same level, same constitution.
+        assert_eq!(average_hp(5, 8, 0), 22, "monster: floored average");
+        assert_eq!(pc_hp(8, 5, 0), 28, "character: max first, then fixed");
+        assert!(pc_hp(8, 5, 0) > average_hp(5, 8, 0));
+    }
+
+    #[test]
+    fn a_punishing_constitution_still_leaves_a_living_character() {
+        assert_eq!(pc_hp(6, 3, -5), 1);
+        assert!(pc_hp(6, 10, -5) >= 1);
+    }
+
+    #[test]
+    fn level_zero_is_not_a_character() {
+        assert_eq!(pc_hp(10, 0, 3), 1);
+        assert_eq!(pc_hp(10, -4, 3), 1);
     }
 }

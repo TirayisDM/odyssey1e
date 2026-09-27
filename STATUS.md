@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**439 tests, zero warnings.** `cd src-tauri && cargo test`.
+**440 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -1896,6 +1896,21 @@ equipment.
 `characters.class_key` references `classes.key` BY VALUE with no foreign
 key, for the reason 004 recorded: the two partial unique indexes that
 make nullable tenancy work cannot back one.
+
+**THE LEVEL BUTTON NOW RIPPLES FOR CHARACTERS TOO.** 029 asked for it -
+"this should ripple through their HPs" - and got half: `set_actor_level`
+recomputed a monster's maximum and `set_level` wrote `{"level": n}` and
+stopped. A player character's maximum was therefore whatever it had been
+at CREATION, which is level 1 with the Constitution 10 the seed trigger
+writes before anybody chooses anything. Garn, a level 5 Barbarian with
+CON 13, sat on the sheet with 12 instead of 45.
+
+`commands::characters::rederive_hp_max` is the one place that answer is
+worked out, called from `set_level` AND from `set_ability` when the
+score is `con` - because Constitution applies per level, so moving it
+by one moves a level 5 character by five. It returns None and writes
+nothing when there is no class to derive from: a stated maximum is a
+real thing, and inventing a d8 is not.
 
 `commands/characters.rs` also took `list_characters` and
 `create_character` out of lib.rs, which is commands/mod.rs's own rule -

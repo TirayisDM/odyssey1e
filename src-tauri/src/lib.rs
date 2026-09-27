@@ -252,12 +252,18 @@ fn set_level(state: State<AppState>, character_id: String, level: i64) -> Result
         return Err("level must be 1-20".to_string());
     }
     let token = state.token()?;
-    supabase::rest_update(
+    let updated = supabase::rest_update(
         &token,
         "characters",
         &[("id", &format!("eq.{}", character_id))],
         &json!({ "level": level }),
-    )
+    )?;
+    // AND THE HIT POINTS WITH IT. 029 asked for the level button to
+    // ripple; `set_actor_level` rippled and this did not, so a player
+    // character's maximum was whatever it had been at creation. Silent
+    // when there is no class to derive from - see rederive_hp_max.
+    commands::characters::rederive_hp_max(&token, &character_id)?;
+    Ok(updated)
 }
 
 /// Upsert one ability. The row always exists — the database seeds six on
@@ -390,7 +396,7 @@ fn set_ability(
         return Err("score must be 1-30".to_string());
     }
     let token = state.token()?;
-    supabase::rest_update(
+    let updated = supabase::rest_update(
         &token,
         "character_abilities",
         &[
@@ -398,7 +404,16 @@ fn set_ability(
             ("ability", &format!("eq.{}", ability)),
         ],
         &json!({ "score": score, "save_prof": save_prof }),
-    )
+    )?;
+    // CONSTITUTION IS HALF THE MAXIMUM, and it applies per level rather
+    // than once - so moving it by one moves a level 5 character by
+    // five. Only con: the other five change nothing a maximum is made
+    // of, and re-deriving on every score edit would be two reads to
+    // learn that.
+    if ability.eq_ignore_ascii_case("con") {
+        commands::characters::rederive_hp_max(&token, &character_id)?;
+    }
+    Ok(updated)
 }
 
 /// Set a skill's proficiency multiplier. Zero deletes the row rather

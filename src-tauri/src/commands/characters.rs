@@ -199,3 +199,83 @@ fn load_con(token: &str, character_id: &str) -> Option<i64> {
         .get("score")
         .and_then(|x| x.as_i64())
 }
+
+/* ======================= WHEN THE NUMBERS MOVE ======================= */
+
+/// Recompute a character's hit point maximum from what it is derived
+/// from, and write it.
+///
+/// THE BUG THIS EXISTS TO KILL. A maximum was computed once, at
+/// creation, and never again. `set_level` wrote `{"level": n}` and
+/// stopped; `set_ability` wrote a score and stopped. So Garn - a level
+/// 5 Barbarian with Constitution 13, who should have 45 - sat on the
+/// sheet with 12, which is what a d12 gives at level 1 with the 10 that
+/// `seed_character_abilities` writes before anybody has chosen
+/// anything. Both numbers the maximum comes from had moved and the
+/// maximum had not heard about either.
+///
+/// 029 ASKED FOR EXACTLY THIS and got half of it: "a set level button
+/// that allows a DM to add or subtract levels - this should ripple
+/// through their HPs". `set_actor_level` does ripple, which is why a
+/// goblin's maximum tracks its level and a player's did not. The rule
+/// was written once for monsters and the characters never got it.
+///
+/// ONE PLACE, CALLED FROM BOTH WRITERS, for the reason the numeric
+/// helper in supabase.rs exists: a rule with two copies is a rule with
+/// two answers, and the second one is always the stale one.
+///
+/// RETURNS None WHEN THERE IS NOTHING TO DERIVE FROM, and writes
+/// nothing in that case. A character with no class has no die, and a
+/// stated maximum is a real thing - 029 made the same call for a
+/// statblock whose hit points are copied from the book. Silence is the
+/// honest answer; inventing a d8 is not.
+pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<i64>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "id,level,class_key,game_id"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let Some(row) = rows.as_array().and_then(|a| a.first()) else {
+        return Ok(None);
+    };
+    let Some(key) = row.get("class_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+    else {
+        // No class, no die. A monster levels through
+        // `commands::dm::set_actor_level`, which has its own rule
+        // because its die comes from size.
+        return Ok(None);
+    };
+    let level = row.get("level").and_then(|v| v.as_i64()).unwrap_or(1);
+    let game_id = row.get("game_id").and_then(|v| v.as_str()).unwrap_or_default();
+
+    let class_rows = supabase::rest_get(
+        token,
+        "classes",
+        &[
+            ("select", class::CLASS_COLUMNS),
+            ("key", &format!("eq.{}", key)),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    )?;
+    let Some(c) = class::collapse(class_rows.as_array().unwrap_or(&Vec::new()))
+        .into_iter()
+        .next()
+    else {
+        // A class_key pointing at nothing. 055 cannot use a foreign key
+        // to prevent this, so it is reported rather than guessed around.
+        return Err(format!("{} has an unknown class: {}", character_id, key));
+    };
+
+    let con = load_con(token, character_id).unwrap_or(10);
+    let hp = vitality::pc_hp(c.hit_die, level, (con - 10).div_euclid(2));
+    supabase::rest_update(
+        token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "hp_max": hp }),
+    )?;
+    Ok(Some(hp))
+}

@@ -333,6 +333,19 @@ mod tests {
         assert_eq!(pc_hp(10, 5, 2), 44);
     }
 
+    // THE ONE THAT WAS WRONG ON SCREEN. Garn, a level 5 Barbarian with
+    // Constitution 13, showed 12 - which is what a d12 gives at level
+    // ONE with the 10 the seed trigger writes. Both inputs had moved
+    // and nothing recomputed. 45 is the answer; the ripple that
+    // delivers it is commands::characters::rederive_hp_max.
+    #[test]
+    fn a_level_five_barbarian_with_con_thirteen() {
+        assert_eq!(pc_hp(12, 5, 1), 45);
+        // And what the stale value actually was, so the two cannot be
+        // confused again.
+        assert_eq!(pc_hp(12, 1, 0), 12);
+    }
+
     #[test]
     fn constitution_applies_at_every_level_including_the_first() {
         // +1 CON over five levels is five more hit points, not one.

@@ -38,6 +38,7 @@ mod narrative;
 mod objects;
 mod pin;
 mod resolution;
+mod species;
 mod spent;
 mod store;
 mod supabase;
@@ -1167,6 +1168,8 @@ pub fn run() {
             // 055: what a character can BE, and therefore which
             // die their hit points come from.
             commands::characters::list_classes,
+            // 056: what a character's people are, and what that adds.
+            commands::characters::list_species,
             list_rolls,
             list_encounters,
             list_targets,

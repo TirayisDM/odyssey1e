@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**440 tests, zero warnings.** `cd src-tauri && cargo test`.
+**458 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -414,6 +414,8 @@ and not after.
     timestamp cannot say which round a swing belonged to
 055 a character has a calling - the twelve classes, and the hit die a
     player character's hit points actually come from
+056 a character has a people - species, their modifiers, and an honest
+    line between what the engine applies and what a DM still must
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -1915,6 +1917,84 @@ real thing, and inventing a d8 is not.
 `commands/characters.rs` also took `list_characters` and
 `create_character` out of lib.rs, which is commands/mod.rs's own rule -
 a group migrates when it is being worked on anyway.
+
+## Species - BUILT (056, species.rs, the Species tab)
+
+**THIS CAMPAIGN IS ALL CUSTOM SPECIES.** Not 5e's list plus some - the
+whole roster is Dave's, and the Unt'garoth are the first. That is why
+`species` has no SRD layer underneath it: the global rows ARE the
+campaign's. The nullable tenancy is there anyway, because a second
+campaign wanting its own Unt'garoth is what it is for.
+
+055 gave a character a class and therefore a hit die. 056 gives them a
+people, and with it the rest of what a sheet is made of.
+
+**BASE AND EFFECTIVE ARE DIFFERENT FACTS.** A species bonus is NEVER
+written into `character_abilities.score`. The stored number stays what
+somebody rolled; `species::effective_score` adds the bonus on the way to
+the sheet, and `Ability` carries `base`, `bonus` and the effective
+`score` separately. Folding +2 into the row would destroy the base, so
+changing species later would double-count, and an 18 would be
+indistinguishable from a 16 with a people behind it. 049's tri-state
+argument in another costume.
+
+The editor writes `base`; everything else reads `score`. That is the
+whole reason the split exists, and the ability box on the sheet shows a
+small `+2` beside the modifier so an 18 reading +5 does not look like
+broken arithmetic.
+
+**ONE PLACE APPLIES IT.** `character::apply_species` raises the
+abilities map once, immediately after the read. Every modifier in the
+app comes from `Ability::score` through `ability_mod_of`, so skills,
+saves, attack rolls, carrying and armour class all pick the bonus up
+without any of them knowing species exist. The alternative - each site
+adding it - is the two-places problem `supabase::numeric` was about.
+
+**WHAT IS APPLIED, AND WHAT IS ONLY WRITTEN DOWN.** This is the honest
+column, and `traits.applied` carries it to the screen:
+
+    APPLIED        ability bonuses, ability maxima (STR 21, not 20),
+                   size, Powerful Build (one step up carry.rs's size
+                   ladder), granted skills, unarmoured AC
+    NOT APPLIED    speed 40 - THERE IS NO MOVEMENT SYSTEM
+                   fire/cold resistance - THERE IS NO RESISTANCE SYSTEM
+                   the advantage traits - Adv/Dis is a human choice on
+                   the roll screen with nothing to fire it
+                   cannot-swim, high-altitude, disease resistance
+
+A trait a DM adjudicates is fine. A screen that hides which ones those
+are is not, so the viewer tags every trait `applied` or `DM applies`
+and colours the two differently. 054 refused to guess at 193 action
+costs for the same reason.
+
+**POWERFUL BUILD IS A SEPARATE SIZE.** `Sheet::carry_size` is the size a
+character CARRIES as; `vitals.size` is the size they ARE. Only carrying
+moves - not reach, not cover, not the hit die, not what a container
+admits. `species::bump_size` walks `vitality::size_rank` rather than
+inventing a second ladder.
+
+**UNYIELDING DEFENSE** is `equipment::armor_class`'s new `unarmored`
+argument: a base and an already-resolved modifier, applied ONLY when no
+body armour is worn. A floor, not a bonus - putting on a breastplate
+goes back to the armour's number, and a shield still counts on top.
+Tests assert all three.
+
+Verified live and rolled back, creating an Unt'garoth Barbarian: size
+lg, carries as huge, STR 10 to 12, CON 10 to 11, hit points 12, carry
+capacity 720 lb, Athletics granted, unarmoured AC 12. The Species tab
+was driven through the rig - facts render, and the three traits come
+back tagged applied / applied / DM applies.
+
+**ONE CONTRADICTION IN THE SOURCE, FLAGGED NOT BURIED.** The species
+document says both "their strength to extend to 20 naturally" and, under
+its own heading, "Maximum of 21". 21 is seeded, because the later
+passage is the specific one with a mechanic and a worked explanation
+against a clause in a summary sentence. It is a design question, and
+056's header says so where it can be found.
+
+Not here: a species EDITOR. Species are authored in the database for
+now; the tab reads. Authoring wants a form with validation against the
+same vocabularies, and the reading half is what was blocking play.
 
 ## Pick up here
 

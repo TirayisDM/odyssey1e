@@ -304,6 +304,13 @@
             <button class="tab" data-chars="npcs">
               NPCs <span class="count" id="n-npcs"></span>
             </button>
+            <!-- 056. A READING tab, not an editing one. Species are
+                 authored in the database for now; what was missing is
+                 anywhere to SEE what a people gives you, which is half
+                 lore and half mechanics and belongs together. -->
+            <button class="tab" data-chars="species">
+              Species <span class="count" id="n-species"></span>
+            </button>
           </nav>
 
           <div class="chars-pane" data-chars="pcs">
@@ -319,7 +326,21 @@
               <option value="">no class yet</option>
             </select>
             <div class="muted" id="char-class-note"></div>
+            <!-- 056. The species decides size and the ability bonuses,
+                 so it belongs at creation beside the class rather than
+                 as an edit afterwards. -->
+            <select id="char-species">
+              <option value="">no species yet</option>
+            </select>
+            <div class="muted" id="char-species-note"></div>
             <button id="create-char">Create character</button>
+          </div>
+
+          <div class="chars-pane" data-chars="species" hidden>
+            <div class="row">
+              <select id="species-pick"></select>
+            </div>
+            <div id="species-view"></div>
           </div>
 
           <div class="chars-pane" data-chars="npcs" hidden>

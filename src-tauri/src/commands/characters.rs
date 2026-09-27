@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 use tauri::State;
 
 use crate::class;
+use crate::species;
 use crate::supabase::{self, AppState};
 use crate::vitality;
 
@@ -66,6 +67,29 @@ pub fn list_classes(state: State<AppState>, game_id: String) -> Result<Vec<class
     Ok(class::collapse(rows.as_array().unwrap_or(&Vec::new())))
 }
 
+/// The peoples this game can choose from.
+///
+/// THIS CAMPAIGN HAS NO SRD LAYER - every species in it is custom, so
+/// the global rows ARE the campaign's. The tenancy collapse runs
+/// anyway, because a second campaign wanting its own Unt'garoth is
+/// exactly what it is for.
+#[tauri::command]
+pub fn list_species(
+    state: State<AppState>,
+    game_id: String,
+) -> Result<Vec<species::Species>, String> {
+    let token = state.token()?;
+    let rows = supabase::rest_get(
+        &token,
+        "species",
+        &[
+            ("select", species::SPECIES_COLUMNS),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    )?;
+    Ok(species::collapse(rows.as_array().unwrap_or(&Vec::new())))
+}
+
 /* ============================ MAKING ONE ============================ */
 
 /// Make a character.
@@ -94,6 +118,7 @@ pub fn create_character(
     name: String,
     token_name: Option<String>,
     class_key: Option<String>,
+    species_key: Option<String>,
     size: Option<String>,
 ) -> Result<Value, String> {
     let session = state
@@ -125,12 +150,28 @@ pub fn create_character(
         None => None,
     };
 
+    // Same treatment as the class: named means it must exist, because
+    // a key pointing at nothing produces a character whose bonuses
+    // nothing can find and 056 cannot use a foreign key to stop it.
+    let people = match species_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(key) => match crate::character::load_species(token, &game_id, key)? {
+            Some(sp) => Some(sp),
+            None => return Err(format!("no such species: {}", key)),
+        },
+        None => None,
+    };
+
+    // THE SPECIES DECIDES THE SIZE unless somebody says otherwise. An
+    // Unt'garoth is Large, and that is a fact about the people rather
+    // than a choice at the form - so an explicit argument still wins,
+    // but the default comes from the row instead of from `med`.
     let size = size
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or("med")
-        .to_string();
+        .map(str::to_string)
+        .or_else(|| people.as_ref().map(|sp| sp.size.clone()))
+        .unwrap_or_else(|| "med".to_string());
 
     let mut row = json!({
         "game_id": game_id,
@@ -140,6 +181,9 @@ pub fn create_character(
         "size": size,
     });
 
+    if let Some(sp) = &people {
+        row["species_key"] = json!(sp.key);
+    }
     if let Some(c) = &chosen {
         row["class_key"] = json!(c.key);
         // The class's saves and proficiencies, copied onto the
@@ -156,9 +200,6 @@ pub fn create_character(
     // HIT POINTS COME SECOND, because Constitution does not exist until
     // the row does - `characters_seed_abilities` is an AFTER INSERT
     // trigger, so there is no score to read before this point.
-    let Some(c) = chosen else {
-        return Ok(created);
-    };
     let Some(id) = created
         .as_array()
         .and_then(|a| a.first())
@@ -168,7 +209,54 @@ pub fn create_character(
         return Ok(created);
     };
 
-    let con = load_con(token, id).unwrap_or(10);
+    // A SPECIES WITHOUT A CLASS IS STILL A SPECIES. The skills below are
+    // granted either way; only the hit points need a die, so that is
+    // what the class guard covers.
+    let Some(c) = chosen else {
+        if let Some(sp) = &people {
+            for key in &sp.skill_profs {
+                let _ = supabase::rest_upsert(
+                    token,
+                    "character_skills",
+                    &json!({ "character_id": id, "skill_key": key, "prof": 1.0 }),
+                    "character_id,skill_key",
+                );
+            }
+        }
+        return Ok(created);
+    };
+
+    // The species' granted skills. Unt'garoth get Athletics outright;
+    // the DOUBLE proficiency their Enduring Might also grants applies
+    // only to climbing, lifting and grappling, and nothing here can
+    // tell which Athletics check is being made - so it stays a DM call
+    // and the trait text says so.
+    if let Some(sp) = &people {
+        for key in &sp.skill_profs {
+            // Best effort: a granted skill that fails to write is worth
+            // less than refusing to make the character at all, and the
+            // sheet will show it missing.
+            let _ = supabase::rest_upsert(
+                token,
+                "character_skills",
+                &json!({ "character_id": id, "skill_key": key, "prof": 1.0 }),
+                "character_id,skill_key",
+            );
+        }
+    }
+
+    // CONSTITUTION WITH THE SPECIES BONUS IN IT, because hit points are
+    // derived from the effective score and not the stored one. An
+    // Unt'garoth's +1 is worth a point per level.
+    let stored_con = load_con(token, id).unwrap_or(10);
+    let con = match &people {
+        Some(sp) => species::effective_score(
+            stored_con,
+            sp.bonus_for("con"),
+            sp.maximum_for("con"),
+        ),
+        None => stored_con,
+    };
     let hp = vitality::pc_hp(c.hit_die, 1, (con - 10).div_euclid(2));
     supabase::rest_update(
         token,
@@ -234,7 +322,7 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
         token,
         "characters",
         &[
-            ("select", "id,level,class_key,game_id"),
+            ("select", "id,level,class_key,game_id,species_key"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -269,7 +357,21 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
         return Err(format!("{} has an unknown class: {}", character_id, key));
     };
 
-    let con = load_con(token, character_id).unwrap_or(10);
+    // THE EFFECTIVE CONSTITUTION, species bonus included - the same
+    // number creation used. Reading the stored score here is how a
+    // re-derivation would quietly disagree with the value it replaced.
+    let stored_con = load_con(token, character_id).unwrap_or(10);
+    let con = match row.get("species_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        Some(sk) => match crate::character::load_species(token, game_id, sk)? {
+            Some(sp) => species::effective_score(
+                stored_con,
+                sp.bonus_for("con"),
+                sp.maximum_for("con"),
+            ),
+            None => stored_con,
+        },
+        None => stored_con,
+    };
     let hp = vitality::pc_hp(c.hit_die, level, (con - 10).div_euclid(2));
     supabase::rest_update(
         token,

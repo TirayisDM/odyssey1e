@@ -23,6 +23,8 @@ let state = {
   // 055. The class catalogue for this game, globals plus any the
   // table has written for itself.
   classes: [],
+  // 056. The peoples, same shape.
+  species: [],
   user: null, gameId: null, characterId: null, sheet: null, rolls: [],
   games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
@@ -346,6 +348,7 @@ async function selectGame(id) {
   // 055: twelve rows, so the creation picker is ready before
   // anybody opens it.
   await loadClasses();
+  await loadSpecies();
   await loadRolls();
   await loadTargets();
   // BEFORE loadDM, and outside it. The places are member-readable by
@@ -508,6 +511,155 @@ function paintClassNote() {
     (c.skill_choices ? " \u00b7 " + c.skill_choices + " skills" : "");
 }
 
+/* ============================ SPECIES ============================ */
+
+// 056. Loaded once per game beside the classes.
+async function loadSpecies() {
+  if (!state.gameId) return;
+  const rows = await invoke("list_species", { gameId: state.gameId }).catch(() => []);
+  state.species = rows || [];
+
+  const sel = document.querySelector("#char-species");
+  if (sel) {
+    const keep = sel.value;
+    sel.innerHTML = "";
+    sel.append(new Option("no species yet", ""));
+    for (const sp of state.species) sel.append(new Option(sp.name, sp.key));
+    if (keep && state.species.some((x) => x.key === keep)) sel.value = keep;
+  }
+
+  const pick = document.querySelector("#species-pick");
+  if (pick) {
+    const keep = pick.value;
+    pick.innerHTML = "";
+    for (const sp of state.species) pick.append(new Option(sp.name, sp.key));
+    if (keep && state.species.some((x) => x.key === keep)) pick.value = keep;
+  }
+  const n = document.querySelector("#n-species");
+  if (n) n.textContent = state.species.length || "";
+
+  paintSpeciesNote();
+  paintSpeciesView();
+}
+
+// What the bonuses read as, in the order species.rs sorted them.
+function bonusText(sp) {
+  const b = sp.ability_bonuses || [];
+  if (!b.length) return "no ability bonuses";
+  return b.map(([code, n]) => (n >= 0 ? "+" : "") + n + " " + code.toUpperCase()).join(", ");
+}
+
+function paintSpeciesNote() {
+  const note = document.querySelector("#char-species-note");
+  const sel = document.querySelector("#char-species");
+  if (!note || !sel) return;
+  const sp = (state.species || []).find((x) => x.key === sel.value);
+  if (!sp) {
+    note.textContent = "no species means no bonuses and a medium build";
+    return;
+  }
+  const bits = [bonusText(sp), SIZE_WORDS[sp.size] || sp.size];
+  if (sp.speed) bits.push(sp.speed + " ft");
+  if (sp.carry_size_steps) bits.push("carries one size larger");
+  note.textContent = bits.join(" \u00b7 ");
+}
+
+const SIZE_WORDS = {
+  tiny: "Tiny", sm: "Small", med: "Medium",
+  lg: "Large", huge: "Huge", grg: "Gargantuan",
+};
+
+// The viewer. HALF LORE AND HALF MECHANICS, and the mechanics say which
+// of them the engine actually applies - see 056. A trait a DM has to
+// adjudicate is fine; a screen that hides which ones those are is not.
+function paintSpeciesView() {
+  const host = document.querySelector("#species-view");
+  const pick = document.querySelector("#species-pick");
+  if (!host || !pick) return;
+  host.innerHTML = "";
+  const sp = (state.species || []).find((x) => x.key === pick.value);
+  if (!sp) {
+    host.append(sEl("div", "muted", "no species in this game yet"));
+    return;
+  }
+
+  if (sp.summary) host.append(sEl("p", "species-summary", sp.summary));
+
+  // --- the numbers ---
+  const facts = [
+    ["ability bonuses", bonusText(sp)],
+    ["size", SIZE_WORDS[sp.size] || sp.size],
+    ["speed", sp.speed ? sp.speed + " ft" : "\u2014"],
+  ];
+  const maxima = sp.ability_maxima || [];
+  if (maxima.length) {
+    facts.push([
+      "natural maximum",
+      maxima.map(([c, n]) => c.toUpperCase() + " " + n).join(", "),
+    ]);
+  }
+  if ((sp.skill_profs || []).length) {
+    facts.push(["skills", sp.skill_profs.join(", ")]);
+  }
+  if (sp.unarmored_ac_base != null) {
+    facts.push([
+      "unarmoured AC",
+      sp.unarmored_ac_base + " + " + (sp.unarmored_ac_ability || "").toUpperCase(),
+    ]);
+  }
+  if ((sp.damage_resistances || []).length) {
+    facts.push(["resistances", sp.damage_resistances.join(", ") + " (DM applies)"]);
+  }
+  if ((sp.languages || []).length) facts.push(["languages", sp.languages.join(", ")]);
+  if (sp.age_note) facts.push(["age", sp.age_note]);
+  if (sp.alignment_note) facts.push(["alignment", sp.alignment_note]);
+
+  const dl = sEl("div", "species-facts");
+  for (const [k, v] of facts) {
+    const row = sEl("div", "species-fact");
+    row.append(sEl("span", "species-key", k), sEl("span", "species-val", v));
+    dl.append(row);
+  }
+  host.append(dl);
+
+  // --- the traits, marked ---
+  if ((sp.traits || []).length) {
+    host.append(sEl("div", "sub", "Traits"));
+    for (const t of sp.traits) {
+      const box = sEl("div", "species-trait" + (t.applied ? "" : " unapplied"));
+      const head = sEl("div", "species-trait-name");
+      head.append(sEl("span", "", t.name));
+      head.append(sEl(
+        "span",
+        "tag " + (t.applied ? "tag-on" : "tag-off"),
+        t.applied ? "applied" : "DM applies",
+      ));
+      box.append(head, sEl("div", "species-trait-text", t.text));
+      host.append(box);
+    }
+  }
+
+  // --- the prose ---
+  for (const [label, text] of [
+    ["Appearance", sp.appearance],
+    ["Culture", sp.culture],
+    ["History", sp.history],
+    ["Playing one", sp.roleplaying],
+  ]) {
+    if (!text) continue;
+    host.append(sEl("div", "sub", label), sEl("p", "species-prose", text));
+  }
+}
+
+// Small DOM helper for this section. Named sEl rather than el
+// because `el` is a local variable name all over this file.
+function sEl(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
 async function loadCharacters() {
   const ul = document.querySelector("#characters");
   ul.innerHTML = "";
@@ -564,6 +716,9 @@ async function loadSheet() {
   for (const code of ABILS) {
     const a = sheet.abilities[code] || { score: 10, save_prof: false };
     const mod = Math.floor((a.score - 10) / 2);
+  // The species' contribution, shown rather than silently folded in -
+  // otherwise an 18 that reads +5 looks like an arithmetic bug.
+  const fromSpecies = a.bonus || 0;
 
     const el = document.createElement("div");
     el.className = "abil";
@@ -572,11 +727,26 @@ async function loadSheet() {
     tag.textContent = code.toUpperCase();
 
     const num = document.createElement("input");
-    num.type = "number"; num.min = 1; num.max = 30; num.value = a.score;
+    // THE BASE, NOT THE EFFECTIVE SCORE. `a.score` already has the
+  // species bonus in it, and showing that here would write it back on
+  // the next save and add the bonus a second time. 056 keeps the two
+  // apart precisely so this box can hold the number somebody rolled.
+  num.type = "number"; num.min = 1; num.max = 30;
+  num.value = a.base ?? a.score;
 
     const m = document.createElement("span");
     m.className = "mod";
     m.textContent = (mod >= 0 ? "+" : "") + mod;
+
+    // 056. Say where the extra came from. Without this an 18 reading
+    // +5 looks like the modifier arithmetic is broken.
+    let sp = null;
+    if (fromSpecies) {
+      sp = document.createElement("span");
+      sp.className = "species-bump";
+      sp.textContent = "+" + fromSpecies;
+      sp.title = "species bonus - the box holds your base score";
+    }
 
     const lab = document.createElement("label");
     const chk = document.createElement("input");
@@ -595,7 +765,9 @@ async function loadSheet() {
     num.addEventListener("change", save);
     chk.addEventListener("change", save);
 
-    el.append(tag, num, m, lab);
+    el.append(tag, num, m);
+    if (sp) el.append(sp);
+    el.append(lab);
     box.append(el);
   }
 
@@ -4290,8 +4462,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       // command reads it as "no class decided" and leaves hp_max null
       // rather than inventing a d8.
       classKey: val("#char-class") || null,
-      // Nothing asks for size yet; the command defaults it to medium,
-      // which is the fix for what made Snot and Unnamed hollow.
+      speciesKey: val("#char-species") || null,
+      // Left to the command, which takes the SPECIES' size when there
+      // is one - an Unt'garoth is Large - and medium otherwise.
       size: null,
     });
     if (c) await loadCharacters();
@@ -4301,6 +4474,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // a die and two saves before it is a name, and the sheet would
   // otherwise be the first place anybody learns what they picked.
   document.querySelector("#char-class").addEventListener("change", paintClassNote);
+  document.querySelector("#char-species").addEventListener("change", paintSpeciesNote);
+  document.querySelector("#species-pick").addEventListener("change", paintSpeciesView);
 
   document.querySelector("#create-roll").addEventListener("click", async () => {
     if (!state.gameId) return log("create_roll", "select a game first", true);

@@ -31,8 +31,29 @@ use crate::supabase;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ability {
+    /// EFFECTIVE, species bonus already in it. Everything that derives
+    /// a modifier reads this and therefore gets the bonus for free -
+    /// skills, saves, attacks, carrying, AC. One place to apply it.
     pub score: i64,
+    /// What is actually STORED in character_abilities - the number
+    /// somebody rolled or bought. THE EDITOR MUST WRITE THIS ONE: the
+    /// bonus is never folded into the row, or changing species later
+    /// would double-count and an 18 would be indistinguishable from a
+    /// 16 with a species behind it. See species.rs.
+    pub base: i64,
+    /// The species' contribution, for a sheet that wants to show its
+    /// working. Zero when there is no species or none for this ability.
+    pub bonus: i64,
     pub save_prof: bool,
+}
+
+impl Ability {
+    /// A score with no species behind it: base and effective the same.
+    /// Most callers and every fixture want this; `apply_species` is the
+    /// only thing that ever moves them apart.
+    pub fn plain(score: i64, save_prof: bool) -> Self {
+        Self { score, base: score, bonus: 0, save_prof }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +115,15 @@ pub struct Sheet {
     /// Foundry `traits.armorProf.value`: lgt med hvy shl, the same
     /// spelling 008 normalizes `items.armor_category` to.
     pub armor_profs: Vec<String>,
+    /// 056. The whole people, not just the key: the sheet shows the
+    /// bonuses and the traits, and the viewer shows the prose. None
+    /// when this character has no species, which is every one made
+    /// before 056 and every monster.
+    pub species: Option<crate::species::Species>,
+    /// The size this character CARRIES as, Powerful Build included.
+    /// Separate from `vitals.size`, which is the size they ARE - only
+    /// carrying moves, not reach or cover or what a container admits.
+    pub carry_size: Option<String>,
     /// What is equipped right now, with proficiency and attack modes
     /// already derived. Unlike `narratives` this one IS sent out — a
     /// loadout is a handful of rows and a sheet screen wants it.
@@ -345,6 +375,8 @@ pub struct Profile {
     pub narrative_pack: String,
     pub weapon_profs: Vec<String>,
     pub armor_profs: Vec<String>,
+    /// 056. None for every character made before it, and for monsters.
+    pub species_key: Option<String>,
     pub vitals: Vitals,
 }
 
@@ -383,7 +415,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
                 "id,entity_id,location_id,game_id,name,level,narrative_pack,\
                  weapon_profs,armor_profs,hp_max,hp_temp,hp_temp_max,\
                  ac_mode,ac_override,death_successes,death_failures,\
-                 exhaustion,inspiration,size",
+                 exhaustion,inspiration,size,species_key",
             ),
             ("id", &format!("eq.{}", character_id)),
         ],
@@ -412,6 +444,11 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         narrative_pack,
         weapon_profs: as_strings(c, "weapon_profs"),
         armor_profs: as_strings(c, "armor_profs"),
+        species_key: c
+            .get("species_key")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         vitals: Vitals {
             // Absent rather than defaulted: a character with no hp_max
             // has never had one set, which is not the same as being on
@@ -450,6 +487,55 @@ fn as_opt_str_char(v: &Value, key: &str) -> Option<String> {
 /// `Sheet::ability_mod` is the same arithmetic against the same map, but
 /// AC has to be computed while the Sheet is still being assembled. One
 /// expression in two places would drift, so the method delegates here.
+/* ============================ SPECIES ============================ */
+
+/// This game's version of a species, or the global one.
+///
+/// LIVES HERE RATHER THAN IN species.rs because that file is rules and
+/// this one already talks to the database - the same line commands/mod.rs
+/// draws, one level down. Callers outside the sheet need it too: an
+/// encumbrance read has to know a people carries one size larger.
+pub(crate) fn load_species(
+    token: &str,
+    game_id: &str,
+    key: &str,
+) -> Result<Option<crate::species::Species>, String> {
+    if key.is_empty() {
+        return Ok(None);
+    }
+    let rows = supabase::rest_get(
+        token,
+        "species",
+        &[
+            ("select", crate::species::SPECIES_COLUMNS),
+            ("key", &format!("eq.{}", key)),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    )?;
+    Ok(crate::species::collapse(rows.as_array().unwrap_or(&Vec::new()))
+        .into_iter()
+        .next())
+}
+
+/// Raise every score by what the species adds, held to its ceiling.
+///
+/// ONE PLACE, AFTER THE READ. Every modifier in the app comes from
+/// `Ability::score` through `ability_mod_of`, so applying the bonus
+/// here means skills, saves, attack rolls, carrying and armour class
+/// all pick it up without any of them knowing species exist. The
+/// alternative - each site adding the bonus itself - is the two-places
+/// problem that 049 and supabase::numeric were both about.
+fn apply_species(abilities: &mut HashMap<String, Ability>, sp: &crate::species::Species) {
+    for (code, a) in abilities.iter_mut() {
+        let bonus = sp.bonus_for(code);
+        if bonus == 0 {
+            continue;
+        }
+        a.bonus = bonus;
+        a.score = crate::species::effective_score(a.base, bonus, sp.maximum_for(code));
+    }
+}
+
 fn ability_mod_of(abilities: &HashMap<String, Ability>, code: &str) -> i64 {
     match abilities.get(code) {
         Some(a) => (a.score - 10).div_euclid(2),
@@ -487,10 +573,13 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         for r in rows {
             abilities.insert(
                 as_str(r, "ability"),
-                Ability {
-                    score: as_i64(r, "score", 10),
-                    save_prof: r.get("save_prof").and_then(|x| x.as_bool()).unwrap_or(false),
-                },
+                // Base for now; `apply_species` raises the effective
+                // score once the people are known. One place, after the
+                // read, rather than threading a species through it.
+                Ability::plain(
+                    as_i64(r, "score", 10),
+                    r.get("save_prof").and_then(|x| x.as_bool()).unwrap_or(false),
+                ),
             );
         }
     }
@@ -557,6 +646,17 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         }
     }
 
+    // BEFORE THE LOADOUT AND BEFORE AC, because it moves the scores
+    // both of those read. Applied straight onto the abilities map, so
+    // every modifier downstream carries it without knowing why.
+    let species = match profile.species_key.as_deref() {
+        Some(key) => load_species(token, &game_id, key)?,
+        None => None,
+    };
+    if let Some(sp) = &species {
+        apply_species(&mut abilities, sp);
+    }
+
     let line_rows = narrative::load_lines(token, &game_id, &profile.narrative_pack)?;
     let narratives = narrative::resolve_lines(&line_rows, &profile.narrative_pack);
 
@@ -585,11 +685,21 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     let techniques = crate::attack::load_for_loadout(token, &game_id, &weapons)?;
 
     let worn: Vec<&equipment::Item> = loadout.iter().map(|o| &o.item).collect();
+    // A species' unarmoured rule, with its ability already resolved to
+    // a modifier - Unyielding Defense is 12 + CON rather than 10 + DEX.
+    // Resolved here because this is where the abilities are; equipment
+    // does not know what an ability is.
+    let unarmored = species.as_ref().and_then(|sp| {
+        let base = sp.unarmored_ac_base?;
+        let ability = sp.unarmored_ac_ability.as_deref()?;
+        Some((base, ability_mod_of(&abilities, ability)))
+    });
     let armor_class = equipment::armor_class(
         ability_mod_of(&abilities, "dex"),
         &worn,
         equipment::AcMode::parse(&profile.vitals.ac_mode),
         profile.vitals.ac_override,
+        unarmored,
     );
 
     Ok(Sheet {
@@ -609,6 +719,11 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         narratives,
         weapon_profs: profile.weapon_profs,
         armor_profs: profile.armor_profs,
+        carry_size: species
+            .as_ref()
+            .map(|sp| sp.carry_size())
+            .or_else(|| profile.vitals.size.clone()),
+        species,
         vitals: profile.vitals,
         armor_class,
         techniques,
@@ -627,12 +742,12 @@ mod tests {
     /// untrained in Athletics. WIS saves proficient, STR saves not.
     fn rodnar() -> Sheet {
         let mut abilities = HashMap::new();
-        abilities.insert("str".into(), Ability { score: 8,  save_prof: false });
-        abilities.insert("dex".into(), Ability { score: 14, save_prof: false });
-        abilities.insert("con".into(), Ability { score: 15, save_prof: false });
-        abilities.insert("int".into(), Ability { score: 10, save_prof: false });
-        abilities.insert("wis".into(), Ability { score: 16, save_prof: true  });
-        abilities.insert("cha".into(), Ability { score: 12, save_prof: false });
+        abilities.insert("str".into(), Ability::plain(8, false));
+        abilities.insert("dex".into(), Ability::plain(14, false));
+        abilities.insert("con".into(), Ability::plain(15, false));
+        abilities.insert("int".into(), Ability::plain(10, false));
+        abilities.insert("wis".into(), Ability::plain(16, true));
+        abilities.insert("cha".into(), Ability::plain(12, false));
 
         let skills = vec![
             SkillDef { key: "ins".into(), name: "Insight".into(),    ability: "wis".into() },
@@ -665,6 +780,8 @@ mod tests {
             // them yet - the attack key is the next job - but the sheet
             // carries them and the fixture should not lie about it. The
             // rules that DO read them are tested in equipment.rs.
+            species: None,
+            carry_size: None,
             weapon_profs: vec!["sim".into()],
             armor_profs: vec!["lgt".into(), "med".into(), "shl".into()],
             loadout: Vec::new(),
@@ -715,11 +832,11 @@ mod tests {
         // The case plain integer division gets wrong: 7 must be -2, not
         // -1. Rust truncates toward zero; Math.floor does not.
         let mut s = rodnar();
-        s.abilities.insert("str".into(), Ability { score: 7, save_prof: false });
+        s.abilities.insert("str".into(), Ability::plain(7, false));
         assert_eq!(s.ability_mod("str"), -2);
-        s.abilities.insert("str".into(), Ability { score: 3, save_prof: false });
+        s.abilities.insert("str".into(), Ability::plain(3, false));
         assert_eq!(s.ability_mod("str"), -4);
-        s.abilities.insert("str".into(), Ability { score: 1, save_prof: false });
+        s.abilities.insert("str".into(), Ability::plain(1, false));
         assert_eq!(s.ability_mod("str"), -5);
     }
 

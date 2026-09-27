@@ -497,8 +497,27 @@ pub fn encumbrance(state: State<AppState>, character_id: String) -> Result<Value
         carried += each * (o.quantity as f64);
     }
 
-    let str_score = load_ability_score(&token, &character_id, "str")?;
-    let size = p.vitals.size.as_deref();
+    // THE EFFECTIVE STRENGTH AND THE CARRYING SIZE, not the stored
+    // score and the size on the row. An Unt'garoth is Large with +2
+    // Strength and counts as one size larger again for carrying, and
+    // every one of those three facts belongs in this number. Reading
+    // the raw score here is how the sheet and the inventory screen
+    // would have come to disagree about the same character.
+    let species = match p.species_key.as_deref() {
+        Some(key) => crate::character::load_species(&token, &p.game_id, key)?,
+        None => None,
+    };
+    let stored_str = load_ability_score(&token, &character_id, "str")?;
+    let str_score = match &species {
+        Some(sp) => crate::species::effective_score(
+            stored_str,
+            sp.bonus_for("str"),
+            sp.maximum_for("str"),
+        ),
+        None => stored_str,
+    };
+    let carry_size = species.as_ref().map(|sp| sp.carry_size());
+    let size = carry_size.as_deref().or(p.vitals.size.as_deref());
     let capacity = crate::carry::carry_capacity(str_score, size);
     let state_ = crate::carry::burden(carried, str_score, size);
 

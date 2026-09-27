@@ -603,6 +603,11 @@ fn batch_character_stats(
                     &items,
                     AcMode::parse(&as_str(r, "ac_mode")),
                     r.get("ac_override").and_then(|x| x.as_i64()),
+                    // 056: no species on this path. A roster row reads
+                    // AC off the character row and its statblock, and a
+                    // species unarmoured rule would need the abilities
+                    // loaded here, which they are not.
+                    None,
                 ),
                 hp_max: r.get("hp_max").and_then(|x| x.as_i64()),
                 successes: r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0),

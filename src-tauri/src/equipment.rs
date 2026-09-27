@@ -372,7 +372,22 @@ impl AcMode {
 /// A `dex_cap` of None means no cap, which is light armour. Some(0) is
 /// heavy armour admitting none. Reading None as zero would quietly cost
 /// a rogue their entire modifier.
-pub fn armor_class(dex_mod: i64, equipped: &[&Item], mode: AcMode, flat: Option<i64>) -> i64 {
+/// `unarmored` is a species' replacement for the bare 10 + DEX: the
+/// base and the already-resolved modifier to add, e.g. (12, con_mod)
+/// for the Unt'garoth's Unyielding Defense. It applies ONLY when no
+/// body armour is worn, which is what makes it a fallback rather than
+/// a bonus - putting on a breastplate goes back to the armour's own
+/// number, exactly as 5e's unarmoured defences do.
+///
+/// A SHIELD STILL COUNTS. 5e's unarmoured defences all allow one, and
+/// the shield is added after this branch either way.
+pub fn armor_class(
+    dex_mod: i64,
+    equipped: &[&Item],
+    mode: AcMode,
+    flat: Option<i64>,
+    unarmored: Option<(i64, i64)>,
+) -> i64 {
     if mode == AcMode::Flat {
         // characters_flat_ac_has_a_value_check means a flat mode cannot
         // exist without its number, so the fallback is unreachable
@@ -391,7 +406,11 @@ pub fn armor_class(dex_mod: i64, equipped: &[&Item], mode: AcMode, flat: Option<
             // unarmoured floor and keeps the number sane.
             armor.base_ac.unwrap_or(10) + allowed
         }
-        None => 10 + dex_mod,
+        // The species' own floor if it has one, otherwise 5e's.
+        None => match unarmored {
+            Some((base, ability_mod)) => base + ability_mod,
+            None => 10 + dex_mod,
+        },
     };
 
     let shield: i64 = equipped
@@ -1404,21 +1423,21 @@ mod tests {
         // returns 14, the flat field has been read when it should not
         // have been, and every attack on him is wrong by one.
         let mail = scale_mail();
-        let ac = armor_class(1, &[&mail], AcMode::Default, Some(14));
+        let ac = armor_class(1, &[&mail], AcMode::Default, Some(14), None);
         assert_eq!(ac, 15);
     }
 
     #[test]
     fn the_flat_field_is_ignored_unless_the_mode_says_otherwise() {
         let mail = scale_mail();
-        assert_eq!(armor_class(1, &[&mail], AcMode::Default, Some(99)), 15);
-        assert_eq!(armor_class(1, &[&mail], AcMode::Flat, Some(99)), 99);
+        assert_eq!(armor_class(1, &[&mail], AcMode::Default, Some(99), None), 15);
+        assert_eq!(armor_class(1, &[&mail], AcMode::Flat, Some(99), None), 99);
     }
 
     #[test]
     fn unarmoured_is_ten_plus_dex() {
-        assert_eq!(armor_class(3, &[], AcMode::Default, None), 13);
-        assert_eq!(armor_class(0, &[], AcMode::Default, None), 10);
+        assert_eq!(armor_class(3, &[], AcMode::Default, None, None), 13);
+        assert_eq!(armor_class(0, &[], AcMode::Default, None, None), 10);
     }
 
     #[test]
@@ -1469,9 +1488,9 @@ mod tests {
     #[test]
     fn a_dex_cap_limits_but_does_not_replace() {
         let mail = scale_mail(); // base 14, cap 2
-        assert_eq!(armor_class(0, &[&mail], AcMode::Default, None), 14);
-        assert_eq!(armor_class(2, &[&mail], AcMode::Default, None), 16);
-        assert_eq!(armor_class(5, &[&mail], AcMode::Default, None), 16);
+        assert_eq!(armor_class(0, &[&mail], AcMode::Default, None, None), 14);
+        assert_eq!(armor_class(2, &[&mail], AcMode::Default, None, None), 16);
+        assert_eq!(armor_class(5, &[&mail], AcMode::Default, None, None), 16);
     }
 
     #[test]
@@ -1479,29 +1498,58 @@ mod tests {
         // Light armour lets the whole modifier through. Reading NULL as
         // zero would quietly cost a rogue four points of AC.
         let l = leather();
-        assert_eq!(armor_class(4, &[&l], AcMode::Default, None), 15);
+        assert_eq!(armor_class(4, &[&l], AcMode::Default, None, None), 15);
         let p = plate();
-        assert_eq!(armor_class(4, &[&p], AcMode::Default, None), 18);
+        assert_eq!(armor_class(4, &[&p], AcMode::Default, None, None), 18);
     }
 
     #[test]
     fn a_dex_penalty_still_applies_under_a_cap() {
         // min(-1, 2) is -1. A cap is a ceiling, not a floor.
         let mail = scale_mail();
-        assert_eq!(armor_class(-1, &[&mail], AcMode::Default, None), 13);
+        assert_eq!(armor_class(-1, &[&mail], AcMode::Default, None, None), 13);
+    }
+
+    /* ------------ a species unarmoured rule (056) ------------ */
+
+    // Unyielding Defense: 12 + CON instead of 10 + DEX, and ONLY while
+    // no body armour is worn.
+    #[test]
+    fn a_species_replaces_the_bare_ten_when_nothing_is_worn() {
+        assert_eq!(armor_class(0, &[], AcMode::Default, None, None), 10, "the ordinary rule");
+        assert_eq!(armor_class(0, &[], AcMode::Default, None, Some((12, 1))), 13);
+        // DEX is ignored entirely - the species rule names its own
+        // ability and that ability is already resolved.
+        assert_eq!(armor_class(4, &[], AcMode::Default, None, Some((12, 1))), 13);
+    }
+
+    // PUTTING ARMOUR ON GOES BACK TO THE ARMOUR. It is a floor, not a
+    // bonus, which is what every 5e unarmoured defence does.
+    #[test]
+    fn armour_beats_the_species_rule_rather_than_stacking_with_it() {
+        let mail = scale_mail();
+        let with = armor_class(1, &[&mail], AcMode::Default, None, Some((12, 5)));
+        let without = armor_class(1, &[&mail], AcMode::Default, None, None);
+        assert_eq!(with, without, "scale mail decides, not the species");
+    }
+
+    #[test]
+    fn a_shield_still_counts_on_top_of_a_species_rule() {
+        let shield = shield();
+        assert_eq!(armor_class(0, &[&shield], AcMode::Default, None, Some((12, 1))), 15);
     }
 
     #[test]
     fn a_shield_adds_to_armour_rather_than_replacing_it() {
         let mail = scale_mail();
         let sh = shield();
-        assert_eq!(armor_class(1, &[&mail, &sh], AcMode::Default, None), 17);
+        assert_eq!(armor_class(1, &[&mail, &sh], AcMode::Default, None, None), 17);
     }
 
     #[test]
     fn a_shield_alone_adds_to_the_unarmoured_floor() {
         let sh = shield();
-        assert_eq!(armor_class(2, &[&sh], AcMode::Default, None), 14);
+        assert_eq!(armor_class(2, &[&sh], AcMode::Default, None, None), 14);
     }
 
     #[test]
@@ -1509,7 +1557,7 @@ mod tests {
         let mace = mace();
         let r = rations();
         let mail = scale_mail();
-        assert_eq!(armor_class(1, &[&mace, &r, &mail], AcMode::Default, None), 15);
+        assert_eq!(armor_class(1, &[&mace, &r, &mail], AcMode::Default, None, None), 15);
     }
 
     /* ---------------- a shield is not a second armour ---------------- */

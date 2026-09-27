@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**458 tests, zero warnings.** `cd src-tauri && cargo test`.
+**478 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -416,6 +416,8 @@ and not after.
     player character's hit points actually come from
 056 a character has a people - species, their modifiers, and an honest
     line between what the engine applies and what a DM still must
+057 how tall is a people - height in feet, playability, one size ladder
+    instead of four, and the Unt'gar
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -820,6 +822,21 @@ advisor after every DDL change anyway.
 ---
 
 ## House rules, marked so nobody takes them for 5e
+
+**REACH IS DERIVED FROM SIZE** (057, size.rs). 5e does NOT do this - a
+Large creature has 5 feet of reach unless its own statblock says
+otherwise, and reach is a property of the creature and its weapon rather
+than of its size band. In a campaign running from a 2-foot rodent people
+to a 25-foot Imiear that is untenable, so `SizeClass::reach_ft` scales:
+5 / 5 / 5 / 10 / 15 / 20 across the six rungs. Anything that wants RAW
+behaviour has to override it per creature, and nothing does yet.
+
+**TINY CREATURES AND HEAVY WEAPONS** (057). 5e gives Small creatures
+disadvantage with Heavy weapons and says nothing about Tiny, because it
+has no Tiny player characters. `size::heavy_weapon_is_awkward` extends
+the rule down rather than leaving a two-foot creature swinging a
+greataxe unremarked. Not wired to the attack path yet - the wielder's
+size does not reach it.
 
 Two live in `death.rs`, both deliberate:
 
@@ -1995,6 +2012,83 @@ against a clause in a summary sentence. It is a design question, and
 Not here: a species EDITOR. Species are authored in the database for
 now; the tab reads. Authoring wants a form with validation against the
 same vocabularies, and the reading half is what was blocking play.
+
+## Size - ONE LADDER (057, size.rs)
+
+**THE CAMPAIGN RUNS FROM TWO FEET TO TWENTY-FIVE.** A rodent people at
+2', the Unt'gar at 4.5', the Felligar at 5.5', the Unt'garoth near 8',
+the Jotun at 18', the Imiear at nearly 25'. Size is not a footnote in a
+world shaped like that.
+
+**THE LADDER WAS WRITTEN OUT FOUR TIMES.** `carry::size_multiplier` held
+the capacities, `vitality` held the dice and the ordering,
+`species::bump_size` held its own array of the six words, and main.js
+briefly held a fifth. vitality.rs had warned about exactly this in a
+comment - "two copies of one vocabulary waiting to disagree about
+whether grg exists" - and then a third appeared anyway, because there
+was nowhere for the second to move to. size.rs is that place. Same
+lesson as `supabase::numeric`, which cost three bugs.
+
+One table now carries, per rung: rank, space, reach, carry multiplier,
+hit die, and the height band. Everything else asks.
+
+**HEIGHT IS THE FACT; THE CATEGORY IS A CONSEQUENCE.** A species states
+its feet AND its rung, and `derived` is computed from the height so the
+two can be compared. A document saying Large with a height reading
+Medium is a contradiction the viewer SAYS rather than one of them
+silently winning.
+
+Derived off the MIDPOINT of the band, not the minimum, and the
+Unt'garoth are why: 7 to 10 feet, and 5e's Large starts at 8, so their
+shortest adult is Medium and their tallest is Large. A people is typed
+by its typical adult. The midpoint is 8.5, which is Large, which is what
+their document says. Off the minimum it would have reported a
+contradiction for every species whose range crosses a line - which is
+most of them.
+
+**THE ROUNDING THAT BITES, AND IT IS A DECISION NOT A DEFECT.** The
+Jotun at 18 feet and the Imiear at nearly 25 are BOTH Huge, because 5e's
+Huge band runs 16 to 32. Seven feet apart, and not one number between
+them differs - same reach, same space, same carrying. There is a test in
+size.rs asserting it, so it cannot be forgotten.
+
+If that is wrong for this campaign the change is to scale the CONTINUOUS
+facts - reach, space, carrying - off `height_ft`, and keep the category
+only for the discrete rules that need rungs: grappling, squeezing,
+mounts. `height_min_ft` and `height_max_ft` are what such a change would
+read, which is half the reason they are stored.
+
+**RULES THE LADDER NOW CARRIES**, tested, three of them not yet wired
+because the systems they need do not exist:
+
+    can_grapple           a target may be at most ONE size larger. The
+                          rule that stops a 2-foot rodent wrestling a
+                          Jotun. No grapple action yet.
+    squeeze_into          one rung down. No map yet.
+    can_carry_rider       a mount must be at least one size LARGER than
+                          its rider. This campaign has a rodent people
+                          who ride ravens, so it will want this.
+    heavy_weapon_is_awkward   Small and Tiny. The attack path does not
+                          know a wielder's size.
+
+**NOT EVERY PEOPLE IS A PLAYER CHARACTER.** `species.playable` keeps the
+Imiear out of the creation picker while leaving them a full species
+everywhere else. A fact about the species, not a permission check, so it
+lives on the row rather than in a policy.
+
+**THE UNT'GAR ARE SEEDED WHOLE** - CON +2, INT +1, Medium, 25 feet,
+History granted. Stonecunning gets the Enduring Might treatment: the
+proficiency is granted, the DOUBLING for stonework is a DM call, because
+nothing here can tell a question about stonework from one about kings.
+Darkvision, Mineral Sense, Trade Savvy and Environmental Resilience are
+written down and applied by nothing - no vision system, no rest system,
+and Adv/Dis is a human choice.
+
+**NOT SEEDED: the Felligar, the Jotun, the Imiear, and the rodent
+people.** Their heights are known and nothing else is. A row with a name
+and six defaults is worse than no row, because it is pickable and gives
+a character nothing. They land when their documents do; 057 is the
+framework that will take them.
 
 ## Pick up here
 

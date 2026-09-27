@@ -38,6 +38,7 @@ mod narrative;
 mod objects;
 mod pin;
 mod resolution;
+mod size;
 mod species;
 mod spent;
 mod store;

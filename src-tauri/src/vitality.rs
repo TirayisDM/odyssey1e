@@ -40,39 +40,22 @@
 /// because guessing d8 would silently give every sizeless statblock a
 /// medium creature's hit points.
 pub fn hit_die(size: Option<&str>) -> Option<i64> {
-    match size? {
-        "tiny" => Some(4),
-        "sm" => Some(6),
-        "med" => Some(8),
-        "lg" => Some(10),
-        "huge" => Some(12),
-        "grg" => Some(20),
-        _ => None,
-    }
+    crate::size::of(size?).map(|s| s.hit_die)
 }
 
 /// Where a size sits on the ladder, small to large.
 ///
-/// BESIDE `hit_die` ON PURPOSE. The two read the same six words, and a
-/// ladder in one file with a die table in another is two copies of one
-/// vocabulary waiting to disagree about whether "grg" exists. 036 put
-/// items on this same ladder rather than inventing a parallel one, for
-/// the reason 033 gave about a place `kind` that drifted - so a Huge
-/// backpack holding Huge things needs no translation.
+/// THE WARNING THIS COMMENT USED TO CARRY CAME TRUE. It said a ladder
+/// in one file with a die table in another is "two copies of one
+/// vocabulary waiting to disagree", and then a THIRD copy appeared in
+/// species.rs, because there was nowhere for the second to move to.
+/// size.rs is that place and both of these now ask it.
 ///
-/// The numbers are ORDER AND NOTHING ELSE. They are never subtracted,
-/// scaled or printed; only compared. A gap between them would mean
-/// something, so there is none.
+/// Kept as a name rather than inlined at the call sites: `size_rank`
+/// reads better than reaching into a table, and 036 and 033 both point
+/// at this function by name.
 pub fn size_rank(size: &str) -> Option<i64> {
-    match size {
-        "tiny" => Some(0),
-        "sm" => Some(1),
-        "med" => Some(2),
-        "lg" => Some(3),
-        "huge" => Some(4),
-        "grg" => Some(5),
-        _ => None,
-    }
+    crate::size::of(size).map(|s| s.rank)
 }
 
 /// The average of one die, doubled, so the arithmetic stays in integers.

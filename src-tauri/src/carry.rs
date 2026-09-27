@@ -119,19 +119,19 @@ pub fn carry_capacity(str_score: i64, size: Option<&str>) -> f64 {
     base * size_multiplier(size)
 }
 
+/// ASKS size.rs RATHER THAN HOLDING ITS OWN COPY. This was one of
+/// three tables of the same six words, which is how a ladder comes to
+/// disagree with itself - see size.rs's header, and supabase::numeric
+/// for the same lesson learned more expensively.
+///
+/// An unrecognised size is still treated as Medium rather than refused:
+/// this is a display number, and declining to say how much somebody can
+/// carry because their size is misspelled helps nobody. `admits_size`
+/// is where a bad size is caught.
 fn size_multiplier(size: Option<&str>) -> f64 {
-    match size.unwrap_or("med") {
-        "tiny" => 0.5,
-        "sm" | "med" => 1.0,
-        "lg" => 2.0,
-        "huge" => 4.0,
-        "grg" => 8.0,
-        // An unrecognised size is treated as medium rather than
-        // refused: this is a display number, and refusing to say how
-        // much somebody can carry because their size is misspelled
-        // helps nobody. `admits_size` is where a bad size is caught.
-        _ => 1.0,
-    }
+    crate::size::of(size.unwrap_or("med"))
+        .map(|s| s.carry_multiplier)
+        .unwrap_or(1.0)
 }
 
 /// How burdened a creature is.

@@ -524,7 +524,12 @@ async function loadSpecies() {
     const keep = sel.value;
     sel.innerHTML = "";
     sel.append(new Option("no species yet", ""));
-    for (const sp of state.species) sel.append(new Option(sp.name, sp.key));
+    // PLAYABLE ONLY. The Imiear are semi-intelligent and are not PCs,
+    // which is a fact about the species - 057 puts it on the row. They
+    // still appear in the viewer below, because a DM wants to read them.
+    for (const sp of state.species.filter((x) => x.playable !== false)) {
+      sel.append(new Option(sp.name, sp.key));
+    }
     if (keep && state.species.some((x) => x.key === keep)) sel.value = keep;
   }
 
@@ -549,6 +554,33 @@ function bonusText(sp) {
   return b.map(([code, n]) => (n >= 0 ? "+" : "") + n + " " + code.toUpperCase()).join(", ");
 }
 
+// 057. Feet, as a species document states them.
+function heightText(sp) {
+  const lo = sp.height_min_ft, hi = sp.height_max_ft;
+  if (lo == null) return "";
+  if (hi == null || hi === lo) return " " + lo + " ft";
+  return " " + lo + "\u2013" + hi + " ft";
+}
+
+// READ, NOT RECOMPUTED. species.rs sends `reach_ft`, `space_ft` and
+// `derived` already worked out. This section held its own copy of the
+// size ladder for exactly one commit, which is precisely how the four
+// copies size.rs replaced came to exist - so it went before it could
+// disagree with anything.
+function reachText(sp) {
+  if (sp.reach_ft == null) return "—";
+  return sp.reach_ft + " ft reach · " + sp.space_ft + " ft space";
+}
+
+// A stated category the stated height disagrees with. Worth SAYING
+// rather than letting one of them quietly win - species.rs decides
+// which, off the MIDPOINT of the height band, because a people is
+// typed by its typical adult rather than by its shortest.
+function sizeWarning(sp) {
+  if (!sp.derived || sp.derived === sp.size) return "";
+  return " — but the height reads as " + (SIZE_WORDS[sp.derived] || sp.derived);
+}
+
 function paintSpeciesNote() {
   const note = document.querySelector("#char-species-note");
   const sel = document.querySelector("#char-species");
@@ -558,7 +590,7 @@ function paintSpeciesNote() {
     note.textContent = "no species means no bonuses and a medium build";
     return;
   }
-  const bits = [bonusText(sp), SIZE_WORDS[sp.size] || sp.size];
+  const bits = [bonusText(sp), SIZE_WORDS[sp.size] || sp.size + heightText(sp)];
   if (sp.speed) bits.push(sp.speed + " ft");
   if (sp.carry_size_steps) bits.push("carries one size larger");
   note.textContent = bits.join(" \u00b7 ");
@@ -588,9 +620,17 @@ function paintSpeciesView() {
   // --- the numbers ---
   const facts = [
     ["ability bonuses", bonusText(sp)],
-    ["size", SIZE_WORDS[sp.size] || sp.size],
-    ["speed", sp.speed ? sp.speed + " ft" : "\u2014"],
+    // 057. The height is the fact and the category is a consequence -
+    // in a campaign running 2 ft to 25 ft the feet are what somebody
+    // actually wants to know.
+    ["height", heightText(sp).trim() || "\u2014"],
+    ["size", (SIZE_WORDS[sp.size] || sp.size) + sizeWarning(sp)],
+    ["reach / space", reachText(sp)],
+    ["speed", sp.speed ? sp.speed + " ft" : "\u2014 (no movement system yet)"],
   ];
+  if (sp.playable === false) {
+    facts.push(["playable", "no - not a player character"]);
+  }
   const maxima = sp.ability_maxima || [];
   if (maxima.length) {
     facts.push([

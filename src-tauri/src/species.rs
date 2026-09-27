@@ -65,6 +65,23 @@ pub struct Species {
     pub unarmored_ac_base: Option<i64>,
     pub unarmored_ac_ability: Option<String>,
 
+    /// How tall, in feet. THE FACT the category is a consequence of -
+    /// see size.rs. Stored because a campaign running from a 2-foot
+    /// rodent people to a 25-foot Imiear loses too much to six rungs.
+    pub height_min_ft: Option<f64>,
+    pub height_max_ft: Option<f64>,
+    /// Whether this people can be chosen at creation. The Imiear are
+    /// semi-intelligent and are not PCs, which is a fact about them
+    /// rather than a permission check.
+    pub playable: bool,
+    /// DERIVED AND SENT OUT: the rung the midpoint of the height band
+    /// falls on, what this people reaches, and how much floor they
+    /// stand on. Computed once here so no screen has to hold its own
+    /// copy of the ladder.
+    pub derived: Option<String>,
+    pub reach_ft: Option<i64>,
+    pub space_ft: Option<f64>,
+
     // --- written down only ---
     pub speed: Option<i64>,
     pub damage_resistances: Vec<String>,
@@ -101,6 +118,51 @@ impl Species {
             .unwrap_or(DEFAULT_MAXIMUM)
     }
 
+    /// The rung their stated height lands on, or None when no height
+    /// is recorded. SERIALISED rather than computed on the screen -
+    /// main.js held its own copy of the ladder for one commit and that
+    /// is how the four copies size.rs replaced got there.
+    ///
+    /// SEPARATE FROM `size`, WHICH IS STATED, so the two can be
+    /// compared. A document that says Large and a height that says
+    /// Medium is a contradiction worth surfacing rather than one of
+    /// them silently winning - `size_matches_height` is that check.
+    ///
+    /// OFF THE MIDPOINT, NOT THE MINIMUM, and the Unt'garoth are why.
+    /// They run 7 to 10 feet and their document calls them Large; 5e's
+    /// Large starts at 8, so their SHORTEST adult is Medium and their
+    /// tallest is Large. A species is typed by its typical adult rather
+    /// than by whoever in it is smallest, so the band's middle decides
+    /// - 8.5 feet, which is Large, which is what the document says.
+    /// Categorising off the minimum would report a contradiction for
+    /// every people whose range crosses a line, which is most of them.
+    fn derive_size(min_ft: Option<f64>, max_ft: Option<f64>) -> Option<&'static str> {
+        let lo = min_ft?;
+        let mid = match max_ft {
+            Some(hi) if hi >= lo => (lo + hi) / 2.0,
+            _ => lo,
+        };
+        Some(crate::size::for_height(mid).key)
+    }
+
+    /// Whether the stated category agrees with the stated height.
+    ///
+    /// True when there is no height to check against: an unstated fact
+    /// cannot contradict anything.
+    ///
+    /// NOT CALLED FROM RUST - the screen compares `derived` against
+    /// `size` itself, because it is the thing that has to SAY so. Kept
+    /// because the rule it states is not obvious: a disagreement is
+    /// reported rather than resolved, and neither value silently wins.
+    /// A species editor will want exactly this when one lands.
+    #[allow(dead_code)]
+    pub fn size_matches_height(&self) -> bool {
+        match self.derived {
+            Some(ref d) => d == &self.size,
+            None => true,
+        }
+    }
+
     /// The size this people CARRIES as, which is not the size they are.
     ///
     /// Powerful Build moves carrying and nothing else - not reach, not
@@ -135,20 +197,15 @@ pub fn effective_score(base: i64, bonus: i64, maximum: i64) -> i64 {
 
 /// One step up the size ladder, per step.
 ///
-/// USES `vitality::size_rank` RATHER THAN A SECOND LADDER, which is the
-/// argument that file makes about itself: one vocabulary in one place,
-/// or two that eventually disagree about whether "grg" exists.
-/// Gargantuan is the top and stays there rather than wrapping.
+/// THIS FUNCTION USED TO CARRY ITS OWN ARRAY OF THE SIX WORDS - the
+/// third copy of the ladder in the crate, written while vitality.rs's
+/// own comment warned that a second one would eventually disagree. It
+/// asks size.rs now, and an unrecognised size still comes back
+/// untouched rather than defaulted, because a typo should not silently
+/// become Medium halfway through a capacity.
 pub fn bump_size(size: &str, steps: i64) -> String {
-    const LADDER: [&str; 6] = ["tiny", "sm", "med", "lg", "huge", "grg"];
-    match crate::vitality::size_rank(size) {
-        Some(rank) => {
-            let up = (rank + steps.max(0)).min(LADDER.len() as i64 - 1);
-            LADDER[up as usize].to_string()
-        }
-        // An unrecognised size is returned untouched rather than
-        // defaulted, the same call carry.rs makes: this feeds a display
-        // number, and a typo should not silently become "med".
+    match crate::size::of(size) {
+        Some(_) => crate::size::bump(size, steps).to_string(),
         None => size.to_string(),
     }
 }
@@ -157,7 +214,8 @@ pub fn bump_size(size: &str, steps: i64) -> String {
 
 pub const SPECIES_COLUMNS: &str = "key,game_id,name,ability_bonuses,ability_maxima,size,\
 carry_size_steps,skill_profs,unarmored_ac_base,unarmored_ac_ability,speed,\
-damage_resistances,languages,summary,appearance,culture,history,roleplaying,\
+damage_resistances,languages,height_min_ft,height_max_ft,playable,\
+summary,appearance,culture,history,roleplaying,\
 age_note,alignment_note,traits";
 
 fn strs(v: &Value, key: &str) -> Vec<String> {
@@ -211,16 +269,29 @@ fn traits_of(v: &Value) -> Vec<Trait> {
 }
 
 pub fn from_row(r: &Value) -> Species {
+    let min_ft = crate::supabase::numeric_at(r, "height_min_ft");
+    let max_ft = crate::supabase::numeric_at(r, "height_max_ft");
+    let stated = r.get("size").and_then(|x| x.as_str()).unwrap_or("med");
+    let rung = crate::size::of(stated);
     Species {
         key: r.get("key").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
         name: r.get("name").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
         ability_bonuses: ability_map(r, "ability_bonuses"),
         ability_maxima: ability_map(r, "ability_maxima"),
-        size: r.get("size").and_then(|x| x.as_str()).unwrap_or("med").to_string(),
+        size: stated.to_string(),
         carry_size_steps: r.get("carry_size_steps").and_then(|x| x.as_i64()).unwrap_or(0),
         skill_profs: strs(r, "skill_profs"),
         unarmored_ac_base: r.get("unarmored_ac_base").and_then(|x| x.as_i64()),
         unarmored_ac_ability: opt_text(r, "unarmored_ac_ability"),
+        height_min_ft: min_ft,
+        height_max_ft: max_ft,
+        derived: Species::derive_size(min_ft, max_ft).map(str::to_string),
+        reach_ft: rung.map(|s| s.reach_ft),
+        space_ft: rung.map(|s| s.space_ft),
+        // ABSENT MEANS PLAYABLE. The column defaults true and every
+        // species seeded so far is; the Imiear will be the first false
+        // and they do not exist yet.
+        playable: r.get("playable").and_then(|x| x.as_bool()).unwrap_or(true),
         speed: r.get("speed").and_then(|x| x.as_i64()),
         damage_resistances: strs(r, "damage_resistances"),
         languages: strs(r, "languages"),
@@ -271,6 +342,7 @@ mod tests {
             "size": "lg", "carry_size_steps": 1, "skill_profs": ["ath"],
             "unarmored_ac_base": 12, "unarmored_ac_ability": "con",
             "speed": 40, "damage_resistances": ["cold", "fire"],
+            "height_min_ft": 7, "height_max_ft": 10, "playable": true,
             "languages": ["Common", "Unt'garoth Dialect"],
             "summary": "Towering.", "traits": [
                 { "name": "Powerful Build", "text": "One size larger for carrying.", "applied": true },
@@ -384,6 +456,63 @@ mod tests {
             "traits": [{ "name": "Vague", "text": "Something." }]
         }));
         assert!(!s.traits[0].applied);
+    }
+
+    /* ---------------------- height and size ---------------------- */
+
+    #[test]
+    fn a_height_lands_on_a_rung_and_is_checked_against_the_stated_one() {
+        let s = from_row(&untgaroth());
+        assert_eq!(s.height_min_ft, Some(7.0));
+        assert_eq!(s.height_max_ft, Some(10.0));
+        // 7 to 10 straddles the Medium/Large line at 8. The midpoint
+        // is 8.5, which is Large, which is what their document says.
+        assert_eq!(s.derived.as_deref(), Some("lg"));
+        assert!(s.size_matches_height(), "the document and the feet agree");
+    }
+
+    // The check has to be able to FAIL, or it is decoration.
+    #[test]
+    fn a_stated_size_that_the_height_contradicts_is_reported() {
+        let wrong = from_row(&json!({
+            "key": "x", "name": "X", "size": "huge",
+            "height_min_ft": 4, "height_max_ft": 5
+        }));
+        assert_eq!(wrong.derived.as_deref(), Some("med"));
+        assert!(!wrong.size_matches_height(), "five feet is not Huge");
+    }
+
+    // The Unt'gar, whose band sits entirely inside one rung.
+    #[test]
+    fn a_band_inside_one_rung_agrees_with_itself() {
+        let untgar = from_row(&json!({
+            "key": "untgar", "name": "Unt'gar", "size": "med",
+            "height_min_ft": 4, "height_max_ft": 5
+        }));
+        assert_eq!(untgar.derived.as_deref(), Some("med"));
+        assert!(untgar.size_matches_height());
+    }
+
+    #[test]
+    fn a_people_with_no_height_contradicts_nothing() {
+        let s = from_row(&json!({ "key": "x", "name": "X", "size": "med" }));
+        assert_eq!(s.derived.as_deref(), None);
+        assert!(s.size_matches_height());
+    }
+
+    #[test]
+    fn reach_and_space_come_off_the_ladder() {
+        let s = from_row(&untgaroth());
+        assert_eq!(s.reach_ft, Some(10), "Large reaches ten feet");
+        assert_eq!(s.space_ft, Some(10.0));
+    }
+
+    // Absent means playable; the column defaults true.
+    #[test]
+    fn a_people_is_playable_unless_it_says_otherwise() {
+        assert!(from_row(&untgaroth()).playable);
+        let imiear = from_row(&json!({ "key": "i", "name": "I", "playable": false }));
+        assert!(!imiear.playable);
     }
 
     #[test]

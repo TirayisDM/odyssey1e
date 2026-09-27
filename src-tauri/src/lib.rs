@@ -1171,6 +1171,8 @@ pub fn run() {
             commands::characters::list_classes,
             // 056: what a character's people are, and what that adds.
             commands::characters::list_species,
+            // 058: what this particular person looks like.
+            commands::characters::set_description,
             list_rolls,
             list_encounters,
             list_targets,

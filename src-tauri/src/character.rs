@@ -120,6 +120,9 @@ pub struct Sheet {
     /// when this character has no species, which is every one made
     /// before 056 and every monster.
     pub species: Option<crate::species::Species>,
+    /// 058. What this particular person looks like, against the band
+    /// their people occupies.
+    pub body: Body,
     /// The size this character CARRIES as, Powerful Build included.
     /// Separate from `vitals.size`, which is the size they ARE - only
     /// carrying moves, not reach or cover or what a container admits.
@@ -344,6 +347,20 @@ fn as_str(v: &Value, key: &str) -> String {
 /// A Postgres text[] arrives as a JSON array. Absent reads as empty,
 /// which is the right default for a proficiency list: claiming none is
 /// safe, claiming one that was not granted is not.
+/// A text column that may be absent or empty.
+///
+/// EMPTY IS ABSENT for these. A character sheet's free-text fields come
+/// back "" from a form somebody tabbed through, and an empty hair
+/// colour is not a hair colour - rendering one would put a blank row on
+/// the panel where a fact should be.
+fn as_opt_str(v: &Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 fn as_strings(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(|x| x.as_array())
@@ -377,7 +394,34 @@ pub struct Profile {
     pub armor_profs: Vec<String>,
     /// 056. None for every character made before it, and for monsters.
     pub species_key: Option<String>,
+    /// 058.
+    pub body: Body,
     pub vitals: Vitals,
+}
+
+/// WHAT THIS PERSON LOOKS LIKE. 058.
+///
+/// The species carries a RANGE - the Unt'garoth run 7 to 10 feet and
+/// 400 to 900 pounds - and this carries the value. A screen can then
+/// show one against the other and say when somebody is unusual for
+/// their people, which a single number never could.
+///
+/// ALL OPTIONAL, and none of it is defaulted. An unstated height is
+/// unstated; guessing the middle of the species band would put a fact
+/// on the sheet that nobody decided.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Body {
+    pub height_ft: Option<f64>,
+    pub weight_lb: Option<f64>,
+    pub hair: Option<String>,
+    pub skin: Option<String>,
+    pub eyes: Option<String>,
+    /// Anything else worth seeing at a glance. Prose the engine will
+    /// never read - 043's contract.
+    pub description: Option<String>,
+    /// Tongues this character has BEYOND their people's. The panel
+    /// shows the union and says which came from where.
+    pub languages: Vec<crate::species::Tongue>,
 }
 
 /// What it takes to hit this character, and what it can take. 010.
@@ -415,7 +459,8 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
                 "id,entity_id,location_id,game_id,name,level,narrative_pack,\
                  weapon_profs,armor_profs,hp_max,hp_temp,hp_temp_max,\
                  ac_mode,ac_override,death_successes,death_failures,\
-                 exhaustion,inspiration,size,species_key",
+                 exhaustion,inspiration,size,species_key,\
+                 height_ft,weight_lb,hair,skin,eyes,description,languages",
             ),
             ("id", &format!("eq.{}", character_id)),
         ],
@@ -449,6 +494,17 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
             .and_then(|x| x.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_string),
+        body: Body {
+            // numeric, so through the one reader that knows how
+            // Postgres sends it - see supabase::numeric.
+            height_ft: supabase::numeric_at(c, "height_ft"),
+            weight_lb: supabase::numeric_at(c, "weight_lb"),
+            hair: as_opt_str(c, "hair"),
+            skin: as_opt_str(c, "skin"),
+            eyes: as_opt_str(c, "eyes"),
+            description: as_opt_str(c, "description"),
+            languages: crate::species::tongues_of(c, "languages"),
+        },
         vitals: Vitals {
             // Absent rather than defaulted: a character with no hp_max
             // has never had one set, which is not the same as being on
@@ -724,6 +780,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
             .map(|sp| sp.carry_size())
             .or_else(|| profile.vitals.size.clone()),
         species,
+        body: profile.body,
         vitals: profile.vitals,
         armor_class,
         techniques,
@@ -781,6 +838,7 @@ mod tests {
             // carries them and the fixture should not lie about it. The
             // rules that DO read them are tested in equipment.rs.
             species: None,
+            body: Body::default(),
             carry_size: None,
             weapon_profs: vec!["sim".into()],
             armor_profs: vec!["lgt".into(), "med".into(), "shl".into()],

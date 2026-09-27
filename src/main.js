@@ -581,6 +581,127 @@ function sizeWarning(sp) {
   return " — but the height reads as " + (SIZE_WORDS[sp.derived] || sp.derived);
 }
 
+/* ===================== THE DESCRIPTION PANEL (058) ===================== */
+
+// What this person is, what they look like, what their people gives
+// them and what it costs them.
+//
+// THE SPECIES STATES A BAND AND THE CHARACTER STATES A VALUE, so this
+// shows one against the other: 8 ft is ordinary for an Unt'garoth and
+// 6 ft is short, and only the pair can say which.
+function paintDescription(sheet) {
+  const sp = sheet.species || null;
+  const body = sheet.body || {};
+
+  // --- who their people are ---
+  const who = document.querySelector("#desc-species");
+  who.innerHTML = "";
+  if (!sp) {
+    who.append(sEl("div", "muted", "no species - nothing to describe but the body"));
+  } else {
+    who.append(sEl("div", "desc-people", sp.name));
+    const bits = [bonusText(sp), SIZE_WORDS[sp.size] || sp.size];
+    if (sp.reach_ft != null) bits.push(sp.reach_ft + " ft reach");
+    if (sp.speed) bits.push(sp.speed + " ft");
+    who.append(sEl("div", "muted", bits.join(" \u00b7 ")));
+    if (sp.summary) who.append(sEl("p", "species-summary", sp.summary));
+  }
+
+  // --- the body, value against band ---
+  const b = document.querySelector("#desc-body");
+  b.innerHTML = "";
+  const rows = [
+    ["height", body.height_ft != null ? body.height_ft + " ft" : null, bandText(sp, "height")],
+    ["weight", body.weight_lb != null ? body.weight_lb + " lb" : null, null],
+    ["hair", body.hair, null],
+    ["skin", body.skin, null],
+    ["eyes", body.eyes, null],
+  ];
+  const dl = sEl("div", "species-facts");
+  for (const [k, v, band] of rows) {
+    const row = sEl("div", "species-fact");
+    const val_ = sEl("span", "species-val", v || "\u2014");
+    if (!v) val_.classList.add("muted");
+    row.append(sEl("span", "species-key", k), val_);
+    if (band) row.append(sEl("span", "muted desc-band", band));
+    dl.append(row);
+  }
+  b.append(dl);
+  if (body.description) b.append(sEl("p", "species-prose", body.description));
+
+  // Fill the boxes with what is there, so a save does not wipe the
+  // fields somebody did not touch.
+  setVal("#desc-height", body.height_ft);
+  setVal("#desc-weight", body.weight_lb);
+  setVal("#desc-hair", body.hair);
+  setVal("#desc-skin", body.skin);
+  setVal("#desc-eyes", body.eyes);
+  setVal("#desc-notes", body.description);
+
+  // --- features and drawbacks, told apart ---
+  paintTraits("#desc-features", (sp && sp.traits || []).filter((t) => t.kind !== "drawback"),
+              "this people asks nothing of you");
+  paintTraits("#desc-drawbacks", (sp && sp.traits || []).filter((t) => t.kind === "drawback"),
+              "nothing written down");
+
+  // --- languages, spoken and written kept apart ---
+  const lang = document.querySelector("#desc-languages");
+  lang.innerHTML = "";
+  const fromPeople = (sp && sp.tongues || []).map((t) => [t, sp.name]);
+  const learned = (body.languages || []).map((t) => [t, "learned"]);
+  const all = fromPeople.concat(learned);
+  if (!all.length) {
+    lang.append(sEl("div", "muted", "none recorded"));
+  } else {
+    for (const [t, from] of all) {
+      const row = sEl("div", "lang-row");
+      row.append(sEl("span", "lang-name", t.name));
+      // SPOKEN AND WRITTEN SHOWN SEPARATELY, because they are
+      // separately true - a tongue can have no script, and a dead one
+      // can be read and never pronounced.
+      row.append(sEl("span", "tag " + (t.spoken ? "tag-on" : "tag-off"),
+                     t.spoken ? "speaks" : "cannot speak"));
+      row.append(sEl("span", "tag " + (t.written ? "tag-on" : "tag-off"),
+                     t.written ? "reads / writes" : "illiterate in"));
+      row.append(sEl("span", "muted lang-from", from));
+      lang.append(row);
+    }
+  }
+}
+
+function paintTraits(sel, list, empty) {
+  const host = document.querySelector(sel);
+  host.innerHTML = "";
+  if (!list.length) {
+    host.append(sEl("div", "muted", empty));
+    return;
+  }
+  for (const t of list) {
+    const box = sEl("div", "species-trait"
+      + (t.applied ? "" : " unapplied")
+      + (t.kind === "drawback" ? " drawback" : ""));
+    const head = sEl("div", "species-trait-name");
+    head.append(sEl("span", "", t.name));
+    head.append(sEl("span", "tag " + (t.applied ? "tag-on" : "tag-off"),
+                    t.applied ? "applied" : "DM applies"));
+    box.append(head, sEl("div", "species-trait-text", t.text));
+    host.append(box);
+  }
+}
+
+// Where this character sits in their people's range.
+function bandText(sp, which) {
+  if (!sp || which !== "height") return null;
+  if (sp.height_min_ft == null) return null;
+  const hi = sp.height_max_ft != null ? sp.height_max_ft : sp.height_min_ft;
+  return sp.name + " run " + sp.height_min_ft + "\u2013" + hi + " ft";
+}
+
+function setVal(sel, v) {
+  const n = document.querySelector(sel);
+  if (n) n.value = v == null ? "" : String(v);
+}
+
 function paintSpeciesNote() {
   const note = document.querySelector("#char-species-note");
   const sel = document.querySelector("#char-species");
@@ -749,6 +870,12 @@ async function loadSheet() {
     sheet.name + " · level " + sheet.level + " · PB +" + pb +
     " · AC " + sheet.armor_class + hp;
   document.querySelector("#level").value = sheet.level;
+
+  // 058. The Description subtab - species, body, features, drawbacks
+  // and tongues. Painted with the rest of the sheet rather than on tab
+  // click, because it is the same one read and a hidden pane costs
+  // nothing to fill.
+  paintDescription(sheet);
 
   // Abilities
   const box = document.querySelector("#abilities");
@@ -4950,6 +5077,33 @@ window.addEventListener("DOMContentLoaded", async () => {
   for (const b of document.querySelectorAll("#scene-tabs .tab")) {
     b.addEventListener("click", () => showSceneTab(b.dataset.scene));
   }
+
+  // The sheet's own strip. Same helper, same shape - see 058's note in
+  // the markup: the next five tabs are a button and a pane each.
+  for (const b of document.querySelectorAll("#sheet-tabs .tab")) {
+    b.addEventListener("click", () => showSub("sheet-tabs", "sheet", b.dataset.sheet));
+  }
+
+  document.querySelector("#save-desc").addEventListener("click", async () => {
+    if (!state.characterId) return log("set_description", "no character loaded", true);
+    const r = await tryCall("set_description", {
+      characterId: state.characterId,
+      // ALWAYS SENT, because "" is how a field is CLEARED. Leaving one
+      // out means "do not touch", and a form needs to say both - 036's
+      // convention, and 049's.
+      heightFt: val("#desc-height"),
+      weightLb: val("#desc-weight"),
+      hair: val("#desc-hair"),
+      skin: val("#desc-skin"),
+      eyes: val("#desc-eyes"),
+      description: val("#desc-notes"),
+    });
+    const msg = document.querySelector("#desc-msg");
+    msg.hidden = false;
+    msg.textContent = r.ok ? "saved" : r.error;
+    msg.classList.toggle("bad", !r.ok);
+    if (r.ok) await loadSheet();
+  });
 
   for (const b of document.querySelectorAll("#chars-tabs .tab")) {
     b.addEventListener("click", () => showSub("chars-tabs", "chars", b.dataset.chars));

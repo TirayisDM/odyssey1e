@@ -420,3 +420,29 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 @media (max-width: 560px) {
   .species-fact { grid-template-columns: 1fr; gap: .05rem; }
 }
+
+/* ============ THE DESCRIPTION SUBTAB (058) ============ */
+
+.desc-people { font-size: 1.05em; font-weight: 600; margin-bottom: .1rem; }
+
+/* The species' band beside the character's value, so "6 ft" can be
+   read as short rather than just as a number. */
+.desc-band { font-size: .8em; opacity: .55; margin-left: .5rem; }
+
+.desc-edit { margin: .3rem 0; }
+
+/* A DRAWBACK IS NOT A FEATURE AND MUST NOT LOOK LIKE ONE. 058's whole
+   argument: showing "cannot swim" in the same colour as "resistance to
+   fire and cold" is a screen lying by arrangement. */
+.species-trait.drawback { border-left-color: var(--bad, #8a3b3b); }
+
+.lang-row {
+  display: flex; align-items: center; gap: .45rem;
+  padding: .2rem 0; flex-wrap: wrap;
+}
+.lang-name { min-width: 10rem; font-weight: 600; }
+.lang-from { font-size: .8em; opacity: .55; }
+
+@media (max-width: 560px) {
+  .lang-name { min-width: 100%; }
+}

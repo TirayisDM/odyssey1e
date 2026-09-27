@@ -37,15 +37,49 @@ use serde_json::Value;
 
 /* ============================ TYPES ============================ */
 
-/// One named thing a people can do.
+/// One named thing a people can do, or cannot.
 ///
-/// `applied` is the honest column: false means the engine does not act
-/// on this and a DM must.
+/// TWO HONEST COLUMNS, and they answer different questions. `applied`
+/// says whether the ENGINE acts on it or a DM must. `kind` says whether
+/// it is an upside or a cost. A trait can be any combination: Dense
+/// Mass is a drawback nothing enforces, Powerful Build is a feature the
+/// engine applies, and both belong on the same list looking different.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Trait {
     pub name: String,
     pub text: String,
     pub applied: bool,
+    /// "feature" or "drawback". PRESENTATIONAL AND DELIBERATELY SO -
+    /// nothing computes differently, and pretending otherwise would be
+    /// inventing a mechanic. What it buys is a screen that does not
+    /// show "cannot swim" in the same colour as "resistance to fire".
+    pub kind: String,
+}
+
+impl Trait {
+    /// NOT CALLED FROM RUST - the screen splits the list itself, since
+    /// it is the thing that has to show the two apart. Kept because the
+    /// vocabulary is the non-obvious part: "drawback" rather than a
+    /// bool, so a third kind can arrive without a migration rewriting
+    /// every row.
+    #[allow(dead_code)]
+    pub fn is_drawback(&self) -> bool {
+        self.kind == "drawback"
+    }
+}
+
+/// A language, and the two separate facts about it.
+///
+/// SPOKEN AND WRITTEN ARE NOT ONE FACT. Most tongues are both and 5e
+/// writes them as one phrase, which is why this was a list of names
+/// until 058. The interesting cases are the others: a tongue with no
+/// script, a dead language read and never pronounced, a character who
+/// speaks four and reads none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tongue {
+    pub name: String,
+    pub spoken: bool,
+    pub written: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,7 +119,9 @@ pub struct Species {
     // --- written down only ---
     pub speed: Option<i64>,
     pub damage_resistances: Vec<String>,
-    pub languages: Vec<String>,
+    /// 058. Replaces a bare list of names, which could not say that a
+    /// tongue has no script.
+    pub tongues: Vec<Tongue>,
 
     // --- prose ---
     pub summary: Option<String>,
@@ -214,7 +250,7 @@ pub fn bump_size(size: &str, steps: i64) -> String {
 
 pub const SPECIES_COLUMNS: &str = "key,game_id,name,ability_bonuses,ability_maxima,size,\
 carry_size_steps,skill_profs,unarmored_ac_base,unarmored_ac_ability,speed,\
-damage_resistances,languages,height_min_ft,height_max_ft,playable,\
+damage_resistances,tongues,height_min_ft,height_max_ft,playable,\
 summary,appearance,culture,history,roleplaying,\
 age_note,alignment_note,traits";
 
@@ -248,6 +284,30 @@ fn ability_map(v: &Value, key: &str) -> Vec<(String, i64)> {
     out
 }
 
+/// A jsonb list of {name, spoken, written}.
+///
+/// A MISSING BOOLEAN READS AS TRUE, which is the opposite call to
+/// `Trait::applied` and right for the opposite reason: an entry that
+/// names a language is claiming the character HAS it, and the common
+/// case by far is both. Defaulting to false would silently mute
+/// somebody for a field nobody filled in.
+pub fn tongues_of(v: &Value, key: &str) -> Vec<Tongue> {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| {
+                    Some(Tongue {
+                        name: t.get("name")?.as_str()?.to_string(),
+                        spoken: t.get("spoken").and_then(|x| x.as_bool()).unwrap_or(true),
+                        written: t.get("written").and_then(|x| x.as_bool()).unwrap_or(true),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn traits_of(v: &Value) -> Vec<Trait> {
     v.get("traits")
         .and_then(|x| x.as_array())
@@ -261,6 +321,16 @@ fn traits_of(v: &Value) -> Vec<Trait> {
                         // the one that tells a DM to check, rather than
                         // the one that claims the engine has it covered.
                         applied: t.get("applied").and_then(|x| x.as_bool()).unwrap_or(false),
+                        // ABSENT MEANS FEATURE. Every trait written
+                        // before 058 was one, and a people whose
+                        // author did not think about it has no cost -
+                        // which is the safe way round for a label that
+                        // decides how something is coloured.
+                        kind: t
+                            .get("kind")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("feature")
+                            .to_string(),
                     })
                 })
                 .collect()
@@ -294,7 +364,7 @@ pub fn from_row(r: &Value) -> Species {
         playable: r.get("playable").and_then(|x| x.as_bool()).unwrap_or(true),
         speed: r.get("speed").and_then(|x| x.as_i64()),
         damage_resistances: strs(r, "damage_resistances"),
-        languages: strs(r, "languages"),
+        tongues: tongues_of(r, "tongues"),
         summary: opt_text(r, "summary"),
         appearance: opt_text(r, "appearance"),
         culture: opt_text(r, "culture"),
@@ -343,7 +413,10 @@ mod tests {
             "unarmored_ac_base": 12, "unarmored_ac_ability": "con",
             "speed": 40, "damage_resistances": ["cold", "fire"],
             "height_min_ft": 7, "height_max_ft": 10, "playable": true,
-            "languages": ["Common", "Unt'garoth Dialect"],
+            "tongues": [
+                { "name": "Common", "spoken": true, "written": true },
+                { "name": "Unt'garoth Dialect", "spoken": true, "written": true }
+            ],
             "summary": "Towering.", "traits": [
                 { "name": "Powerful Build", "text": "One size larger for carrying.", "applied": true },
                 { "name": "Elemental Resilience", "text": "Fire and cold.", "applied": false }
@@ -513,6 +586,62 @@ mod tests {
         assert!(from_row(&untgaroth()).playable);
         let imiear = from_row(&json!({ "key": "i", "name": "I", "playable": false }));
         assert!(!imiear.playable);
+    }
+
+    /* ------------------- drawbacks and tongues ------------------- */
+
+    // A trait written before 058 has no `kind`, and every one of them
+    // was a feature. The safe default is the one that does not accuse
+    // a people of a cost its author never wrote.
+    #[test]
+    fn a_trait_with_no_kind_is_a_feature() {
+        let s = from_row(&json!({
+            "key": "x", "name": "X",
+            "traits": [{ "name": "Old", "text": "Written before 058." }]
+        }));
+        assert_eq!(s.traits[0].kind, "feature");
+        assert!(!s.traits[0].is_drawback());
+    }
+
+    #[test]
+    fn a_drawback_says_so() {
+        let s = from_row(&json!({
+            "key": "x", "name": "X",
+            "traits": [
+                { "name": "Powerful Build", "text": "...", "kind": "feature", "applied": true },
+                { "name": "Dense Mass", "text": "Cannot swim.", "kind": "drawback" }
+            ]
+        }));
+        assert!(!s.traits[0].is_drawback());
+        assert!(s.traits[1].is_drawback());
+        // The two columns are INDEPENDENT: a drawback the engine does
+        // not enforce is the commonest kind there is.
+        assert!(!s.traits[1].applied);
+    }
+
+    #[test]
+    fn a_tongue_carries_two_separate_facts() {
+        let s = from_row(&json!({
+            "key": "x", "name": "X",
+            "tongues": [
+                { "name": "Common", "spoken": true, "written": true },
+                { "name": "Old Jotun", "spoken": false, "written": true },
+                { "name": "Cant", "spoken": true, "written": false }
+            ]
+        }));
+        assert_eq!(s.tongues.len(), 3);
+        assert!(s.tongues[1].written && !s.tongues[1].spoken, "read, never pronounced");
+        assert!(s.tongues[2].spoken && !s.tongues[2].written, "no script");
+    }
+
+    // The opposite default to `applied`, and for the opposite reason:
+    // naming a language is claiming it, and both is the common case.
+    #[test]
+    fn a_tongue_that_does_not_say_is_both() {
+        let s = from_row(&json!({
+            "key": "x", "name": "X", "tongues": [{ "name": "Common" }]
+        }));
+        assert!(s.tongues[0].spoken && s.tongues[0].written);
     }
 
     #[test]

@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**478 tests, zero warnings.** `cd src-tauri && cargo test`.
+**482 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -418,6 +418,8 @@ and not after.
     line between what the engine applies and what a DM still must
 057 how tall is a people - height in feet, playability, one size ladder
     instead of four, and the Unt'gar
+058 what a character looks like - the body, spoken and written kept
+    apart, and a trait that can cost you something
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2089,6 +2091,72 @@ people.** Their heights are known and nothing else is. A row with a name
 and six defaults is worse than no row, because it is pickable and gives
 a character nothing. They land when their documents do; 057 is the
 framework that will take them.
+
+## The Description subtab - BUILT (058)
+
+**THE SHEET HAS SUBTABS NOW**, and this is the first of about six.
+`#sheet-tabs` runs on `showSub`, the same helper the Characters tabs
+have used since 033 - so the next one is a button and a pane and
+nothing else. Stats keeps what the sheet already had; Description is
+new. Combat, spells and background are the obvious next three and
+nothing about them needs deciding yet.
+
+**THE SPECIES STATES A RANGE, THE CHARACTER STATES A VALUE.** That is
+the shape of the whole migration. The Unt'garoth run 7 to 10 feet and
+400 to 900 pounds; Garn is one specific height. `characters.height_ft`
+and `weight_lb` hold his, `hair`/`skin`/`eyes`/`description` hold the
+rest, and the panel shows the value AGAINST the band - "9 ft ·
+Unt'garoth run 7-10 ft" - so a short one reads as short rather than as
+a number. Same separation as 049's overrides and 056's bonuses: the
+general fact and the particular one stay apart so both can be true.
+
+Nothing is defaulted. An unstated height is unstated; filling in the
+middle of the species band would put a fact on the sheet that nobody
+decided. Height and weight are NOT validated against the species
+either - an Unt'garoth of six feet is short for their people, not
+illegal, and refusing them would be the app overruling a DM about their
+own world. The panel says so; it does not object.
+
+**SPOKEN AND WRITTEN ARE DIFFERENT FACTS.** `languages text[]` could
+only carry a name. 5e writes "speak, read and write X" as one phrase and
+most tongues are all three, but the interesting ones are not: a language
+with no script, a dead one read and never pronounced, a character who
+speaks four and reads none. A tongue is now `{name, spoken, written}`
+and the two booleans are separate because they are separately true.
+
+A character carries their OWN on top of their people's, and the panel
+shows the union with where each came from. A MISSING BOOLEAN READS AS
+TRUE here, which is the opposite call to `Trait::applied` and right for
+the opposite reason: naming a language is claiming it, and defaulting to
+false would silently mute somebody over an unfilled field.
+
+**A TRAIT CAN COST YOU SOMETHING.** 056's traits were all upside,
+because the two species seeded first mostly are. An Unt'garoth CANNOT
+SWIM - their own document says the density does not permit it - and
+showing that in the same list, in the same colour, as "resistance to
+fire and cold" is a screen lying by arrangement. `kind` is 'feature' or
+'drawback', the panel splits them, and a drawback's rule is red rather
+than green.
+
+DELIBERATELY NOT MECHANICAL. Nothing computes differently from `kind`;
+it is presentational, and saying so is more honest than implying a
+system that does not exist. It is a STRING rather than a bool so a third
+kind can arrive without a migration rewriting every row.
+
+ONE drawback is marked - the Unt'garoth's Dense Mass - because it is the
+only one either document states. The Unt'gar have none written down, and
+inventing some to balance the two would be designing Dave's game for
+him. An empty Drawbacks section is an honest answer.
+
+Verified through the rig against a stubbed Unt'garoth: the value-against-
+band line renders, features and drawbacks land in their own sections with
+the drawback carrying its own border, and a tongue reading "Old Jotun ·
+cannot speak · reads / writes · learned" proves the split does what it
+was built for. The save sends every field, with an emptied one clearing
+and the untouched ones carrying their current values - 036's convention.
+Verified live and rolled back on Garn: every column takes the write, and
+`to_json(height_ft)` is `9.0`, a bare number, read through
+`supabase::numeric_at` like every other numeric in the app.
 
 ## Pick up here
 

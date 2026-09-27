@@ -288,6 +288,75 @@ fn load_con(token: &str, character_id: &str) -> Option<i64> {
         .and_then(|x| x.as_i64())
 }
 
+/* ======================== WHAT THEY LOOK LIKE ======================== */
+
+/// Write a character's physical description. 058.
+///
+/// EVERY FIELD IS OPTIONAL AND EVERY FIELD IS SENT. An absent argument
+/// leaves the column alone; an empty string CLEARS it. That is 036's
+/// convention for overrides and 049's for the object editor, and the
+/// reason is the same one: "unset it" and "do not touch it" are
+/// different instructions and a form has to be able to give both.
+///
+/// HEIGHT AND WEIGHT ARE NOT VALIDATED AGAINST THE SPECIES. An
+/// Unt'garoth of six feet is short for their people, not illegal, and
+/// refusing them would be this app overruling a DM about their own
+/// world. The panel SAYS when somebody sits outside their band, which
+/// is the useful half of the same observation.
+#[tauri::command]
+pub fn set_description(
+    state: State<AppState>,
+    character_id: String,
+    height_ft: Option<String>,
+    weight_lb: Option<String>,
+    hair: Option<String>,
+    skin: Option<String>,
+    eyes: Option<String>,
+    description: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let mut patch = json!({});
+
+    for (field, given) in [
+        ("height_ft", &height_ft),
+        ("weight_lb", &weight_lb),
+    ] {
+        let Some(raw) = given.as_deref().map(str::trim) else { continue };
+        if raw.is_empty() {
+            patch[field] = Value::Null;
+            continue;
+        }
+        let n: f64 = raw
+            .parse()
+            .map_err(|_| format!("{} wants a number, not '{}'", field, raw))?;
+        if n <= 0.0 {
+            return Err(format!("{} has to be more than nothing", field));
+        }
+        patch[field] = json!(n);
+    }
+
+    for (field, given) in [
+        ("hair", &hair),
+        ("skin", &skin),
+        ("eyes", &eyes),
+        ("description", &description),
+    ] {
+        let Some(raw) = given.as_deref().map(str::trim) else { continue };
+        patch[field] = if raw.is_empty() { Value::Null } else { json!(raw) };
+    }
+
+    if patch.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        return Err("nothing to change".to_string());
+    }
+
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &patch,
+    )
+}
+
 /* ======================= WHEN THE NUMBERS MOVE ======================= */
 
 /// Recompute a character's hit point maximum from what it is derived

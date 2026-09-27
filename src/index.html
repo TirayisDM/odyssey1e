@@ -99,12 +99,56 @@
       <div class="pane" data-pane="play">
       <section id="sheet-panel" hidden>
         <h2>Sheet <span id="sheet-who" class="muted"></span></h2>
-        <div class="row">
-          <input id="level" type="number" min="1" max="20" placeholder="level" />
-          <button id="save-level" class="ghost">Set level</button>
+
+        <!-- 058. THE SHEET GETS SUBTABS. There will be half a dozen of
+             them - combat, spells, background and the rest - and the
+             strip is built on `showSub`, the same helper the Characters
+             tabs use, so the next one is a button and a pane and
+             nothing else. Adding a tab must never mean touching this
+             comment. -->
+        <nav class="tabs mini" id="sheet-tabs">
+          <button class="tab on" data-sheet="stats">Stats</button>
+          <button class="tab" data-sheet="description">Description</button>
+        </nav>
+
+        <div class="sheet-pane" data-sheet="stats">
+          <div class="row">
+            <input id="level" type="number" min="1" max="20" placeholder="level" />
+            <button id="save-level" class="ghost">Set level</button>
+          </div>
+          <div id="abilities" class="abils"></div>
+          <div id="skills" class="list"></div>
         </div>
-        <div id="abilities" class="abils"></div>
-        <div id="skills" class="list"></div>
+
+        <div class="sheet-pane" data-sheet="description" hidden>
+          <div id="desc-species"></div>
+
+          <div class="sub">Physical description</div>
+          <div id="desc-body"></div>
+          <div class="row desc-edit">
+            <input id="desc-height" class="narrow" placeholder="height ft" />
+            <input id="desc-weight" class="narrow" placeholder="weight lb" />
+          </div>
+          <div class="row desc-edit">
+            <input id="desc-hair" placeholder="hair" />
+            <input id="desc-skin" placeholder="skin" />
+            <input id="desc-eyes" placeholder="eyes" />
+          </div>
+          <div class="row desc-edit">
+            <input id="desc-notes" placeholder="anything else worth seeing at a glance" />
+            <button id="save-desc" class="ghost">Save</button>
+          </div>
+          <div id="desc-msg" class="dm-msg" hidden></div>
+
+          <div class="sub">Features</div>
+          <div id="desc-features"></div>
+
+          <div class="sub">Drawbacks</div>
+          <div id="desc-drawbacks"></div>
+
+          <div class="sub">Languages</div>
+          <div id="desc-languages"></div>
+        </div>
       </section>
 
       <section id="equipment-panel" hidden>

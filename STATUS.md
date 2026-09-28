@@ -2462,13 +2462,38 @@ fixing yet, but that is where the latency is if it ever matters.
   it, in Rust, where it can be tested - not in a check constraint and
   not on the screen. Every write path would need it, not just the
   obvious one.
-- **`take_object` is the last registered command with no caller**, and
-  an uncalled command is a defect rather than a spare. Five others were
-  settled on that rule: `set_encounter_location` and `destroy_object`
-  got the screens they were waiting for, and `loose_objects`,
-  `load_techniques` and `list_roster` were deleted. This one stays
-  because the Take rule in `acquire.rs` is the access-control work it
-  belongs to - wire it or retire it when that lands.
+- **SIX registered commands have no caller**, out of 104. An uncalled
+  command is a defect rather than a spare - and this entry said "one"
+  until the whole list was audited instead of the last count being
+  trusted:
+
+      take_object       the Take rule in acquire.rs is the access
+                        control work it belongs to
+      quote_object      040's pricing, reachable from nothing
+      list_members      who is in the game, never shown
+      rename_location   both added by c7c26ea, neither ever wired to
+      move_location     a control on the World tab
+      roll_dice         the formula sandbox; useful, unreferenced
+
+  Five others were settled earlier on the same rule:
+  `set_encounter_location` and `destroy_object` got the screens they
+  were waiting for, and `loose_objects`, `load_techniques` and
+  `list_roster` were deleted. Wire or retire, one at a time.
+- **A DERIVED NUMBER COMPUTED IN TWO PLACES WILL BE TWO NUMBERS.** The
+  sheet and the encounter's target list both work out armour class,
+  and when 056 gave a species its own unarmoured floor only the sheet
+  learned it: Garn read AC 14 on his sheet and AC 10 on the list a
+  goblin's attack resolves against. Both now go through
+  `character::apply_species`, `ability_mod_of` and `unarmored_rule`,
+  so neither can move without the other.
+
+  THE SAME ROOT IS STILL LIVE IN TWO PLACES. `commands::dm::
+  set_actor_level` reads Constitution off the row with no species
+  bonus, so levelling an enrolled character through the Run tab
+  recomputes their maximum low and overwrites what `rederive_hp_max`
+  got right. And `commands::initiative` takes DEX off the row for the
+  initiative roll - latent only because neither seeded people has a
+  DEX bonus. Both are the same fix: read the effective score.
 - **Versatile weapons store their second die and nothing reads it.**
   027 added `items.versatile_number` / `versatile_denomination` so a
   longsword row is not a lie, but the engine still offers the 1d8. The

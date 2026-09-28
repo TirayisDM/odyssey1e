@@ -1,7 +1,7 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated after initiative, the turn and the
-encounter screen.**
+**Written 2026-09-17, updated 2026-09-27 after the character stack:
+classes, species, size, and the sheet's subtabs.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -2212,6 +2212,85 @@ read it as a fault, because a form that is always open looks like a form.
 Fixed globally - `[hidden]{display:none !important}` - rather than on the
 one element, because every other `hidden` in the app was one `display`
 rule away from the same thing.
+
+## Where this run got to
+
+Eight commits on this machine, migrations 055 to 059, on top of fifteen
+pulled from the laptop (per-object techniques, initiative and the turn,
+the encounter screen). The through-line is that a CHARACTER became a
+thing the app can describe rather than a row with a
+name on it.
+
+**The arc.** `create_character` took a name and inserted a name. Level
+defaulted to 1 and everything else to NULL, which meant no size, no hit
+die, and NO HIT POINTS AT ALL - not zero, null, an empty space on the
+sheet where a life goes. Snot and Unnamed stood that way for weeks and
+nothing complained, because nothing was asking. Everything below came
+out of pulling that thread.
+
+    055  classes        the twelve, and the hit die a PC's hit points
+                        actually come from. vitality::pc_hp beside
+                        average_hp: two rules, not one with an exception
+    056  species        a people, their modifiers, and an honest line
+                        between what the engine applies and what a DM
+                        must
+    057  size           height in feet, playability, and ONE size ladder
+                        where there had been four. The Unt'gar
+    058  the body       height, weight, hair, skin, eyes; spoken and
+                        written kept apart; a trait that can cost you
+                        something
+    059  short stride   the Unt'gar's 25 feet, said where a player will
+                        look for it
+
+Plus the numeric helper that started the run, the level-button ripple,
+and the sheet split into four subtabs.
+
+**Three bugs, and all three were one shape: a fact written down in more
+than one place.**
+
+    supabase::numeric   the ladder of numeric readers - seven of them,
+                        three of which had been wrong, two of which
+                        still carried comments saying so
+    size.rs             the size ladder, written out FOUR times, in a
+                        file whose own comment warned that a second
+                        copy would eventually disagree
+    rederive_hp_max     set_actor_level rippled and set_level did not,
+                        so a player's maximum froze at creation. Garn
+                        showed 12 at level 5
+
+Each was fixed by making one place right and having everything else ask
+it. That is now the house reflex and it is worth keeping.
+
+**Two bugs that had been on screen the whole time and read as normal.**
+A weight override emptied the entire Objects tab, because `Obj` is
+deserialised by serde and the declared type IS the parser. And
+`[hidden]` did nothing to any element with a class that sets `display`,
+so the proficiency editor has sat permanently expanded on every
+character sheet ever rendered - visible in the first screenshot in this
+project's history, and read by nobody as a fault, because a form that is
+always open looks like a form.
+
+**What the campaign now has.** Two peoples seeded whole - the Unt'garoth
+at 7-10 feet and the Unt'gar at 4-5 - out of a roster spanning a 2-foot
+rodent people to a 25-foot Imiear. Garn is a level 5 Unt'garoth
+Barbarian: STR 20, CON 14, 50 hit points, Large, carrying as Huge,
+Athletics granted.
+
+**The decisions waiting on Dave.**
+
+  - THE JOTUN AND THE IMIEAR ARE BOTH HUGE. Eighteen feet and
+    twenty-five, and not one number between them differs. A test in
+    size.rs asserts it so it cannot be forgotten. The fix, if it is one,
+    is to scale reach, space and carrying off `height_ft` and keep the
+    category for the discrete rules.
+  - FOUR SPECIES ARE UNSEEDED - Felligar, Jotun, Imiear, and the rodent
+    people, whose name is not known here. Heights only. A row with a
+    name and six defaults is worse than no row, because it is pickable
+    and gives a character nothing.
+  - ENDURING MIGHT AND STONECUNNING both grant conditional expertise -
+    doubled proficiency on SOME uses of one skill. Nothing can detect
+    which use, so both are granted at ordinary proficiency with the
+    doubling left to the table.
 
 ## Pick up here
 

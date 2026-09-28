@@ -559,18 +559,72 @@ pub(crate) fn load_species(
     if key.is_empty() {
         return Ok(None);
     }
+    Ok(load_species_map(token, game_id, &[key.to_string()])?.remove(key))
+}
+
+/// Several peoples in one request, for a screen that reads a roster
+/// rather than a character.
+///
+/// THE SINGLE READ IS THIS ONE WITH A LIST OF ONE. An encounter holds
+/// six creatures of maybe two peoples, and a species read per creature
+/// is the shape `batch_character_stats` exists to avoid - it already
+/// does the characters, the abilities, the objects and the catalogue
+/// four requests rather than four per head.
+pub(crate) fn load_species_map(
+    token: &str,
+    game_id: &str,
+    keys: &[String],
+) -> Result<HashMap<String, crate::species::Species>, String> {
+    // QUOTED, like every other `in.(...)` list in the crate. A species
+    // key is a slug today and quoting it costs nothing; an unquoted
+    // list is one key with a comma in it away from asking for two
+    // species that do not exist - see the trap supabase.rs records
+    // about interpolating into a filter.
+    let wanted: Vec<String> = keys
+        .iter()
+        .filter(|k| !k.is_empty())
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .map(|k| crate::narrative::quoted(&k))
+        .collect();
+    if wanted.is_empty() {
+        return Ok(HashMap::new());
+    }
     let rows = supabase::rest_get(
         token,
         "species",
         &[
             ("select", crate::species::SPECIES_COLUMNS),
-            ("key", &format!("eq.{}", key)),
+            ("key", &format!("in.({})", wanted.join(","))),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
         ],
     )?;
     Ok(crate::species::collapse(rows.as_array().unwrap_or(&Vec::new()))
         .into_iter()
-        .next())
+        .map(|sp| (sp.key.clone(), sp))
+        .collect())
+}
+
+/// A species' unarmoured floor, with its ability already resolved to a
+/// modifier: Unyielding Defense is 12 + CON rather than 10 + DEX.
+///
+/// ONE PLACE, BECAUSE TWO SCREENS ASK. The sheet computes what it takes
+/// to hit you; the encounter's target list computes what it takes to
+/// hit you, and for a while they disagreed - the roster passed None
+/// here and read every unarmoured character at 10 + DEX. Garn's sheet
+/// said AC 14 and the list the goblins actually roll against said 10.
+///
+/// Resolved in this file rather than in equipment.rs for the reason
+/// given at the call site: equipment does not know what an ability is.
+pub(crate) fn unarmored_rule(
+    species: Option<&crate::species::Species>,
+    abilities: &HashMap<String, Ability>,
+) -> Option<(i64, i64)> {
+    let sp = species?;
+    let base = sp.unarmored_ac_base?;
+    let ability = sp.unarmored_ac_ability.as_deref()?;
+    Some((base, ability_mod_of(abilities, ability)))
 }
 
 /// Raise every score by what the species adds, held to its ceiling.
@@ -581,7 +635,10 @@ pub(crate) fn load_species(
 /// all pick it up without any of them knowing species exist. The
 /// alternative - each site adding the bonus itself - is the two-places
 /// problem that 049 and supabase::numeric were both about.
-fn apply_species(abilities: &mut HashMap<String, Ability>, sp: &crate::species::Species) {
+pub(crate) fn apply_species(
+    abilities: &mut HashMap<String, Ability>,
+    sp: &crate::species::Species,
+) {
     for (code, a) in abilities.iter_mut() {
         let bonus = sp.bonus_for(code);
         if bonus == 0 {
@@ -592,7 +649,7 @@ fn apply_species(abilities: &mut HashMap<String, Ability>, sp: &crate::species::
     }
 }
 
-fn ability_mod_of(abilities: &HashMap<String, Ability>, code: &str) -> i64 {
+pub(crate) fn ability_mod_of(abilities: &HashMap<String, Ability>, code: &str) -> i64 {
     match abilities.get(code) {
         Some(a) => (a.score - 10).div_euclid(2),
         None => 0,
@@ -745,11 +802,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // a modifier - Unyielding Defense is 12 + CON rather than 10 + DEX.
     // Resolved here because this is where the abilities are; equipment
     // does not know what an ability is.
-    let unarmored = species.as_ref().and_then(|sp| {
-        let base = sp.unarmored_ac_base?;
-        let ability = sp.unarmored_ac_ability.as_deref()?;
-        Some((base, ability_mod_of(&abilities, ability)))
-    });
+    let unarmored = unarmored_rule(species.as_ref(), &abilities);
     let armor_class = equipment::armor_class(
         ability_mod_of(&abilities, "dex"),
         &worn,
@@ -1022,6 +1075,86 @@ mod tests {
         s.level = 1;
         let r = resolve_request(&s, "insight", "normal");
         assert_eq!(r.modifier, 5);            // WIS +3, PB +2
+    }
+
+    /* ------------------ the unarmoured floor ------------------ */
+
+    /// Garn's people: +2 STR, +1 CON, and Unyielding Defense at 12 +
+    /// CON. The same row species.rs tests against.
+    fn untgaroth() -> crate::species::Species {
+        crate::species::from_row(&serde_json::json!({
+            "key": "untgaroth", "name": "Unt'garoth",
+            "ability_bonuses": { "str": 2, "con": 1 },
+            "ability_maxima": { "str": 21 },
+            "size": "lg", "carry_size_steps": 1, "skill_profs": ["ath"],
+            "unarmored_ac_base": 12, "unarmored_ac_ability": "con",
+            "playable": true
+        }))
+    }
+
+    /// Garn as stored: CON 13 on the row, 14 once his people are in it.
+    fn garn() -> HashMap<String, Ability> {
+        let mut a = HashMap::new();
+        a.insert("str".to_string(), Ability::plain(18, false));
+        a.insert("dex".to_string(), Ability::plain(11, false));
+        a.insert("con".to_string(), Ability::plain(13, false));
+        a
+    }
+
+    #[test]
+    fn no_species_leaves_the_ordinary_floor_alone() {
+        assert_eq!(unarmored_rule(None, &garn()), None);
+    }
+
+    #[test]
+    fn a_people_without_the_rule_claims_nothing() {
+        let mut sp = untgaroth();
+        sp.unarmored_ac_base = None;
+        assert_eq!(unarmored_rule(Some(&sp), &garn()), None);
+    }
+
+    /// THE BUG THIS PAIR IS FOR. The roster read the STORED score and
+    /// no species at all, so Garn's sheet said AC 14 while the target
+    /// list the goblins roll against said 10 - and the target list is
+    /// the one that decides whether a swing connected.
+    #[test]
+    fn the_floor_reads_the_effective_score_not_the_stored_one() {
+        let sp = untgaroth();
+        let mut abilities = garn();
+
+        // Stored CON 13 is +1. Nobody should ever see this number.
+        assert_eq!(unarmored_rule(Some(&sp), &abilities), Some((12, 1)));
+
+        // With their people applied, CON 14 is +2 - and that is what
+        // both screens now compute from.
+        apply_species(&mut abilities, &sp);
+        assert_eq!(unarmored_rule(Some(&sp), &abilities), Some((12, 2)));
+    }
+
+    #[test]
+    fn both_screens_arrive_at_the_same_armour_class() {
+        let sp = untgaroth();
+        let mut abilities = garn();
+        apply_species(&mut abilities, &sp);
+
+        let ac = crate::equipment::armor_class(
+            ability_mod_of(&abilities, "dex"),
+            &[],
+            crate::equipment::AcMode::Default,
+            None,
+            unarmored_rule(Some(&sp), &abilities),
+        );
+        assert_eq!(ac, 14, "12 + CON 14's +2, unarmoured");
+
+        // What the encounter path used to hand in: no species, DEX 11.
+        let was = crate::equipment::armor_class(
+            0,
+            &[],
+            crate::equipment::AcMode::Default,
+            None,
+            None,
+        );
+        assert_eq!(was, 10, "the four points a goblin was being given");
     }
 
     #[test]

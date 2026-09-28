@@ -33,7 +33,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-use crate::character::Sheet;
+use crate::character::{self, Sheet};
 use crate::death::{self, Condition};
 use crate::equipment::{self, AcMode, Item};
 use crate::narrative::quoted;
@@ -504,25 +504,52 @@ fn batch_character_stats(
         token,
         "characters",
         &[
-            ("select", "id,entity_id,ac_mode,ac_override,hp_max,death_successes,death_failures,dead"),
+            (
+                "select",
+                "id,entity_id,ac_mode,ac_override,hp_max,\
+                 death_successes,death_failures,dead,species_key",
+            ),
             ("id", &format!("in.({})", list)),
         ],
     )?;
 
+    // ALL SIX, NOT JUST DEX.
+    //
+    // This asked for `ability=eq.dex` and computed 10 + DEX for anyone
+    // unarmoured, which is 5e's rule and was the whole rule until 056.
+    // A species can now state its own floor - the Unt'garoth's
+    // Unyielding Defense is 12 + CON - and that needs an ability this
+    // query was not fetching. It also read the STORED score, so a
+    // species bonus never reached the roster's DEX either.
+    //
+    // The cost of the wider read is nothing: same request, one filter
+    // removed, six rows per character instead of one.
     let abil = supabase::rest_get(
         token,
         "character_abilities",
         &[
-            ("select", "character_id,ability,score"),
+            ("select", "character_id,ability,score,save_prof"),
             ("character_id", &format!("in.({})", list)),
-            ("ability", "eq.dex"),
         ],
     )?;
-    let mut dex: HashMap<String, i64> = HashMap::new();
+    let mut scores: HashMap<String, HashMap<String, character::Ability>> = HashMap::new();
     for r in abil.as_array().unwrap_or(&Vec::new()) {
         let score = r.get("score").and_then(|x| x.as_i64()).unwrap_or(10);
-        dex.insert(as_str(r, "character_id"), (score - 10).div_euclid(2));
+        let prof = r.get("save_prof").and_then(|x| x.as_bool()).unwrap_or(false);
+        scores
+            .entry(as_str(r, "character_id"))
+            .or_default()
+            .insert(as_str(r, "ability"), character::Ability::plain(score, prof));
     }
+
+    // Their peoples, in one request for however many are in the fight.
+    let species_keys: Vec<String> = chars
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|r| as_opt_str(r, "species_key"))
+        .collect();
+    let peoples = character::load_species_map(token, game_id, &species_keys)?;
 
     // Equipped rows for everyone at once, then the catalogue for every
     // key they mention. Two requests, not two per character.
@@ -598,17 +625,26 @@ fn batch_character_stats(
         out.insert(
             id.clone(),
             CharStats {
-                ac: equipment::armor_class(
-                    dex.get(&id).copied().unwrap_or(0),
-                    &items,
-                    AcMode::parse(&as_str(r, "ac_mode")),
-                    r.get("ac_override").and_then(|x| x.as_i64()),
-                    // 056: no species on this path. A roster row reads
-                    // AC off the character row and its statblock, and a
-                    // species unarmoured rule would need the abilities
-                    // loaded here, which they are not.
-                    None,
-                ),
+                ac: {
+                    // THE SAME TWO FUNCTIONS THE SHEET USES. The bonus
+                    // is applied by character::apply_species and the
+                    // modifier comes out of character::ability_mod_of,
+                    // so "what it takes to hit Garn" is one answer
+                    // whichever screen asks. It was two.
+                    let mut abilities = scores.get(&id).cloned().unwrap_or_default();
+                    let people = as_opt_str(r, "species_key")
+                        .and_then(|k| peoples.get(&k));
+                    if let Some(sp) = people {
+                        character::apply_species(&mut abilities, sp);
+                    }
+                    equipment::armor_class(
+                        character::ability_mod_of(&abilities, "dex"),
+                        &items,
+                        AcMode::parse(&as_str(r, "ac_mode")),
+                        r.get("ac_override").and_then(|x| x.as_i64()),
+                        character::unarmored_rule(people, &abilities),
+                    )
+                },
                 hp_max: r.get("hp_max").and_then(|x| x.as_i64()),
                 successes: r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0),
                 failures: r.get("death_failures").and_then(|x| x.as_i64()).unwrap_or(0),

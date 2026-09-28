@@ -2509,6 +2509,23 @@ fixing yet, but that is where the latency is if it ever matters.
   alone on purpose: it has just read the species to grant skills, so
   asking the loader would re-read what it is holding. It calls the
   same `species::effective_score` the loader does.
+- **A POSTGREST EMBED NEEDS EXACTLY ONE RELATIONSHIP, AND 051 ADDED A
+  SECOND.** `encounter_actors.encounter_id` has pointed at
+  `encounters` since 011; 051 added `encounters.turn_actor_id`
+  pointing back. Two paths, so `encounter_actors?select=encounters
+  (game_id)` is refused outright - "more than one relationship was
+  found", a 300 - and it is refused at RUN TIME, on a table pair that
+  was embeddable when the older half was written.
+
+  The good news is that it says so. Compare the two selects traps
+  above, which both produced a calm wrong answer. The fix was to ask
+  through `characters(game_id)`, the one unambiguous hop, rather than
+  to name the constraint - a constraint name in a query is a schema
+  detail no migration is obliged to keep.
+
+  WORTH CHECKING BEFORE ADDING AN EMBED: whether the other table
+  points back. `actions -> rolls` in `commands/log.rs` is still a
+  single path.
 - **Versatile weapons store their second die and nothing reads it.**
   027 added `items.versatile_number` / `versatile_denomination` so a
   longsword row is not a lie, but the engine still offers the 1d8. The

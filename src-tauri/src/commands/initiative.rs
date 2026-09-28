@@ -294,7 +294,18 @@ fn dex_of_actor(token: &str, actor_id: &str) -> Result<i64, String> {
         token,
         "encounter_actors",
         &[
-            ("select", "id,character_id,encounters(game_id)"),
+            // THE CHARACTER'S GAME, NOT THE ENCOUNTER'S - and they are
+            // the same game, so this is about which embed PostgREST
+            // will accept. `encounters(game_id)` is refused: 051 added
+            // `encounters.turn_actor_id` pointing back at this table,
+            // so there are now TWO relationships between the pair and
+            // PostgREST will not guess which one is meant. It says so
+            // plainly, which is the good version of this failure.
+            //
+            // A character belongs to exactly one game and an actor to
+            // exactly one character, so this answers the same question
+            // through the one unambiguous path.
+            ("select", "id,character_id,characters(game_id)"),
             ("id", &format!("eq.{}", actor_id)),
         ],
     )?;
@@ -304,8 +315,8 @@ fn dex_of_actor(token: &str, actor_id: &str) -> Result<i64, String> {
         .cloned()
         .ok_or_else(|| "no such creature in an encounter you can see".to_string())?;
     let game_id = actor
-        .get("encounters")
-        .and_then(|e| e.get("game_id"))
+        .get("characters")
+        .and_then(|c| c.get("game_id"))
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();

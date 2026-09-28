@@ -853,8 +853,15 @@ pub fn set_actor_level(
         )
     })?;
 
-    let con = load_ability(&token, &character_id, "con")?;
-    let hp_max = crate::vitality::average_hp(level, die, (con - 10).div_euclid(2));
+    // THE EFFECTIVE CONSTITUTION, people included. This read the score
+    // straight off the row, which is fine for the goblin this button
+    // was written for and wrong for anybody with a species: since 022
+    // an enrolled PC is levelled through exactly this path, and a
+    // stored 13 against an effective 14 costs a level 5 character five
+    // hit points - written over the maximum `rederive_hp_max` got
+    // right, so the two writers disagreed about one number.
+    let eff = crate::character::load_effective(&token, &p.game_id, &[character_id.clone()])?;
+    let hp_max = crate::vitality::average_hp(level, die, eff.modifier(&character_id, "con"));
 
     supabase::rest_update(
         &token,
@@ -883,29 +890,10 @@ pub fn set_actor_level(
     }))
 }
 
-/// One ability score. The level path needs Constitution and nothing
-/// else, and `load_sheet` would fetch a skill catalogue and a loadout
-/// to get it.
-fn load_ability(token: &str, character_id: &str, code: &str) -> Result<i64, String> {
-    let rows = supabase::rest_get(
-        token,
-        "character_abilities",
-        &[
-            ("select", "score"),
-            ("character_id", &format!("eq.{}", character_id)),
-            ("ability", &format!("eq.{}", code)),
-        ],
-    )?;
-    Ok(rows
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|r| r.get("score"))
-        .and_then(|x| x.as_i64())
-        // Ten is the average and the schema seeds all six on creation,
-        // so an absent row is a fault elsewhere and not a reason to
-        // refuse. A modifier of zero is the harmless reading.
-        .unwrap_or(10))
-}
+// `load_ability` was here: one score off the row, for the level path.
+// It read what was STORED, which is not what a character with a people
+// has - `character::load_effective` is the one loader that knows the
+// difference, and an uncalled helper is a defect rather than a spare.
 
 
 /// Make somebody a shopkeeper, or stop them being one.

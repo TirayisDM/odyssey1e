@@ -2479,21 +2479,36 @@ fixing yet, but that is where the latency is if it ever matters.
   `set_encounter_location` and `destroy_object` got the screens they
   were waiting for, and `loose_objects`, `load_techniques` and
   `list_roster` were deleted. Wire or retire, one at a time.
-- **A DERIVED NUMBER COMPUTED IN TWO PLACES WILL BE TWO NUMBERS.** The
-  sheet and the encounter's target list both work out armour class,
-  and when 056 gave a species its own unarmoured floor only the sheet
-  learned it: Garn read AC 14 on his sheet and AC 10 on the list a
-  goblin's attack resolves against. Both now go through
-  `character::apply_species`, `ability_mod_of` and `unarmored_rule`,
-  so neither can move without the other.
+- **A STORED SCORE IS NOT AN EFFECTIVE ONE, AND FOUR PLACES READ THE
+  WRONG ONE.** 056 keeps a people's bonus out of
+  `character_abilities` deliberately, so the row holds what somebody
+  rolled and the character has something else. Every site that turned
+  a score into a modifier had to know that, and each had been written
+  before there was anything to know:
 
-  THE SAME ROOT IS STILL LIVE IN TWO PLACES. `commands::dm::
-  set_actor_level` reads Constitution off the row with no species
-  bonus, so levelling an enrolled character through the Run tab
-  recomputes their maximum low and overwrites what `rederive_hp_max`
-  got right. And `commands::initiative` takes DEX off the row for the
-  initiative roll - latent only because neither seeded people has a
-  DEX bonus. Both are the same fix: read the effective score.
+      the target list    AC off the stored DEX and no species floor -
+                         Garn read 14 on his sheet and 10 on the list
+                         a goblin's attack resolves against
+      the level button   Constitution off the row, so levelling an
+                         enrolled character recomputed their maximum
+                         five points low, over what rederive_hp_max
+                         had got right
+      initiative         DEX off the row; latent only because neither
+                         seeded people raises DEX
+      rederive_hp_max    correct, and a second copy of the resolution,
+                         which is how the other three stayed wrong
+
+  `character::load_effective` is the one loader now: stored rows
+  raised by each character's people, three requests for any number of
+  them, with `modifier()` and `unarmored()` on the result. All four
+  call it. `load_sheet` does not, only because it is already reading
+  everything for one character - it reaches the same answer through
+  the same `apply_species`.
+
+  Character creation also resolves its own Constitution, and is left
+  alone on purpose: it has just read the species to grant skills, so
+  asking the loader would re-read what it is holding. It calls the
+  same `species::effective_score` the loader does.
 - **Versatile weapons store their second die and nothing reads it.**
   027 added `items.versatile_number` / `versatile_denomination` so a
   longsword row is not a lie, but the engine still offers the 1d8. The

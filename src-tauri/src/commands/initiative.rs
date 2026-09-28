@@ -43,7 +43,7 @@ pub fn turn_order(state: State<AppState>, encounter_id: String) -> Result<Value,
         &token,
         "encounters",
         &[
-            ("select", "id,name,status,round,turn_actor_id"),
+            ("select", "id,name,status,round,turn_actor_id,game_id"),
             ("id", &format!("eq.{}", encounter_id)),
         ],
     )?;
@@ -71,7 +71,9 @@ pub fn turn_order(state: State<AppState>, encounter_id: String) -> Result<Value,
         }));
     }
 
-    let dex = dex_by_character(&token, &actors)?;
+    // The game, because a people can be overridden per game and a
+    // DEX modifier now resolves through one.
+    let dex = dex_by_character(&token, &as_text(&enc, "game_id"), &actors)?;
 
     let contenders: Vec<Contender> = actors
         .iter()
@@ -248,10 +250,19 @@ fn as_text(v: &Value, key: &str) -> String {
     v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
 }
 
-/// DEX modifier per character, for every character in the roster, in
-/// one read.
+/// DEX modifier per character, for every character in the roster.
+///
+/// THE EFFECTIVE SCORE, NOT THE STORED ONE. This read `eq.dex` off the
+/// row and subtracted ten, which was the whole answer until 056: a
+/// people's bonus is deliberately never written into
+/// `character_abilities`, so the row holds what somebody rolled and
+/// the character has something else. Initiative was therefore rolled
+/// on the wrong modifier for anybody whose people raises DEX. Neither
+/// seeded people does, which is why nobody saw it - and why it is
+/// worth fixing before the third species arrives rather than after.
 fn dex_by_character(
     token: &str,
+    game_id: &str,
     actors: &[Value],
 ) -> Result<std::collections::HashMap<String, i64>, String> {
     let ids: Vec<String> = actors
@@ -264,32 +275,26 @@ fn dex_by_character(
         return Ok(out);
     }
 
-    let rows = supabase::rest_get(
-        token,
-        "character_abilities",
-        &[
-            ("select", "character_id,score"),
-            ("ability", "eq.dex"),
-            ("character_id", &format!("in.({})", ids.join(","))),
-        ],
-    )?;
-    for r in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
-        let Some(id) = r.get("character_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let score = r.get("score").and_then(|v| v.as_i64()).unwrap_or(10);
-        // The same floor-toward-negative the sheet uses.
-        out.insert(id.to_string(), (score - 10).div_euclid(2));
+    let eff = crate::character::load_effective(token, game_id, &ids)?;
+    for id in ids {
+        let m = eff.modifier(&id, "dex");
+        out.insert(id, m);
     }
     Ok(out)
 }
 
+/// One creature's DEX, for its own roll.
+///
+/// THE GAME TRAVELS WITH THE ACTOR, embedded rather than fetched
+/// separately: a people can be overridden per game, so resolving a
+/// score needs to know whose game this is, and `roll_for` is handed an
+/// actor id and nothing else.
 fn dex_of_actor(token: &str, actor_id: &str) -> Result<i64, String> {
     let rows = supabase::rest_get(
         token,
         "encounter_actors",
         &[
-            ("select", "id,character_id"),
+            ("select", "id,character_id,encounters(game_id)"),
             ("id", &format!("eq.{}", actor_id)),
         ],
     )?;
@@ -298,5 +303,14 @@ fn dex_of_actor(token: &str, actor_id: &str) -> Result<i64, String> {
         .and_then(|a| a.first())
         .cloned()
         .ok_or_else(|| "no such creature in an encounter you can see".to_string())?;
-    Ok(*dex_by_character(token, &[actor])?.values().next().unwrap_or(&0))
+    let game_id = actor
+        .get("encounters")
+        .and_then(|e| e.get("game_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(*dex_by_character(token, &game_id, &[actor])?
+        .values()
+        .next()
+        .unwrap_or(&0))
 }

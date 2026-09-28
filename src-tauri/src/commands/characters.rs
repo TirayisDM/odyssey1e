@@ -429,19 +429,12 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
     // THE EFFECTIVE CONSTITUTION, species bonus included - the same
     // number creation used. Reading the stored score here is how a
     // re-derivation would quietly disagree with the value it replaced.
-    let stored_con = load_con(token, character_id).unwrap_or(10);
-    let con = match row.get("species_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-        Some(sk) => match crate::character::load_species(token, game_id, sk)? {
-            Some(sp) => species::effective_score(
-                stored_con,
-                sp.bonus_for("con"),
-                sp.maximum_for("con"),
-            ),
-            None => stored_con,
-        },
-        None => stored_con,
-    };
-    let hp = vitality::pc_hp(c.hit_die, level, (con - 10).div_euclid(2));
+    // Resolved here first, and correctly - which made it the second
+    // copy of a rule that turned out to be wrong in three other
+    // places. One loader answers it now for all four: this, the
+    // target list, the initiative roll and the level button.
+    let eff = crate::character::load_effective(token, game_id, &[character_id.to_string()])?;
+    let hp = vitality::pc_hp(c.hit_die, level, eff.modifier(character_id, "con"));
     supabase::rest_update(
         token,
         "characters",

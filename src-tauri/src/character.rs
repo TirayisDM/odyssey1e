@@ -591,19 +591,168 @@ pub(crate) fn load_species_map(
     if wanted.is_empty() {
         return Ok(HashMap::new());
     }
+    // NO GAME MEANS THE GLOBAL ROWS, not a broken filter. A caller can
+    // arrive without one - `roll_for` is handed an actor id and reads
+    // the game off its encounter, which RLS can refuse - and
+    // `game_id.eq.` with nothing after it is a 400 that would take the
+    // initiative roll down with it. The global species is the right
+    // answer there; only a game's own override is lost.
+    let scope = if game_id.is_empty() {
+        "(game_id.is.null)".to_string()
+    } else {
+        format!("(game_id.is.null,game_id.eq.{})", game_id)
+    };
     let rows = supabase::rest_get(
         token,
         "species",
         &[
             ("select", crate::species::SPECIES_COLUMNS),
             ("key", &format!("in.({})", wanted.join(","))),
-            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("or", &scope),
         ],
     )?;
     Ok(crate::species::collapse(rows.as_array().unwrap_or(&Vec::new()))
         .into_iter()
         .map(|sp| (sp.key.clone(), sp))
         .collect())
+}
+
+/// EFFECTIVE ABILITY SCORES FOR A SET OF CHARACTERS, with each one's
+/// people already applied - and the peoples themselves, because the
+/// unarmoured floor needs the species as well as the modifier.
+///
+/// WHY THIS EXISTS. Four separate places read `character_abilities`
+/// and turned a score into a modifier: the target list, the initiative
+/// roll, the level button and the hit-point rederivation. Every one of
+/// them read the STORED number, which is what somebody rolled and not
+/// what the character has - 056 keeps those apart on purpose. The
+/// target list is where it showed first and worst, reading Garn at AC
+/// 10 while his sheet said 14.
+///
+/// One loader, so the next screen that needs a modifier cannot get a
+/// different answer than the sheet. `load_sheet` does not use it only
+/// because it is already reading everything for one character; it
+/// applies the same `apply_species` to get there.
+pub(crate) struct Effective {
+    scores: HashMap<String, HashMap<String, Ability>>,
+    peoples: HashMap<String, crate::species::Species>,
+}
+
+impl Effective {
+    /// Built from rows a test has in hand rather than from the
+    /// network, so the defaults every call site leans on are pinned.
+    #[cfg(test)]
+    pub(crate) fn of(
+        scores: HashMap<String, HashMap<String, Ability>>,
+        peoples: HashMap<String, crate::species::Species>,
+    ) -> Self {
+        Effective { scores, peoples }
+    }
+
+    /// The modifier, species bonus included. Zero for a character with
+    /// no rows, which is what every one of the four sites defaulted to
+    /// and is the harmless reading - the schema seeds all six on
+    /// creation, so an absent row is a fault elsewhere.
+    pub(crate) fn modifier(&self, character_id: &str, code: &str) -> i64 {
+        match self.scores.get(character_id) {
+            Some(a) => ability_mod_of(a, code),
+            None => 0,
+        }
+    }
+
+    /// Their species' unarmoured floor, resolved against their own
+    /// scores. None for anyone whose people does not state one.
+    pub(crate) fn unarmored(&self, character_id: &str) -> Option<(i64, i64)> {
+        let abilities = self.scores.get(character_id)?;
+        unarmored_rule(self.peoples.get(character_id), abilities)
+    }
+}
+
+/// Three requests for any number of characters: who they are, what
+/// they rolled, and what their peoples add.
+pub(crate) fn load_effective(
+    token: &str,
+    game_id: &str,
+    character_ids: &[String],
+) -> Result<Effective, String> {
+    let ids: Vec<String> = character_ids
+        .iter()
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if ids.is_empty() {
+        return Ok(Effective {
+            scores: HashMap::new(),
+            peoples: HashMap::new(),
+        });
+    }
+    let list = ids.join(",");
+
+    let chars = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "id,species_key"),
+            ("id", &format!("in.({})", list)),
+        ],
+    )?;
+    let mut key_of: HashMap<String, String> = HashMap::new();
+    for r in chars.as_array().unwrap_or(&Vec::new()) {
+        if let (Some(id), Some(k)) = (
+            r.get("id").and_then(|v| v.as_str()),
+            r.get("species_key").and_then(|v| v.as_str()),
+        ) {
+            if !k.is_empty() {
+                key_of.insert(id.to_string(), k.to_string());
+            }
+        }
+    }
+
+    let rows = supabase::rest_get(
+        token,
+        "character_abilities",
+        &[
+            ("select", "character_id,ability,score,save_prof"),
+            ("character_id", &format!("in.({})", list)),
+        ],
+    )?;
+
+    let catalogue = load_species_map(
+        token,
+        game_id,
+        &key_of.values().cloned().collect::<Vec<_>>(),
+    )?;
+
+    let mut scores: HashMap<String, HashMap<String, Ability>> = HashMap::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(cid) = r.get("character_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(code) = r.get("ability").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let score = r.get("score").and_then(|v| v.as_i64()).unwrap_or(10);
+        let prof = r.get("save_prof").and_then(|v| v.as_bool()).unwrap_or(false);
+        scores
+            .entry(cid.to_string())
+            .or_default()
+            .insert(code.to_string(), Ability::plain(score, prof));
+    }
+
+    let mut peoples: HashMap<String, crate::species::Species> = HashMap::new();
+    for (cid, key) in &key_of {
+        let Some(sp) = catalogue.get(key) else {
+            continue;
+        };
+        if let Some(abilities) = scores.get_mut(cid) {
+            apply_species(abilities, sp);
+        }
+        peoples.insert(cid.clone(), sp.clone());
+    }
+
+    Ok(Effective { scores, peoples })
 }
 
 /// A species' unarmoured floor, with its ability already resolved to a
@@ -1129,6 +1278,44 @@ mod tests {
         // both screens now compute from.
         apply_species(&mut abilities, &sp);
         assert_eq!(unarmored_rule(Some(&sp), &abilities), Some((12, 2)));
+    }
+
+    /// The four sites that ask this loader - the target list, the
+    /// initiative roll, the level button and the hit-point
+    /// rederivation - all lean on the same two defaults, so both are
+    /// stated here rather than rediscovered at each one.
+    #[test]
+    fn the_loader_answers_for_everybody_including_the_unknown() {
+        let sp = untgaroth();
+        let mut abilities = garn();
+        apply_species(&mut abilities, &sp);
+
+        let mut scores = HashMap::new();
+        scores.insert("garn".to_string(), abilities);
+        let mut peoples = HashMap::new();
+        peoples.insert("garn".to_string(), sp);
+        let eff = Effective::of(scores, peoples);
+
+        assert_eq!(eff.modifier("garn", "con"), 2, "13 stored, 14 with his people");
+        assert_eq!(eff.modifier("garn", "str"), 5, "18 stored, 20 with his people");
+        assert_eq!(eff.unarmored("garn"), Some((12, 2)));
+
+        // A creature with no rows at all - every monster - reads zero
+        // and no floor, which is what all four sites did before.
+        assert_eq!(eff.modifier("a goblin", "dex"), 0);
+        assert_eq!(eff.unarmored("a goblin"), None);
+    }
+
+    /// A character whose people states no floor keeps 5e's.
+    #[test]
+    fn a_people_without_a_floor_leaves_the_ordinary_one() {
+        let mut sp = untgaroth();
+        sp.unarmored_ac_base = None;
+        let mut scores = HashMap::new();
+        scores.insert("x".to_string(), garn());
+        let mut peoples = HashMap::new();
+        peoples.insert("x".to_string(), sp);
+        assert_eq!(Effective::of(scores, peoples).unarmored("x"), None);
     }
 
     #[test]

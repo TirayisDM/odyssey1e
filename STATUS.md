@@ -2486,9 +2486,11 @@ fixing yet, but that is where the latency is if it ever matters.
   a score into a modifier had to know that, and each had been written
   before there was anything to know:
 
-      the target list    AC off the stored DEX and no species floor -
-                         Garn read 14 on his sheet and 10 on the list
-                         a goblin's attack resolves against
+      the target list    AC off the stored DEX, and None where the
+                         species floor goes, so an unarmoured
+                         Unt'garoth reads 10 + DEX on the list a
+                         goblin's attack resolves against and 12 + CON
+                         on their own sheet
       the level button   Constitution off the row, so levelling an
                          enrolled character recomputed their maximum
                          five points low, over what rederive_hp_max
@@ -2497,6 +2499,20 @@ fixing yet, but that is where the latency is if it ever matters.
                          seeded people raises DEX
       rederive_hp_max    correct, and a second copy of the resolution,
                          which is how the other three stayed wrong
+
+  NO LIVE VICTIM, and the first account of this said there was one.
+  Garn was cited as reading 14 on his sheet against 10 on the target
+  list. He wears CHAIN MAIL - base 16, dex cap 0 - and body armour
+  beats the unarmoured floor, so both screens said 16 before the fix
+  and both say 16 after it. The claim came from a query written
+  against `objects.holder_id = characters.id`, which answers zero for
+  everybody: since 031 a holder is an ENTITY and the join is through
+  `characters.entity_id`. A wrong join returning no rows reads exactly
+  like a character with no armour.
+
+  The defect in the code was real and is worth the fix - the target
+  list plainly passed None and plainly read stored scores. What it did
+  not have was a character it was wrong about yet.
 
   `character::load_effective` is the one loader now: stored rows
   raised by each character's people, three requests for any number of

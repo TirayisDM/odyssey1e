@@ -420,6 +420,8 @@ and not after.
     instead of four, and the Unt'gar
 058 what a character looks like - the body, spoken and written kept
     apart, and a trait that can cost you something
+059 a short stride is a cost - the Unt'gar's 25 feet, said where a
+    player will look for it
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2157,6 +2159,59 @@ and the untouched ones carrying their current values - 036's convention.
 Verified live and rolled back on Garn: every column takes the write, and
 `to_json(height_ft)` is `9.0`, a bare number, read through
 `supabase::numeric_at` like every other numeric in the app.
+
+## The sheet's subtabs - FOUR OF SIX (058, 059, and the split)
+
+    Stats              level and abilities
+    Description        species, body, features, drawbacks, languages
+    Equipment          weapons, loot, general - in that order
+    Skills & Talents   skills, proficiencies, talents and where each came from
+
+Combat, spells and background are the obvious remaining two or three.
+Every one is a button and a pane: `#sheet-tabs` runs on `showSub`, the
+same helper the Characters tabs have used since 033.
+
+**EQUIPMENT IS THREE DIVISIONS AND THE ORDER IS THE POINT.** What you
+fight with first, because it is what you reach for under pressure; what
+you are carrying out second, because it is what the session was for;
+everything else after. One flat list sorted by nothing made a greatsword
+and a blanket equally hard to find.
+
+The grouping is the catalogue's own `kind` - the column the engine
+already branches on for the one-armour rule - rather than a
+classification invented on the screen. GENERAL IS DEFINED AS THE
+LEFTOVERS rather than as a list of kinds, so a kind nobody has thought
+of yet lands there instead of vanishing off the screen.
+
+**PROFICIENCIES MOVED TO SKILLS & TALENTS.** What a person is trained
+with is a fact about them rather than about what is in their pack, and
+every weapon row already says `proficient` on its own - which was the
+half that belonged beside the gear.
+
+**A TALENT NAMES ITS SOURCE.** The Talents section lists the applied
+species traits and the skills a people grants outright, each tagged with
+where it came from - so a player can see why Athletics is ticked when
+they never chose it. Drawbacks and the full prose stay on Description:
+that tab is the "who you are" reading and this one is "what can you do",
+which is why the same traits appear differently in each rather than
+twice the same way. Class features join these when 055's deliberate
+omission is filled in.
+
+## A bug that had been on screen since 008
+
+`[hidden]` did nothing to any element carrying a class that sets
+`display`. The browser's own `[hidden]` rule is a UA default with almost
+no specificity, and `.row{display:flex}` beats it.
+
+The visible cost was the PROFICIENCY EDITOR, which has sat permanently
+expanded under the trained line on every character sheet since it was
+written - carrying `hidden` the whole time and honouring it never. It is
+in the first screenshot of the app in this project's history and nobody
+read it as a fault, because a form that is always open looks like a form.
+
+Fixed globally - `[hidden]{display:none !important}` - rather than on the
+one element, because every other `hidden` in the app was one `display`
+rule away from the same thing.
 
 ## Pick up here
 

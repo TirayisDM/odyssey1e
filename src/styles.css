@@ -28,6 +28,17 @@ button.tiny{padding:.1rem .45rem;font-size:11px;margin:0}
    PIN and looked identical to it, which is how a stored token
    disappears without anybody deciding to remove it. */
 button.ghost.danger{color:var(--bad);border-color:var(--bad)}
+/* HIDDEN HAS TO WIN. The browser's own [hidden] rule is a UA default
+   with almost no specificity, so ANY class that sets `display` beats
+   it - and `.row{display:flex}` immediately below does.
+
+   The cost of not having this was a permanently expanded proficiency
+   editor sitting under the trained line on every character sheet since
+   008, carrying `hidden` the whole time and honouring it never. Every
+   other `hidden` in this app was one `display` rule away from the same
+   fate, so the fix belongs here rather than on the one element. */
+[hidden]{display:none !important}
+
 .row{display:flex;gap:.4rem}
 .row button{flex:1}
 .muted{color:var(--muted)}
@@ -446,3 +457,21 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 @media (max-width: 560px) {
   .lang-name { min-width: 100%; }
 }
+
+/* ============ SKILLS & TALENTS (060) ============ */
+
+.talent {
+  border-left: 2px solid var(--accent, #4a6fa5);
+  padding: .35rem 0 .35rem .6rem;
+  margin: .35rem 0;
+}
+.talent-name { display: flex; align-items: center; gap: .5rem; font-weight: 600; }
+.talent-text { opacity: .88; line-height: 1.45; margin-top: .15rem; }
+
+/* Where a talent came from. Muted rather than loud - the source is
+   context, not the headline. */
+.tag-src { background: rgba(74,111,165,.25); }
+
+/* The equipment divisions. A heading with nothing under it should read
+   as an answer, not as a loading state. */
+.sheet-pane .list .flat.muted { opacity: .5; font-style: italic; }

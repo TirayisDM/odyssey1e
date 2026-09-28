@@ -181,7 +181,12 @@ function clearData() {
   state.encounterId = null;
   state.dmEncounterId = null;
   document.querySelector("#sheet-panel").hidden = true;
-  document.querySelector("#equipment-panel").hidden = true;
+  // The equipment pane is a SHEET TAB now and its visibility belongs to
+  // showSub. Clearing it is what "no character" means here.
+  for (const id of ["#inv-weapons", "#inv-loot", "#inv-general"]) {
+    const n = document.querySelector(id);
+    if (n) n.innerHTML = "";
+  }
   // Signing out as the DM must not leave the DM panel on screen for
   // whoever signs in next.
   for (const id of ["#run-panel", "#world-panel"]) {
@@ -589,6 +594,53 @@ function sizeWarning(sp) {
 // THE SPECIES STATES A BAND AND THE CHARACTER STATES A VALUE, so this
 // shows one against the other: 8 ft is ordinary for an Unt'garoth and
 // 6 ft is short, and only the pair can say which.
+// WHAT THIS CHARACTER CAN DO THAT ANOTHER CANNOT. 060.
+//
+// Skills and proficiencies are above; this is the rest - the species
+// traits the engine actually applies. NOT the whole trait list: the
+// prose, the lore and the drawbacks live on Description, which is the
+// "who you are" reading. This is the "what can you do" one, so it shows
+// the applied ones only, compactly, and says where each came from.
+//
+// A TALENT WITH NO SOURCE IS A TALENT NOBODY CAN AUDIT, which is why
+// every line names one. Class features will join these when 055's
+// deliberate omission is filled in.
+function paintTalents(sheet) {
+  const host = document.querySelector("#talents");
+  if (!host) return;
+  host.innerHTML = "";
+  const sp = sheet.species || null;
+
+  const rows = [];
+  for (const t of (sp && sp.traits) || []) {
+    // Applied only. A DM-adjudicated trait is real but it is not a
+    // thing this character can DO without somebody ruling on it, and
+    // Description already lists them all with their prose.
+    if (!t.applied || t.kind === "drawback") continue;
+    rows.push([t.name, t.text, sp.name]);
+  }
+
+  // Skills the species handed over outright, named so a player can see
+  // why Athletics is ticked when they never chose it.
+  for (const k of (sp && sp.skill_profs) || []) {
+    const def = (sheet.skills || []).find((x) => x.key === k);
+    rows.push([(def && def.name) || k, "Granted outright by your people.", sp.name]);
+  }
+
+  if (!rows.length) {
+    host.append(sEl("div", "muted", "nothing beyond the skills above"));
+    return;
+  }
+  for (const [name, text, from] of rows) {
+    const box = sEl("div", "talent");
+    const head = sEl("div", "talent-name");
+    head.append(sEl("span", "", name));
+    head.append(sEl("span", "tag tag-src", from));
+    box.append(head, sEl("div", "talent-text", text));
+    host.append(box);
+  }
+}
+
 function paintDescription(sheet) {
   const sp = sheet.species || null;
   const body = sheet.body || {};
@@ -871,11 +923,11 @@ async function loadSheet() {
     " · AC " + sheet.armor_class + hp;
   document.querySelector("#level").value = sheet.level;
 
-  // 058. The Description subtab - species, body, features, drawbacks
-  // and tongues. Painted with the rest of the sheet rather than on tab
-  // click, because it is the same one read and a hidden pane costs
-  // nothing to fill.
+  // 058/060. The subtabs are painted with the rest of the sheet rather
+  // than on tab click: it is all one read, and filling a hidden pane
+  // costs nothing.
   paintDescription(sheet);
+  paintTalents(sheet);
 
   // Abilities
   const box = document.querySelector("#abilities");
@@ -987,14 +1039,25 @@ async function loadSheet() {
 // the panel adds is the EVIDENCE: the character's proficiencies at the
 // top and each item's class beside it, so a "not prof" can be read
 // rather than taken on trust.
+// THREE DIVISIONS, in the order a player reaches for them: what you
+// fight with, what you are carrying out, and the rest. The grouping is
+// the catalogue's own `kind` - the same column the engine branches on
+// for the one-armour rule - rather than a classification invented here.
+const INV_DIVISIONS = [
+  ["#inv-weapons", (it) => it.item.kind === "weapon", "no weapons"],
+  ["#inv-loot", (it) => it.item.kind === "loot", "nothing worth selling"],
+  // EVERYTHING ELSE, defined as the leftovers rather than as a list of
+  // kinds. A kind nobody has thought of yet lands here instead of
+  // vanishing off the screen, which is what an explicit list would do.
+  ["#inv-general", (it) => it.item.kind !== "weapon" && it.item.kind !== "loot", "nothing else"],
+];
+
 async function loadInventory() {
-  const panel = document.querySelector("#equipment-panel");
-  const list = document.querySelector("#inventory");
-  if (!state.characterId) { panel.hidden = true; return; }
+  const lists = INV_DIVISIONS.map(([sel]) => document.querySelector(sel));
+  for (const l of lists) if (l) l.innerHTML = "";
+  if (!state.characterId) return;
 
   const items = await call("list_inventory", { characterId: state.characterId });
-  panel.hidden = false;
-  list.innerHTML = "";
 
   const sheet = state.sheet || {};
   // NONE IS WORTH SAYING LOUDLY. A character trained with nothing is
@@ -1042,18 +1105,25 @@ async function loadInventory() {
     burdenEl.textContent = "";
   }
 
-  if (!Array.isArray(items) || items.length === 0) {
-    const li = document.createElement("li");
-    li.className = "flat muted";
-    li.textContent = "carrying nothing";
-    list.append(li);
-    return;
-  }
+  if (!Array.isArray(items)) return;
 
   // Kept so a row can offer the OTHER rows as somewhere to put itself.
+  // THE WHOLE LIST, not the division - a weapon can be put into a
+  // backpack, and the backpack is in General.
   state.inventory = items;
-  for (const it of items) {
-    list.append(inventoryRow(it));
+
+  for (const [sel, belongs, empty] of INV_DIVISIONS) {
+    const list = document.querySelector(sel);
+    if (!list) continue;
+    const mine = items.filter(belongs);
+    if (!mine.length) {
+      const li = document.createElement("li");
+      li.className = "flat muted";
+      li.textContent = empty;
+      list.append(li);
+      continue;
+    }
+    for (const it of mine) list.append(inventoryRow(it));
   }
 }
 

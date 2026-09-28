@@ -109,6 +109,8 @@
         <nav class="tabs mini" id="sheet-tabs">
           <button class="tab on" data-sheet="stats">Stats</button>
           <button class="tab" data-sheet="description">Description</button>
+          <button class="tab" data-sheet="equipment">Equipment</button>
+          <button class="tab" data-sheet="skills">Skills &amp; Talents</button>
         </nav>
 
         <div class="sheet-pane" data-sheet="stats">
@@ -117,7 +119,6 @@
             <button id="save-level" class="ghost">Set level</button>
           </div>
           <div id="abilities" class="abils"></div>
-          <div id="skills" class="list"></div>
         </div>
 
         <div class="sheet-pane" data-sheet="description" hidden>
@@ -149,15 +150,52 @@
           <div class="sub">Languages</div>
           <div id="desc-languages"></div>
         </div>
-      </section>
+      <!-- ===================== EQUIPMENT ===================== -->
+      <div class="sheet-pane" data-sheet="equipment" hidden>
+        <div id="burden" class="muted trained burden"></div>
+        <div id="purse" class="muted trained"></div>
+        <!-- The designed way to acquire something. Until 026 there was
+             none: equipping an item you did not own created it, because
+             the write underneath was an upsert. -->
+        <div class="row">
+          <select id="add-what"></select>
+          <input id="add-qty" type="number" min="1" value="1" class="narrow" />
+          <button id="add-item" class="ghost">Add</button>
+          <button id="check-keys" class="tiny ghost">check keys</button>
+        </div>
 
-      <section id="equipment-panel" hidden>
-        <h2>Equipment <button id="check-keys" class="tiny ghost">check keys</button></h2>
+        <!-- THREE DIVISIONS, IN THIS ORDER, and the order is the point.
+             What you fight with comes first because it is what you
+             reach for under pressure; what you are carrying out comes
+             second because it is what the session was for; everything
+             else is the rest. One list sorted by nothing made a
+             greatsword and a blanket equally hard to find. -->
+        <div class="sub">Weapons</div>
+        <ul id="inv-weapons" class="list"></ul>
+
+        <div class="sub">Loot</div>
+        <ul id="inv-loot" class="list"></ul>
+
+        <div class="sub">General</div>
+        <ul id="inv-general" class="list"></ul>
+      </div>
+
+      <!-- ================= SKILLS &amp; TALENTS ================= -->
+      <div class="sheet-pane" data-sheet="skills" hidden>
+        <div id="skills" class="list"></div>
+
         <!-- TRAINED WITH WHAT. Read since 008 and written by nothing
-             until now: a statblock got its proficiencies at authoring
-             and a player character got whatever 006 seeded, so a
-             character with an empty list read as not proficient with
-             everything and had no way to say otherwise. -->
+             until 022: a statblock got its proficiencies at authoring
+             and a player character got whatever 006 seeded, so one with
+             an empty list read as not proficient with everything and
+             had no way to say otherwise.
+
+             IT LIVES HERE NOW rather than over the inventory. What a
+             person is trained with is a fact about them, not about
+             what is in their pack - and each weapon row already says
+             `proficient` on its own, which is the half that belonged
+             beside the gear. -->
+        <div class="sub">Proficiencies</div>
         <div id="equip-profs" class="muted trained">
           <span id="profs-text"></span>
           <button id="edit-profs" class="tiny ghost">edit</button>
@@ -168,17 +206,10 @@
           <button id="save-profs" class="ghost">Save</button>
         </div>
         <div id="profs-msg" class="dm-msg" hidden></div>
-        <div id="burden" class="muted trained burden"></div>
-        <div id="purse" class="muted trained"></div>
-        <!-- The designed way to acquire something. Until 026 there was
-             none: equipping an item you did not own created it, because
-             the write underneath was an upsert. -->
-        <div class="row">
-          <select id="add-what"></select>
-          <input id="add-qty" type="number" min="1" value="1" class="narrow" />
-          <button id="add-item" class="ghost">Add</button>
-        </div>
-        <ul id="inventory" class="list"></ul>
+
+        <div class="sub">Talents</div>
+        <div id="talents"></div>
+      </div>
       </section>
 
       <section>

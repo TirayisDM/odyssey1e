@@ -4060,10 +4060,24 @@ async function selectEncounter(id) {
       tags.append(chip(a.death_successes + "/" + a.death_failures + " saves", "no"));
     if (tags.childElementCount) li.append(tags);
 
-    // A monster acts. Characters do not get buttons here — their player
-    // rolls for them from the sheet, which is the whole point of a
-    // player having one.
-    if (a.npc_key && a.active && !a.dead) {
+    // EVERYBODY IN THE FIGHT SWINGS FROM HERE.
+    //
+    // This asked `a.npc_key`, which reads as "is this a monster" and
+    // actually means "was this stamped from a statblock". Since 022 an
+    // NPC *is* a character and the key is only a note about where it
+    // came from, so the question was never the one being asked - and
+    // the merchant settled it from the other side: a merchant can be a
+    // PC or an NPC, and which one it is must not decide whether the DM
+    // can make it attack.
+    //
+    // The old note said a player rolls from their own sheet, which is
+    // true and unchanged. Two doors to the same swing is not a
+    // problem: the DM's is for the character whose player is not here,
+    // or is one the DM runs. `npc_attack` builds its sheet from the
+    // actor's character either way - there is no monster branch under
+    // any of this - and the insert policies ask for membership, not
+    // for who owns the creature.
+    if (a.active && !a.dead) {
       li.append(await attackRow(a, id));
     }
 

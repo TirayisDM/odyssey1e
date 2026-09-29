@@ -272,6 +272,48 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    from the statblock's weapons, one per mode. */
 .attacks{display:flex;gap:.25rem;flex-wrap:wrap;align-items:center;margin-top:.15rem}
 .attacks select{width:auto;flex:1;min-width:9rem;margin:0;padding:.18rem .3rem;font-size:11px}
+/* THE FIGHT CARD. Two columns while there is room for two; one
+   underneath the other on a narrow screen, actor first, because the
+   creature whose go it is outranks the list of who is next. */
+.fight{display:grid;grid-template-columns:minmax(0,1fr) 14rem;gap:.6rem;
+       margin:.4rem 0 .8rem;padding:.6rem;border:1px solid var(--line);
+       border-radius:8px;background:#191d24}
+.fight-actor{display:flex;flex-direction:column;gap:.45rem;min-width:0}
+.fight-side{display:flex;flex-direction:column;gap:.4rem;min-width:0}
+.fight-who{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem}
+.fw-name{font-size:15px;font-weight:600;letter-spacing:.02em}
+.fight-options{display:flex;flex-direction:column;gap:.3rem}
+.fight-result{font-size:11px}
+.fight-result.muted{color:var(--muted);font-style:italic}
+.fight-result .logline{margin:0}
+
+.fight-round{text-align:right;line-height:1}
+.fight-big{font-size:44px;font-weight:700;letter-spacing:-.02em}
+.fight-cap{font-size:9px;text-transform:uppercase;letter-spacing:.08em;
+           color:var(--muted)}
+.fight-nth{font-size:10px;color:var(--muted);margin-top:.2rem}
+
+.fight-order{list-style:none;margin:0;padding:0;display:flex;
+             flex-direction:column;gap:.15rem}
+.forder{display:flex;align-items:baseline;gap:.35rem;cursor:pointer;
+        padding:.18rem .3rem;border-radius:4px;border:1px solid transparent}
+.forder:hover{background:#20242b}
+.forder.now{border-color:var(--accent)}
+.forder.shown{background:#22272f}
+.forder.out{opacity:.45}
+.fo-init{font-size:11px;color:var(--muted);min-width:1.4rem;text-align:right}
+.fo-name{font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;
+         white-space:nowrap}
+.fo-tally{font-size:10px;color:var(--muted)}
+.fo-tally.warn{color:#e0b341}
+button.wide{width:100%}
+
+@media (max-width:720px){
+  .fight{grid-template-columns:1fr}
+  .fight-side{order:-1}
+  .fight-round{text-align:left}
+}
+
 .logline .head{gap:.3rem;flex-wrap:wrap}
 .tag.spent{background:#1d2b1d;color:#8fc98f}
 .tag.spent.warn{background:#2f2a16;color:#e0b341}

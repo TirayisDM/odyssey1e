@@ -290,7 +290,29 @@
 
           <div class="encmode-pane" data-encmode="view">
             <div id="enc-narrative" class="prose-block"></div>
-            <div class="sub">Who is in this</div>
+
+            <!-- RUNNING IT IS NOT READING IT. A fight in front of the
+                 table wants one creature, its options, and what just
+                 happened - not a column of every creature's buttons.
+                 The card appears only while the encounter is ACTIVE;
+                 a draft or an ended fight still reads as the list
+                 below, which is the right shape for planning one. -->
+            <div id="fight-card" class="fight" hidden>
+              <div class="fight-actor">
+                <div id="fight-who" class="fight-who"></div>
+                <div id="fight-options" class="fight-options"></div>
+                <div id="fight-sheet" class="actorview" hidden></div>
+                <div id="fight-result" class="fight-result"></div>
+              </div>
+              <div class="fight-side">
+                <div id="fight-round" class="fight-round"></div>
+                <div class="sub">In order</div>
+                <ol id="fight-order" class="fight-order"></ol>
+                <button id="fight-next" class="ghost wide">End turn</button>
+              </div>
+            </div>
+
+            <div id="roster-head" class="sub">Who is in this</div>
             <ul id="roster" class="list"></ul>
 
             <!-- WHAT HAS BEEN DONE. The attack buttons are on this tab

@@ -3194,6 +3194,200 @@ function logLine(a) {
   return li;
 }
 
+// THE FIGHT CARD. One creature at a time, because that is how a round
+// is actually run: whose turn, what can they do, what happened, next.
+//
+// ONLY WHILE THE ENCOUNTER IS ACTIVE. A draft is being built and an
+// ended one is being read, and both of those want the flat list
+// underneath - every creature visible at once, nothing implying a
+// turn is being taken. 034 already draws that line for the players'
+// target list; this is the same line drawn on the DM's screen.
+//
+// THE LEFT PANEL FOLLOWS THE TURN BUT DOES NOT ENFORCE IT. Clicking a
+// name on the right brings that creature up instead, marked as out of
+// turn - 051 decided the order informs and never refuses, and a card
+// that could only ever show the turn holder would be a refusal with a
+// layout instead of an error message.
+async function paintFightCard(id, turns, enc) {
+  const card = document.querySelector("#fight-card");
+  const head = document.querySelector("#roster-head");
+  const flat = document.querySelector("#roster");
+  const live = enc && enc.status === "active";
+
+  // ONE OF THE TWO, NEVER BOTH. The flat roster carries every
+  // creature's attack buttons, so leaving it under the card would put
+  // each swing on screen twice and undo the separation entirely.
+  card.hidden = !live;
+  head.hidden = live;
+  flat.hidden = live;
+  if (!live) return;
+
+  const order = (turns && turns.order) || [];
+  const round = (turns && turns.encounter && turns.encounter.round) || 0;
+  const current = order.find((a) => a.is_current);
+
+  // Whoever the DM clicked last, while they are still in the fight.
+  // Otherwise the turn holder, otherwise the top of the order.
+  let focus = order.find((a) => a.id === state.fightFocus);
+  if (!focus) focus = current || order.find((a) => a.takes_turns) || order[0];
+  state.fightFocus = focus ? focus.id : null;
+
+  /* ---------------- top right: where the fight is ---------------- */
+
+  const pos = document.querySelector("#fight-round");
+  pos.innerHTML = "";
+  const big = document.createElement("div");
+  big.className = "fight-big";
+  big.textContent = round ? round : "\u2013";
+  const cap = document.createElement("div");
+  cap.className = "fight-cap";
+  // ROUND 0 IS NOT ROUND 1 - 051. "Not started" is a real state and
+  // printing "round 0" would be arithmetic where a sentence belongs.
+  cap.textContent = round ? "round" : "not started";
+  pos.append(big, cap);
+
+  if (round && current) {
+    const at = order.filter((a) => a.takes_turns).findIndex((a) => a.id === current.id);
+    if (at >= 0) {
+      const nth = document.createElement("div");
+      nth.className = "fight-nth";
+      nth.textContent =
+        at + 1 + " of " + order.filter((a) => a.takes_turns).length;
+      pos.append(nth);
+    }
+  }
+
+  /* -------------- lower right: the order, descending -------------- */
+
+  const ol = document.querySelector("#fight-order");
+  ol.innerHTML = "";
+  for (const a of order) {
+    const li = document.createElement("li");
+    li.className =
+      "forder" +
+      (a.is_current ? " now" : "") +
+      (a.takes_turns ? "" : " out") +
+      (a.id === state.fightFocus ? " shown" : "");
+
+    const n = document.createElement("span");
+    n.className = "fo-init";
+    n.textContent = a.initiative == null ? "\u2013" : a.initiative;
+
+    const nm = document.createElement("span");
+    nm.className = "fo-name";
+    nm.textContent = a.label;
+
+    const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
+    const tally = document.createElement("span");
+    tally.className = "fo-tally" + (sp && sp.beyond_one_turn ? " warn" : "");
+    tally.textContent = sp && sp.actions ? "\u00d7" + sp.actions : "";
+
+    li.append(n, nm, tally);
+    li.title = a.takes_turns
+      ? a.is_current
+        ? "acting now"
+        : "in the order"
+      : a.initiative == null
+      ? "has not rolled"
+      : a.dead
+      ? "dead"
+      : "withdrawn";
+    li.addEventListener("click", async () => {
+      state.fightFocus = a.id;
+      await selectEncounter(id);
+    });
+    ol.append(li);
+  }
+
+  /* ------------------ left: whose go it is ------------------ */
+
+  const who = document.querySelector("#fight-who");
+  const opts = document.querySelector("#fight-options");
+  who.innerHTML = "";
+  opts.innerHTML = "";
+
+  if (!focus) {
+    who.textContent = "nobody is enrolled yet";
+    paintFightResult(null);
+    return;
+  }
+
+  const nm = document.createElement("span");
+  nm.className = "fw-name";
+  nm.textContent = focus.label;
+  who.append(nm);
+
+  const t = (state.dmTargets || []).find((x) => x.id === focus.id);
+  if (t) {
+    who.append(chip("AC " + t.value, "cls"));
+    if (t.hp_max != null) who.append(chip(t.hp_current + "/" + t.hp_max, "hp"));
+    if (t.condition && t.condition !== "conscious") who.append(chip(t.condition, "no"));
+  }
+  if (focus.initiative != null) who.append(chip("init " + focus.initiative, "use"));
+
+  // THE SHEET IS STILL ONE CLICK AWAY. It was a button on every roster
+  // row, and the roster is hidden while the card is up - a view that
+  // separates the fight must not also remove what the fight needs.
+  const sheet = document.querySelector("#fight-sheet");
+  sheet.hidden = true;
+  sheet.innerHTML = "";
+  sheet.dataset.loaded = "";
+  who.append(
+    action("sheet", async () => {
+      const open = sheet.hidden;
+      sheet.hidden = !open;
+      if (open && !sheet.dataset.loaded) {
+        await paintActorView(sheet, focus, id);
+        sheet.dataset.loaded = "1";
+      }
+    })
+  );
+
+  // SAY IT WHEN IT IS NOT THEIR GO. Nothing is disabled - see the
+  // header - but a swing taken here while somebody else holds the
+  // turn is marked in the log by 060, and the card should not be the
+  // one place that stays quiet about it.
+  if (!focus.is_current && current) {
+    const warn = document.createElement("span");
+    warn.className = "tag warn";
+    warn.textContent = "not their turn \u2014 " + current.label + " is up";
+    who.append(warn);
+  }
+
+  if (!focus.takes_turns) {
+    const why = document.createElement("span");
+    why.className = "tag no";
+    why.textContent =
+      focus.initiative == null ? "has not rolled" : focus.dead ? "dead" : "withdrawn";
+    who.append(why);
+  }
+
+  opts.append(await attackRow(focus, id));
+
+  paintFightResult(focus);
+}
+
+// WHAT JUST HAPPENED, under the options rather than in the log a
+// screen away. The newest action this creature took, read out of the
+// log that was already fetched - no second request, and no second
+// account of the same swing to keep in step.
+function paintFightResult(focus) {
+  const box = document.querySelector("#fight-result");
+  box.innerHTML = "";
+  if (!focus) return;
+  const mine = (state.encLog || []).find((a) => a.actor_id === focus.id);
+  if (!mine) {
+    box.className = "fight-result muted";
+    box.textContent = "nothing yet this fight";
+    return;
+  }
+  box.className = "fight-result";
+  const cap = document.createElement("div");
+  cap.className = "sub";
+  cap.textContent = "last thing they did";
+  box.append(cap, logLine(mine));
+}
+
 function paintOrderStrip(turns) {
   const el = document.querySelector("#order-strip");
   el.innerHTML = "";
@@ -3992,6 +4186,7 @@ async function selectEncounter(id) {
   paintTurnBar(id, turns);
   paintOrderStrip(turns);
   paintEncLog(done, turns);
+  await paintFightCard(id, turns, e);
 
   // Targets for THIS encounter, not the active one.
   //
@@ -4132,7 +4327,12 @@ async function selectEncounter(id) {
     // actor's character either way - there is no monster branch under
     // any of this - and the insert policies ask for membership, not
     // for who owns the creature.
-    if (a.active && !a.dead) {
+    //
+    // NOT WHILE THE CARD IS UP. Every attack row is a full sheet read
+    // - seven queries - and the card shows one creature's options, so
+    // painting five more into a list nobody can see would cost the
+    // whole roster on every repaint to display nothing.
+    if (a.active && !a.dead && (!e || e.status !== "active")) {
       li.append(await attackRow(a, id));
     }
 
@@ -5161,6 +5361,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     // was true a moment ago.
     await loadSheet();
     await loadInventory();
+  });
+
+  // END TURN, from inside the card. The same command the turn bar's
+  // button calls - one way to advance, so the round cannot be moved
+  // by one control and not the other. It clears the focus so the card
+  // follows the turn instead of staying on whoever was last clicked.
+  guarded("#fight-next", async () => {
+    if (!state.dmEncounterId) return dmSay("pick an encounter first", true);
+    const r = await tryCall("advance_turn", { encounterId: state.dmEncounterId });
+    if (!r.ok) return dmSay(r.error, true);
+    state.fightFocus = null;
+    await selectEncounter(state.dmEncounterId);
   });
 
   guarded("#next-turn", async () => {

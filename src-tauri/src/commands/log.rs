@@ -60,8 +60,8 @@ pub fn encounter_log(
         &[
             (
                 "select",
-                "id,round,key,request,label,created_at,actor_id,character_id,\
-                 target_actor_id,target_challenge_id,\
+                "id,round,turn_actor_id,key,request,label,created_at,\
+                 actor_id,character_id,target_actor_id,target_challenge_id,\
                  rolls(id,role,label,request,formula,detail,total,natural_roll,\
                  character_name,target_value,target_kind,target_label,\
                  success,reason,margin,face_outcome)",
@@ -72,7 +72,19 @@ pub fn encounter_log(
         ],
     )?;
 
-    let actions = rows.as_array().cloned().unwrap_or_default();
+    let mut actions = rows.as_array().cloned().unwrap_or_default();
+
+    // WHETHER EACH ONE WAS TAKEN IN TURN, decided by `spent::out_of_turn`
+    // rather than by the screen comparing two ids. It is one comparison,
+    // and one comparison written on a screen is how the frontend came to
+    // disagree with the engine about whether a goblin may heal itself.
+    for a in actions.iter_mut() {
+        let out = crate::spent::out_of_turn(
+            a.get("actor_id").and_then(|v| v.as_str()),
+            a.get("turn_actor_id").and_then(|v| v.as_str()),
+        );
+        a["out_of_turn"] = json!(out);
+    }
 
     // The count is derived from exactly the rows that were just read,
     // so the log and the tally can never disagree with each other.

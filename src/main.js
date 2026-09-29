@@ -2824,6 +2824,27 @@ function paintTurnBar(encounterId, turns) {
     say.textContent += " \u00b7 " + waiting + " still to roll";
   }
 
+  // HOW MANY HAVE GONE THIS ROUND. The turn moves by hand and nothing
+  // refuses a swing out of turn, which is 051's decision - so the bar
+  // has to say where the round has got to, or "round 1" means nothing
+  // more than "somebody pressed Begin once". The Inn fight ran seven
+  // actions across two days inside one round before this said so.
+  if (enc.round) {
+    const gone = (state.encSpent || []).length;
+    const due = order.filter((a) => a.takes_turns).length;
+    if (due) {
+      const tally = document.createElement("span");
+      tally.className = "tag" + (gone >= due ? " warn" : "");
+      tally.textContent = gone + " of " + due + " have acted";
+      tally.title =
+        gone >= due
+          ? "everybody has gone - the round is ready to turn over"
+          : "in this round, however the turn has moved";
+      say.append(" ");
+      say.append(tally);
+    }
+  }
+
   if (!up) {
     next.textContent = "Begin";
     next.disabled = true;
@@ -3130,6 +3151,18 @@ function logLine(a) {
     at.className = "tag";
     at.textContent = "at " + hit.target_label;
     head.append(at);
+  }
+
+  // OUT OF TURN, decided in Rust off two stamped ids - see 060 and
+  // spent::out_of_turn. Not a refusal and not a mistake: a held
+  // action, a reaction and a DM allowing a second swing all land
+  // here. It says what happened, which is all anybody wanted.
+  if (a.out_of_turn) {
+    const ooo = document.createElement("span");
+    ooo.className = "tag warn";
+    ooo.textContent = "out of turn";
+    ooo.title = "somebody else was holding the turn when this happened";
+    head.append(ooo);
   }
 
   if (dmg && dmg.total !== null && dmg.total !== undefined) {
@@ -3923,7 +3956,6 @@ async function selectEncounter(id) {
   // turns at all, and whether it is up now.
   const turns = await call("turn_order", { encounterId: id });
   const roster = (turns && turns.order) || [];
-  paintTurnBar(id, turns);
   paintEncounterEditor(e);
 
   // WHAT HAS BEEN DONE, and what each creature has spent doing it.
@@ -3935,6 +3967,12 @@ async function selectEncounter(id) {
   const done = await tryCall("encounter_log", { encounterId: id });
   state.encLog = done.ok ? done.value.actions || [] : [];
   state.encSpent = done.ok ? done.value.spent || [] : [];
+  // AFTER THE LOG, because the bar now says how many have acted and
+  // that count comes out of it. Painted before, it would show the
+  // previous encounter's tally for one frame - which is the kind of
+  // wrong number nobody ever catches, because it is only wrong until
+  // you look away.
+  paintTurnBar(id, turns);
   paintOrderStrip(turns);
   paintEncLog(done, turns);
 

@@ -80,6 +80,27 @@ pub struct Spent {
 
 /* ============================ RULES ============================ */
 
+/// Whether this was taken by somebody other than the creature holding
+/// the turn.
+///
+/// FALSE WHERE THERE WAS NO TURN TO BE OUT OF, and 060 lists the three
+/// ways that happens: an action outside an encounter, one taken before
+/// the order started, and every action written before the column
+/// existed. None of those is a creature jumping the queue, and saying
+/// so would put a warning on most of the log the first time a DM
+/// opened it.
+///
+/// It reads two STAMPED ids and compares them. Comparing against
+/// whoever holds the turn NOW would answer a different question -
+/// the pointer moves, and an action taken properly in round 1 would
+/// start reading as out of turn the moment the turn passed.
+pub fn out_of_turn(actor_id: Option<&str>, turn_actor_id: Option<&str>) -> bool {
+    match (actor_id, turn_actor_id) {
+        (Some(who), Some(whose)) => who != whose,
+        _ => false,
+    }
+}
+
 /// What everybody has spent in the given round.
 ///
 /// Sorted by actor so the same input always gives the same output -
@@ -251,6 +272,29 @@ mod tests {
         assert_eq!(all[0].actions, 1);
         assert_eq!(all[1].actor_id, "b");
         assert_eq!(all[1].actions, 2);
+    }
+
+    /* ---------------------- out of turn ---------------------- */
+
+    #[test]
+    fn the_creature_whose_turn_it_is_is_in_turn() {
+        assert!(!out_of_turn(Some("a"), Some("a")));
+    }
+
+    #[test]
+    fn anybody_else_is_out_of_turn() {
+        assert!(out_of_turn(Some("b"), Some("a")));
+    }
+
+    /// 060: three ways to have no turn, and none of them is jumping
+    /// the queue. Every action written before that column existed
+    /// lands here, so getting this wrong would put a warning on most
+    /// of the log the first time a DM opened it.
+    #[test]
+    fn no_turn_is_not_a_turn_somebody_took_early() {
+        assert!(!out_of_turn(Some("a"), None), "before the order started");
+        assert!(!out_of_turn(None, Some("a")), "nobody in the fight swung it");
+        assert!(!out_of_turn(None, None), "outside an encounter entirely");
     }
 
     #[test]

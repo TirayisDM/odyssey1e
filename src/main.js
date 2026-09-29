@@ -3065,34 +3065,51 @@ function paintEncLog(done, turns) {
   }
 
   const now = done.value.round;
-  let round;
-  let first = true;
-  for (const a of actions) {
-    if (first || a.round !== round) {
-      round = a.round;
-      first = false;
-      const head = document.createElement("li");
-      head.className = "flat group";
-      // THREE DIFFERENT ANSWERS, and they must not print alike.
-      //
-      //   null   written before 054 existed. Inside an encounter that
-      //          is the ONLY way to have no round, because the trigger
-      //          stamps every one since. 70 rows in this database.
-      //   0      051's "the order has not started" - swung before
-      //          anybody rolled, which is a real and ordinary thing.
-      //   n      a round.
-      //
-      // Filing the first two under "round 1" would invent a fight that
-      // had not begun, which is 054's whole argument for NULL.
-      head.textContent =
-        a.round == null
-          ? "before rounds were recorded"
-          : a.round === 0
-          ? "before the first turn"
-          : "round " + a.round + (a.round === now ? " · now" : "");
-      ul.append(head);
+
+  // GROUPED BY ROUND, NOT BY RUNS OF IT.
+  //
+  // This printed a header whenever the round changed from one row to
+  // the next, which assumed rounds arrive in order. They do not: the
+  // round goes back to zero when a DM presses reset, so a fight that
+  // was reset mid-session reads 1, 0, 1 down the page and produced
+  // TWO "round 1 · now" headers with "before the first turn" wedged
+  // between them. Seen on the Inn fight, and it looks like the screen
+  // losing its place rather than like the history it is.
+  //
+  // Rounds descend; the two kinds of no-round sit underneath, because
+  // whatever they are they are not the fight as it stands now.
+  const rank = (r) => (r == null ? -2 : r === 0 ? -1 : r);
+  const rounds = [...new Set(actions.map((a) => a.round ?? null))].sort(
+    (x, y) => rank(y) - rank(x)
+  );
+
+  for (const r of rounds) {
+    const head = document.createElement("li");
+    head.className = "flat group";
+    // THREE DIFFERENT ANSWERS, and they must not print alike.
+    //
+    //   null   written before 054 existed. Inside an encounter that
+    //          is the ONLY way to have no round, because the trigger
+    //          stamps every one since.
+    //   0      051's "the order has not started" - swung before
+    //          anybody rolled, which is a real and ordinary thing,
+    //          and what a reset puts a fight back to.
+    //   n      a round.
+    //
+    // Filing the first two under "round 1" would invent a fight that
+    // had not begun, which is 054's whole argument for NULL.
+    head.textContent =
+      r == null
+        ? "before rounds were recorded"
+        : r === 0
+        ? "before the first turn"
+        : "round " + r + (r === now ? " · now" : "");
+    ul.append(head);
+    // Newest first inside the round, which is the order they arrived
+    // in - the query already sorted by time.
+    for (const a of actions.filter((a) => (a.round ?? null) === r)) {
+      ul.append(logLine(a));
     }
-    ul.append(logLine(a));
   }
 }
 

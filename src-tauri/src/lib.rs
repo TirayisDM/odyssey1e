@@ -1242,6 +1242,9 @@ pub fn run() {
             commands::initiative::roll_initiative,
             commands::initiative::set_initiative,
             commands::initiative::advance_turn,
+            // 062: the three slots a tick can spend.
+            commands::initiative::spend_slot,
+            commands::initiative::clear_slot,
             commands::initiative::reset_order,
             commands::log::encounter_log,
             death_save,

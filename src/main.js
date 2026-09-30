@@ -2827,6 +2827,58 @@ function spendTitle(sp) {
   return bits.join(" \u00b7 ");
 }
 
+// THE THREE SLOTS A TICK CAN SPEND. 062.
+//
+// Not attack and not action: those are spent by DOING something, and a
+// tick that could mark them would be a second way to say what the log
+// already says. These three have no roll behind them - a Rogue's
+// Cunning Action, a reaction, picking something up - so before 062
+// there was nowhere for them to be recorded at all.
+const SLOTS = [
+  ["bonus", "Bonus", "a bonus action - Cunning Action, a second wind, an off-hand swing"],
+  ["reaction", "Reaction", "a reaction - an opportunity attack, a shield spell, a readied action firing"],
+  ["free", "Free", "the free object interaction - drawing a blade, opening a door"],
+];
+
+// A row of ticks for the creature the card is showing.
+//
+// IT SAYS AND IT DOES NOT REFUSE, which is 051's decision about the
+// order applied to the economy. Ticking twice is possible, reads as
+// over budget, and is an ordinary Tuesday for a DM who granted it.
+function paintSlots(host, encounterId, actor, sp) {
+  const row = sEl("div", "slots");
+  for (const [cost, label, why] of SLOTS) {
+    const used = sp ? (cost === "bonus" ? sp.bonus : cost === "reaction" ? sp.reactions : sp.free) || 0 : 0;
+    const owed = (sp && sp.budget && (cost === "bonus" ? sp.budget.bonus
+                 : cost === "reaction" ? sp.budget.reactions : sp.budget.free)) || 1;
+
+    const b = sEl("button", "slot" + (used ? " on" : "") + (used > owed ? " over" : ""));
+    // THE BOX IS IN THE TEXT, not only in the colour - the same call
+    // 061 made for the turn caret. A tick that is only a background
+    // says nothing when read aloud or at phone width.
+    b.textContent = (used ? "\u2611 " : "\u2610 ") + label + (used > 1 ? " \u00d7" + used : "");
+    b.title = why + (used > owed ? " - MORE THAN ONE, which is a call you made" : "");
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      // A TOGGLE, so the second click clears the round rather than
+      // adding a second marker. Spending twice is still possible from
+      // the engine's side; it is just not what a box is for.
+      const r = await tryCall(used ? "clear_slot" : "spend_slot", {
+        encounterId,
+        actorId: actor.id,
+        cost,
+      });
+      if (!r.ok) dmSay(r.error, true);
+      // THROUGH loadDM, the way every other DM write refreshes -
+      // the tick changes the log, the tallies and the strip, and only
+      // one of those is on this card.
+      await loadDM();
+    });
+    row.append(b);
+  }
+  host.append(row);
+}
+
 function paintTurnBar(encounterId, turns) {
   const say = document.querySelector("#turn-now");
   const next = document.querySelector("#next-turn");
@@ -3343,7 +3395,20 @@ async function paintFightCard(id, turns, enc) {
     mark.textContent = a.is_current ? "\u25b6" : "";
     mark.title = a.is_current ? "acting now" : "";
 
-    li.append(mark, n, nm, tally);
+    // A COMPACT READ OF THE THREE, so the card is not the only place
+    // they can be seen. Letters rather than dots: b/r/f says which one
+    // is gone, and a dot would need a legend.
+    const used = [
+      sp && sp.bonus ? "b" : "",
+      sp && sp.reactions ? "r" : "",
+      sp && sp.free ? "f" : "",
+    ].join("");
+    const slots = document.createElement("span");
+    slots.className = "fo-slots";
+    slots.textContent = used;
+    slots.title = used ? "spent: " + spendTitle(sp) : "";
+
+    li.append(mark, n, nm, tally, slots);
     li.title = a.takes_turns
       ? a.is_current
         ? "acting now"
@@ -3399,6 +3464,16 @@ async function paintFightCard(id, turns, enc) {
     sw.title = spendTitle(fsp);
     who.append(sw);
   }
+
+  // 062. THE THREE SLOTS, ticked by hand because nothing rolls for
+  // them. The attack count above is spent by swinging and the action
+  // by rolling; these three had no way to be recorded at all.
+  //
+  // ONLY WHILE THE FIGHT IS RUNNING. A draft has no round for a
+  // marker to belong to, and an ended one is being read rather than
+  // played - 060 keeps a roundless action out of the count, so a tick
+  // in a draft would write a row nothing would ever show.
+  if (round) paintSlots(who, id, focus, fsp);
 
   // THE SHEET IS STILL ONE CLICK AWAY. It was a button on every roster
   // row, and the roster is hidden while the card is up - a view that

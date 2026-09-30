@@ -537,3 +537,28 @@ button.wide{width:100%}
    needs room to say so without clipping. */
 #fight-next { text-align: center; white-space: normal; line-height: 1.25; }
 #fight-next[disabled] { opacity: .45; cursor: not-allowed; }
+
+/* ============ THE OTHER THREE SLOTS (062) ============ */
+
+.slots { display: flex; gap: .35rem; flex-wrap: wrap; margin: .35rem 0 .1rem; }
+
+/* A TICK, and the box is in the TEXT rather than only the background -
+   the same call 061 made for the turn caret. A state carried only by
+   colour says nothing read aloud, at phone width, or to anyone who
+   does not know which colour means spent. */
+.slot {
+  font-size: .82em; padding: .12rem .45rem; border-radius: .25rem;
+  border: 1px solid var(--line, #333); background: transparent;
+  opacity: .7; cursor: pointer; white-space: nowrap;
+}
+.slot:hover { opacity: 1; }
+.slot.on { opacity: 1; border-color: var(--accent, #4a6fa5); }
+/* More than one is not refused - 051's rule - but it is said. */
+.slot.over { border-color: var(--bad, #8a3b3b); font-weight: 600; }
+.slot[disabled] { opacity: .4; cursor: progress; }
+
+/* b / r / f beside the swing tally in the order list. */
+.fo-slots {
+  font-size: .72em; letter-spacing: .08em; opacity: .6;
+  min-width: 2.2em; text-align: right;
+}

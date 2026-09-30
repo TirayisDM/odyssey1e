@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**504 tests, zero warnings.** `cd src-tauri && cargo test`.
+**509 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -425,6 +425,8 @@ and not after.
 060 an action knows whose turn it was - stamped, so out-of-turn is a
     fact rather than a comparison against a pointer that has moved
 061 how many swings do you get - Extra Attack, and what an action cost
+062 the other three slots - a bonus action, a reaction and a free
+    interaction, spent by a tick rather than by a roll
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2374,6 +2376,74 @@ still applied, and 061 computes his owed attacks as 2. Rig: the order
 renders `1/2` and a warned `2/1`, the caret follows the turn, and the
 button names the next creature in both the ordinary and the wrapping
 case.
+
+## The other three slots - BUILT (062, spend_slot / clear_slot)
+
+061 made `bonus`, `reaction` and `free` legal and left them empty, and
+said why: "the column admits them so the first one is a write rather
+than a migration, and the screen does NOT show counters for slots
+nothing can fill." This is that write.
+
+**A SLOT IS SPENT BY WRITING AN ACTION WITH NO DICE.** The alternative
+was a per-turn state table, and it would have been a second account of
+the same round. An action already gets its round stamped (054, 060),
+already records whose turn it was taken in, already appears in the log,
+and already deletes cleanly - which is exactly what un-ticking a box
+has to do. The table already permitted the shape: every roll column
+lives on `rolls`, not here.
+
+**THE KEY AND THE COST AGREE BY CONSTRUCTION.** 061's trigger read
+`attack` from the key and called everything else an action, so a marker
+keyed `bonus` would have been stamped `action` unless the caller passed
+the cost too - two things to keep in step. The trigger now recognises a
+cost word used as a key, and a stated cost is still kept for the
+attack technique that one day costs a bonus action.
+
+**EACH SLOT HAS ITS OWN TALLY.** Before 062 everything that was not a
+swing landed in `other`, which was right while nothing could write the
+other three and would have made a Rogue's Cunning Action read as a
+spent turn the moment something could. `an_attack_and_a_bonus_action_is
+_one_ordinary_turn` is the test that pins it.
+
+**THE TICKS.** Three boxes on the fight card for the creature being
+acted from, and `b` / `r` / `f` beside the swing tally in the order
+list so the card is not the only place they can be seen. The box
+character is in the TEXT rather than only in a colour - the same call
+061 made for the turn caret, and for the same reason: a state carried
+only by colour says nothing read aloud or at phone width.
+
+ONLY WHILE THE FIGHT IS RUNNING. A round of 0 means "not started", and
+060 keeps a roundless action out of the count - so a tick in a
+not-yet-begun fight would write a row nothing would ever show.
+Verified: the boxes are absent at round 0 and the button reads
+"Begin -> Garn", the top of the order.
+
+NOTHING IS REFUSED, including ticking twice. 051 decided the order
+informs and never refuses, and a slot is the same: a DM granting a
+second bonus action is an ordinary Tuesday, and an app that argues
+about it is one they fight. A second tick reads "Reaction x2" with a
+red rule and the count says over budget.
+
+**A REACTION IS ONCE PER ROUND AND THE OTHERS ARE ONCE PER TURN.** 5e
+refreshes a reaction at the start of your turn, so a creature that acts
+once per round is the same either way - which every creature here does.
+The counting is per round, it is right for every case the app can
+currently produce, and it wants revisiting the day something takes two
+turns in one round. Written down rather than discovered then.
+
+**THE HELD ATTACK still has no home**, and it is the last of the five
+Dave named. Readying is an action that BECOMES a reaction on a trigger,
+so it needs both halves and something to fire it. What 062 gives it is
+the reaction slot to land in when it is built.
+
+Double-tested. Unit: 509, including a full legal turn of two swings, a
+bonus, a reaction and a free interaction reading as not over budget,
+and Extra Attack buying no extra reactions. Live and rolled back: three
+markers written with only `key` set came back stamped bonus/reaction/
+free at round 1, and clearing the reaction removed exactly that one.
+Rig: the ticks render and toggle, an unticked box calls `spend_slot`
+and a ticked one calls `clear_slot` with the right cost, a doubled slot
+shows "x2" with its red rule, and round 0 shows no boxes at all.
 
 ## Pick up here
 

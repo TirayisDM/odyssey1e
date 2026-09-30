@@ -325,3 +325,155 @@ fn dex_of_actor(token: &str, actor_id: &str) -> Result<i64, String> {
         .next()
         .unwrap_or(&0))
 }
+
+/* ======================== THE OTHER THREE SLOTS ======================== */
+
+/// The slots a tick can spend. Not `attack` and not `action`: those are
+/// spent by DOING something - swinging, rolling a check - and a tick
+/// that could mark them would be a second way to say what the log
+/// already says.
+const TICKABLE: [&str; 3] = ["bonus", "reaction", "free"];
+
+fn tickable(cost: &str) -> Result<&str, String> {
+    TICKABLE
+        .iter()
+        .find(|c| **c == cost)
+        .copied()
+        .ok_or_else(|| format!("{} is not a slot you can tick", cost))
+}
+
+/// What a spent slot is called in the log.
+fn slot_label(cost: &str) -> &'static str {
+    match cost {
+        "bonus" => "Bonus action",
+        "reaction" => "Reaction",
+        _ => "Free interaction",
+    }
+}
+
+/// The encounter, the round, and this actor's character - everything
+/// both halves of the toggle need.
+fn slot_context(
+    token: &str,
+    encounter_id: &str,
+    actor_id: &str,
+) -> Result<(String, i64, Option<String>), String> {
+    let enc = supabase::rest_get(
+        token,
+        "encounters",
+        &[
+            ("select", "id,game_id,round"),
+            ("id", &format!("eq.{}", encounter_id)),
+        ],
+    )?;
+    let enc = enc
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .ok_or_else(|| "that encounter is not visible to you".to_string())?;
+
+    let rows = supabase::rest_get(
+        token,
+        "encounter_actors",
+        &[
+            ("select", "id,character_id"),
+            ("id", &format!("eq.{}", actor_id)),
+            ("encounter_id", &format!("eq.{}", encounter_id)),
+        ],
+    )?;
+    let row = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .ok_or_else(|| "that creature is not in this fight".to_string())?;
+
+    Ok((
+        as_text(&enc, "game_id"),
+        enc.get("round").and_then(|v| v.as_i64()).unwrap_or(0),
+        row.get("character_id")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+    ))
+}
+
+/// Mark a bonus action, reaction or free interaction as spent. 062.
+///
+/// IT WRITES AN ACTION WITH NO DICE. That was the decision worth
+/// making: the alternative was a per-turn state table, which would
+/// have been a second account of the same round. An action already has
+/// its round stamped, already records whose turn it was taken in,
+/// already shows in the log and already deletes cleanly - which is
+/// exactly what un-ticking a box has to do.
+///
+/// NOTHING IS REFUSED, including ticking twice. 051 decided the order
+/// informs and never refuses and a slot is the same: a DM granting a
+/// second bonus action is an ordinary Tuesday, and the count simply
+/// reads as over budget. What the app owes them is to SAY so.
+#[tauri::command]
+pub fn spend_slot(
+    state: State<AppState>,
+    encounter_id: String,
+    actor_id: String,
+    cost: String,
+) -> Result<Value, String> {
+    let session = state
+        .current()?
+        .ok_or_else(|| "not signed in".to_string())?;
+    let token = &session.access_token;
+    let cost = tickable(cost.trim())?;
+    let (game_id, _round, character_id) = slot_context(token, &encounter_id, &actor_id)?;
+
+    // THE KEY IS THE COST WORD and the cost is left for the trigger,
+    // which 062 taught to read one from the other. Passing both would
+    // be two things to keep in step.
+    supabase::rest_insert(
+        token,
+        "actions",
+        &json!({
+            "game_id": game_id,
+            "character_id": character_id,
+            "encounter_id": encounter_id,
+            "owner_uid": session.user_id,
+            "actor_id": actor_id,
+            "request": cost,
+            "key": cost,
+            "label": slot_label(cost),
+            "status": "resolved",
+        }),
+    )
+}
+
+/// Un-tick it: delete this round's markers of that kind for that
+/// creature.
+///
+/// DELETES EVERY ONE OF THEM, not the newest. A box that is off should
+/// be off - if two got written because somebody clicked twice, leaving
+/// one behind would make the tick lie about the round.
+///
+/// SCOPED TO THE ROUND, so un-ticking in round 3 cannot reach into
+/// round 2 and rewrite what happened there. A marker with no round -
+/// one written before the order started - is left alone for the same
+/// reason 054 refuses to count it.
+#[tauri::command]
+pub fn clear_slot(
+    state: State<AppState>,
+    encounter_id: String,
+    actor_id: String,
+    cost: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let cost = tickable(cost.trim())?;
+    let (_game_id, round, _character_id) = slot_context(&token, &encounter_id, &actor_id)?;
+
+    supabase::rest_delete(
+        &token,
+        "actions",
+        &[
+            ("encounter_id", &format!("eq.{}", encounter_id)),
+            ("actor_id", &format!("eq.{}", actor_id)),
+            ("cost", &format!("eq.{}", cost)),
+            ("round", &format!("eq.{}", round)),
+        ],
+    )?;
+    Ok(json!({ "cleared": cost, "round": round }))
+}

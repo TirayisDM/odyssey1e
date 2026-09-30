@@ -65,6 +65,12 @@ impl Act {
         match self.cost.as_deref() {
             Some(c) if !c.is_empty() => c,
             _ if self.key == "attack" => "attack",
+            // A COST WORD USED AS A KEY IS THAT COST - the same rule
+            // 062's trigger applies, stated here so a fixture built by
+            // hand and a row read from the database agree.
+            _ if matches!(self.key.as_str(), "bonus" | "reaction" | "free" | "action") => {
+                &self.key
+            }
             _ => "action",
         }
     }
@@ -97,19 +103,25 @@ pub struct Budget {
     /// One. The Attack action is an action, and the attacks above are
     /// what that one action buys.
     pub actions: i64,
-    /// One each, AND NOTHING WRITES THEM YET - 061 admits the values
-    /// and no path produces them. Carried so the shape is right when a
-    /// bonus action or a readied attack arrives; deliberately NOT shown
-    /// on screen, because an always-empty counter claims a system that
-    /// does not exist.
+    /// One each. 062 writes them: the fight card has a tick per slot
+    /// and spending one is an action with no dice.
+    ///
+    /// A REACTION IS ONCE PER ROUND AND THESE ARE COUNTED PER ROUND,
+    /// which agrees for every creature the app can currently produce -
+    /// each takes one turn per round. It will need revisiting the day
+    /// something takes two.
     pub bonus: i64,
     pub reactions: i64,
+    /// The free object interaction. One per turn in 5e, and the one a
+    /// DM is most likely to wave through - it is here to be SEEN
+    /// rather than to be policed.
+    pub free: i64,
 }
 
 impl Default for Budget {
     /// What somebody with no class gets: one swing, one action.
     fn default() -> Self {
-        Self { attacks: 1, actions: 1, bonus: 1, reactions: 1 }
+        Self { attacks: 1, actions: 1, bonus: 1, reactions: 1, free: 1 }
     }
 }
 
@@ -130,10 +142,18 @@ pub struct Spent {
     /// twice" and "attacked twice" are different things to a DM, and
     /// the second is the one that was asked about.
     pub attacks: i64,
-    /// Everything that was not a swing: checks, death saves. The pair
+    /// Everything that spent the ACTION: checks, death saves. The pair
     /// matters because the Attack action buys N attacks, so two swings
     /// are ONE action and two checks are two.
+    ///
+    /// NOT the other three slots - those have their own, because a
+    /// bonus action that counted against the action would make every
+    /// Rogue on the screen look over budget.
     pub other: i64,
+    /// 062. Spent from the ticks on the fight card.
+    pub bonus: i64,
+    pub reactions: i64,
+    pub free: i64,
     /// What this creature was owed, so a screen can print "2 of 2"
     /// rather than counting to two and worrying.
     pub budget: Budget,
@@ -213,6 +233,9 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
                     actions: 0,
                     attacks: 0,
                     other: 0,
+                    bonus: 0,
+                    reactions: 0,
+                    free: 0,
                     budget,
                     over_budget: false,
                 });
@@ -224,8 +247,15 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
         // bonus action the count follows the column rather than
         // needing this line edited. `Act::cost` falls back to the key,
         // which is the same rule 061's trigger applies.
+        // EACH SLOT ON ITS OWN TALLY. Before 062 everything that was
+        // not a swing landed in `other`, which was right while nothing
+        // could write the other three and would have made one bonus
+        // action read as a spent turn the moment something could.
         match a.cost() {
             "attack" => slot.attacks += 1,
+            "bonus" => slot.bonus += 1,
+            "reaction" => slot.reactions += 1,
+            "free" => slot.free += 1,
             _ => slot.other += 1,
         }
         // THE ATTACK ACTION IS AN ACTION. That is the part worth
@@ -240,8 +270,11 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
         // turn. `a_check_is_an_action_too` has asserted otherwise
         // since 054 and was right.
         let slots = i64::from(slot.attacks > 0) + slot.other;
-        slot.over_budget =
-            slot.attacks > slot.budget.attacks || slots > slot.budget.actions;
+        slot.over_budget = slot.attacks > slot.budget.attacks
+            || slots > slot.budget.actions
+            || slot.bonus > slot.budget.bonus
+            || slot.reactions > slot.budget.reactions
+            || slot.free > slot.budget.free;
     }
 
     out.sort_by(|a, b| a.actor_id.cmp(&b.actor_id));
@@ -271,6 +304,9 @@ mod tests {
                 actions: 0,
                 attacks: 0,
                 other: 0,
+                bonus: 0,
+                reactions: 0,
+                free: 0,
                 budget: Budget::default(),
                 over_budget: false,
             })
@@ -410,7 +446,85 @@ mod tests {
         a.cost = Some("bonus".into());
         let s = one(&[a], 1, "a");
         assert_eq!(s.attacks, 0, "not a swing - the column said so");
-        assert_eq!(s.other, 1);
+        assert_eq!(s.bonus, 1, "and it lands in its own slot, not in other");
+        assert_eq!(s.other, 0);
+    }
+
+    /* --------------------- the other three (062) --------------------- */
+
+    // A cost word used as a KEY is that cost, which is how 062's
+    // markers are written and what its trigger does.
+    #[test]
+    fn a_marker_keyed_by_its_cost_needs_no_stated_cost() {
+        for word in ["bonus", "reaction", "free"] {
+            let s = one(&[act(Some("a"), word, Some(1))], 1, "a");
+            let got = match word {
+                "bonus" => s.bonus,
+                "reaction" => s.reactions,
+                _ => s.free,
+            };
+            assert_eq!(got, 1, "{} did not land in its slot", word);
+            assert_eq!(s.other, 0, "{} leaked into the action slot", word);
+            assert!(!s.over_budget, "one {} is exactly one", word);
+        }
+    }
+
+    // THE POINT OF SEPARATE TALLIES. A Rogue who attacks and then
+    // Cunning Actions has spent an action and a bonus action, which is
+    // one turn played correctly - and would have read as two actions
+    // and a warning before 062.
+    #[test]
+    fn an_attack_and_a_bonus_action_is_one_ordinary_turn() {
+        let acts = vec![
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "bonus", Some(1)),
+        ];
+        let s = one(&acts, 1, "a");
+        assert_eq!(s.attacks, 1);
+        assert_eq!(s.bonus, 1);
+        assert_eq!(s.other, 0);
+        assert!(!s.over_budget);
+    }
+
+    #[test]
+    fn a_second_bonus_action_is_over() {
+        let acts = vec![
+            act(Some("a"), "bonus", Some(1)),
+            act(Some("a"), "bonus", Some(1)),
+        ];
+        let s = one(&acts, 1, "a");
+        assert_eq!(s.bonus, 2);
+        assert!(s.over_budget);
+    }
+
+    // Each slot is checked against its OWN budget - a Fighter owed four
+    // swings is owed one reaction like everybody else.
+    #[test]
+    fn extra_attacks_buy_no_extra_reactions() {
+        let acts = vec![
+            act(Some("a"), "reaction", Some(1)),
+            act(Some("a"), "reaction", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "a", &owed("a", 4));
+        assert_eq!(s.budget.attacks, 4);
+        assert_eq!(s.reactions, 2);
+        assert!(s.over_budget);
+    }
+
+    // A whole legal turn for somebody with everything: two swings, a
+    // bonus action, a reaction and a free interaction.
+    #[test]
+    fn a_full_legal_turn_is_not_over_budget() {
+        let acts = vec![
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "bonus", Some(1)),
+            act(Some("a"), "reaction", Some(1)),
+            act(Some("a"), "free", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "a", &owed("a", 2));
+        assert_eq!(s.actions, 5, "five rows");
+        assert!(!s.over_budget, "and every one of them owed");
     }
 
     #[test]

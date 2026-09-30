@@ -494,6 +494,17 @@ async function loadClasses() {
   // A repaint must not silently change what somebody already chose.
   if (keep && state.classes.some((c) => c.key === keep)) sel.value = keep;
   paintClassNote();
+
+  // 064. The statblock form's picker, off the same catalogue - a
+  // table's own Fighter should be available to a monster too.
+  const sb = document.querySelector("#npc-class-key");
+  if (sb) {
+    const held = sb.value;
+    sb.innerHTML = "";
+    sb.append(new Option("no class", ""));
+    for (const c of state.classes) sb.append(new Option(c.name, c.key));
+    if (held && state.classes.some((c) => c.key === held)) sb.value = held;
+  }
 }
 
 function paintClassNote() {
@@ -5487,6 +5498,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       level: val("#npc-level") ? Number(val("#npc-level")) : null,
       species: val("#npc-species") || null,
       class: val("#npc-class") || null,
+      // 064. The descriptor above is prose; this is the reference the
+      // engine acts on.
+      classKey: val("#npc-class-key") || null,
       weaponProfs: val("#npc-wprof") || null,
       armorProfs: val("#npc-aprof") || null,
     });

@@ -429,6 +429,10 @@ and not after.
     interaction, spent by a tick rather than by a roll
 063 a held action names its place - holding is a position in the order,
     not a trigger
+064 a goblin has a calling too - NPCs get a class, and the twelve in
+    place were swept
+065 an instance inherits its calling - instantiate_npc carries it, so
+    the thirteenth goblin is not born classless
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2523,6 +2527,70 @@ attacks and additional attacks - 061 did the swings and the action,
 model for is haste, an action surge and a legendary action, all of
 which read as over budget and all of which are legitimate; the flag
 says "look at this" and has never claimed more.
+
+## NPCs have a class - BUILT (064, 065)
+
+055 gave a CHARACTER a class and stopped at the player side. Every
+monster in the game had `class_key` NULL, so `Effective::attacks` handed
+them one swing and `class::attacks_at` was never asked. Dave's rule:
+most combat types are fighters or rogues, the shop keeper is a rogue,
+the bar keeper is a bard.
+
+**THERE WAS ALREADY A `class` AND IT IS PROSE.** `npcs.class` has held
+"Fighter" on the Goblin Fighter since 022 and NULL on the Goblin, and
+nothing has ever read it. `class_key` is the reference; the text stays
+as the DESCRIPTOR, because a statblock may want to say "Chieftain"
+where no catalogue class fits and losing that would lose something a DM
+wrote. The key is the rule, the text is the label, and the form now
+takes both - verified through the rig: `class: "Brute"` and
+`classKey: "fighter"` in one payload.
+
+**THE LINE THAT MATTERS: A CLASS DOES NOT CHANGE A MONSTER'S HIT
+POINTS.** 029 settled that a monster's maximum is level times the die
+their SIZE gives, because the Monster Manual writes 7 (2d6) and that is
+what makes "set level" a button rather than a rewrite. 061's `pc_hp` is
+the other rule and it is not this one.
+
+`rederive_hp_max` recomputes from class for anything that has one, and
+before 064 no NPC did. Left alone, the Goblin Scout would have gone
+from 28 hit points to 43 the first time anybody touched their level,
+silently. The guard went in with the sweep: an NPC returns early and
+keeps 029's rule. Verified live - the probe printed "scout keeps 28 (pc
+rule would say 43)".
+
+**WHAT A CLASS GIVES A MONSTER** is an attack count and a name for what
+they are. Nothing else: 055 deliberately has no class features, so a
+Rogue goblin gets no Sneak Attack and no Expertise.
+
+**THE SWEEP.** Twelve instances and two statblocks, none left
+unclassed. Goblin Fighters are Fighters because their own statblock
+said so. Everything else goblin is a ROGUE: a 5e goblin's signature is
+Nimble Escape - Disengage or Hide as a bonus action - which is Cunning
+Action wearing another name, and a skirmisher is the closer read than a
+line fighter. Dave's rule allows either.
+
+EVERY INSTANCE STILL COMES OUT AT ONE SWING, because a Rogue gains none
+and a level 1 Fighter has not reached five. Nothing about the fights on
+the table changed, which is the right way for a sweep to land.
+
+**PROFICIENCIES WERE FILLED, NEVER OVERWRITTEN.** An empty list is
+028's fault and reads as proficient with nothing; three Goblin Fighters
+had been carrying one and now hold `{sim,mar}` and `{lgt,med,hvy,shl}`.
+Goblin Fighter 0004 kept the `{shortsword}` somebody authored.
+
+**065 IS THE HALF THAT WOULD HAVE BEEN MISSED.** `instantiate_npc`
+copies ten columns from the statblock and could not copy the eleventh,
+so the THIRTEENTH goblin would have come out classless - the same
+half-a-feature as `objects.attuned` since 008 and `characters.markup`
+since 040. Verified live and rolled back: a fresh goblin comes out
+`rogue`, 7 hit points, level 2, `{sim}` intact.
+
+**ONE THING LEFT FOR DAVE.** Merchant 1 is the shop keeper and Dave's
+rule says a shop keeper is a rogue - but `is_npc` is FALSE on that row,
+because he was made a PC to test the shop UI. The sweep took the flag
+at its word and left him alone. Classing him is one update; it would
+also move his maximum from 22 to 28, since he is a character and
+`rederive_hp_max` applies to characters. His call.
 
 ## Pick up here
 

@@ -62,7 +62,7 @@ pub fn list_npcs(state: State<AppState>, game_id: String) -> Result<Value, Strin
         &token,
         "npcs",
         &[
-            ("select", "key,game_id,name,species,class,ac,hp_max,size,notes"),
+            ("select", "key,game_id,name,species,class,class_key,ac,hp_max,size,notes"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("order", "name.asc"),
         ],
@@ -91,6 +91,10 @@ pub fn create_npc(
     level: Option<i64>,
     species: Option<String>,
     class: Option<String>,
+    // 064. THE RULE, where `class` beside it is the descriptor. A
+    // statblock may say "Chieftain" in prose and still be a Fighter
+    // underneath, which is the whole reason the two are separate.
+    class_key: Option<String>,
     weapon_profs: Option<String>,
     armor_profs: Option<String>,
 ) -> Result<Value, String> {
@@ -151,6 +155,9 @@ pub fn create_npc(
             "name": name.trim(),
             "species": name_or_null(species),
             "class": name_or_null(class),
+            // An empty pick is NO class rather than an empty string,
+            // which would be a key pointing at nothing.
+            "class_key": name_or_null(class_key),
             "ac": ac,
             "hp_max": hp_max,
             "size": name_or_null(size.clone()),

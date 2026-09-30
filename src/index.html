@@ -456,6 +456,13 @@
           <div class="row">
             <input id="npc-species" placeholder="species (optional)" />
             <input id="npc-class" placeholder="class (optional)" />
+            <!-- 064. THE RULE beside the descriptor. The text above may
+                 say "Chieftain"; this says what the engine treats them
+                 as - which decides their attack count and fills empty
+                 proficiency lists on instantiation. -->
+            <select id="npc-class-key">
+              <option value="">no class</option>
+            </select>
           </div>
           <div class="row">
             <input id="npc-ac" type="number" min="0" placeholder="AC" />

@@ -391,13 +391,32 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
         token,
         "characters",
         &[
-            ("select", "id,level,class_key,game_id,species_key"),
+            ("select", "id,level,class_key,game_id,species_key,is_npc"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
     let Some(row) = rows.as_array().and_then(|a| a.first()) else {
         return Ok(None);
     };
+
+    // A MONSTER'S HIT POINTS ARE NOT A CHARACTER'S, and 064 is what
+    // made saying so necessary. Before it every NPC had `class_key`
+    // NULL and fell out of this function on the next check; now a
+    // goblin is a Rogue, and without this guard the first touch of
+    // their level would quietly recompute them on 061's `pc_hp` -
+    // the Goblin Scout going from 28 hit points to 43 with nothing on
+    // screen to explain it.
+    //
+    // 029 settled it: a monster is level times the die their SIZE
+    // gives, because the Monster Manual writes 7 (2d6) and that is
+    // what makes "set level" a button rather than a rewrite. They
+    // level through `commands::dm::set_actor_level`, which applies
+    // that rule. A class gives them an attack count and a name; it
+    // does not give them a hit die.
+    if row.get("is_npc").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Ok(None);
+    }
+
     let Some(key) = row.get("class_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
     else {
         // No class, no die. A monster levels through

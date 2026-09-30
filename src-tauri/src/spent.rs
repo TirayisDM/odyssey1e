@@ -48,6 +48,75 @@ pub struct Act {
     /// encounter, or one written before the column existed. Neither can
     /// be attributed to a round, so neither is counted in one.
     pub round: Option<i64>,
+    /// What it spent - 061. `attack`, `action`, and the three the app
+    /// cannot yet write: `bonus`, `reaction`, `free`.
+    ///
+    /// ABSENT FALLS BACK TO THE KEY, which is the same rule 061's
+    /// trigger applies. The column is stamped on insert and backfilled,
+    /// so nothing in the database is missing one - but a caller
+    /// building an Act by hand should not have to know that, and a
+    /// silent None would quietly stop counting somebody's swings.
+    pub cost: Option<String>,
+}
+
+impl Act {
+    /// What this cost, stated or derived.
+    pub fn cost(&self) -> &str {
+        match self.cost.as_deref() {
+            Some(c) if !c.is_empty() => c,
+            _ if self.key == "attack" => "attack",
+            _ => "action",
+        }
+    }
+}
+
+/// WHAT A CREATURE IS OWED IN ONE TURN. 061.
+///
+/// 054 counted what was spent and called a second action "beyond one
+/// turn", and said plainly that Extra Attack would make that flag fire
+/// on correct play. It did: Garn is a level 5 Barbarian, he is owed
+/// two swings, and every second one he has ever taken has been marked
+/// irregular by an app with no way to know better.
+///
+/// A warning that fires on correct play is worse than no warning,
+/// because a DM learns to ignore it and then misses the one that
+/// mattered.
+///
+/// STILL NOT A GATE. 051 decided the order informs and refuses
+/// nothing, and a budget is the same kind of thing: it says what is
+/// owed so a screen can show two swings as two of two rather than as
+/// one too many. Haste, action surge and a legendary action are all
+/// still outside what the engine knows, and all still legitimate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Budget {
+    /// From the class's Extra Attack progression - see
+    /// `class::attacks_at`. One for anybody without a class, which is
+    /// every monster: a statblock's multiattack is its own thing and
+    /// nothing reads it yet.
+    pub attacks: i64,
+    /// One. The Attack action is an action, and the attacks above are
+    /// what that one action buys.
+    pub actions: i64,
+    /// One each, AND NOTHING WRITES THEM YET - 061 admits the values
+    /// and no path produces them. Carried so the shape is right when a
+    /// bonus action or a readied attack arrives; deliberately NOT shown
+    /// on screen, because an always-empty counter claims a system that
+    /// does not exist.
+    pub bonus: i64,
+    pub reactions: i64,
+}
+
+impl Default for Budget {
+    /// What somebody with no class gets: one swing, one action.
+    fn default() -> Self {
+        Self { attacks: 1, actions: 1, bonus: 1, reactions: 1 }
+    }
+}
+
+impl Budget {
+    pub fn with_attacks(attacks: i64) -> Self {
+        Self { attacks: attacks.max(1), ..Self::default() }
+    }
 }
 
 /// What one creature has spent, in one round.
@@ -61,21 +130,26 @@ pub struct Spent {
     /// twice" and "attacked twice" are different things to a DM, and
     /// the second is the one that was asked about.
     pub attacks: i64,
-    /// More than one turn's worth, by the plain rule - one action per
-    /// turn.
+    /// Everything that was not a swing: checks, death saves. The pair
+    /// matters because the Attack action buys N attacks, so two swings
+    /// are ONE action and two checks are two.
+    pub other: i64,
+    /// What this creature was owed, so a screen can print "2 of 2"
+    /// rather than counting to two and worrying.
+    pub budget: Budget,
+    /// Past what they are owed - 061 replaced 054's `beyond_one_turn`,
+    /// which measured against a flat one and therefore fired on every
+    /// Extra Attack ever taken.
     ///
-    /// A FLAG, NOT A VERDICT. Extra Attack, haste, action surge and a
-    /// legendary action all make this true and legitimate, and the
-    /// engine knows about none of them. It means "look at this", which
-    /// is what was being asked for: right now a character can swing
-    /// again and again and nothing anywhere says so.
+    /// STILL A FLAG, NOT A VERDICT, and the list of things that make
+    /// it legitimately true is shorter now but not empty: haste, action
+    /// surge, a legendary action, and a DM simply allowing it. It means
+    /// "look at this".
     ///
-    /// DECIDED HERE, NOT ON THE SCREEN. It is one comparison, and one
-    /// comparison is exactly the kind of thing that ends up written
-    /// twice and drifts - the frontend is already the place where a
-    /// goblin was stopped from healing itself while the player's roll
-    /// box allowed it.
-    pub beyond_one_turn: bool,
+    /// DECIDED HERE, NOT ON THE SCREEN. It is two comparisons, and a
+    /// comparison written on a screen is how the frontend came to
+    /// disagree with the engine about whether a goblin may heal itself.
+    pub over_budget: bool,
 }
 
 /* ============================ RULES ============================ */
@@ -107,7 +181,7 @@ pub fn out_of_turn(actor_id: Option<&str>, turn_actor_id: Option<&str>) -> bool 
 /// the screen indexes into it rather than reading it in order, but a
 /// function that returns rows in hash order is one that cannot be
 /// tested honestly.
-pub fn this_round(acts: &[Act], round: i64) -> Vec<Spent> {
+pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec<Spent> {
     let mut out: Vec<Spent> = Vec::new();
 
     for a in acts {
@@ -124,20 +198,50 @@ pub fn this_round(acts: &[Act], round: i64) -> Vec<Spent> {
         let slot = match out.iter_mut().find(|s| s.actor_id == id) {
             Some(s) => s,
             None => {
+                // A creature with no budget given gets the default:
+                // one swing, one action. That is every monster today -
+                // a statblock's multiattack is its own thing and
+                // nothing reads it yet - and it is also the honest
+                // answer for anybody the caller failed to look up.
+                let budget = budgets
+                    .iter()
+                    .find(|(k, _)| k == id)
+                    .map(|(_, b)| *b)
+                    .unwrap_or_default();
                 out.push(Spent {
                     actor_id: id.to_string(),
                     actions: 0,
                     attacks: 0,
-                    beyond_one_turn: false,
+                    other: 0,
+                    budget,
+                    over_budget: false,
                 });
                 out.last_mut().expect("just pushed")
             }
         };
         slot.actions += 1;
-        if a.key == "attack" {
-            slot.attacks += 1;
+        // COUNTED BY COST, NOT BY KEY, so the day a technique costs a
+        // bonus action the count follows the column rather than
+        // needing this line edited. `Act::cost` falls back to the key,
+        // which is the same rule 061's trigger applies.
+        match a.cost() {
+            "attack" => slot.attacks += 1,
+            _ => slot.other += 1,
         }
-        slot.beyond_one_turn = slot.actions > 1;
+        // THE ATTACK ACTION IS AN ACTION. That is the part worth
+        // stating: swinging N times costs ONE action however large N
+        // is, so a Fighter's four swings are one action - but swinging
+        // at all and then making a check is TWO, because the check
+        // needs the action the Attack already spent.
+        //
+        // A pre-existing test caught this. The first version of the
+        // rule gave attacks and checks separate pools, which let a
+        // level 1 character swing and then make a check inside one
+        // turn. `a_check_is_an_action_too` has asserted otherwise
+        // since 054 and was right.
+        let slots = i64::from(slot.attacks > 0) + slot.other;
+        slot.over_budget =
+            slot.attacks > slot.budget.attacks || slots > slot.budget.actions;
     }
 
     out.sort_by(|a, b| a.actor_id.cmp(&b.actor_id));
@@ -154,14 +258,21 @@ mod tests {
     /// creature. The library offers the whole round because that is
     /// what the screen paints; picking one out is the test's business.
     fn one(acts: &[Act], round: i64, actor_id: &str) -> Spent {
-        this_round(acts, round)
+        one_with(acts, round, actor_id, &[])
+    }
+
+    /// The same, for a creature that is owed more than the default.
+    fn one_with(acts: &[Act], round: i64, actor_id: &str, budgets: &[(String, Budget)]) -> Spent {
+        this_round(acts, round, budgets)
             .into_iter()
             .find(|s| s.actor_id == actor_id)
             .unwrap_or(Spent {
                 actor_id: actor_id.to_string(),
                 actions: 0,
                 attacks: 0,
-                beyond_one_turn: false,
+                other: 0,
+                budget: Budget::default(),
+                over_budget: false,
             })
     }
 
@@ -170,7 +281,18 @@ mod tests {
             actor_id: actor.map(String::from),
             key: key.to_string(),
             round,
+            // Left unstated on purpose: `Act::cost` falls back to the
+            // key, which is the same rule 061's trigger applies, and
+            // these fixtures exercise that fallback rather than
+            // restating the column.
+            cost: None,
         }
+    }
+
+    /// A creature owed more than the default, for the tests that are
+    /// about Extra Attack.
+    fn owed(actor: &str, attacks: i64) -> Vec<(String, Budget)> {
+        vec![(actor.to_string(), Budget::with_attacks(attacks))]
     }
 
     #[test]
@@ -178,7 +300,7 @@ mod tests {
         let s = one(&[], 1, "a");
         assert_eq!(s.actions, 0);
         assert_eq!(s.attacks, 0);
-        assert!(!s.beyond_one_turn);
+        assert!(!s.over_budget);
     }
 
     #[test]
@@ -190,7 +312,113 @@ mod tests {
         let s = one(&acts, 1, "a");
         assert_eq!(s.actions, 2);
         assert_eq!(s.attacks, 2);
-        assert!(s.beyond_one_turn);
+        // Owed one, took two - worth a look.
+        assert!(s.over_budget);
+    }
+
+    /* ------------------- what the budget changes ------------------- */
+
+    // GARN. A level 5 Barbarian is owed two swings, and before 061
+    // every second one he took was flagged as irregular by an app with
+    // no way to know better.
+    #[test]
+    fn a_second_swing_is_owed_to_somebody_with_extra_attack() {
+        let acts = vec![
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "attack", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "a", &owed("a", 2));
+        assert_eq!(s.attacks, 2);
+        assert_eq!(s.budget.attacks, 2);
+        assert!(!s.over_budget, "two of two is not over");
+    }
+
+    #[test]
+    fn and_a_third_is_not() {
+        let acts = vec![
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "attack", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "a", &owed("a", 2));
+        assert_eq!(s.attacks, 3);
+        assert!(s.over_budget);
+    }
+
+    // THE PAIR IS THE POINT. The Attack action buys N swings, so two
+    // swings are one action - but two CHECKS are two actions, and the
+    // budget for those is one however many attacks you get.
+    #[test]
+    fn two_checks_are_over_even_for_a_fighter() {
+        let acts = vec![
+            act(Some("a"), "prc", Some(1)),
+            act(Some("a"), "ins", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "a", &owed("a", 4));
+        assert_eq!(s.other, 2);
+        assert_eq!(s.attacks, 0);
+        assert!(s.over_budget, "four attacks buys no extra checks");
+    }
+
+    #[test]
+    fn attacks_and_a_check_are_counted_apart() {
+        let acts = vec![
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "attack", Some(1)),
+            act(Some("a"), "prc", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "a", &owed("a", 2));
+        assert_eq!(s.attacks, 2);
+        assert_eq!(s.other, 1);
+        assert_eq!(s.actions, 3, "the total is still every row");
+        // AND IT IS OVER, because the Attack action already spent the
+        // action the check wants. Both swings were owed; the check is
+        // the one that does not fit.
+        assert!(s.over_budget);
+    }
+
+    // The whole of Extra Attack inside one action, which is the case
+    // the separate-pools version got wrong in the other direction.
+    #[test]
+    fn four_swings_are_still_one_action() {
+        let acts: Vec<Act> = (0..4)
+            .map(|_| act(Some("a"), "attack", Some(1)))
+            .collect();
+        let s = one_with(&acts, 1, "a", &owed("a", 4));
+        assert_eq!(s.attacks, 4);
+        assert_eq!(s.other, 0);
+        assert!(!s.over_budget, "a level 20 Fighter, doing exactly their job");
+    }
+
+    // A death save IS the turn of a creature that is dying - 015 - so
+    // it costs the action rather than being free.
+    #[test]
+    fn a_death_save_spends_the_action() {
+        let acts = vec![act(Some("a"), "death", Some(1))];
+        let s = one(&acts, 1, "a");
+        assert_eq!(s.other, 1);
+        assert_eq!(s.attacks, 0);
+        assert!(!s.over_budget);
+    }
+
+    // The column is what counts; the key is only the fallback. A
+    // technique that one day costs a bonus action must not be counted
+    // as a swing because its key still says attack.
+    #[test]
+    fn a_stated_cost_beats_the_key() {
+        let mut a = act(Some("a"), "attack", Some(1));
+        a.cost = Some("bonus".into());
+        let s = one(&[a], 1, "a");
+        assert_eq!(s.attacks, 0, "not a swing - the column said so");
+        assert_eq!(s.other, 1);
+    }
+
+    #[test]
+    fn an_unbudgeted_creature_gets_one_swing() {
+        let acts = vec![act(Some("goblin"), "attack", Some(1))];
+        let s = one(&acts, 1, "goblin");
+        assert_eq!(s.budget.attacks, 1);
+        assert!(!s.over_budget);
     }
 
     #[test]
@@ -211,7 +439,7 @@ mod tests {
         let acts = vec![act(Some("a"), "attack", None)];
         assert_eq!(one(&acts, 0, "a").actions, 0);
         assert_eq!(one(&acts, 1, "a").actions, 0);
-        assert!(this_round(&acts, 1).is_empty());
+        assert!(this_round(&acts, 1, &[]).is_empty());
     }
 
     /// Round 0 is a real value - 051 uses it for "the order has not
@@ -242,7 +470,7 @@ mod tests {
         let s = one(&acts, 1, "a");
         assert_eq!(s.actions, 2);
         assert_eq!(s.attacks, 1);
-        assert!(s.beyond_one_turn);
+        assert!(s.over_budget);
     }
 
     /// Somebody not enrolled can still roll, and the log keeps it. It
@@ -253,7 +481,7 @@ mod tests {
             act(None, "attack", Some(1)),
             act(Some("a"), "attack", Some(1)),
         ];
-        let all = this_round(&acts, 1);
+        let all = this_round(&acts, 1, &[]);
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].actor_id, "a");
     }
@@ -265,7 +493,7 @@ mod tests {
             act(Some("a"), "attack", Some(1)),
             act(Some("b"), "attack", Some(1)),
         ];
-        let all = this_round(&acts, 1);
+        let all = this_round(&acts, 1, &[]);
         assert_eq!(all.len(), 2);
         // Sorted, so this is stable rather than incidental.
         assert_eq!(all[0].actor_id, "a");
@@ -300,6 +528,6 @@ mod tests {
     #[test]
     fn one_action_is_not_beyond_a_turn() {
         let acts = vec![act(Some("a"), "attack", Some(1))];
-        assert!(!one(&acts, 1, "a").beyond_one_turn);
+        assert!(!one(&acts, 1, "a").over_budget);
     }
 }

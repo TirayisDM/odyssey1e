@@ -636,6 +636,10 @@ pub(crate) fn load_species_map(
 pub(crate) struct Effective {
     scores: HashMap<String, HashMap<String, Ability>>,
     peoples: HashMap<String, crate::species::Species>,
+    /// How many swings the Attack action buys, per character - 061.
+    /// Derived from their class and level, which the first request
+    /// already had to read.
+    attacks: HashMap<String, i64>,
 }
 
 impl Effective {
@@ -646,7 +650,17 @@ impl Effective {
         scores: HashMap<String, HashMap<String, Ability>>,
         peoples: HashMap<String, crate::species::Species>,
     ) -> Self {
-        Effective { scores, peoples }
+        Effective { scores, peoples, attacks: HashMap::new() }
+    }
+
+    /// How many attacks this character's Attack action buys.
+    ///
+    /// ONE FOR ANYBODY WITHOUT A CLASS, which is every monster in the
+    /// game. A statblock's multiattack is a different mechanism that
+    /// nothing reads yet, and claiming a goblin gets one swing is both
+    /// true today and the safe way to be wrong.
+    pub(crate) fn attacks(&self, character_id: &str) -> i64 {
+        self.attacks.get(character_id).copied().unwrap_or(1)
     }
 
     /// The modifier, species bonus included. Zero for a character with
@@ -668,8 +682,13 @@ impl Effective {
     }
 }
 
-/// Three requests for any number of characters: who they are, what
-/// they rolled, and what their peoples add.
+/// Four requests for any number of characters: who they are, what they
+/// rolled, what their peoples add, and what their classes buy.
+///
+/// THE FOURTH CAME FREE OF A FIFTH. The first request already reads
+/// `characters`, so `class_key` and `level` cost nothing extra there;
+/// only the class catalogue itself is a new round trip, and it is
+/// twelve rows.
 pub(crate) fn load_effective(
     token: &str,
     game_id: &str,
@@ -686,6 +705,7 @@ pub(crate) fn load_effective(
         return Ok(Effective {
             scores: HashMap::new(),
             peoples: HashMap::new(),
+            attacks: HashMap::new(),
         });
     }
     let list = ids.join(",");
@@ -694,18 +714,26 @@ pub(crate) fn load_effective(
         token,
         "characters",
         &[
-            ("select", "id,species_key"),
+            ("select", "id,species_key,class_key,level"),
             ("id", &format!("in.({})", list)),
         ],
     )?;
     let mut key_of: HashMap<String, String> = HashMap::new();
+    // (character, class key, level) for the ones that have a class.
+    let mut classed: Vec<(String, String, i64)> = Vec::new();
     for r in chars.as_array().unwrap_or(&Vec::new()) {
-        if let (Some(id), Some(k)) = (
-            r.get("id").and_then(|v| v.as_str()),
-            r.get("species_key").and_then(|v| v.as_str()),
-        ) {
+        let Some(id) = r.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some(k) = r.get("species_key").and_then(|v| v.as_str()) {
             if !k.is_empty() {
                 key_of.insert(id.to_string(), k.to_string());
+            }
+        }
+        if let Some(c) = r.get("class_key").and_then(|v| v.as_str()) {
+            if !c.is_empty() {
+                let level = r.get("level").and_then(|v| v.as_i64()).unwrap_or(1);
+                classed.push((id.to_string(), c.to_string(), level));
             }
         }
     }
@@ -741,6 +769,38 @@ pub(crate) fn load_effective(
             .insert(code.to_string(), Ability::plain(score, prof));
     }
 
+    // THE FOURTH REQUEST, SKIPPED WHEN NOBODY HAS A CLASS - which is
+    // the common case for a roster of monsters, and the reason this is
+    // not folded into the species read.
+    let mut attacks: HashMap<String, i64> = HashMap::new();
+    if !classed.is_empty() {
+        let keys: Vec<String> = classed
+            .iter()
+            .map(|(_, k, _)| k.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let rows = supabase::rest_get(
+            token,
+            "classes",
+            &[
+                ("select", crate::class::CLASS_COLUMNS),
+                ("key", &format!("in.({})", keys.join(","))),
+                ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ],
+        )?;
+        let catalogue = crate::class::collapse(rows.as_array().unwrap_or(&Vec::new()));
+        for (cid, key, level) in &classed {
+            // A class_key pointing at nothing leaves the character on
+            // one swing rather than refusing the whole read. 055 cannot
+            // use a foreign key to prevent it, and a dangling reference
+            // should not empty a screen.
+            if let Some(c) = catalogue.iter().find(|c| &c.key == key) {
+                attacks.insert(cid.clone(), c.attacks_at(*level));
+            }
+        }
+    }
+
     let mut peoples: HashMap<String, crate::species::Species> = HashMap::new();
     for (cid, key) in &key_of {
         let Some(sp) = catalogue.get(key) else {
@@ -752,7 +812,7 @@ pub(crate) fn load_effective(
         peoples.insert(cid.clone(), sp.clone());
     }
 
-    Ok(Effective { scores, peoples })
+    Ok(Effective { scores, peoples, attacks })
 }
 
 /// A species' unarmoured floor, with its ability already resolved to a

@@ -2802,6 +2802,31 @@ function labelledCell(label, value, cls) {
 // THE BUTTON NAMES THE ACT rather than the state: "Begin" before the
 // order starts and "Next: Goblin 2" after, because a button that says
 // "next turn" makes you look at the list to find out what that means.
+// HOW MANY SWINGS, OUT OF HOW MANY OWED. 061.
+//
+// The budget comes from Rust with the class progression already
+// applied - a level 5 Barbarian is owed two - so the screen prints a
+// pair and does no arithmetic of its own. Before 061 it printed a bare
+// count and a warning, and the warning fired on every Extra Attack
+// anybody had ever taken.
+function swingText(sp) {
+  if (!sp) return "";
+  const owed = (sp.budget && sp.budget.attacks) || 1;
+  return sp.attacks + "/" + owed;
+}
+
+// What to say on hover, spelled out rather than abbreviated.
+function spendTitle(sp) {
+  if (!sp) return "nothing spent this round";
+  const owed = (sp.budget && sp.budget.attacks) || 1;
+  const bits = [
+    sp.attacks + (sp.attacks === 1 ? " attack" : " attacks") + " of " + owed,
+  ];
+  if (sp.other) bits.push(sp.other + (sp.other === 1 ? " other action" : " other actions"));
+  if (sp.over_budget) bits.push("MORE THAN THIS TURN OWES - haste, an action surge, or a call you made");
+  return bits.join(" \u00b7 ");
+}
+
 function paintTurnBar(encounterId, turns) {
   const say = document.querySelector("#turn-now");
   const next = document.querySelector("#next-turn");
@@ -3259,6 +3284,29 @@ async function paintFightCard(id, turns, enc) {
 
   /* -------------- lower right: the order, descending -------------- */
 
+  // THE BUTTON NAMES THE NEXT CREATURE. 051's paintTurnBar already
+  // made this argument for the bar - "a button that says next turn
+  // makes you look at the list to find out what that means" - and the
+  // card's own button had been left saying "End turn". Moving to the
+  // next character IS the order marker Dave asked for, so it should
+  // read as one.
+  const btn = document.querySelector("#fight-next");
+  if (btn) {
+    const takers = order.filter((a) => a.takes_turns);
+    const at = current ? takers.findIndex((a) => a.id === current.id) : -1;
+    const nxt = takers.length
+      ? takers[at >= 0 ? (at + 1) % takers.length : 0]
+      : null;
+    const wraps = at >= 0 && at + 1 >= takers.length;
+    btn.textContent = !takers.length
+      ? "nobody can act"
+      : !round
+      ? "Begin → " + nxt.label
+      : "End turn → " + nxt.label + (wraps ? " (round " + (round + 1) + ")" : "");
+    btn.disabled = !takers.length;
+    btn.title = wraps ? "last in the order - this starts the next round" : "";
+  }
+
   const ol = document.querySelector("#fight-order");
   ol.innerHTML = "";
   for (const a of order) {
@@ -3279,10 +3327,23 @@ async function paintFightCard(id, turns, enc) {
 
     const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
     const tally = document.createElement("span");
-    tally.className = "fo-tally" + (sp && sp.beyond_one_turn ? " warn" : "");
-    tally.textContent = sp && sp.actions ? "\u00d7" + sp.actions : "";
+    tally.className = "fo-tally" + (sp && sp.over_budget ? " warn" : "");
+    // SWINGS OUT OF SWINGS OWED, not a bare count of everything. "2"
+    // beside a Barbarian said nothing; "2/2" says they are done and
+    // "1/2" says they have another coming.
+    tally.textContent = sp && sp.actions ? swingText(sp) : "";
+    if (sp) tally.title = spendTitle(sp);
 
-    li.append(n, nm, tally);
+    // WHOSE GO IT IS, said in the markup rather than only in colour.
+    // Dave asked for a harder division and a marker that travels with
+    // the order; a border is not one if the row is read aloud or the
+    // screen is small.
+    const mark = document.createElement("span");
+    mark.className = "fo-mark";
+    mark.textContent = a.is_current ? "\u25b6" : "";
+    mark.title = a.is_current ? "acting now" : "";
+
+    li.append(mark, n, nm, tally);
     li.title = a.takes_turns
       ? a.is_current
         ? "acting now"
@@ -3324,6 +3385,20 @@ async function paintFightCard(id, turns, enc) {
     if (t.condition && t.condition !== "conscious") who.append(chip(t.condition, "no"));
   }
   if (focus.initiative != null) who.append(chip("init " + focus.initiative, "use"));
+
+  // WHAT THIS ONE HAS LEFT, on the card that is being acted from. The
+  // order strip says it for everybody; here it sits beside AC and hit
+  // points, which is where a DM is already looking before they swing.
+  const fsp = (state.encSpent || []).find((x) => x.actor_id === focus.id);
+  const fowed = (fsp && fsp.budget && fsp.budget.attacks) || 1;
+  if (fowed > 1 || (fsp && fsp.attacks)) {
+    const sw = chip(
+      (fsp ? fsp.attacks : 0) + "/" + fowed + " attacks",
+      fsp && fsp.over_budget ? "no" : "use",
+    );
+    sw.title = spendTitle(fsp);
+    who.append(sw);
+  }
 
   // THE SHEET IS STILL ONE CLICK AWAY. It was a button on every roster
   // row, and the roster is hidden while the card is up - a view that
@@ -3410,8 +3485,9 @@ function paintOrderStrip(turns) {
     const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
     chip.textContent =
       (a.initiative == null ? "—" : a.initiative) + " " + a.label +
-      (sp && sp.actions ? " ×" + sp.actions : "");
-    if (sp && sp.beyond_one_turn) chip.classList.add("again");
+      (sp && sp.actions ? " " + swingText(sp) : "");
+    if (sp && sp.over_budget) chip.classList.add("again");
+    if (sp) chip.title = spendTitle(sp);
     chip.title = a.takes_turns
       ? a.is_current
         ? "acting now"
@@ -4268,13 +4344,12 @@ async function selectEncounter(id) {
     const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
     if (sp && sp.actions) {
       const gone = document.createElement("span");
-      gone.className = "tag spent" + (sp.beyond_one_turn ? " warn" : "");
+      gone.className = "tag spent" + (sp.over_budget ? " warn" : "");
+      // The pair, not a bare count. What a DM is deciding between
+      // swings is whether this one has another attack coming.
       gone.textContent =
-        sp.actions === 1 ? "acted" : "acted " + sp.actions + " times";
-      gone.title =
-        sp.attacks + (sp.attacks === 1 ? " attack" : " attacks") +
-        " of " + sp.actions + " this round" +
-        (sp.beyond_one_turn ? " - more than one turn's worth" : "");
+        sp.attacks ? swingText(sp) + " attacks" : "acted " + sp.actions;
+      gone.title = spendTitle(sp);
       head.append(gone);
     }
 

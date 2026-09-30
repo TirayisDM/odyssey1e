@@ -60,7 +60,7 @@ pub fn encounter_log(
         &[
             (
                 "select",
-                "id,round,turn_actor_id,key,request,label,created_at,\
+                "id,round,turn_actor_id,key,cost,request,label,created_at,\
                  actor_id,character_id,target_actor_id,target_challenge_id,\
                  rolls(id,role,label,request,formula,detail,total,natural_roll,\
                  character_name,target_value,target_kind,target_label,\
@@ -101,12 +101,77 @@ pub fn encounter_log(
                 .unwrap_or("custom")
                 .to_string(),
             round: a.get("round").and_then(|v| v.as_i64()),
+            cost: a.get("cost").and_then(|v| v.as_str()).map(String::from),
         })
         .collect();
 
     Ok(json!({
         "round": round,
         "actions": actions,
-        "spent": spent::this_round(&acts, round),
+        "spent": spent::this_round(&acts, round, &budgets_for(&token, &encounter_id)?),
     }))
+}
+
+/// What each creature in this fight is owed in a turn, keyed by the
+/// ROSTER row rather than by the character.
+///
+/// THE KEY IS THE ACTOR because that is what an action records and what
+/// the screen paints. Two goblins off one statblock are two actors and
+/// two characters since 022, so the two ids do not collapse - but an
+/// action points at the actor, and translating on the way in beats
+/// making `spent` learn about characters.
+///
+/// A ROSTER WITH NO CLASSES COSTS ONE REQUEST, not four:
+/// `load_effective` returns early on an empty id list, and a fight of
+/// nothing but monsters supplies one. Every monster then falls through
+/// to `Budget::default` - one swing - which is both true today and the
+/// safe way to be wrong, since a statblock's multiattack is a
+/// different mechanism nothing reads yet.
+fn budgets_for(
+    token: &str,
+    encounter_id: &str,
+) -> Result<Vec<(String, crate::spent::Budget)>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "encounter_actors",
+        &[
+            // THROUGH `characters`, not through `encounters`. 051 gave
+            // encounters a second path back to this table and PostgREST
+            // refuses an ambiguous embed outright - see the trap in
+            // STATUS. This hop is the unambiguous one.
+            ("select", "id,character_id,characters(game_id)"),
+            ("encounter_id", &format!("eq.{}", encounter_id)),
+        ],
+    )?;
+    let rows = rows.as_array().cloned().unwrap_or_default();
+
+    let game_id = rows
+        .iter()
+        .find_map(|r| {
+            r.get("characters")
+                .and_then(|c| c.get("game_id"))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or_default()
+        .to_string();
+
+    let ids: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.get("character_id").and_then(|v| v.as_str()))
+        .map(String::from)
+        .collect();
+
+    let eff = crate::character::load_effective(token, &game_id, &ids)?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            let actor = r.get("id").and_then(|v| v.as_str())?;
+            let cid = r.get("character_id").and_then(|v| v.as_str())?;
+            Some((
+                actor.to_string(),
+                crate::spent::Budget::with_attacks(eff.attacks(cid)),
+            ))
+        })
+        .collect())
 }

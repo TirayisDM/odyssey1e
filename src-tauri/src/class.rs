@@ -50,6 +50,9 @@ pub struct Class {
     pub armor_profs: Vec<String>,
     /// `sim`/`mar`, or exact item keys for the restricted classes.
     pub weapon_profs: Vec<String>,
+    /// The levels at which this class gains ANOTHER attack in the
+    /// Attack action. 061. Empty for seven of the twelve.
+    pub extra_attack_levels: Vec<i64>,
     pub skill_choices: i64,
     /// Three-letter keys from the skills catalogue. EMPTY MEANS ANY,
     /// which is how the Bard is written and is a real answer rather
@@ -59,6 +62,29 @@ pub struct Class {
 }
 
 impl Class {
+    /// How many attacks the Attack action gives at this level.
+    ///
+    /// ONE, PLUS HOW MANY OF THE THRESHOLDS YOU HAVE REACHED. A
+    /// Fighter's {5,11,20} therefore reads 1, 2, 3, 4 across twenty
+    /// levels, and a Barbarian's {5} reads 1 then 2.
+    ///
+    /// THE LIST NEED NOT BE SORTED and this does not sort it, because
+    /// it counts rather than walks - a homebrew row written {11,5}
+    /// gives the same answer as {5,11}. A function that quietly
+    /// depended on the order would be a trap for whoever writes the
+    /// class editor.
+    ///
+    /// FLOORED AT ONE. Everybody gets a swing; a level below 1 is a
+    /// character who does not exist yet rather than one who cannot
+    /// act.
+    pub fn attacks_at(&self, level: i64) -> i64 {
+        1 + self
+            .extra_attack_levels
+            .iter()
+            .filter(|&&at| level >= at)
+            .count() as i64
+    }
+
     /// Whether this class may pick that skill. An empty option list is
     /// the Bard: any skill at all.
     ///
@@ -77,7 +103,7 @@ impl Class {
 /// The columns a class read asks for. One place, so a select and a
 /// parser cannot drift apart.
 pub const CLASS_COLUMNS: &str = "key,game_id,name,hit_die,primary_abilities,saving_throws,\
-armor_profs,weapon_profs,skill_choices,skill_options,description";
+armor_profs,weapon_profs,extra_attack_levels,skill_choices,skill_options,description";
 
 /* ============================ READING ============================ */
 
@@ -107,6 +133,11 @@ pub fn from_row(r: &Value) -> Class {
         saving_throws: strs(r, "saving_throws"),
         armor_profs: strs(r, "armor_profs"),
         weapon_profs: strs(r, "weapon_profs"),
+        extra_attack_levels: r
+            .get("extra_attack_levels")
+            .and_then(|x| x.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_i64()).collect())
+            .unwrap_or_default(),
         skill_choices: r.get("skill_choices").and_then(|x| x.as_i64()).unwrap_or(2),
         skill_options: strs(r, "skill_options"),
         description: r.get("description").and_then(|x| x.as_str()).map(str::to_string),
@@ -164,6 +195,64 @@ mod tests {
         assert!(!CLASS_COLUMNS.contains(char::is_whitespace), "{}", CLASS_COLUMNS);
         assert!(CLASS_COLUMNS.starts_with("key,game_id,name,hit_die"));
         assert!(CLASS_COLUMNS.ends_with("description"));
+    }
+
+    /* ---------------------- how many swings ---------------------- */
+
+    fn with_levels(levels: Value) -> Class {
+        from_row(&json!({
+            "key": "x", "name": "X", "hit_die": 10,
+            "extra_attack_levels": levels
+        }))
+    }
+
+    // The Fighter is the only one in the book with three thresholds,
+    // which makes it the one worth checking every step of.
+    #[test]
+    fn a_fighter_climbs_one_two_three_four() {
+        let f = with_levels(json!([5, 11, 20]));
+        assert_eq!(f.attacks_at(1), 1);
+        assert_eq!(f.attacks_at(4), 1, "the level before");
+        assert_eq!(f.attacks_at(5), 2, "and the level itself");
+        assert_eq!(f.attacks_at(10), 2);
+        assert_eq!(f.attacks_at(11), 3);
+        assert_eq!(f.attacks_at(19), 3);
+        assert_eq!(f.attacks_at(20), 4);
+    }
+
+    // Garn. The character this whole migration is about.
+    #[test]
+    fn a_level_five_barbarian_gets_two() {
+        let b = with_levels(json!([5]));
+        assert_eq!(b.attacks_at(4), 1);
+        assert_eq!(b.attacks_at(5), 2);
+        assert_eq!(b.attacks_at(20), 2, "and never a third");
+    }
+
+    #[test]
+    fn seven_of_the_twelve_never_gain_one() {
+        let w = with_levels(json!([]));
+        for level in [1, 5, 11, 20] {
+            assert_eq!(w.attacks_at(level), 1, "at level {}", level);
+        }
+    }
+
+    // It counts rather than walks, so a homebrew row written out of
+    // order gives the same answer.
+    #[test]
+    fn the_thresholds_need_not_be_sorted() {
+        let a = with_levels(json!([5, 11, 20]));
+        let b = with_levels(json!([20, 5, 11]));
+        for level in 1..=20 {
+            assert_eq!(a.attacks_at(level), b.attacks_at(level), "at {}", level);
+        }
+    }
+
+    #[test]
+    fn everybody_gets_at_least_one_swing() {
+        let f = with_levels(json!([5, 11, 20]));
+        assert_eq!(f.attacks_at(0), 1);
+        assert_eq!(f.attacks_at(-3), 1);
     }
 
     #[test]

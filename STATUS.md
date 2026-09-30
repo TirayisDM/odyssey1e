@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**482 tests, zero warnings.** `cd src-tauri && cargo test`.
+**504 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -422,6 +422,9 @@ and not after.
     apart, and a trait that can cost you something
 059 a short stride is a cost - the Unt'gar's 25 feet, said where a
     player will look for it
+060 an action knows whose turn it was - stamped, so out-of-turn is a
+    fact rather than a comparison against a pointer that has moved
+061 how many swings do you get - Extra Attack, and what an action cost
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2291,6 +2294,86 @@ Athletics granted.
     doubled proficiency on SOME uses of one skill. Nothing can detect
     which use, so both are granted at ordinary proficiency with the
     doubling left to the table.
+
+## How many swings - BUILT (061, class::attacks_at, spent::Budget)
+
+**054 SAID THIS WOULD HAPPEN AND IT DID.** It counted actions, called a
+second one "beyond one turn", and wrote down that "Extra Attack, haste,
+action surge and a legendary action all make this true and legitimate,
+and the engine knows about none of them."
+
+Garn is a level 5 Barbarian. He is owed TWO attacks. Every second swing
+he has ever taken was flagged as irregular by an app with no way to know
+it was owed to him - and a warning that fires on correct play is worse
+than no warning, because a DM learns to ignore it and then misses the
+one that mattered.
+
+**THE PROGRESSION IS DATA.** `classes.extra_attack_levels` is the list
+of levels at which a class gains another attack, so the count is `1 +
+how many you have reached`. Fighter {5,11,20} reads 1, 2, 3, 4 across
+twenty levels; Barbarian, Paladin, Ranger and Monk are {5}; the other
+seven are empty. On the row because 055 gave classes nullable tenancy so
+a table could write its own - a match arm in Rust would make a homebrew
+Fighter a code change.
+
+The Bard is empty and WILL BE WRONG for a College of Swords bard, whose
+Extra Attack comes from a subclass at 6. 055 has no subclasses. Written
+down rather than discovered.
+
+**THE ATTACK ACTION IS AN ACTION, and a pre-existing test caught me
+getting that wrong.** The first version of the rule gave attacks and
+other actions separate pools, which let a level 1 character swing and
+then make a check inside one turn. `a_check_is_an_action_too` has
+asserted otherwise since 054 and was right. Swinging N times costs ONE
+action however large N is; swinging at all and then making a check costs
+two, because the check needs the action the Attack already spent.
+
+**WHAT AN ACTION COST.** `actions.cost` is stamped by trigger from
+`key` - a swing costs an attack, everything else costs the action - and
+83 existing rows were backfilled by the same rule, so history and future
+agree rather than the backfill being a second opinion.
+
+054 refused to classify 193 techniques and was right to; that refusal
+does not apply here for two reasons. This is DERIVED from a column that
+already exists rather than invented. And the techniques are all one
+thing - checked, not assumed: every one of the 193 has dice and a weapon
+mode, so there is no bonus-action technique to misclassify.
+
+`bonus`, `reaction` and `free` are legal values that NOTHING WRITES. The
+column admits them so the first one is a write rather than a migration,
+and the screen deliberately shows no counters for them - an always-zero
+"bonus 0/1" is a claim that a system exists. A HELD ATTACK is the one
+Dave named with no home yet: readying is an action that becomes a
+reaction on a trigger, so it needs both halves and something to hang on.
+
+**ONE LOADER, STILL.** `Effective::attacks` joined the loader the laptop
+built rather than a second per-character read appearing beside it. The
+fourth request came free of a fifth: the first already reads
+`characters`, so `class_key` and `level` cost nothing there, and only
+the twelve-row class catalogue is new - skipped entirely when nobody in
+the fight has a class, which is a roster of monsters.
+
+**THE SCREEN PRINTS A PAIR AND DOES NO ARITHMETIC.** "1/2" where it used
+to say a bare count, in the order list, the strip above it, the roster
+tag and the card head. The caret marking whose go it is sits in the
+MARKUP rather than only in a border, so the row still says so when read
+aloud or at phone width. And the card's button names the next creature -
+"End turn to Goblin Scout", or "(round 2)" when the order is about to
+wrap - which 051 had already argued for the bar and never done here.
+
+STILL NOT A GATE. 051 decided the order informs and refuses nothing, and
+a budget is the same kind of thing: it says what is owed so two swings
+read as two of two. Haste, an action surge and a legendary action remain
+outside what the engine knows, and remain legitimate.
+
+Double-tested as asked. Unit: 504 passing, including a Fighter walked
+level by level, four swings inside one action, and a stated cost beating
+the key. Live and rolled back: three actions inserted for Garn with no
+cost stated came back stamped `attack, attack, action` with 060's round
+still applied, and 061 computes his owed attacks as 2. Rig: the order
+renders `1/2` and a warned `2/1`, the caret follows the turn, and the
+button names the next creature in both the ordinary and the wrapping
+case.
 
 ## Pick up here
 

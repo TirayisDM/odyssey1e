@@ -517,3 +517,23 @@ button.wide{width:100%}
 /* The equipment divisions. A heading with nothing under it should read
    as an answer, not as a loading state. */
 .sheet-pane .list .flat.muted { opacity: .5; font-style: italic; }
+
+/* ============ WHOSE GO IT IS (061) ============ */
+
+/* A HARDER DIVISION, and not only in colour. The caret is in the
+   markup so the row still says whose turn it is when read aloud, at
+   phone width, or by anything that is not looking at a border. */
+.fo-mark {
+  width: 1em; flex: 0 0 1em; text-align: center;
+  color: var(--accent, #4a6fa5); font-size: .8em;
+}
+.forder.now .fo-mark { color: inherit; }
+
+/* Swings out of swings owed. Tabular so 1/2 and 2/2 do not jump. */
+.fo-tally { font-variant-numeric: tabular-nums; opacity: .75; }
+.fo-tally.warn { opacity: 1; font-weight: 600; }
+
+/* The button that moves the order. It names the next creature, so it
+   needs room to say so without clipping. */
+#fight-next { text-align: center; white-space: normal; line-height: 1.25; }
+#fight-next[disabled] { opacity: .45; cursor: not-allowed; }

@@ -1245,6 +1245,9 @@ pub fn run() {
             // 062: the three slots a tick can spend.
             commands::initiative::spend_slot,
             commands::initiative::clear_slot,
+            // 063: a held action names its place in the order.
+            commands::initiative::hold_turn,
+            commands::initiative::release_hold,
             commands::initiative::reset_order,
             commands::log::encounter_log,
             death_save,

@@ -32,6 +32,44 @@ use serde::{Deserialize, Serialize};
 
 /* ============================ TYPES ============================ */
 
+/// WHERE A HELD CREATURE HAS DECLARED THEY WILL ACT. 063.
+///
+/// Not 5e's Ready. There is no trigger and no condition text: a hold
+/// here is a statement about the ORDER - go after the next one, go
+/// after that character, go at the end of the round - which is a thing
+/// this app already has, rather than about an event, which is a thing
+/// it does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HoldMode {
+    /// Let the next creature go, then act. One place later.
+    AfterNext,
+    /// Act immediately after a named creature.
+    AfterActor,
+    /// Act last.
+    EndOfRound,
+}
+
+impl HoldMode {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "after_next" => Some(Self::AfterNext),
+            "after_actor" => Some(Self::AfterActor),
+            "end_of_round" => Some(Self::EndOfRound),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hold {
+    pub mode: HoldMode,
+    /// Who they are waiting for. Present only for `AfterActor`, which
+    /// 063 enforces with a check constraint rather than leaving to
+    /// whoever writes the row.
+    pub after: Option<String>,
+}
+
 /// One creature in the running, as the order needs it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contender {
@@ -52,6 +90,8 @@ pub struct Contender {
     /// turn, and spends it on a death save. That is the whole payoff 015
     /// was waiting for.
     pub dead: bool,
+    /// 063. None is the common case: they act on their rolled number.
+    pub hold: Option<Hold>,
 }
 
 impl Contender {
@@ -88,6 +128,16 @@ pub struct Turn {
 /// SOME order and it had better be the same order every time. An
 /// unstable sort here would shuffle the roster on every repaint.
 pub fn order(contenders: &[Contender]) -> Vec<Contender> {
+    place_holds(&rolled_order(contenders))
+}
+
+/// The order the dice made, before anybody declared anything.
+///
+/// SPLIT OUT so `place_holds` has something stable to reason about and
+/// so a test can assert the two halves separately - the sort is the
+/// part that must never shuffle, and the placement is the part with
+/// the interesting edges.
+fn rolled_order(contenders: &[Contender]) -> Vec<Contender> {
     let mut out = contenders.to_vec();
     out.sort_by(|a, b| {
         // None last, whatever it is beside.
@@ -104,6 +154,122 @@ pub fn order(contenders: &[Contender]) -> Vec<Contender> {
         .then_with(|| a.id.cmp(&b.id))
     });
     out
+}
+
+/// Put the held creatures where they said they would be.
+///
+/// THE ORDER OF OPERATIONS IS THE RULE. Everybody who is not holding
+/// keeps their rolled place; the end-of-round holders go last; then
+/// the ones naming a creature or a slot are inserted, repeatedly,
+/// until a pass places nobody new.
+///
+/// IT CANNOT LOOP AND IT CANNOT LOSE ANYBODY, which are the two things
+/// worth guaranteeing. A holds after B while B holds after A is a
+/// declaration with no answer - each pass places neither, the loop
+/// stops, and both fall to the end in their rolled order. Same for a
+/// hold naming somebody who has left the fight: 063's foreign key
+/// nulls the target, and a target that resolves to nothing is treated
+/// exactly like one that cannot be placed.
+///
+/// NOTHING IS REFUSED, which is 051's decision about the order applied
+/// to the second way of sitting in it. A hold that makes no sense is
+/// shown somewhere defensible rather than rejected at the point a DM
+/// was trying to describe what happened at their table.
+fn place_holds(rolled: &[Contender]) -> Vec<Contender> {
+    if rolled.iter().all(|c| c.hold.is_none()) {
+        return rolled.to_vec();
+    }
+
+    let mut line: Vec<Contender> = Vec::with_capacity(rolled.len());
+    let mut waiting: Vec<Contender> = Vec::new();
+
+    for c in rolled {
+        match &c.hold {
+            None => line.push(c.clone()),
+            Some(_) => waiting.push(c.clone()),
+        }
+    }
+
+    // END OF ROUND FIRST, because "last" has to mean last among the
+    // creatures who are not themselves waiting to be placed - and
+    // somebody holding AFTER an end-of-round creature should land
+    // behind them, which only works if they are already down.
+    let (last, mut rest): (Vec<Contender>, Vec<Contender>) = waiting
+        .drain(..)
+        .partition(|c| matches!(c.hold.as_ref().map(|h| h.mode), Some(HoldMode::EndOfRound)));
+    line.extend(last);
+
+    // Then the ones that name a place, until a pass changes nothing.
+    // Bounded by the number waiting: each pass either places at least
+    // one or ends the loop.
+    loop {
+        let before = rest.len();
+        let mut still: Vec<Contender> = Vec::new();
+
+        for c in rest.drain(..) {
+            let placed = match c.hold.as_ref() {
+                Some(h) if h.mode == HoldMode::AfterActor => {
+                    match h.after.as_deref().and_then(|t| index_of(&line, t)) {
+                        Some(i) => {
+                            line.insert(i + 1, c.clone());
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                Some(h) if h.mode == HoldMode::AfterNext => {
+                    // ONE PLACE LATER. Their rolled neighbour is
+                    // whoever they would have gone before; letting that
+                    // creature past and going next is exactly what "go
+                    // after the next one" says.
+                    match neighbour_after(rolled, &c.id)
+                        .and_then(|n| index_of(&line, &n))
+                    {
+                        Some(i) => {
+                            line.insert(i + 1, c.clone());
+                            true
+                        }
+                        // Nobody after them to wait for: they were
+                        // already last, so holding changes nothing.
+                        None => {
+                            line.push(c.clone());
+                            true
+                        }
+                    }
+                }
+                _ => false,
+            };
+            if !placed {
+                still.push(c);
+            }
+        }
+
+        rest = still;
+        if rest.len() == before {
+            break;
+        }
+    }
+
+    // Whatever is left could not be placed - a cycle, or a target that
+    // is gone. They go last, in the order the dice gave them.
+    line.extend(rest);
+    line
+}
+
+fn index_of(line: &[Contender], id: &str) -> Option<usize> {
+    line.iter().position(|c| c.id == id)
+}
+
+/// Who comes after this creature on the ROLLED order, skipping anybody
+/// else who is holding - waiting for somebody who is themselves
+/// waiting is not what "go after the next one" means.
+fn neighbour_after(rolled: &[Contender], id: &str) -> Option<String> {
+    let at = rolled.iter().position(|c| c.id == id)?;
+    rolled
+        .iter()
+        .skip(at + 1)
+        .find(|c| c.hold.is_none())
+        .map(|c| c.id.clone())
 }
 
 /// Who acts next, and whether that starts a new round.
@@ -172,9 +338,20 @@ mod tests {
             dex,
             active: true,
             dead: false,
+            hold: None,
         }
     }
 
+    /// The same, holding. `after` is the creature named, for
+    /// `AfterActor`; the other two modes ignore it.
+    fn held(id: &str, init: i64, mode: HoldMode, after: Option<&str>) -> Contender {
+        Contender {
+            hold: Some(Hold { mode, after: after.map(String::from) }),
+            ..c(id, Some(init), 0)
+        }
+    }
+
+    /// Just the ids, which is what every placement test is about.
     fn ids(v: &[Contender]) -> Vec<&str> {
         v.iter().map(|x| x.id.as_str()).collect()
     }
@@ -329,5 +506,204 @@ mod tests {
         assert_eq!(score(14, 3), 17);
         assert_eq!(score(1, -1), 0, "a real zero, which is not the same as unrolled");
         assert_eq!(score(1, -3), -2, "and it can go below zero");
+    }
+
+    /* ===================== HOLDING A PLACE (063) ===================== */
+
+    // Nobody holding: the rolled order, untouched. The cheap path, and
+    // the one every existing test depends on.
+    #[test]
+    fn with_no_holds_the_order_is_the_roll() {
+        let all = vec![c("a", Some(20), 0), c("b", Some(10), 0), c("c", Some(5), 0)];
+        assert_eq!(ids(&order(&all)), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn end_of_round_goes_last() {
+        let all = vec![
+            held("a", 20, HoldMode::EndOfRound, None),
+            c("b", Some(10), 0),
+            c("c", Some(5), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["b", "c", "a"]);
+    }
+
+    // Two of them keep their rolled order relative to each other.
+    #[test]
+    fn two_holding_to_the_end_stay_in_rolled_order() {
+        let all = vec![
+            held("a", 20, HoldMode::EndOfRound, None),
+            c("b", Some(15), 0),
+            held("c", 10, HoldMode::EndOfRound, None),
+        ];
+        assert_eq!(ids(&order(&all)), ["b", "a", "c"]);
+    }
+
+    #[test]
+    fn after_actor_lands_immediately_behind_them() {
+        let all = vec![
+            held("a", 20, HoldMode::AfterActor, Some("c")),
+            c("b", Some(15), 0),
+            c("c", Some(10), 0),
+            c("d", Some(5), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["b", "c", "a", "d"]);
+    }
+
+    // Waiting for somebody SLOWER is the ordinary case; naming somebody
+    // faster is legal and simply means acting sooner than the dice
+    // said, which a DM may well want.
+    #[test]
+    fn a_hold_may_name_somebody_who_already_went() {
+        let all = vec![
+            c("a", Some(20), 0),
+            c("b", Some(15), 0),
+            held("c", 10, HoldMode::AfterActor, Some("a")),
+        ];
+        assert_eq!(ids(&order(&all)), ["a", "c", "b"]);
+    }
+
+    // ONE PLACE LATER, which is what "go after the next one" says.
+    #[test]
+    fn after_next_drops_one_place() {
+        let all = vec![
+            held("a", 20, HoldMode::AfterNext, None),
+            c("b", Some(15), 0),
+            c("c", Some(10), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["b", "a", "c"]);
+    }
+
+    // Already last, so letting the next one past changes nothing -
+    // there is no next one.
+    #[test]
+    fn after_next_at_the_bottom_stays_at_the_bottom() {
+        let all = vec![
+            c("a", Some(20), 0),
+            c("b", Some(15), 0),
+            held("c", 10, HoldMode::AfterNext, None),
+        ];
+        assert_eq!(ids(&order(&all)), ["a", "b", "c"]);
+    }
+
+    // The neighbour it waits for is somebody who is NOT also waiting -
+    // holding for a creature who is themselves holding is not what the
+    // words mean.
+    #[test]
+    fn after_next_skips_another_holder_to_find_its_neighbour() {
+        let all = vec![
+            held("a", 20, HoldMode::AfterNext, None),
+            held("b", 15, HoldMode::EndOfRound, None),
+            c("d", Some(10), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["d", "a", "b"]);
+    }
+
+    /* ---------------- the ones that must not break ---------------- */
+
+    // THE CYCLE. Two creatures each waiting for the other is a
+    // declaration with no answer. It must not loop and must not lose
+    // them - they fall to the end in rolled order.
+    #[test]
+    fn two_holding_for_each_other_do_not_loop() {
+        let all = vec![
+            c("a", Some(20), 0),
+            held("b", 15, HoldMode::AfterActor, Some("c")),
+            held("c", 10, HoldMode::AfterActor, Some("b")),
+        ];
+        let placed = order(&all);
+        let got = ids(&placed);
+        assert_eq!(got.len(), 3, "nobody is lost");
+        assert_eq!(got[0], "a");
+        assert!(got.contains(&"b") && got.contains(&"c"));
+    }
+
+    // A chain resolves: c waits for b, b waits for a, a is not holding.
+    #[test]
+    fn a_chain_of_holds_resolves() {
+        let all = vec![
+            c("a", Some(20), 0),
+            held("b", 15, HoldMode::AfterActor, Some("a")),
+            held("c", 10, HoldMode::AfterActor, Some("b")),
+            c("d", Some(1), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["a", "b", "c", "d"]);
+    }
+
+    // 063 nulls the target when the creature leaves the fight. A hold
+    // with nobody to follow goes last rather than vanishing.
+    #[test]
+    fn a_hold_naming_nobody_falls_to_the_end() {
+        let all = vec![
+            c("a", Some(20), 0),
+            held("b", 15, HoldMode::AfterActor, None),
+            c("c", Some(10), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["a", "c", "b"]);
+    }
+
+    #[test]
+    fn a_hold_naming_somebody_who_is_not_here_falls_to_the_end() {
+        let all = vec![
+            c("a", Some(20), 0),
+            held("b", 15, HoldMode::AfterActor, Some("ghost")),
+            c("c", Some(10), 0),
+        ];
+        assert_eq!(ids(&order(&all)), ["a", "c", "b"]);
+    }
+
+    // EVERYBODY HOLDING. Degenerate and worth pinning: nobody is lost
+    // and the answer is the same twice.
+    #[test]
+    fn a_fight_where_everybody_holds_still_returns_everybody() {
+        let all = vec![
+            held("a", 20, HoldMode::EndOfRound, None),
+            held("b", 15, HoldMode::AfterNext, None),
+            held("c", 10, HoldMode::AfterActor, Some("a")),
+        ];
+        let placed = order(&all);
+        let again = order(&all);
+        assert_eq!(ids(&placed).len(), 3);
+        assert_eq!(ids(&placed), ids(&again), "and the same answer twice");
+    }
+
+    // A held creature is in the order like anybody else. Holding is
+    // not a reason to be passed over.
+    #[test]
+    fn next_turn_walks_the_held_order() {
+        let all = order(&[
+            held("a", 20, HoldMode::EndOfRound, None),
+            c("b", Some(15), 0),
+            c("c", Some(10), 0),
+        ]);
+        assert_eq!(ids(&all), ["b", "c", "a"]);
+        let t = next_turn(&all, Some("c")).unwrap();
+        assert_eq!(t.actor_id, "a", "the holder acts last, not never");
+        assert!(!t.new_round);
+    }
+
+    #[test]
+    fn the_placement_is_stable_across_repaints() {
+        let all = vec![
+            held("a", 20, HoldMode::AfterActor, Some("c")),
+            c("b", Some(15), 0),
+            c("c", Some(10), 0),
+            held("d", 5, HoldMode::EndOfRound, None),
+        ];
+        let first = order(&all);
+        let once = ids(&first);
+        for _ in 0..5 {
+            let again = order(&all);
+            assert_eq!(ids(&again), once);
+        }
+    }
+
+    #[test]
+    fn a_mode_parses_from_the_column_or_not_at_all() {
+        assert_eq!(HoldMode::parse("after_next"), Some(HoldMode::AfterNext));
+        assert_eq!(HoldMode::parse("after_actor"), Some(HoldMode::AfterActor));
+        assert_eq!(HoldMode::parse("end_of_round"), Some(HoldMode::EndOfRound));
+        assert_eq!(HoldMode::parse("whenever"), None);
+        assert_eq!(HoldMode::parse(""), None);
     }
 }

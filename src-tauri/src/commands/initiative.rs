@@ -59,7 +59,7 @@ pub fn turn_order(state: State<AppState>, encounter_id: String) -> Result<Value,
         &[
             (
                 "select",
-                "id,label,character_id,npc_key,initiative,active,dead,enrolled_at",
+                "id,label,character_id,npc_key,initiative,active,dead,enrolled_at,\n                 held_mode,held_after_id",
             ),
             ("encounter_id", &format!("eq.{}", encounter_id)),
         ],
@@ -89,6 +89,22 @@ pub fn turn_order(state: State<AppState>, encounter_id: String) -> Result<Value,
                 .unwrap_or(0),
             active: a.get("active").and_then(|v| v.as_bool()).unwrap_or(true),
             dead: a.get("dead").and_then(|v| v.as_bool()).unwrap_or(false),
+            // 063. A mode the column does not recognise reads as no
+            // hold at all rather than refusing the whole order - the
+            // check constraint is what keeps a bad one out, and a
+            // screen that empties because of one row is worse than a
+            // creature standing in their rolled place.
+            hold: a
+                .get("held_mode")
+                .and_then(|v| v.as_str())
+                .and_then(initiative::HoldMode::parse)
+                .map(|mode| initiative::Hold {
+                    mode,
+                    after: a
+                        .get("held_after_id")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                }),
         })
         .collect();
 
@@ -106,6 +122,12 @@ pub fn turn_order(state: State<AppState>, encounter_id: String) -> Result<Value,
             row["dex_mod"] = json!(c.dex);
             row["takes_turns"] = json!(c.takes_turns());
             row["is_current"] = json!(Some(c.id.as_str()) == current);
+            // 063. The declaration itself, and - because the screen
+            // should not have to work it out - whether it could be
+            // honoured. A hold naming somebody who has gone is placed
+            // at the end, and saying so is the difference between a
+            // sort that looks broken and one that explains itself.
+            row["held"] = json!(c.hold);
             Some(row)
         })
         .collect();
@@ -214,6 +236,18 @@ pub fn advance_turn(state: State<AppState>, encounter_id: String) -> Result<Valu
     let actor_id = next.get("actor_id").and_then(|v| v.as_str()).unwrap_or("");
     let new_round = next.get("new_round").and_then(|v| v.as_bool()).unwrap_or(false);
 
+    // A HOLD LASTS ONE ROUND - 063. "End of round" only means anything
+    // inside a round, so that is the life of the whole declaration.
+    //
+    // BEFORE the pointer moves, not after: if the wipe fails the turn
+    // has not advanced, and a DM pressing the button again is harmless.
+    // The other way round leaves the fight on round 2 with round 1's
+    // declarations still standing, which is the state nobody could
+    // explain.
+    if new_round {
+        release_all_holds(&token, &encounter_id)?;
+    }
+
     supabase::rest_update(
         &token,
         "encounters",
@@ -226,6 +260,27 @@ pub fn advance_turn(state: State<AppState>, encounter_id: String) -> Result<Valu
     .map_err(|e| denied(e, "run the turn order"))
 }
 
+/// Clear every hold in this fight.
+///
+/// Used when the round turns over, and by `reset_order` - putting a
+/// fight back before its first turn has to put the order back too, or
+/// a reset would keep declarations made about a round that no longer
+/// exists.
+fn release_all_holds(token: &str, encounter_id: &str) -> Result<(), String> {
+    supabase::rest_update(
+        token,
+        "encounter_actors",
+        &[
+            ("encounter_id", &format!("eq.{}", encounter_id)),
+            // Only the rows that have one, so a fight where nobody
+            // held is not rewritten every round.
+            ("held_mode", "not.is.null"),
+        ],
+        &json!({ "held_mode": Value::Null, "held_after_id": Value::Null }),
+    )
+    .map(|_| ())
+}
+
 /// Put the fight back before the first turn.
 ///
 /// The round goes to zero, which 051 keeps distinct from round one, and
@@ -235,6 +290,9 @@ pub fn advance_turn(state: State<AppState>, encounter_id: String) -> Result<Valu
 #[tauri::command]
 pub fn reset_order(state: State<AppState>, encounter_id: String) -> Result<Value, String> {
     let token = state.token()?;
+    // 063. A reset puts the fight before its first turn, so the
+    // declarations made about a round that no longer exists go with it.
+    release_all_holds(&token, &encounter_id)?;
     supabase::rest_update(
         &token,
         "encounters",
@@ -476,4 +534,82 @@ pub fn clear_slot(
         ],
     )?;
     Ok(json!({ "cleared": cost, "round": round }))
+}
+
+/* ========================== HOLDING A PLACE ========================== */
+
+/// Declare where this creature will act instead of on their roll. 063.
+///
+/// THREE DECLARATIONS AND NO TRIGGER. "After the next one", "after that
+/// character", "at the end of the round". A condition in prose - when
+/// the goblin steps into the doorway - is a sentence for a DM, and a
+/// column nothing reads would be decoration.
+///
+/// THE ROLL IS UNTOUCHED. 011 made `initiative` the record of what
+/// somebody rolled and this lays a declaration over it; releasing puts
+/// them back with nothing to restore, because nothing was overwritten.
+///
+/// NOT REFUSED WHEN IT MAKES NO SENSE. Naming a creature who has
+/// already acted is legal and means acting sooner than the dice said,
+/// which a DM may well want. Naming one who has left the fight
+/// resolves to the end of the round. 051 decided the order informs and
+/// never refuses; the only thing 063 does refuse is holding for
+/// yourself, which is a check constraint because it is not a
+/// declaration anybody could mean.
+#[tauri::command]
+pub fn hold_turn(
+    state: State<AppState>,
+    actor_id: String,
+    mode: String,
+    after_id: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let mode = initiative::HoldMode::parse(mode.trim())
+        .ok_or_else(|| format!("{} is not a way to hold", mode))?;
+
+    let after = after_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    // The pair has to agree, and saying so here gives a sentence where
+    // the check constraint would give "violates constraint".
+    let after = match mode {
+        initiative::HoldMode::AfterActor => Some(
+            after
+                .ok_or_else(|| "holding after somebody needs somebody to name".to_string())?,
+        ),
+        _ => None,
+    };
+    if after == Some(actor_id.as_str()) {
+        return Err("a creature cannot wait for themselves".to_string());
+    }
+
+    supabase::rest_update(
+        &token,
+        "encounter_actors",
+        &[("id", &format!("eq.{}", actor_id))],
+        &json!({
+            "held_mode": match mode {
+                initiative::HoldMode::AfterNext => "after_next",
+                initiative::HoldMode::AfterActor => "after_actor",
+                initiative::HoldMode::EndOfRound => "end_of_round",
+            },
+            "held_after_id": after.map(Value::from).unwrap_or(Value::Null),
+        }),
+    )
+    .map_err(|e| denied(e, "change the turn order"))
+}
+
+/// Put one creature back on their rolled initiative.
+#[tauri::command]
+pub fn release_hold(state: State<AppState>, actor_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_update(
+        &token,
+        "encounter_actors",
+        &[("id", &format!("eq.{}", actor_id))],
+        &json!({ "held_mode": Value::Null, "held_after_id": Value::Null }),
+    )
+    .map_err(|e| denied(e, "change the turn order"))
 }

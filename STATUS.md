@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**509 tests, zero warnings.** `cd src-tauri && cargo test`.
+**525 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -427,6 +427,8 @@ and not after.
 061 how many swings do you get - Extra Attack, and what an action cost
 062 the other three slots - a bonus action, a reaction and a free
     interaction, spent by a tick rather than by a roll
+063 a held action names its place - holding is a position in the order,
+    not a trigger
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2444,6 +2446,83 @@ free at round 1, and clearing the reaction removed exactly that one.
 Rig: the ticks render and toggle, an unticked box calls `spend_slot`
 and a ticked one calls `clear_slot` with the right cost, a doubled slot
 shows "x2" with its red rule, and round 0 shows no boxes at all.
+
+## Holding a place - BUILT (063, initiative::place_holds)
+
+**062 GUESSED WRONG ABOUT WHAT A HELD ATTACK WAS.** It assumed 5e's
+Ready: an action converted into a reaction, fired by a trigger somebody
+describes in prose and the app has to watch for. Dave corrected it - a
+held action here DECLARES A POSITION. Go after the next one, go after
+that character, go at the end of the round.
+
+That is a statement about the ORDER, which this app has, rather than
+about an event, which it does not. The trigger version needs a watcher
+and a vocabulary of conditions; this needs two columns and a sort.
+
+**THE ROLL IS STILL THE RECORD.** A hold does not rewrite `initiative`.
+011 made that column what somebody rolled and this lays a declaration
+over it - release the hold and they are back where the dice put them,
+with nothing to restore because nothing was overwritten.
+
+**A HOLD LASTS ONE ROUND.** "End of round" only means anything inside a
+round, so that is the life of the whole declaration: advancing into a
+new round clears every hold, and so does a reset. The alternative - a
+hold that persists until cancelled - means a creature who held in round
+1 quietly acting last in rounds 2, 3 and 4 because nobody remembered.
+That is the kind of state that makes a tool untrustworthy at the table.
+
+The wipe happens BEFORE the pointer moves, not after. If it fails the
+turn has not advanced and pressing the button again is harmless; the
+other way round leaves the fight on round 2 carrying round 1's
+declarations, which is the state nobody could explain.
+
+**THE PLACEMENT CANNOT LOOP AND CANNOT LOSE ANYBODY**, which are the
+two things worth guaranteeing about a sort that takes instructions.
+Everybody not holding keeps their rolled place; the end-of-round
+holders go last; then the ones naming a creature or a slot are inserted
+repeatedly until a pass places nobody new. A holding after B while B
+holds after A is a declaration with no answer - each pass places
+neither, the loop stops, and both fall to the end in rolled order. Same
+for a hold naming somebody who has left: 063's foreign key nulls the
+target and an unresolvable target is treated exactly like an unplaceable
+one.
+
+`after_next` means ONE PLACE LATER, and the neighbour it waits for is
+somebody who is not also holding - waiting for a creature who is
+themselves waiting is not what the words mean.
+
+**ONE THING IS REFUSED AND THE REST ARE RESOLVED.** Waiting for
+yourself is a check constraint, because it is not a declaration anybody
+could mean. Everything else follows 051: naming somebody who has
+already acted is legal and means acting sooner than the dice said,
+which a DM may well want; naming somebody gone resolves to the end of
+the round and the screen says so, because a row out of its rolled place
+with no explanation reads as a broken sort.
+
+**ON SCREEN**: two toggles and a picker on the fight card, the picker
+excluding the creature themselves. A held creature carries a pause
+glyph in the order and their initiative is struck through - the glyph
+is in the MARKUP rather than only a colour, the third time that call
+has been made, after 061's turn caret and 062's tick boxes.
+
+Double-tested. Unit: 525, including the cycle, a chain, a target that
+has left, a fight where everybody holds, `after_next` at the bottom of
+the order, and the placement being identical across five repaints.
+Live and rolled back: all four guards refuse - holding for yourself, a
+mode nobody defined, `end_of_round` carrying a target, and naming a
+creature in a different fight - and the round wipe clears every row.
+Rig: Garn at initiative 16 renders below a Goblin Scout at 5 with the
+pause glyph and "holding - after Goblin Scout", the picker is set to
+the creature he named and does not offer him, and the three controls
+send `end_of_round`, `after_actor` with the id, and `release_hold` when
+the picker is cleared.
+
+**THAT IS ALL FIVE.** Actions, bonus actions, instant effects, held
+attacks and additional attacks - 061 did the swings and the action,
+062 the other three slots, 063 the hold. What the economy still has no
+model for is haste, an action surge and a legendary action, all of
+which read as over budget and all of which are legitimate; the flag
+says "look at this" and has never claimed more.
 
 ## Pick up here
 

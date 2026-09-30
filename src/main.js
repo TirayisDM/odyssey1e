@@ -2879,6 +2879,78 @@ function paintSlots(host, encounterId, actor, sp) {
   host.append(row);
 }
 
+// WHERE A HELD CREATURE SAID THEY WOULD ACT. 063.
+//
+// Not a trigger: a hold here names a POSITION in the order - after the
+// next one, after that character, at the end of the round - which is a
+// thing this app has, rather than an event, which is a thing it does
+// not.
+function holdText(a, order) {
+  const h = a && a.held;
+  if (!h) return "";
+  if (h.mode === "end_of_round") return "holding \u00b7 end of round";
+  if (h.mode === "after_next") return "holding \u00b7 after the next";
+  const who = (order || []).find((x) => x.id === h.after);
+  // A target that has left the fight is nulled by 063 and the sort
+  // drops them to the end. Saying so beats a row that just looks
+  // misplaced.
+  return "holding \u00b7 after " + (who ? who.label : "somebody gone");
+}
+
+// The control. Three declarations, and release.
+function paintHold(host, encounterId, actor, order) {
+  const row = sEl("div", "holds");
+  const h = actor.held || null;
+
+  const mk = (label, mode, after, why) => {
+    const on = h && h.mode === mode && (mode !== "after_actor" || h.after === after);
+    const b = sEl("button", "slot" + (on ? " on" : ""));
+    b.textContent = (on ? "\u2611 " : "\u2610 ") + label;
+    b.title = why;
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      // A TOGGLE, like the slots: pressing the declaration you are
+      // already under takes it off.
+      const r = on
+        ? await tryCall("release_hold", { actorId: actor.id })
+        : await tryCall("hold_turn", { actorId: actor.id, mode, afterId: after || null });
+      if (!r.ok) dmSay(r.error, true);
+      await loadDM();
+    });
+    return b;
+  };
+
+  row.append(mk("After next", "after_next", null,
+    "let the next creature go, then act - one place later"));
+  row.append(mk("End of round", "end_of_round", null,
+    "act last"));
+
+  // AFTER A NAMED CREATURE, as a picker rather than three more
+  // buttons - a fight can hold a dozen, and a row of a dozen buttons
+  // is not a control.
+  const pick = document.createElement("select");
+  pick.className = "hold-pick";
+  pick.append(new Option("after\u2026", ""));
+  for (const o of order || []) {
+    if (o.id === actor.id) continue; // 063 refuses waiting for yourself
+    pick.append(new Option(o.label, o.id));
+  }
+  if (h && h.mode === "after_actor") pick.value = h.after || "";
+  pick.title = "act immediately after that creature";
+  pick.addEventListener("change", async () => {
+    const after = pick.value;
+    pick.disabled = true;
+    const r = after
+      ? await tryCall("hold_turn", { actorId: actor.id, mode: "after_actor", afterId: after })
+      : await tryCall("release_hold", { actorId: actor.id });
+    if (!r.ok) dmSay(r.error, true);
+    await loadDM();
+  });
+  row.append(pick);
+
+  host.append(row);
+}
+
 function paintTurnBar(encounterId, turns) {
   const say = document.querySelector("#turn-now");
   const next = document.querySelector("#next-turn");
@@ -3408,7 +3480,18 @@ async function paintFightCard(id, turns, enc) {
     slots.textContent = used;
     slots.title = used ? "spent: " + spendTitle(sp) : "";
 
-    li.append(mark, n, nm, tally, slots);
+    // 063. A creature out of their rolled place should say why, or
+    // the sort reads as broken.
+    if (a.held) {
+      li.classList.add("held");
+      const hm = document.createElement("span");
+      hm.className = "fo-held";
+      hm.textContent = "\u23f8";
+      hm.title = holdText(a, order);
+      li.append(mark, n, nm, tally, slots, hm);
+    } else {
+      li.append(mark, n, nm, tally, slots);
+    }
     li.title = a.takes_turns
       ? a.is_current
         ? "acting now"
@@ -3474,6 +3557,15 @@ async function paintFightCard(id, turns, enc) {
   // played - 060 keeps a roundless action out of the count, so a tick
   // in a draft would write a row nothing would ever show.
   if (round) paintSlots(who, id, focus, fsp);
+
+  // 063. WHERE THEY WILL ACT, beside what they have spent. Only while
+  // the fight is running, for the same reason the slots are: a hold is
+  // a statement about a round, and a not-started fight has none.
+  if (round) {
+    paintHold(who, id, focus, order);
+    const ht = holdText(focus, order);
+    if (ht) who.append(chip(ht, "no"));
+  }
 
   // THE SHEET IS STILL ONE CLICK AWAY. It was a button on every roster
   // row, and the roster is hidden while the card is up - a view that

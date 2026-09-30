@@ -562,3 +562,14 @@ button.wide{width:100%}
   font-size: .72em; letter-spacing: .08em; opacity: .6;
   min-width: 2.2em; text-align: right;
 }
+
+/* ============ HOLDING A PLACE (063) ============ */
+
+.holds { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin: .2rem 0 .3rem; }
+.hold-pick { font-size: .82em; padding: .1rem .3rem; max-width: 12rem; }
+
+/* A creature out of their rolled place says so. The pause glyph is in
+   the markup rather than only a colour - the same call 061 made for
+   the turn caret and 062 for the tick boxes. */
+.fo-held { font-size: .78em; opacity: .8; margin-left: .15rem; }
+.forder.held .fo-init { opacity: .45; text-decoration: line-through; }

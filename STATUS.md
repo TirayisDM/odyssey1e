@@ -447,6 +447,9 @@ and not after.
     saying a bard is owed three
 076 karma and the audience - classes.karma_skills (bard is {ins,prf}),
     and the seven-row audiences catalogue that is the chart's other axis
+077 the trigger surface goes back to zero - the EXECUTE revoke that 002
+    and 017 established, applied to the fifteen trigger functions
+    written since, and three search paths repinned to ''
 
 (066 to 070 and 072 are code-only changesets with no migration - the
 numbering is continuous across both, which is why there are gaps here.)
@@ -846,10 +849,47 @@ or silently means something else - and either way it looks like missing
 seed data rather than a bad query. `narrative::quoted()` does this; use
 it for every reference table that gets filtered by a name.
 
-**Three SECURITY DEFINER advisor warnings are expected.**
-`is_game_member`, `is_game_dm`, `join_game` need `authenticated` to hold
-EXECUTE or every policy fails closed. Do not "fix" them. Run the
-advisor after every DDL change anyway.
+**FIVE SECURITY DEFINER advisor warnings are expected, and they are
+all `authenticated`, never `anon`:**
+
+    is_game_member      called BY the policies in 001 - revoke it and
+    is_game_dm          every one of them fails closed
+    holder_character    the same, for the object policies
+    holder_is_a_location
+    join_game           the one a player calls on purpose
+
+Do not "fix" those. Run the advisor after every DDL change anyway.
+
+**THIS ENTRY SAID THREE UNTIL 077, AND THE ADVISOR SAID FIFTEEN.** 002
+and 017 revoked the default EXECUTE on every function they could see,
+and the pattern then lived nowhere but in those two files - so the next
+fifteen trigger functions were written without it, one or two at a
+time, each one looking fine on its own.
+
+The risk was small: Postgres refuses to run a trigger function called
+any other way, so the grant was reachable and not useful. The cost was
+the note. A reader opening a list of fifteen against a line promising
+three learns that the list is noise, and stops reading it - which is
+exactly when the sixteenth will not be a trigger.
+
+077 revoked all fifteen and the count is now zero. **If this entry and
+the advisor ever disagree again, the entry is the thing that is
+wrong.** Count with:
+
+    select p.proname from pg_proc p join pg_namespace n
+      on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.prosecdef
+       and p.prorettype = 'trigger'::regtype
+       and (has_function_privilege('anon', p.oid, 'EXECUTE')
+         or has_function_privilege('authenticated', p.oid, 'EXECUTE'));
+
+**EVERY SECURITY DEFINER FUNCTION PINS `search_path = ''`** and writes
+each table name out in full. 061, 063 and 073 pinned `public` instead;
+077 put them back. With an empty path an unqualified name fails to
+resolve at creation, which turns a typo into an error. With `public`
+it resolves - and the temporary schema is searched ahead of it for
+tables, so a session holding a temp table named `characters` would have
+had `sync_character_level` update that one and report success.
 
 ---
 

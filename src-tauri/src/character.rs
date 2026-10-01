@@ -767,6 +767,36 @@ impl Effective {
         self.attacks.get(character_id).copied().unwrap_or(1)
     }
 
+    /// The SCORE itself, species bonus included, for the one rule that
+    /// wants the number rather than the modifier: carrying capacity is
+    /// Strength times fifteen, not Strength's +2.
+    ///
+    /// Ten where there is no row, which is what every reader of a
+    /// missing ability has always assumed - the schema seeds all six at
+    /// creation, so an absent row is a fault somewhere else and the
+    /// average is the harmless reading of it.
+    pub(crate) fn score(&self, character_id: &str, code: &str) -> i64 {
+        self.scores
+            .get(character_id)
+            .and_then(|a| a.get(code))
+            .map(|a| a.score)
+            .unwrap_or(10)
+    }
+
+    /// This character's people, for a rule that needs the row itself
+    /// rather than a number off it.
+    ///
+    /// THIS EXISTED, WAS DELETED AS DEAD CODE, AND WAS WANTED THE NEXT
+    /// DAY. Carrying size is the caller: an Unt'garoth counts as one
+    /// size larger for what they can lift, which is a fact about the
+    /// people and not about any ability. Without it the carry path read
+    /// the species a second time and resolved Strength by hand -
+    /// correctly, and as the last copy of the rule this loader exists
+    /// to own.
+    pub(crate) fn people(&self, character_id: &str) -> Option<&crate::species::Species> {
+        self.peoples.get(character_id)
+    }
+
     /// The modifier, species bonus included. Zero for a character with
     /// no rows, which is what every one of the four sites defaulted to
     /// and is the harmless reading - the schema seeds all six on
@@ -1585,6 +1615,34 @@ mod tests {
         // and no floor, which is what all four sites did before.
         assert_eq!(eff.modifier("a goblin", "dex"), 0);
         assert_eq!(eff.unarmored("a goblin"), None);
+    }
+
+    /// THE SCORE AND THE MODIFIER ARE DIFFERENT ANSWERS, and carrying
+    /// capacity is the rule that wants the first: Strength times
+    /// fifteen, where every other rule in the app wants the +5.
+    #[test]
+    fn the_loader_gives_the_score_as_well_as_the_modifier() {
+        let sp = untgaroth();
+        let mut abilities = garn();
+        apply_species(&mut abilities, &sp);
+
+        let mut scores = HashMap::new();
+        scores.insert("garn".to_string(), abilities);
+        let mut peoples = HashMap::new();
+        peoples.insert("garn".to_string(), sp);
+        let eff = Effective::of(scores, peoples);
+
+        assert_eq!(eff.score("garn", "str"), 20, "18 on the row, 20 with his people");
+        assert_eq!(eff.modifier("garn", "str"), 5);
+
+        // The people itself, for carrying size - the reason this
+        // accessor exists at all.
+        assert_eq!(eff.people("garn").map(|s| s.carry_size()), Some("huge".to_string()));
+
+        // A monster: ten and nobody, which is what the carry path read
+        // before it asked the loader.
+        assert_eq!(eff.score("a goblin", "str"), 10);
+        assert!(eff.people("a goblin").is_none());
     }
 
     /// A character whose people states no floor keeps 5e's.

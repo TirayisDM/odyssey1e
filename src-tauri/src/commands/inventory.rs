@@ -498,20 +498,14 @@ pub fn encumbrance(state: State<AppState>, character_id: String) -> Result<Value
     // every one of those three facts belongs in this number. Reading
     // the raw score here is how the sheet and the inventory screen
     // would have come to disagree about the same character.
-    let species = match p.species_key.as_deref() {
-        Some(key) => crate::character::load_species(&token, &p.game_id, key)?,
-        None => None,
-    };
-    let stored_str = load_ability_score(&token, &character_id, "str")?;
-    let str_score = match &species {
-        Some(sp) => crate::species::effective_score(
-            stored_str,
-            sp.bonus_for("str"),
-            sp.maximum_for("str"),
-        ),
-        None => stored_str,
-    };
-    let carry_size = species.as_ref().map(|sp| sp.carry_size());
+    //
+    // THROUGH THE LOADER, which is the only thing that should know how
+    // a stored score becomes an effective one. This resolved it here
+    // instead, correctly, because `Effective` had no way to hand back
+    // the species row that carrying size comes off - it does now.
+    let eff = crate::character::load_effective(&token, &p.game_id, &[character_id.clone()])?;
+    let str_score = eff.score(&character_id, "str");
+    let carry_size = eff.people(&character_id).map(|sp| sp.carry_size());
     let size = carry_size.as_deref().or(p.vitals.size.as_deref());
     let capacity = crate::carry::carry_capacity(str_score, size);
     let state_ = crate::carry::burden(carried, str_score, size);
@@ -530,24 +524,11 @@ pub fn encumbrance(state: State<AppState>, character_id: String) -> Result<Value
     }))
 }
 
-/// One ability score, without loading a sheet to get it.
-fn load_ability_score(token: &str, character_id: &str, code: &str) -> Result<i64, String> {
-    let rows = supabase::rest_get(
-        token,
-        "character_abilities",
-        &[
-            ("select", "score"),
-            ("character_id", &format!("eq.{}", character_id)),
-            ("ability", &format!("eq.{}", code)),
-        ],
-    )?;
-    Ok(rows
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|r| r.get("score"))
-        .and_then(|x| x.as_i64())
-        .unwrap_or(10))
-}
+// `load_ability_score` was here: one score, straight off the row, to
+// save loading a sheet. It read what is STORED, which is not what a
+// character with a people has - the third helper to be deleted for
+// that reason, after dm.rs's and characters.rs's. The loader is the
+// one thing that knows the difference.
 
 /// Destroy an object outright.
 ///

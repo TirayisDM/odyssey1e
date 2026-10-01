@@ -474,12 +474,19 @@
                authored, and big enough to write in. -->
           <div class="sub" id="desc-own-head">In particular</div>
           <div id="desc-own"></div>
-          <div class="row desc-edit">
-            <textarea id="desc-notes" rows="5"
-              placeholder="who this one is - what their people's description does not say, or says differently"></textarea>
-          </div>
-          <div class="row desc-edit">
-            <button id="desc-from-species" class="linky">start from the people's words</button>
+          <!-- FOLDED ONCE THERE IS SOMETHING TO FOLD. An empty sheet
+               opens on the box, because the box is the whole point of
+               an empty one; a written description shows as prose with
+               an edit button after it, because that is what a sheet
+               is for reading. -->
+          <div id="desc-editor">
+            <div class="row desc-edit">
+              <textarea id="desc-notes" rows="5"
+                placeholder="who this one is - what their people's description does not say, or says differently"></textarea>
+            </div>
+            <div class="row desc-edit">
+              <button id="desc-from-species" class="linky">start from the people's words</button>
+            </div>
           </div>
 
           <div class="sub">Physical description</div>
@@ -506,6 +513,17 @@
 
           <div class="sub">Languages</div>
           <div id="desc-languages"></div>
+
+          <!-- THE REST OF WHAT 056 AND 058 SEEDED. Six prose fields
+               were on the species row and the sheet showed one of
+               them, so the culture, the history and the rest were
+               written down and unreachable.
+
+               LAST ON THE PANE AND FOLDED SHUT. Six paragraphs about
+               thousands of people, placed above the one paragraph
+               about this one, would answer the wrong question first. -->
+          <div class="sub" id="desc-lore-head">More about their people</div>
+          <div id="desc-lore"></div>
         </div>
       <!-- ===================== EQUIPMENT ===================== -->
       <div class="sheet-pane" data-sheet="equipment" hidden>

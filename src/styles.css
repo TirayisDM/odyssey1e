@@ -315,6 +315,13 @@ button.wide{width:100%}
 }
 
 #desc-notes{width:100%;resize:vertical;font:inherit;line-height:1.45}
+#desc-lore details{border:1px solid var(--line);border-radius:6px;
+                   padding:.3rem .5rem;margin:.25rem 0;background:#191d24}
+#desc-lore summary{cursor:pointer;font-size:10px;text-transform:uppercase;
+                   letter-spacing:.07em;color:var(--muted)}
+#desc-lore details[open] summary{margin-bottom:.3rem}
+#desc-lore .species-prose{margin:0}
+#desc-own .tiny{margin-left:.4rem;vertical-align:baseline}
 .desc-edit button.linky{padding:0}
 
 .logline .head{gap:.3rem;flex-wrap:wrap}

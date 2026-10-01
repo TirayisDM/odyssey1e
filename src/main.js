@@ -724,6 +724,22 @@ function paintDescription(sheet) {
          : "nothing written yet"));
   }
 
+  // WRITTEN MEANS READ-ONLY UNTIL ASKED. An empty description opens
+  // on the box - that is the whole of an empty sheet's job - and a
+  // written one shows as prose with `edit` after it. `descEditing` is
+  // cleared by the save, so putting something in folds it away again.
+  const editing = !body.description || state.descEditing;
+  document.querySelector("#desc-editor").hidden = !editing;
+  if (body.description && !editing) {
+    own.append(
+      action("edit", () => {
+        state.descEditing = true;
+        paintDescription(sheet);
+        document.querySelector("#desc-notes").focus();
+      })
+    );
+  }
+
   // THE COPY IS AN ACT, NOT A DEFAULT. 058 refused to fill a height in
   // from the middle of the species band, for the reason that a fact
   // nobody decided should not appear on a sheet. The same applies to
@@ -749,6 +765,39 @@ function paintDescription(sheet) {
               "this people asks nothing of you");
   paintTraits("#desc-drawbacks", (sp && sp.traits || []).filter((t) => t.kind === "drawback"),
               "nothing written down");
+
+  // --- the rest of what their people are, folded shut ---
+  //
+  // SIX FIELDS, NOT ONE. 056 and 058 seeded appearance, culture,
+  // history, roleplaying, an age note and an alignment note, and the
+  // sheet rendered the summary alone - so the other five were in the
+  // database, true, and unreachable from the app that owns them.
+  //
+  // `details` rather than a toggle of ours: it opens, it prints, it
+  // reads aloud to a screen reader, and it is three characters of
+  // markup against twenty lines of ours.
+  const lore = document.querySelector("#desc-lore");
+  const loreHead = document.querySelector("#desc-lore-head");
+  lore.innerHTML = "";
+  const chapters = sp
+    ? [
+        ["Appearance", sp.appearance],
+        ["Culture", sp.culture],
+        ["History", sp.history],
+        ["Roleplaying", sp.roleplaying],
+        ["Age", sp.age_note],
+        ["Alignment", sp.alignment_note],
+      ].filter(([, text]) => text)
+    : [];
+  loreHead.hidden = !chapters.length;
+  loreHead.textContent = sp ? "More about the " + sp.name : "More about their people";
+  for (const [label, text] of chapters) {
+    const box = document.createElement("details");
+    const head = document.createElement("summary");
+    head.textContent = label;
+    box.append(head, sEl("p", "species-prose", text));
+    lore.append(box);
+  }
 
   // --- languages, spoken and written kept apart ---
   const lang = document.querySelector("#desc-languages");
@@ -6494,7 +6543,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     msg.hidden = false;
     msg.textContent = r.ok ? "saved" : r.error;
     msg.classList.toggle("bad", !r.ok);
-    if (r.ok) await loadSheet();
+    // FOLD ONLY ON SUCCESS. A refused save that hid the box would hide
+    // the words somebody just wrote along with it.
+    if (r.ok) {
+      state.descEditing = false;
+      await loadSheet();
+    }
   });
 
   // 068. The creation form is behind a link now. It opens, and it

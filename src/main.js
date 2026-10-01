@@ -2064,12 +2064,21 @@ async function doTrade(free) {
 // running what is in front of the table, or building the world behind
 // it.
 //
-// Show and hide only. No routing, no history, no state beyond which
-// button is lit - the panes are the same markup they always were and
-// every loader still fills them whether or not they are visible. That
-// is deliberate: a tab that only loads when opened is a tab that can be
-// stale, and this rig's whole value is that what it shows is what the
-// database said.
+// Show and hide, and a read. No routing, no history, no state beyond
+// which button is lit.
+//
+// THIS SAID "SHOW AND HIDE ONLY" AND ARGUED FOR IT: a tab that only
+// loads when opened is a tab that can be stale, and the rig's whole
+// value is that what it shows is what the database said. The argument
+// was right and the conclusion was backwards. Nothing else re-read
+// either, so every pane held whatever it was given at sign-in or after
+// this app's own last write - and a change made in another window, on
+// the other machine, by a second player or in SQL stayed invisible
+// until somebody signed out and in again.
+//
+// So arriving at a tab reads it. CLICKING THE TAB YOU ARE ALREADY ON
+// IS THEREFORE THE REFRESH, with no new control for it: the handler
+// does not check whether the tab changed, and that is worth keeping.
 function showTab(name) {
   for (const b of document.querySelectorAll("#tabs .tab")) {
     b.classList.toggle("on", b.dataset.tab === name);
@@ -2078,6 +2087,52 @@ function showTab(name) {
     p.hidden = p.dataset.pane !== name;
   }
   state.tab = name;
+  // Deliberately not awaited: the pane is already on screen with what
+  // it had, and the fresh read paints over it when it lands. Making
+  // the switch wait would trade a stale number for a stalled tab.
+  refreshTab(name);
+}
+
+// WHAT A TAB SHOWS, READ AGAIN WHEN YOU ARRIVE AT IT.
+//
+// This app only ever refreshed after its OWN writes - `afterObjectChange`
+// is the pattern and its comment is about exactly this failure one
+// screen at a time. Anything that changed ELSEWHERE was invisible:
+// another window, the other machine, a second player, or a DM editing
+// the database behind the app. The only way back was to sign out and in
+// again, which reloads everything because it rebuilds everything.
+//
+// Taking Falon's leather off is the case that named it - the sheet kept
+// saying AC 12 because nothing had told it to look.
+//
+// ONE DISPATCH, so a new tab cannot forget to be in it. The cost is a
+// handful of reads on navigation, which is the moment a person already
+// expects the screen to be fetching something.
+async function refreshTab(name) {
+  if (!state.gameId) return;
+  try {
+    if (name === "play") {
+      await loadRolls();
+      if (state.characterId) await loadSheet();
+    } else if (name === "chars") {
+      await loadChars();
+      if (state.characterId) await loadSheet();
+    } else if (name === "run") {
+      await loadDM();
+      await loadTargets();
+    } else if (name === "world") {
+      await loadWorld();
+    } else if (name === "objects") {
+      await loadObjects();
+    } else if (name === "trade") {
+      await loadTrade();
+    }
+  } catch (e) {
+    // A refresh that fails must not take the tab switch with it. The
+    // pane is already showing the last good read, and every loader in
+    // here reports its own failure through the log.
+    log("refresh " + name, e, true);
+  }
 }
 
 // The sub-tab strips, one function three strips use.

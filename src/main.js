@@ -2757,7 +2757,7 @@ function objectRow(o) {
     action("clone", async () => {
       const r = await tryCall("clone_object", { objectId: o.id, quantity: 1 });
       dmSay(r.ok ? "another " + (o.item_key) + " made" : r.error, !r.ok);
-      await loadObjects();
+      await afterObjectChange();
     }),
     action("move", () => toggle(mover, () => fillMover(mover, o)))
   );
@@ -4305,7 +4305,21 @@ function fillEditor(el, o) {
       holdsSizeOverride: holdsIn ? holdsIn.value : null,
     });
     dmSay(r.ok ? "saved" : r.error, !r.ok);
-    if (r.ok) await loadObjects();
+    if (r.ok) {
+      await loadObjects();
+      // 071. AND THE SHEET, WHICH IS LOOKING AT THE SAME OBJECT.
+      //
+      // This refreshed the Objects tab alone, so an axe renamed Hapi
+      // and given new weight, size and damage kept its old name and
+      // numbers on the character sheet until something else happened
+      // to reload it. Both screens read the same row and only one was
+      // being told it had changed.
+      //
+      // loadSheet ends in loadInventory, so one call repaints the
+      // header, the equipment divisions and the attack options that
+      // derive from them.
+      if (state.characterId) await loadSheet();
+    }
   });
 
   const kill = document.createElement("button");
@@ -4318,7 +4332,7 @@ function fillEditor(el, o) {
     if (!confirm("Destroy " + (o.name || o.item_key) + "? This cannot be undone.")) return;
     const r = await tryCall("destroy_object", { objectId: o.id });
     dmSay(r.ok ? (o.name || o.item_key) + " destroyed" : r.error, !r.ok);
-    if (r.ok) await loadObjects();
+    if (r.ok) await afterObjectChange();
   });
 
   const buttons = document.createElement("div");
@@ -4395,7 +4409,7 @@ function fillMover(el, o) {
       quantity: count(),
     });
     dmSay(r.ok ? moved(o, count()) + " moved" : r.error, !r.ok);
-    if (r.ok) await loadObjects();
+    if (r.ok) await afterObjectChange();
   });
   const placeLine = document.createElement("div");
   placeLine.className = "row";
@@ -4460,7 +4474,7 @@ function fillMover(el, o) {
       quantity: count(),
     });
     dmSay(r.ok ? moved(o, count()) + " packed away" : r.error, !r.ok);
-    if (r.ok) await loadObjects();
+    if (r.ok) await afterObjectChange();
   });
 
   const intoLine = document.createElement("div");
@@ -4492,7 +4506,7 @@ function fillMover(el, o) {
           : r.error,
         !r.ok
       );
-      if (r.ok) await loadObjects();
+      if (r.ok) await afterObjectChange();
     })
   );
   el.append(outLine);
@@ -4548,6 +4562,22 @@ function paintCatalogue() {
 // courtesy, not a guard: every one of these commands is refused by
 // Postgres for anyone else, and the panel would simply fill the log with
 // "only the DM of this game can ...".
+// AN OBJECT CHANGED, AND TWO SCREENS ARE LOOKING AT IT. 071.
+//
+// The Objects tab and a character's Equipment list read the same rows.
+// Every write here refreshed the first and left the second showing
+// what the object used to be - an axe renamed Hapi and given new
+// weight, size and damage kept its old name and numbers on the sheet
+// until something unrelated happened to reload it.
+//
+// ONE FUNCTION so the next write cannot forget. loadSheet ends in
+// loadInventory, so this repaints the header, the equipment divisions
+// and the attack options that derive from them.
+async function afterObjectChange() {
+  await loadObjects();
+  if (state.characterId) await loadSheet();
+}
+
 async function loadDM() {
   // TWO PANELS NOW, one gate. Running a fight and building the world
   // are different jobs on different tabs; they are still the same

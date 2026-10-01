@@ -59,9 +59,10 @@ pub fn list_audiences(state: State<AppState>, game_id: String) -> Result<Value, 
 /// Play to a room and see what comes of it.
 ///
 /// THE CHART IS THE WHOLE RESOLUTION. Karma down one axis, the
-/// audience along the other, a d100 at or under the target where they
-/// cross - see karma.rs, which is where every one of those words is
-/// tested.
+/// audience along the other, and a d100 rolled OVER the number where
+/// they cross - see karma.rs, which is where every one of those words
+/// is tested, and which ran the other way until the first live
+/// performance proved it backwards.
 ///
 /// AN INSTRUMENT IS REQUIRED AND ITS PROFICIENCY IS ONLY REPORTED.
 /// Whether playing something you were never taught should cost you is

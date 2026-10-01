@@ -2857,15 +2857,31 @@ IS the reward.
 The HOPPER chart is:
 
 ```text
-    target = 50 + 2 * (karma - audience)      floored 01, 100 printed 00
+    target = 50 + 2 * (audience - karma)      roll OVER it, held 01..99
 ```
 
 which makes the whole 676-cell table ONE number - the gap, -25 to +25 -
 and the diagonal 50 everywhere along it. An even match is a coin flip
 wherever on the chart it happens. It never reaches certain at either
-end: always a 1% chance of humiliating a master, always one of a fool
-bringing the house down. Twenty-one tests, including all five anchors
-read off Dave's printed chart.
+end: beating 01 still fails on a natural 1, beating 99 still comes off
+on a 00. Twenty-six tests, including all five anchors read off Dave's
+printed chart.
+
+**IT RAN THE OTHER WAY FIRST, AND THE FIRST LIVE PERFORMANCE IS WHAT
+CAUGHT IT.** Falon rolled 26 against a printed 38 and the screen said
+"made it by 12". Dave said that is a miss: his chart is a difficulty to
+clear, not an allowance to stay inside.
+
+Both halves had to move, which is the part worth remembering. Flipping
+only the comparison leaves `karma - audience` raising the number, so a
+master in a friendly room would need to beat 100 and the better you got
+the worse you would do. Mirroring the axes as well keeps low good and
+leaves the ODDS for every pairing exactly where they were - a cell that
+printed 38 and meant 38% now prints 62 and still means 38%.
+
+The ceiling moved with it: 100 printed as `00` was a roll-under
+necessity and nothing prints `00` any longer. The hundred is a ROLL
+now, the one that beats the worst corner.
 
 **The audience ladder is DATA, not code**, because the spacing is a
 tuning guess and retuning a guess should be one UPDATE and no rebuild:

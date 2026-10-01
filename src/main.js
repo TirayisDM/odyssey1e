@@ -2704,13 +2704,19 @@ function paintOdds() {
   const room = (state.audiences || []).find(
     (a) => a.key === document.querySelector("#perform-audience").value);
   if (!k || !room) { out.textContent = ""; return; }
-  // 50 + 2 * (karma - audience), which karma.rs owns. Recomputed here
+  // 50 + 2 * (audience - karma), which karma.rs owns. Recomputed here
   // ONLY to preview - every result that counts comes back from the
   // command, so the screen can never disagree with the engine about
   // what actually happened.
-  const t = Math.min(100, Math.max(1, 50 + 2 * (k.rating - room.rating)));
+  //
+  // THE NUMBER IS BEATEN, NOT STAYED UNDER. This said "or under" while
+  // the engine agreed with it, and the two were wrong together - which
+  // is the cost of a preview that recomputes a rule instead of asking
+  // for it. It has to be changed in step or it becomes a second
+  // opinion.
+  const t = Math.min(99, Math.max(1, 50 + 2 * (room.rating - k.rating)));
   out.textContent = "Karma " + k.rating + " vs " + room.name + " " + room.rating +
-    " \u2014 needs " + (t === 100 ? "00" : String(t).padStart(2, "0")) + " or under";
+    " \u2014 needs over " + String(t).padStart(2, "0");
 }
 
 async function loadAudiences() {
@@ -5905,8 +5911,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     out.innerHTML = "";
     const verdict = sEl("span", r.made_it ? "made" : "missed",
       "rolled " + r.roll + " against " + r.printed +
-      (r.made_it ? " — made it by " + r.margin
-                 : " — missed by " + Math.abs(r.margin)));
+      (r.made_it ? " — beat it by " + r.margin
+                 : " — short by " + Math.abs(r.margin)));
     out.append(verdict);
     // THE WORKING UNDER THE VERDICT. A player who wants to argue with
     // the result should be able to see every number that produced it

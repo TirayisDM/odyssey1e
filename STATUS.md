@@ -433,6 +433,23 @@ and not after.
     place were swept
 065 an instance inherits its calling - instantiate_npc carries it, so
     the thirteenth goblin is not born classless
+071 what a thing looks like - items.description filled on all 89
+    catalogue rows. The column existed from 004 and nothing ever wrote
+    to it; 070 put it on screen and turned a quiet absence into a
+    visible one. Guarded on NULL and on game_id IS NULL, so it is
+    re-runnable and takes nothing back from a game that authored its own
+073 a character is more than one thing - character_classes, one row per
+    class, plus sync_character_level keeping characters.level and
+    class_key in step from it
+074 something to play it on - nine instruments, and `instrument` added
+    to the items.kind check constraint that refused the first insert
+075 trained with a tool - characters.tool_profs, and classes.tool_choices
+    saying a bard is owed three
+076 karma and the audience - classes.karma_skills (bard is {ins,prf}),
+    and the seven-row audiences catalogue that is the chart's other axis
+
+(066 to 070 and 072 are code-only changesets with no migration - the
+numbering is continuous across both, which is why there are gaps here.)
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -2674,6 +2691,179 @@ disabling the pickers, and the payload carrying all six pairs with the
 7 discarded. One bug found and fixed in the rig - the Lock button kept
 its "Abilities locked" label over the empty pool of a fresh form.
 
+## A character can be renamed - BUILT (072, naming.rs)
+
+The sheet could set a level and could not set a name. An object had
+`rename_object` and an encounter actor had `rename_actor`; the one name
+a player types first was fixed at creation, so a typo at the form was
+permanent. A name box now leads the stats row with the level beside it.
+
+**The part that is not one update.** A character carries two names:
+`name`, and `token_name`, which is what the roster, the initiative strip
+and every roll card actually print. Moving `name` alone changes the
+sheet heading and nothing else - the same half-fix `edit_object` had.
+Overwriting both is also wrong, because a short name that differs from
+the long one is something somebody chose.
+
+So naming.rs decides, and the rule is narrow:
+
+| old name | old short | new name | short becomes |
+|---|---|---|---|
+| Test PC 1 | NULL | Garn | NULL |
+| Snot | Snot | Grisk | **Grisk** - it was a copy, so it follows |
+| Rodnar Shieldcrest | Rodnar | Rodnar Oathbreaker | **Rodnar** - it was a decision, so it stays |
+
+That middle row is the NPC case: `instantiate_npc` writes the same text
+into both columns, so without it a goblin renamed would have kept
+answering to Snot everywhere except its own sheet.
+
+**NOT RETROSPECTIVE.** Rolls and actions keep the name that was true
+when they happened (001), and an actor already standing in an encounter
+keeps its own label. `rename_actor` is still the tool for that,
+deliberately separate, because a disguise is a real thing to want.
+
+## Multiclassing - BUILT (073, multiclass.rs)
+
+055 gave a character `class_key` and `level`: one class, and that level
+column was doing two jobs at once - the class's level and the
+character's. For a single-classed character they are the same number,
+which is why it worked and why it would not stretch. A Fighter 5 /
+Rogue 3 has three levels at once: 5, 3, and the 8 that buys their
+proficiency bonus.
+
+`character_classes` holds one row per class. The Stats row shows the
+leading class between the name and the level, and the level beside a
+class is THAT CLASS'S level; additional classes get a row each
+underneath with their own level and their own Set level.
+
+**Three rules that a lot of character sheets get wrong:**
+
+- The proficiency bonus is off the TOTAL. Fighter 5 / Rogue 3 gets a
+  level 8's +3.
+- The first level's whole hit die belongs to the STARTING class and is
+  paid once in a career. Taking a second class at level 6 does not hand
+  out another maximum. This is what `added_at` is for - it is the
+  starting-class rule and the tie-break for which class leads, not a
+  timestamp for curiosity.
+- **Extra Attack DOES NOT STACK.** Fighter 5 / Ranger 5 swings twice,
+  not three times. `multiclass::attacks` takes the best.
+
+A test pins multiclass HP against 061's `pc_hp` for every die, level and
+Constitution in range, because a character who takes a second class and
+drops it again has to land back on the number they started with.
+
+**`characters.level` and `class_key` STAY, and a trigger keeps them.**
+A monster has a level and no class, and every screen reads both - making
+them all sum a second table would be a dozen new round trips to answer a
+question the row already answers. But nothing in the app writes them for
+a classed character any more: `sync_character_level` does, from the class
+rows, and `set_level` refuses outright for anybody holding any. There is
+no honest way to spread "make them level 7" across a Fighter 5 / Rogue 3,
+and a second writer is the two-places-disagree fault this codebase has
+now been bitten by three times. A trigger cannot be forgotten.
+
+Verified on a rolled-back probe: +rogue 3 reads level 7 led by fighter,
+rogue raised to 6 moves the lead, dropping it returns 4, and dropping the
+last class leaves the level alone rather than making anybody level zero.
+
+**Two design calls that are Dave's to overturn:** blanking the class
+dropdown and pressing Set level drops that class (it is the only route
+back to classless, and the extra rows have an explicit remove); and which
+class leads is computed - most levels, ties to whichever was taken first -
+rather than chosen. Making the primary a DM decision is a column and an
+afternoon.
+
+**NOT BUILT: multiclass spell slots.** Half and third casters add on a
+separate progression table, and nothing in this engine casts anything
+yet. It gets its own file when it does, not a fourth rule in this one.
+
+## The bard, stage 1 - BUILT (074, 075, 076, karma.rs)
+
+Instruments exist, a bard has a Karma rating, and a performance resolves
+end to end against a chosen audience. On Skills & Talents: the Karma
+block with its working, an instrument picker, an audience picker, and
+the odds shown BEFORE you commit to them.
+
+**What 5e actually has, so the line is clear.** Instruments are tools
+and a bard gets three of their choice; an instrument may be a
+spellcasting focus (that is the "channel or totem" half, and it is RAW);
+Bardic Inspiration gives ONE ally a die for 10 minutes and does not
+stack. Performance is a d20 Charisma check. **There is no percentile
+anywhere in 5e and no "draft a song" mechanic at all** - the % roll, the
+1-hour duration and the party-wide target are Dave's, marked as his in
+the code.
+
+**074** adds `instrument` as a seventh `items.kind`. The check
+constraint refused the first insert, which is the constraint doing its
+job - widening it deliberately is the whole difference between a new
+category and a typo. Nine of them, stats deliberately flat (1-5 lb,
+1-35 gp) because no rule anywhere distinguishes a drum from a viol. All
+carry `foc`, which READS NOWHERE because nothing casts; the catalogue
+should not lie about what a lute is.
+
+**075** adds `characters.tool_profs` beside `weapon_profs` and
+`armor_profs`, through the same `equipment::is_proficient`. Its
+catch-all said "nothing else grants or needs proficiency", which stopped
+being true the moment there was a lute. `classes.tool_choices` says a
+bard is owed three; nothing enforces it, exactly as `skill_choices` has
+not since 055.
+
+**076 is the rule.** Karma is a property of the CLASS -
+`classes.karma_skills`, bard is `{ins,prf}` - so the second class to get
+one is a row, not a release. Expertise counts, which means a late-career
+bard sits pinned at the chart's ceiling: that is intended, the ceiling
+IS the reward.
+
+The HOPPER chart is:
+
+```text
+    target = 50 + 2 * (karma - audience)      floored 01, 100 printed 00
+```
+
+which makes the whole 676-cell table ONE number - the gap, -25 to +25 -
+and the diagonal 50 everywhere along it. An even match is a coin flip
+wherever on the chart it happens. It never reaches certain at either
+end: always a 1% chance of humiliating a master, always one of a fool
+bringing the house down. Twenty-one tests, including all five anchors
+read off Dave's printed chart.
+
+**The audience ladder is DATA, not code**, because the spacing is a
+tuning guess and retuning a guess should be one UPDATE and no rebuild:
+
+| Audience | rating | | Audience | rating |
+|---|---|---|---|---|
+| Participating | 0 | | Busy | 13 |
+| Watching | 3 | | Distracted | 18 |
+| Some interest | 5 | | Hostile | 24 |
+| **Neutral** | **8** | | | |
+
+Goodwill is compressed and hostility spread on purpose - a friendly room
+helps less than a hostile one hurts. `audiences` is tenanted like every
+other catalogue, so a game can insert its own "Royal Court".
+
+**A bug that only live data would have found.** Falon was already a
+Fighter 4 / Bard 1 in Dave's running app, and `derive_karma` found the
+LEADING class and then asked whether it had a formula. Fighters have
+none, so it stopped there - a bard with a sword had no Karma at all. The
+filter belongs inside the search. Unit tests alone would have shipped
+it; reading the rows before committing caught it.
+
+**NOT APPLIED, deliberately:** whether playing an instrument you were
+never taught should cost you. `proficient` comes back on the result and
+the screen says "untrained", but it changes no number. The chart has
+only two axes, so folding in a third thing means either docking Karma or
+treating the room as harsher, and both are guesses. Dave decides.
+
+**STAGE 2 AND 3 ARE NOT BUILT.** Stage 2 is `songs` - a drafted song as
+a record, the way a roll is one. Stage 3 is `effects`, and it is the
+only hard part: **there is no conditions table and no clock between
+encounters.** The engine counts rounds inside a fight and has no concept
+of time outside one, so "inspires for 1 hour, does not stack" has
+nowhere to be measured or enforced. That is a design decision before it
+is a coding one. Estimated at ~8 hours once the time model is settled,
+and it pays off across everything else queued - haste, action surge,
+legendary actions, poison, rage, exhaustion all want the same table.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square
@@ -2684,6 +2874,15 @@ screen, and monsters that are individuals rather than views of a type.
 Inventory is now real on both sides: a catalogue to pick from, a
 designed way to acquire, and objects that can be named, split, dropped
 and destroyed.
+
+Since the last handoff: an object edit now reaches the sheet and not
+just the Objects tab (five other object writes had the same staleness);
+the encumbrance walk applies an object's own `weight_override` instead
+of the catalogue's, which had Hapi showing 25 lb on the item and 19 lb
+on the carry line from the same row; and `items.description` is filled
+on all 89 catalogue rows - the column had existed since 004 and nothing
+had ever written to it until 070 put it on screen. Characters can be
+renamed, can be more than one class, and a bard can play to a room.
 
 What AppSheet did that this still does not is *deliver*. `rolls.status`
 goes `pending -> resolved -> delivered` and nothing in this codebase

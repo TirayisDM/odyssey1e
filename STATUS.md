@@ -2171,7 +2171,23 @@ Verified live and rolled back on Garn: every column takes the write, and
 `to_json(height_ft)` is `9.0`, a bare number, read through
 `supabase::numeric_at` like every other numeric in the app.
 
-## The sheet's subtabs - FOUR OF SIX (058, 059, and the split)
+## The sheet's subtabs - FOUR OF SIX, IN CHARACTERS (058, 059, 067)
+
+**067 MOVED THE WHOLE SHEET OUT OF PLAY** and into the Characters tab,
+where the list you pick a character from already is. Play keeps Rolls
+and nothing else.
+
+A SIBLING OF `#chars-panel`, NOT A CHILD. That panel is hidden for
+anybody who is not the DM, so nesting the sheet inside it would have
+taken every player's own sheet away - the Characters tab would have
+become a DM tool and a player would have had nowhere to read their own
+numbers. The sheet sits beside it in the pane, gated as it always was
+on having a character selected.
+
+Creating a character now lands on their STATS subtab. The sheet is in
+the same tab as the form, so making one no longer means changing tabs -
+but it does mean the sheet could be left on whichever subtab the LAST
+character was read on, which for a brand new one is never right.
 
     Stats              level and abilities
     Description        species, body, features, drawbacks, languages

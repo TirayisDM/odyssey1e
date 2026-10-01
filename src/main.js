@@ -5395,8 +5395,18 @@ window.addEventListener("DOMContentLoaded", async () => {
       paintChargen();
       document.querySelector("#char-name").value = "";
       await loadCharacters();
-      if (id) await selectCharacter(id);
-      else await loadCharacters();
+      if (id) {
+        await selectCharacter(id);
+        // 067. ON THE STATS TAB OF THE NEW CHARACTER. The sheet moved
+        // into Characters, so creating one no longer means changing
+        // tabs - but it does mean the sheet can be left on whichever
+        // subtab the LAST character was being read on, which for a
+        // brand new one is never the right answer.
+        showTab("chars");
+        showSub("sheet-tabs", "sheet", "stats");
+        document.querySelector("#sheet-panel")
+          .scrollIntoView({ block: "start", behavior: "smooth" });
+      }
     }
   });
 

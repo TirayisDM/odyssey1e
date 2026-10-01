@@ -97,120 +97,6 @@
       <div id="dm-msg" class="dm-msg" hidden></div>
 
       <div class="pane" data-pane="play">
-      <section id="sheet-panel" hidden>
-        <h2>Sheet <span id="sheet-who" class="muted"></span></h2>
-
-        <!-- 058. THE SHEET GETS SUBTABS. There will be half a dozen of
-             them - combat, spells, background and the rest - and the
-             strip is built on `showSub`, the same helper the Characters
-             tabs use, so the next one is a button and a pane and
-             nothing else. Adding a tab must never mean touching this
-             comment. -->
-        <nav class="tabs mini" id="sheet-tabs">
-          <button class="tab on" data-sheet="stats">Stats</button>
-          <button class="tab" data-sheet="description">Description</button>
-          <button class="tab" data-sheet="equipment">Equipment</button>
-          <button class="tab" data-sheet="skills">Skills &amp; Talents</button>
-        </nav>
-
-        <div class="sheet-pane" data-sheet="stats">
-          <div class="row">
-            <input id="level" type="number" min="1" max="20" placeholder="level" />
-            <button id="save-level" class="ghost">Set level</button>
-          </div>
-          <div id="abilities" class="abils"></div>
-        </div>
-
-        <div class="sheet-pane" data-sheet="description" hidden>
-          <div id="desc-species"></div>
-
-          <div class="sub">Physical description</div>
-          <div id="desc-body"></div>
-          <div class="row desc-edit">
-            <input id="desc-height" class="narrow" placeholder="height ft" />
-            <input id="desc-weight" class="narrow" placeholder="weight lb" />
-          </div>
-          <div class="row desc-edit">
-            <input id="desc-hair" placeholder="hair" />
-            <input id="desc-skin" placeholder="skin" />
-            <input id="desc-eyes" placeholder="eyes" />
-          </div>
-          <div class="row desc-edit">
-            <input id="desc-notes" placeholder="anything else worth seeing at a glance" />
-            <button id="save-desc" class="ghost">Save</button>
-          </div>
-          <div id="desc-msg" class="dm-msg" hidden></div>
-
-          <div class="sub">Features</div>
-          <div id="desc-features"></div>
-
-          <div class="sub">Drawbacks</div>
-          <div id="desc-drawbacks"></div>
-
-          <div class="sub">Languages</div>
-          <div id="desc-languages"></div>
-        </div>
-      <!-- ===================== EQUIPMENT ===================== -->
-      <div class="sheet-pane" data-sheet="equipment" hidden>
-        <div id="burden" class="muted trained burden"></div>
-        <div id="purse" class="muted trained"></div>
-        <!-- The designed way to acquire something. Until 026 there was
-             none: equipping an item you did not own created it, because
-             the write underneath was an upsert. -->
-        <div class="row">
-          <select id="add-what"></select>
-          <input id="add-qty" type="number" min="1" value="1" class="narrow" />
-          <button id="add-item" class="ghost">Add</button>
-          <button id="check-keys" class="tiny ghost">check keys</button>
-        </div>
-
-        <!-- THREE DIVISIONS, IN THIS ORDER, and the order is the point.
-             What you fight with comes first because it is what you
-             reach for under pressure; what you are carrying out comes
-             second because it is what the session was for; everything
-             else is the rest. One list sorted by nothing made a
-             greatsword and a blanket equally hard to find. -->
-        <div class="sub">Weapons</div>
-        <ul id="inv-weapons" class="list"></ul>
-
-        <div class="sub">Loot</div>
-        <ul id="inv-loot" class="list"></ul>
-
-        <div class="sub">General</div>
-        <ul id="inv-general" class="list"></ul>
-      </div>
-
-      <!-- ================= SKILLS &amp; TALENTS ================= -->
-      <div class="sheet-pane" data-sheet="skills" hidden>
-        <div id="skills" class="list"></div>
-
-        <!-- TRAINED WITH WHAT. Read since 008 and written by nothing
-             until 022: a statblock got its proficiencies at authoring
-             and a player character got whatever 006 seeded, so one with
-             an empty list read as not proficient with everything and
-             had no way to say otherwise.
-
-             IT LIVES HERE NOW rather than over the inventory. What a
-             person is trained with is a fact about them, not about
-             what is in their pack - and each weapon row already says
-             `proficient` on its own, which is the half that belonged
-             beside the gear. -->
-        <div class="sub">Proficiencies</div>
-        <div id="equip-profs" class="muted trained">
-          <span id="profs-text"></span>
-          <button id="edit-profs" class="tiny ghost">edit</button>
-        </div>
-        <div class="row" id="profs-edit" hidden>
-          <input id="prof-weapons" placeholder="weapons: sim, mar, or a base item like rapier" />
-          <input id="prof-armour" placeholder="armour: lgt med hvy shl" />
-          <button id="save-profs" class="ghost">Save</button>
-        </div>
-        <div id="profs-msg" class="dm-msg" hidden></div>
-
-        <div class="sub">Talents</div>
-        <div id="talents"></div>
-      </div>
-      </section>
 
       <section>
         <h2>Rolls</h2>
@@ -515,6 +401,126 @@
             <ul id="npc-list" class="list"></ul>
           </div>
         </section>
+
+        <!-- 067. THE SHEET LIVES HERE NOW, not in Play. It is a
+             SIBLING of #chars-panel rather than a child, and that is
+             load-bearing: #chars-panel is hidden for anybody who is
+             not the DM, so nesting the sheet inside it would have
+             taken every player's own character sheet away. -->
+      <section id="sheet-panel" hidden>
+        <h2>Sheet <span id="sheet-who" class="muted"></span></h2>
+
+        <!-- 058. THE SHEET GETS SUBTABS. There will be half a dozen of
+             them - combat, spells, background and the rest - and the
+             strip is built on `showSub`, the same helper the Characters
+             tabs use, so the next one is a button and a pane and
+             nothing else. Adding a tab must never mean touching this
+             comment. -->
+        <nav class="tabs mini" id="sheet-tabs">
+          <button class="tab on" data-sheet="stats">Stats</button>
+          <button class="tab" data-sheet="description">Description</button>
+          <button class="tab" data-sheet="equipment">Equipment</button>
+          <button class="tab" data-sheet="skills">Skills &amp; Talents</button>
+        </nav>
+
+        <div class="sheet-pane" data-sheet="stats">
+          <div class="row">
+            <input id="level" type="number" min="1" max="20" placeholder="level" />
+            <button id="save-level" class="ghost">Set level</button>
+          </div>
+          <div id="abilities" class="abils"></div>
+        </div>
+
+        <div class="sheet-pane" data-sheet="description" hidden>
+          <div id="desc-species"></div>
+
+          <div class="sub">Physical description</div>
+          <div id="desc-body"></div>
+          <div class="row desc-edit">
+            <input id="desc-height" class="narrow" placeholder="height ft" />
+            <input id="desc-weight" class="narrow" placeholder="weight lb" />
+          </div>
+          <div class="row desc-edit">
+            <input id="desc-hair" placeholder="hair" />
+            <input id="desc-skin" placeholder="skin" />
+            <input id="desc-eyes" placeholder="eyes" />
+          </div>
+          <div class="row desc-edit">
+            <input id="desc-notes" placeholder="anything else worth seeing at a glance" />
+            <button id="save-desc" class="ghost">Save</button>
+          </div>
+          <div id="desc-msg" class="dm-msg" hidden></div>
+
+          <div class="sub">Features</div>
+          <div id="desc-features"></div>
+
+          <div class="sub">Drawbacks</div>
+          <div id="desc-drawbacks"></div>
+
+          <div class="sub">Languages</div>
+          <div id="desc-languages"></div>
+        </div>
+      <!-- ===================== EQUIPMENT ===================== -->
+      <div class="sheet-pane" data-sheet="equipment" hidden>
+        <div id="burden" class="muted trained burden"></div>
+        <div id="purse" class="muted trained"></div>
+        <!-- The designed way to acquire something. Until 026 there was
+             none: equipping an item you did not own created it, because
+             the write underneath was an upsert. -->
+        <div class="row">
+          <select id="add-what"></select>
+          <input id="add-qty" type="number" min="1" value="1" class="narrow" />
+          <button id="add-item" class="ghost">Add</button>
+          <button id="check-keys" class="tiny ghost">check keys</button>
+        </div>
+
+        <!-- THREE DIVISIONS, IN THIS ORDER, and the order is the point.
+             What you fight with comes first because it is what you
+             reach for under pressure; what you are carrying out comes
+             second because it is what the session was for; everything
+             else is the rest. One list sorted by nothing made a
+             greatsword and a blanket equally hard to find. -->
+        <div class="sub">Weapons</div>
+        <ul id="inv-weapons" class="list"></ul>
+
+        <div class="sub">Loot</div>
+        <ul id="inv-loot" class="list"></ul>
+
+        <div class="sub">General</div>
+        <ul id="inv-general" class="list"></ul>
+      </div>
+
+      <!-- ================= SKILLS &amp; TALENTS ================= -->
+      <div class="sheet-pane" data-sheet="skills" hidden>
+        <div id="skills" class="list"></div>
+
+        <!-- TRAINED WITH WHAT. Read since 008 and written by nothing
+             until 022: a statblock got its proficiencies at authoring
+             and a player character got whatever 006 seeded, so one with
+             an empty list read as not proficient with everything and
+             had no way to say otherwise.
+
+             IT LIVES HERE NOW rather than over the inventory. What a
+             person is trained with is a fact about them, not about
+             what is in their pack - and each weapon row already says
+             `proficient` on its own, which is the half that belonged
+             beside the gear. -->
+        <div class="sub">Proficiencies</div>
+        <div id="equip-profs" class="muted trained">
+          <span id="profs-text"></span>
+          <button id="edit-profs" class="tiny ghost">edit</button>
+        </div>
+        <div class="row" id="profs-edit" hidden>
+          <input id="prof-weapons" placeholder="weapons: sim, mar, or a base item like rapier" />
+          <input id="prof-armour" placeholder="armour: lgt med hvy shl" />
+          <button id="save-profs" class="ghost">Save</button>
+        </div>
+        <div id="profs-msg" class="dm-msg" hidden></div>
+
+        <div class="sub">Talents</div>
+        <div id="talents"></div>
+      </div>
+      </section>
       </div>
 
       <div class="pane" data-pane="objects" hidden>

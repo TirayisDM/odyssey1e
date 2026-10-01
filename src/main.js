@@ -1543,6 +1543,79 @@ function objectControls(it, onDone) {
 // the point: "Heavy Smash" should never need typing, but what runs is
 // the identical path, so nothing can behave differently because it was
 // clicked.
+// WHAT THE THING IS. 070.
+//
+// Weight, size, what it is worth, what it does - the facts a player
+// asks about a weapon that the sheet had no way to answer. None of it
+// decides anything: a price does not stop you carrying something and a
+// rarity gates nothing. It is here to be READ.
+//
+// IT READS THE RESOLVED ITEM, so an object carrying 049 overrides
+// shows its own numbers rather than its type's - a named sword worth
+// more than a plain one says so, which is the first thing
+// `price_override` has ever been applied to.
+const SIZE_FULL = {
+  tiny: "Tiny", sm: "Small", med: "Medium",
+  lg: "Large", huge: "Huge", grg: "Gargantuan",
+};
+
+function itemFacts(it) {
+  const i = it.item || {};
+  const out = [];
+
+  if (i.damage_number && i.damage_denomination) {
+    let dmg = i.damage_number + "d" + i.damage_denomination;
+    if ((i.damage_types || []).length) dmg += " " + i.damage_types.join("/");
+    // A versatile weapon does more in two hands, and the catalogue has
+    // said so since 027 with nothing reading it. Nothing ROLLS it yet -
+    // the attack path offers one mode per weapon and a second grip is
+    // not a second mode - so it is shown rather than offered.
+    if (i.versatile_number && i.versatile_denomination) {
+      dmg += " · " + i.versatile_number + "d" + i.versatile_denomination + " two-handed";
+    }
+    out.push(["damage", dmg]);
+  }
+  if (i.base_ac != null) {
+    out.push(["armour", "AC " + i.base_ac +
+      (i.dex_cap != null ? " · DEX cap " + i.dex_cap : "")]);
+  }
+  if (i.range_value) {
+    out.push(["range", i.range_value + (i.range_long ? "/" + i.range_long : "") + " ft"]);
+  } else if (i.range_reach) {
+    out.push(["reach", i.range_reach + " ft"]);
+  }
+
+  out.push(["weight", i.weight != null ? i.weight + " lb" : "—"]);
+  out.push(["size", SIZE_FULL[i.size] || i.size || "—"]);
+  if (i.slots != null) out.push(["slots", i.slots]);
+  if (i.capacity_slots != null) out.push(["holds", i.capacity_slots + " slots"]);
+  // Worth, as the book prints it rather than normalised to copper -
+  // "10 gp" is what a player expects to read.
+  out.push(["value", i.price != null ? i.price + " " + (i.denom || "gp") : "—"]);
+  if (i.rarity) out.push(["rarity", i.rarity]);
+  if ((i.properties || []).length) out.push(["properties", i.properties.join(", ")]);
+  return out;
+}
+
+function itemInfo(it) {
+  const box = sEl("div", "iteminfo");
+  const grid = sEl("div", "iteminfo-grid");
+  for (const [k, v] of itemFacts(it)) {
+    const row = sEl("div", "iteminfo-row");
+    row.append(sEl("span", "iteminfo-key", k), sEl("span", "iteminfo-val", String(v)));
+    grid.append(row);
+  }
+  box.append(grid);
+
+  // DESCRIPTION IS NULL ON ALL 89 CATALOGUE ROWS. The column has
+  // existed since 004 and nothing has ever filled it, so this renders
+  // only when somebody has - rather than printing an empty heading
+  // under every item in the game.
+  const d = it.item && it.item.description;
+  if (d) box.append(sEl("p", "iteminfo-desc", d));
+  return box;
+}
+
 function itemActions(it) {
   if (it.item.kind !== "weapon") return [];
   const out = [];
@@ -1694,6 +1767,11 @@ function inventoryRow(it) {
   const detail = document.createElement("div");
   detail.className = "actions";
   detail.hidden = true;
+  // 070. RIGHT UNDER THE STATS, which is where it was asked for: the
+  // chips above say what the engine makes of the thing, and this says
+  // what the thing is.
+  detail.append(itemInfo(it));
+
   for (const a of actions) {
     const b = document.createElement("button");
     b.className = "tiny" + (a.technique ? " ghost" : "") + (a.locked ? " locked-move" : "");

@@ -590,6 +590,16 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             // Not what these fixtures are about. Written out
             // rather than defaulted, because a fixture that is
             // faithful to the seed makes a failure mean the RULE

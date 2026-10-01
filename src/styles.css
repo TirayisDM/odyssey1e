@@ -638,3 +638,18 @@ button.wide{width:100%}
   border-style: dashed;
 }
 .tiny.locked-move:hover { opacity: .55; }
+
+/* ============ WHAT THE THING IS (070) ============ */
+
+.iteminfo { margin: .35rem 0 .45rem; }
+.iteminfo-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .1rem .9rem;
+}
+.iteminfo-row { display: grid; grid-template-columns: 5.2rem 1fr; gap: .4rem; }
+.iteminfo-key { opacity: .55; font-size: .82em; }
+.iteminfo-val { font-size: .88em; font-variant-numeric: tabular-nums; }
+/* Only rendered when somebody has written one - see itemInfo. */
+.iteminfo-desc { margin: .4rem 0 0; line-height: 1.45; opacity: .9; font-size: .9em; }
+
+@media (max-width: 560px) { .iteminfo-grid { grid-template-columns: 1fr; } }

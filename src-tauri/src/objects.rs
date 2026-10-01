@@ -201,6 +201,12 @@ impl Overrides {
         if let Some(v) = self.base_ac {
             out.base_ac = Some(v);
         }
+        // 070. `price_override` has been carried here since 049 and
+        // applied to nothing, because `Item` had no price to apply it
+        // to. A named sword worth more than its type now says so.
+        if let Some(v) = self.price {
+            out.price = Some(v);
+        }
         out
     }
 }
@@ -389,6 +395,13 @@ mod tests {
             size: "med".into(),
             holds_size: None,
             weight: Some("3".into()),
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             accepts: Vec::new(),
             capacity_slots: None,
         }

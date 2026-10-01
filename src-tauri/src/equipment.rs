@@ -110,6 +110,35 @@ pub struct Item {
     /// ANYTHING. Enforced by containers::admits since 032 and shown
     /// nowhere until now, so a refusal arrived with no way to have
     /// predicted it.
+    /// 070. WHAT THE THING IS, for a screen rather than a rule. None
+    /// of these decides anything: a price does not stop a character
+    /// carrying something and a rarity gates nothing. They are here
+    /// because a player looking at a weapon wants to know what it
+    /// weighs and what it is worth, and the sheet had no way to say.
+    ///
+    /// `description` is NULL on all 89 catalogue rows today - the
+    /// column has existed since 004 and nothing has ever filled it.
+    /// Carried anyway, so the day somebody writes one it appears
+    /// without another migration.
+    pub description: Option<String>,
+    /// Price in `denom`, which is 5e's coin ladder - see currency.rs.
+    /// Stored as the pair rather than normalised to copper, because
+    /// "10 gp" is what the book prints and what a player expects.
+    pub price: Option<i64>,
+    pub denom: Option<String>,
+    pub rarity: Option<String>,
+    /// How much room one takes in a container. Text for the reason
+    /// `weight` is - a quarter slot is 0.25 and nothing here divides.
+    pub slots: Option<String>,
+    /// The two-handed dice of a versatile weapon. A battleaxe is 1d8
+    /// in one hand and 1d10 in two; the `ver` property says it has a
+    /// second grip and these say what it does.
+    ///
+    /// NOTHING ROLLS THESE YET - the attack path offers one mode per
+    /// weapon and versatile is a second grip rather than a second
+    /// mode. Shown so the number is visible while that is true.
+    pub versatile_number: Option<i64>,
+    pub versatile_denomination: Option<i64>,
     pub accepts: Vec<String>,
     /// Containers only: how much room, in slots. None is an unfinished
     /// catalogue row rather than "bottomless" - see containers::Profile,
@@ -531,19 +560,29 @@ fn item_from_row(r: &Value) -> Item {
         // unmeasurable.
         size: as_opt_str(r, "size").unwrap_or_else(|| "med".to_string()),
         holds_size: as_opt_str(r, "holds_size"),
-        // PostgREST sends `numeric` as a JSON STRING. Kept as one
-        // rather than parsed, because nothing here does arithmetic on
-        // it and a parse would turn "0.05" into a rounding question
-        // that only the screen has to answer.
+        // TEXT RATHER THAN A NUMBER, because nothing here does
+        // arithmetic on it and a parse would turn 0.05 into a rounding
+        // question only the screen has to answer. How `numeric`
+        // arrives is supabase::numeric's business - the comment that
+        // used to sit here had it backwards, which is the belief that
+        // cost three bugs before it was cornered.
         weight: supabase::numeric_text_at(r, "weight"),
         accepts: as_strings(r, "accepts"),
         capacity_slots: supabase::numeric_text_at(r, "capacity_slots"),
+        description: as_opt_str(r, "description"),
+        price: r.get("price").and_then(|x| x.as_i64()),
+        denom: as_opt_str(r, "denom"),
+        rarity: as_opt_str(r, "rarity"),
+        slots: supabase::numeric_text_at(r, "slots"),
+        versatile_number: r.get("versatile_number").and_then(|x| x.as_i64()),
+        versatile_denomination: r.get("versatile_denomination").and_then(|x| x.as_i64()),
     }
 }
 
 pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
 damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap,\
-size,holds_size,weight,accepts,capacity_slots";
+size,holds_size,weight,accepts,capacity_slots,\
+description,price,denom,rarity,slots,versatile_number,versatile_denomination";
 
 /// Global rows plus this game's overrides, collapsed so an override
 /// replaces the global row sharing its key. Same two-pass shape as the
@@ -956,6 +995,16 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             // Not what these fixtures are about. Written out
             // rather than defaulted, because a fixture that is
             // faithful to the seed makes a failure mean the RULE
@@ -985,6 +1034,16 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1010,6 +1069,16 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1035,6 +1104,13 @@ mod tests {
             armor_category: Some("med".into()),
             base_ac: Some(14),
             dex_cap: Some(2),
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1060,6 +1136,16 @@ mod tests {
             armor_category: None,
             base_ac: None,
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1213,6 +1299,13 @@ mod tests {
             armor_category: Some("hvy".into()),
             base_ac: Some(18),
             dex_cap: Some(0),
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1356,6 +1449,16 @@ mod tests {
             armor_category: Some("shl".into()),
             base_ac: Some(2),
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1382,6 +1485,16 @@ mod tests {
             armor_category: Some("lgt".into()),
             base_ac: Some(11),
             dex_cap: None,
+            // 070's descriptive fields. Not what these fixtures are
+            // about either, and None rather than invented so a failure
+            // still means the rule changed.
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1409,6 +1522,13 @@ mod tests {
             dex_cap: Some(0),
             size: "med".into(),
             holds_size: None,
+            description: None,
+            price: None,
+            denom: None,
+            rarity: None,
+            slots: None,
+            versatile_number: None,
+            versatile_denomination: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,

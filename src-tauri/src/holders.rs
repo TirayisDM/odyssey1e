@@ -427,6 +427,19 @@ fn as_item(t: &Kind) -> crate::equipment::Item {
         weight: t.weight.clone(),
         accepts: Vec::new(),
         capacity_slots: t.capacity_slots.map(|c| c.to_string()),
+        // 070'S DESCRIPTIVE FIELDS ARE ABSENCES HERE, for the reason
+        // the fields above are: `Kind` carries what the OBJECT MANAGER
+        // needs - size, weight, what a thing does - and a price or a
+        // description is not read on that screen. Filling them from
+        // nowhere would be the lie this comment has warned about since
+        // the function was written.
+        description: None,
+        price: None,
+        denom: None,
+        rarity: None,
+        slots: None,
+        versatile_number: None,
+        versatile_denomination: None,
     }
 }
 

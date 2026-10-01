@@ -627,3 +627,14 @@ button.wide{width:100%}
 /* The name over the sheet, so what you are reading is never in doubt
    once the list it came from is folded away. */
 #sheet-panel h2 { margin-bottom: .2rem; }
+
+/* ============ A MOVE NOT YET EARNED (069) ============ */
+
+/* SHOWN, NOT HIDDEN. Every weapon carries three techniques at levels
+   1, 3 and 5; dropping the unearned ones made a level 1 character's
+   weapon read as having none at all. */
+.tiny.locked-move {
+  opacity: .4; cursor: not-allowed;
+  border-style: dashed;
+}
+.tiny.locked-move:hover { opacity: .55; }

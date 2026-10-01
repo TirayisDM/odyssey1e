@@ -1561,14 +1561,31 @@ function itemActions(it) {
   for (const t of (state.sheet && state.sheet.techniques) || []) {
     if (t.item_key !== it.item.key) continue;
     if (!it.modes.includes(t.mode)) continue;
-    if (t.min_level > level) continue;
+
+    // 069. A TECHNIQUE YOU HAVE NOT EARNED IS SHOWN, NOT DROPPED.
+    //
+    // This used to `continue`, and the silence was the bug: every
+    // weapon in the armoury carries three moves at levels 1, 3 and 5,
+    // so a level 1 character saw ONE and had no way to tell whether
+    // the weapon had two more waiting or none at all. It reads as a
+    // weapon with no techniques, which is what it was reported as.
+    //
+    // `resolve` still refuses to roll one - attack.rs gates on
+    // min_level and returns None rather than quietly swinging the
+    // plain weapon. This only stops the screen pretending they do not
+    // exist.
+    const locked = t.min_level > level;
     out.push({
       request: t.roll_name,
-      label: t.name,
+      label: t.name + (locked ? " · lvl " + t.min_level : ""),
       technique: true,
-      hint: t.name + " — " + t.dice + " in " + t.mode +
-            (t.crit_min !== 20 || t.fumble_max !== 1
-              ? ", crit " + t.crit_min + "+, fumble " + t.fumble_max + "-" : ""),
+      locked,
+      hint: locked
+        ? t.name + " — earned at level " + t.min_level +
+          " (this character is " + level + ")"
+        : t.name + " — " + t.dice + " in " + t.mode +
+          (t.crit_min !== 20 || t.fumble_max !== 1
+            ? ", crit " + t.crit_min + "+, fumble " + t.fumble_max + "-" : ""),
     });
   }
 
@@ -1679,9 +1696,13 @@ function inventoryRow(it) {
   detail.hidden = true;
   for (const a of actions) {
     const b = document.createElement("button");
-    b.className = "tiny" + (a.technique ? " ghost" : "");
+    b.className = "tiny" + (a.technique ? " ghost" : "") + (a.locked ? " locked-move" : "");
     b.textContent = a.label;
     b.title = a.hint;
+    // Not clickable, because the roll behind it would be refused -
+    // offering it would be the screen promising what the engine will
+    // not do.
+    b.disabled = !!a.locked;
     // SELECTS, does not roll. Advantage and the target live in the
     // Rolls box and a second set of them here would be two places to
     // get one swing wrong. This removes the typing, which was the ask.

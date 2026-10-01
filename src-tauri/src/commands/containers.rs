@@ -34,7 +34,7 @@ pub fn list_contents(
     let entity = c
         .entity_id
         .ok_or_else(|| "that is not a container".to_string())?;
-    crate::equipment::load_loadout(&token, &entity, &c.game_id, &[], &[], false)
+    crate::equipment::load_loadout(&token, &entity, &c.game_id, &[], &[], &[], false)
 }
 
 /// Whether this holder would still be a legal container afterwards.

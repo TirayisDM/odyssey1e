@@ -281,6 +281,12 @@ pub fn is_proficient(
     proficient_override: Option<bool>,
     weapon_profs: &[String],
     armor_profs: &[String],
+    // 075. The third list, and the shortest rule of the three: a tool
+    // is named outright by `items.key` and there are no classes to
+    // widen it with. Added as a parameter rather than as a mechanism
+    // beside this one, because the question - is this character
+    // trained with the thing they are holding - is the same question.
+    tool_profs: &[String],
 ) -> bool {
     if let Some(explicit) = proficient_override {
         return explicit;
@@ -302,7 +308,12 @@ pub fn is_proficient(
             Some(cat) => armor_profs.iter().any(|p| p == cat),
             None => false,
         },
-        // Nothing else grants or needs proficiency.
+        // 075. An instrument is named directly - `lute`, `drum` - the
+        // way `weapon_profs` may name a bare base item. No class to
+        // fall back to, because there is no "all instruments".
+        "instrument" => tool_profs.iter().any(|p| p == &item.key),
+        // Nothing else grants or needs proficiency. Armour and weapons
+        // are trained; a lantern is not.
         _ => false,
     }
 }
@@ -622,6 +633,7 @@ pub fn load_loadout(
     game_id: &str,
     weapon_profs: &[String],
     armor_profs: &[String],
+    tool_profs: &[String],
     equipped_only: bool,
 ) -> Result<Vec<Owned>, String> {
     let mut query: Vec<(&str, String)> = vec![
@@ -689,7 +701,13 @@ pub fn load_loadout(
         out.push(Owned {
             id: as_str(r, "id"),
             name: as_opt_str(r, "name"),
-            proficient: is_proficient(&item, proficient_override, weapon_profs, armor_profs),
+            proficient: is_proficient(
+                &item,
+                proficient_override,
+                weapon_profs,
+                armor_profs,
+                tool_profs,
+            ),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
             equipped: r.get("equipped").and_then(|x| x.as_bool()).unwrap_or(false),
@@ -1211,24 +1229,24 @@ mod tests {
         // The Mace ships proficient: 1 and would also derive true. The
         // case that matters is the override saying NO to something the
         // derivation would allow.
-        assert!(is_proficient(&mace(), Some(true), &weapon_profs(), &armor_profs()));
-        assert!(!is_proficient(&light_hammer(), Some(false), &weapon_profs(), &armor_profs()));
+        assert!(is_proficient(&mace(), Some(true), &weapon_profs(), &armor_profs(), &[]));
+        assert!(!is_proficient(&light_hammer(), Some(false), &weapon_profs(), &armor_profs(), &[]));
         // And saying YES to something it would not.
-        assert!(is_proficient(&heavy_crossbow(), Some(true), &weapon_profs(), &armor_profs()));
+        assert!(is_proficient(&heavy_crossbow(), Some(true), &weapon_profs(), &armor_profs(), &[]));
     }
 
     #[test]
     fn null_derives_rather_than_meaning_false() {
         // The whole reason the column is nullable. The Light Hammer is
         // not flagged in the source; it earns proficiency by matching sim.
-        assert!(is_proficient(&light_hammer(), None, &weapon_profs(), &armor_profs()));
+        assert!(is_proficient(&light_hammer(), None, &weapon_profs(), &armor_profs(), &[]));
     }
 
     #[test]
     fn a_martial_weapon_is_not_proficient_on_simple_training() {
         // STATUS.md states this outcome directly: Rodnar holds only sim,
         // which is why his Heavy Crossbow to-hit is DEX alone.
-        assert!(!is_proficient(&heavy_crossbow(), None, &weapon_profs(), &armor_profs()));
+        assert!(!is_proficient(&heavy_crossbow(), None, &weapon_profs(), &armor_profs(), &[]));
     }
 
     #[test]
@@ -1237,14 +1255,15 @@ mod tests {
         // classes, a bare baseItem grants one weapon. Someone trained on
         // heavycrossbow alone is proficient with it and still not martial.
         let profs = vec!["heavycrossbow".to_string()];
-        assert!(is_proficient(&heavy_crossbow(), None, &profs, &armor_profs()));
+        assert!(is_proficient(&heavy_crossbow(), None, &profs, &armor_profs(), &[]));
 
         let other = Item { key: "other".into(), ..heavy_crossbow() };
         assert!(!is_proficient(
             &Item { base_item: Some("greatsword".into()), ..other },
             None,
             &profs,
-            &armor_profs()
+            &armor_profs(),
+            &[]
         ));
     }
 
@@ -1253,10 +1272,10 @@ mod tests {
         // Only possible because 008 normalized light/medium/heavy/shield
         // to lgt/med/hvy/shl on the way in. Unnormalized, 'medium' would
         // miss 'med' and every armor check would quietly read false.
-        assert!(is_proficient(&scale_mail(), None, &weapon_profs(), &armor_profs()));
+        assert!(is_proficient(&scale_mail(), None, &weapon_profs(), &armor_profs(), &[]));
 
         let untrained = vec!["lgt".to_string()];
-        assert!(!is_proficient(&scale_mail(), None, &weapon_profs(), &untrained));
+        assert!(!is_proficient(&scale_mail(), None, &weapon_profs(), &untrained, &[]));
     }
 
     #[test]
@@ -1265,12 +1284,12 @@ mod tests {
         // spelling into armor_category, this is what it looks like.
         let mut foundry_spelling = scale_mail();
         foundry_spelling.armor_category = Some("medium".into());
-        assert!(!is_proficient(&foundry_spelling, None, &weapon_profs(), &armor_profs()));
+        assert!(!is_proficient(&foundry_spelling, None, &weapon_profs(), &armor_profs(), &[]));
     }
 
     #[test]
     fn ordinary_gear_is_neither_proficient_nor_armed() {
-        assert!(!is_proficient(&rations(), None, &weapon_profs(), &armor_profs()));
+        assert!(!is_proficient(&rations(), None, &weapon_profs(), &armor_profs(), &[]));
     }
 
     /* ---------------- one equipped armor ---------------- */

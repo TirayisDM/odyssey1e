@@ -84,6 +84,7 @@ pub mod initiative;
 pub mod inventory;
 pub mod log;
 pub mod locations;
+pub mod perform;
 pub mod session;
 pub mod store;
 

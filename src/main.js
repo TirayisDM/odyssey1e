@@ -33,6 +33,8 @@ let state = {
   listOpen: true,
   // Everybody in this game, so the folded line can name one.
   folk: [],
+  // 076. The audience catalogue - global rows and this game's own.
+  audiences: [],
   // 073. Whether the blank "which class" row is showing. Cleared by
   // anything that commits or cancels, and by a fresh sheet read.
   addingClass: false,
@@ -364,6 +366,9 @@ async function selectGame(id) {
   // 055: twelve rows, so the creation picker is ready before
   // anybody opens it.
   await loadClasses();
+  // 076. The audience catalogue, beside the class one - both are
+  // per-game reference data read once when a game is opened.
+  await loadAudiences();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1092,6 +1097,7 @@ async function loadSheet() {
   // than on tab click: it is all one read, and filling a hidden pane
   // costs nothing.
   paintClasses(sheet);
+  paintPerform(sheet);
   paintDescription(sheet);
   paintTalents(sheet);
 
@@ -2639,6 +2645,85 @@ async function dropClass(key) {
 async function afterClassChange() {
   await loadSheet();
   await loadCharacters();
+}
+
+// KARMA, AND PLAYING TO A ROOM. 076.
+//
+// The whole resolution is one lookup: Karma down one axis of the
+// HOPPER chart, the audience along the other, a d100 at or under where
+// they cross. Both axes come off the sheet and the database - nothing
+// here computes a rule, which is why karma.rs can be the only place
+// any of it is written.
+//
+// HIDDEN WITHOUT KARMA. `sheet.karma` is None for every class but the
+// bard, so a fighter never sees this at all.
+function paintPerform(sheet) {
+  const block = document.querySelector("#perform-block");
+  const k = sheet.karma;
+  block.hidden = !k;
+  if (!k) return;
+
+  // THE WORKING, NOT JUST THE TOTAL. A bard who disagrees with their
+  // own Karma should be able to see which half is wrong.
+  const parts = (k.parts || [])
+    .map(([key, mod]) => skillName(key) + " " + withSign(mod))
+    .join(" + ");
+  const pinned = k.raw > k.rating
+    ? " \u00b7 " + k.raw + " before the chart's ceiling of " + k.rating
+    : "";
+  document.querySelector("#karma-line").textContent =
+    k.class_key + " Karma " + k.rating + " = " + parts + pinned;
+
+  // Only what they are actually carrying. An instrument sold is an
+  // instrument they cannot play, which is the engine's view too.
+  const inst = document.querySelector("#perform-instrument");
+  const keep = inst.value;
+  inst.innerHTML = "";
+  const playable = (sheet.loadout || []).filter((o) => o.item.kind === "instrument");
+  if (!playable.length) inst.append(new Option("nothing to play", ""));
+  for (const o of playable) {
+    inst.append(new Option(
+      (o.name || o.item.name) + (o.proficient ? "" : " \u00b7 untrained"), o.id));
+  }
+  if (keep && playable.some((o) => o.id === keep)) inst.value = keep;
+
+  paintOdds();
+}
+
+function skillName(key) {
+  const s = ((state.sheet && state.sheet.skills) || []).find((x) => x.key === key);
+  return s ? s.name : key;
+}
+
+// WHAT THE CHART SAYS BEFORE THE DICE DO. Shown as you change the
+// room, because the point of a lookup table is that you can see the
+// odds before you commit to them.
+function paintOdds() {
+  const out = document.querySelector("#perform-odds");
+  const k = state.sheet && state.sheet.karma;
+  const room = (state.audiences || []).find(
+    (a) => a.key === document.querySelector("#perform-audience").value);
+  if (!k || !room) { out.textContent = ""; return; }
+  // 50 + 2 * (karma - audience), which karma.rs owns. Recomputed here
+  // ONLY to preview - every result that counts comes back from the
+  // command, so the screen can never disagree with the engine about
+  // what actually happened.
+  const t = Math.min(100, Math.max(1, 50 + 2 * (k.rating - room.rating)));
+  out.textContent = "Karma " + k.rating + " vs " + room.name + " " + room.rating +
+    " \u2014 needs " + (t === 100 ? "00" : String(t).padStart(2, "0")) + " or under";
+}
+
+async function loadAudiences() {
+  if (!state.gameId) return;
+  const rows = await invoke("list_audiences", { gameId: state.gameId }).catch(() => []);
+  state.audiences = rows || [];
+  const sel = document.querySelector("#perform-audience");
+  const keep = sel.value;
+  sel.innerHTML = "";
+  for (const a of state.audiences) sel.append(new Option(a.name, a.key));
+  if (keep && state.audiences.some((a) => a.key === keep)) sel.value = keep;
+  else sel.value = "neutral";
+  paintOdds();
 }
 
 function paintChosen() {
@@ -5801,6 +5886,34 @@ window.addEventListener("DOMContentLoaded", async () => {
       await loadSheet();
       await loadCharacters();
     }
+  });
+
+  document.querySelector("#perform-audience").addEventListener("change", paintOdds);
+
+  document.querySelector("#do-perform").addEventListener("click", async () => {
+    const objectId = val("#perform-instrument");
+    if (!objectId) return log("perform", "nothing to play - pick up an instrument", true);
+
+    const r = await call("perform", {
+      characterId: state.characterId,
+      audienceKey: val("#perform-audience"),
+      objectId,
+    });
+    if (!r) return;
+
+    const out = document.querySelector("#perform-result");
+    out.innerHTML = "";
+    const verdict = sEl("span", r.made_it ? "made" : "missed",
+      "rolled " + r.roll + " against " + r.printed +
+      (r.made_it ? " — made it by " + r.margin
+                 : " — missed by " + Math.abs(r.margin)));
+    out.append(verdict);
+    // THE WORKING UNDER THE VERDICT. A player who wants to argue with
+    // the result should be able to see every number that produced it
+    // without asking anybody.
+    out.append(sEl("span", "working",
+      r.instrument + (r.proficient ? "" : " (untrained)") +
+      " · Karma " + r.karma + " vs " + r.audience + " " + r.audience_rating));
   });
 
   document.querySelector("#add-class").addEventListener("click", () => {

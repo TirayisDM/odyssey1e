@@ -34,6 +34,7 @@ mod equipment;
 mod generation;
 mod holders;
 mod initiative;
+mod karma;
 mod locations;
 mod multiclass;
 mod naming;
@@ -516,6 +517,7 @@ fn list_inventory(
         &p.game_id,
         &p.weapon_profs,
         &p.armor_profs,
+        &p.tool_profs,
         false,
     )
 }
@@ -1204,6 +1206,8 @@ pub fn run() {
             commands::characters::rename_character,
             commands::characters::set_class_level,
             commands::characters::remove_class,
+            commands::perform::list_audiences,
+            commands::perform::perform,
             // 055: what a character can BE, and therefore which
             // die their hit points come from.
             commands::characters::list_classes,

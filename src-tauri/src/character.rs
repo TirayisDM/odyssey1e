@@ -64,6 +64,28 @@ pub struct SkillDef {
     pub ability: String,
 }
 
+/// What a character's Karma comes to, and the working behind it.
+///
+/// 076. CARRIED WITH THE PARTS SHOWING, because a number nobody can
+/// check is a number nobody trusts. A bard looking at "Karma 8" should
+/// see that it is Insight +3 and Performance +5 without opening a
+/// rulebook, and a DM who thinks it is wrong should be able to say
+/// WHICH half is wrong.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Karma {
+    /// Which class expressed it. A Fighter/Bard has one class with a
+    /// formula and one without, and this says which answered.
+    pub class_key: String,
+    /// The sum, clamped to the chart's 0-25 - see karma::rating.
+    pub rating: i64,
+    /// Before the clamp. Shown so a bard pinned at the top of the
+    /// table can see how far past it they actually are.
+    pub raw: i64,
+    /// (skill key, that skill's modifier), in the order the class
+    /// names them.
+    pub parts: Vec<(String, i64)>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sheet {
     /// Where they are standing - 035, carried out so a screen can name
@@ -129,6 +151,17 @@ pub struct Sheet {
     /// Foundry `traits.armorProf.value`: lgt med hvy shl, the same
     /// spelling 008 normalizes `items.armor_category` to.
     pub armor_profs: Vec<String>,
+    /// 075. Tools this character is trained with, by `items.key`. An
+    /// instrument is the only kind so far, and this is empty for
+    /// everybody who existed before there were any.
+    pub tool_profs: Vec<String>,
+    /// 076. What this character's Karma comes to, and from what.
+    ///
+    /// NONE FOR ALMOST EVERYBODY, which is an answer and not a gap.
+    /// Karma is expressed per class and the bard is the only class
+    /// that has one, so this is absent for every fighter, every
+    /// monster and every classless character.
+    pub karma: Option<Karma>,
     /// 056. The whole people, not just the key: the sheet shows the
     /// bonuses and the traits, and the viewer shows the prose. None
     /// when this character has no species, which is every one made
@@ -207,6 +240,60 @@ impl Sheet {
     pub fn skill_prof_bonus(&self, key: &str) -> i64 {
         let mult = self.profs.get(key).copied().unwrap_or(0.0);
         (mult * self.proficiency_bonus() as f64).floor() as i64
+    }
+
+    /// One skill's modifier: the ability behind it plus proficiency at
+    /// whatever degree this character holds it.
+    ///
+    /// 076. NAMED RATHER THAN REPEATED. This pairing was already
+    /// written inline in `resolve`, and Karma needs the same answer -
+    /// so it is one method now and `resolve` calls it. A second copy
+    /// is a second answer, and the second one is always the stale one.
+    pub fn skill_modifier(&self, key: &str) -> i64 {
+        match self.find_skill(key) {
+            Some(s) => self.ability_mod(&s.ability) + self.skill_prof_bonus(&s.key),
+            None => 0,
+        }
+    }
+
+    /// This character's Karma, if any class they hold expresses one.
+    ///
+    /// PER CLASS AND NEVER SUMMED. 073 lets somebody be two things; a
+    /// Fighter 5 / Bard 3 has Bard Karma when acting as a bard, and
+    /// their fighter levels do not touch it. Where more than one class
+    /// eventually has a formula this takes the one that LEADS - which
+    /// is the order `classes` already arrives in - rather than adding
+    /// them, because two Karmas added is not a bigger Karma. It is a
+    /// different question nobody has asked yet.
+    ///
+    /// EXPERTISE ARRIVES ON ITS OWN. `skill_prof_bonus` applies the
+    /// stored degree, so a doubled Performance comes back doubled
+    /// without this knowing what expertise is.
+    fn derive_karma(&self, catalogue: &[crate::class::Class]) -> Option<Karma> {
+        // THE FILTER IS INSIDE THE SEARCH, and that is the whole of
+        // this line. Finding the first class and THEN asking whether it
+        // has a formula gives up at the first one that does not - so a
+        // Fighter 4 / Bard 1 reads as having no Karma at all, because
+        // the fighter leads and fighters have none. It has to keep
+        // looking past the classes that cannot answer.
+        let c = self.classes.iter().find_map(|held| {
+            catalogue
+                .iter()
+                .find(|c| c.key == held.key && !c.karma_skills.is_empty())
+        })?;
+
+        let parts: Vec<(String, i64)> = c
+            .karma_skills
+            .iter()
+            .map(|k| (k.clone(), self.skill_modifier(k)))
+            .collect();
+        let each: Vec<i64> = parts.iter().map(|(_, m)| *m).collect();
+        Some(Karma {
+            class_key: c.key.clone(),
+            rating: crate::karma::rating(&each),
+            raw: each.iter().sum(),
+            parts,
+        })
     }
 
     fn find_skill(&self, needle: &str) -> Option<&SkillDef> {
@@ -314,7 +401,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
 
     // Skill, by key ("ins") or by name ("insight")
     if let Some(s) = sheet.find_skill(&t) {
-        let m = sheet.ability_mod(&s.ability) + sheet.skill_prof_bonus(&s.key);
+        let m = sheet.skill_modifier(&s.key);
         return Resolved {
             label: format!("{} ({})", s.name, s.ability.to_uppercase()),
             formula: d20_formula(m, mode),
@@ -406,6 +493,8 @@ pub struct Profile {
     pub narrative_pack: String,
     pub weapon_profs: Vec<String>,
     pub armor_profs: Vec<String>,
+    /// 075.
+    pub tool_profs: Vec<String>,
     /// 056. None for every character made before it, and for monsters.
     pub species_key: Option<String>,
     /// 058.
@@ -471,7 +560,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
             (
                 "select",
                 "id,entity_id,location_id,game_id,name,level,narrative_pack,\
-                 weapon_profs,armor_profs,hp_max,hp_temp,hp_temp_max,\
+                 weapon_profs,armor_profs,tool_profs,hp_max,hp_temp,hp_temp_max,\
                  ac_mode,ac_override,death_successes,death_failures,\
                  exhaustion,inspiration,size,species_key,\
                  height_ft,weight_lb,hair,skin,eyes,description,languages",
@@ -503,6 +592,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         narrative_pack,
         weapon_profs: as_strings(c, "weapon_profs"),
         armor_profs: as_strings(c, "armor_profs"),
+        tool_profs: as_strings(c, "tool_profs"),
         species_key: c
             .get("species_key")
             .and_then(|x| x.as_str())
@@ -1025,6 +1115,16 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         &crate::class::load_taken(token, &game_id, character_id)?,
     );
 
+    // 076. The catalogue for whatever classes they hold, so Karma can
+    // ask which skills this class sums. Costs nothing for the
+    // classless - `load_map` returns early on an empty key list, which
+    // is every monster in the game.
+    let class_catalogue = crate::class::load_map(
+        token,
+        &game_id,
+        &classes.iter().map(|t| t.key.clone()).collect::<Vec<_>>(),
+    )?;
+
     let line_rows = narrative::load_lines(token, &game_id, &profile.narrative_pack)?;
     let narratives = narrative::resolve_lines(&line_rows, &profile.narrative_pack);
 
@@ -1034,6 +1134,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         &game_id,
         &profile.weapon_profs,
         &profile.armor_profs,
+        &profile.tool_profs,
         true,
     )?;
 
@@ -1066,7 +1167,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         unarmored,
     );
 
-    Ok(Sheet {
+    let mut sheet = Sheet {
         location_id: profile.location_id,
         character_id: Some(profile.character_id),
         game_id,
@@ -1084,6 +1185,10 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         narratives,
         weapon_profs: profile.weapon_profs,
         armor_profs: profile.armor_profs,
+        tool_profs: profile.tool_profs,
+        // SET BELOW, once the sheet exists - see the note at the end
+        // of this function.
+        karma: None,
         carry_size: species
             .as_ref()
             .map(|sp| sp.carry_size())
@@ -1094,7 +1199,16 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         armor_class,
         techniques,
         loadout,
-    })
+    };
+    // LAST, AND OFF THE FINISHED SHEET. Karma sums skill MODIFIERS, and
+    // a skill modifier needs the abilities with the species bonus
+    // already in them, the proficiency bonus derived from the level,
+    // and the skill catalogue resolved for this game. All three are
+    // facts the sheet has and none of them is a fact this function had
+    // before it built one - so Karma is derived from the sheet rather
+    // than assembled in parallel beside it.
+    sheet.karma = sheet.derive_karma(&class_catalogue);
+    Ok(sheet)
 }
 
 /* ============================ TESTS ============================ */
@@ -1150,6 +1264,8 @@ mod tests {
             species: None,
             body: Body::default(),
             carry_size: None,
+            tool_profs: Vec::new(),
+            karma: None,
             weapon_profs: vec!["sim".into()],
             armor_profs: vec!["lgt".into(), "med".into(), "shl".into()],
             loadout: Vec::new(),
@@ -1374,6 +1490,63 @@ mod tests {
     /// no species at all, so Garn's sheet said AC 14 while the target
     /// list the goblins roll against said 10 - and the target list is
     /// the one that decides whether a swing connected.
+    #[test]
+    fn a_fighter_who_took_one_level_of_bard_still_has_karma() {
+        // 076, and the bug this test exists for. Falon is Fighter 4 /
+        // Bard 1 - the fighter LEADS, because four beats one - and the
+        // first version of derive_karma found the leading class and
+        // then asked whether it had a formula. It does not, so it
+        // returned None and a bard with a sword had no Karma.
+        let mut sheet = rodnar();
+        sheet.classes = vec![
+            crate::multiclass::Taken { key: "fighter".into(), level: 4, hit_die: 10 },
+            crate::multiclass::Taken { key: "bard".into(), level: 1, hit_die: 8 },
+        ];
+        let catalogue = vec![
+            crate::class::from_row(&serde_json::json!({
+                "key": "fighter", "name": "Fighter", "hit_die": 10, "karma_skills": []
+            })),
+            crate::class::from_row(&serde_json::json!({
+                "key": "bard", "name": "Bard", "hit_die": 8, "karma_skills": ["ins", "prf"]
+            })),
+        ];
+
+        let k = sheet.derive_karma(&catalogue).expect("the bard level answers");
+        assert_eq!(k.class_key, "bard");
+        assert_eq!(k.parts.len(), 2);
+    }
+
+    #[test]
+    fn a_character_with_no_class_that_expresses_karma_has_none() {
+        let mut sheet = rodnar();
+        sheet.classes = vec![crate::multiclass::Taken {
+            key: "fighter".into(), level: 4, hit_die: 10,
+        }];
+        let catalogue = vec![crate::class::from_row(&serde_json::json!({
+            "key": "fighter", "name": "Fighter", "hit_die": 10, "karma_skills": []
+        }))];
+        assert!(sheet.derive_karma(&catalogue).is_none());
+    }
+
+    #[test]
+    fn karma_sums_the_modifiers_the_class_names() {
+        // Rodnar's fixture, read as a bard. Whatever his Insight and
+        // Performance modifiers are, Karma is their sum - which pins
+        // that this reads the SHEET's skill rule and not a second copy.
+        let mut sheet = rodnar();
+        sheet.classes = vec![crate::multiclass::Taken {
+            key: "bard".into(), level: 3, hit_die: 8,
+        }];
+        let catalogue = vec![crate::class::from_row(&serde_json::json!({
+            "key": "bard", "name": "Bard", "hit_die": 8, "karma_skills": ["ins", "prf"]
+        }))];
+
+        let k = sheet.derive_karma(&catalogue).unwrap();
+        let expected = sheet.skill_modifier("ins") + sheet.skill_modifier("prf");
+        assert_eq!(k.raw, expected);
+        assert_eq!(k.rating, expected.clamp(0, crate::karma::MAX));
+    }
+
     #[test]
     fn the_floor_reads_the_effective_score_not_the_stored_one() {
         let sp = untgaroth();

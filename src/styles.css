@@ -669,3 +669,11 @@ button.wide{width:100%}
 #class-extra .row { margin-left: 1.5rem; }
 #class-extra select { min-width: 9rem; }
 #class-lead { min-width: 9rem; }
+
+/* 076. THE RESULT OF A PERFORMANCE. Two lines - what the chart said
+   and what the dice said - with the verdict carrying the colour. */
+#perform-result { margin: 0.5rem 0; font-family: var(--mono, monospace); }
+#perform-result .made { color: var(--good, #7fd18c); }
+#perform-result .missed { color: var(--bad, #e08585); }
+#perform-result .working { display: block; font-size: 0.85em; opacity: 0.75; }
+#perform-instrument, #perform-audience { min-width: 10rem; }

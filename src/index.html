@@ -521,6 +521,22 @@
 
       <!-- ================= SKILLS &amp; TALENTS ================= -->
       <div class="sheet-pane" data-sheet="skills" hidden>
+        <!-- 076. KARMA AND THE CHART, hidden for everybody who has no
+             Karma - which is every class but the bard, every monster
+             and every classless character. An empty "Perform" heading
+             over a fighter's sheet would be worse than no heading. -->
+        <div id="perform-block" hidden>
+          <div class="sub">Karma</div>
+          <div id="karma-line" class="muted"></div>
+          <div class="row">
+            <select id="perform-instrument"></select>
+            <select id="perform-audience"></select>
+            <button id="do-perform" class="ghost">Perform</button>
+          </div>
+          <div id="perform-odds" class="muted"></div>
+          <div id="perform-result"></div>
+        </div>
+
         <div id="skills" class="list"></div>
 
         <!-- TRAINED WITH WHAT. Read since 008 and written by nothing

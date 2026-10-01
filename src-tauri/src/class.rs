@@ -54,6 +54,17 @@ pub struct Class {
     /// Attack action. 061. Empty for seven of the twelve.
     pub extra_attack_levels: Vec<i64>,
     pub skill_choices: i64,
+    /// 075. How many tool proficiencies this class picks freely - the
+    /// bard's three instruments. NOT ENFORCED: nothing counts chosen
+    /// against owed, exactly as `skill_choices` has not since 055.
+    pub tool_choices: i64,
+    /// Tools granted outright, with no choice. Empty for the bard.
+    pub tool_grants: Vec<String>,
+    /// 076. Which skills sum to this class's Karma, by `skills.key`.
+    /// Bard is Insight and Performance. EMPTY IS THE COMMON CASE - the
+    /// bard is the only class with a Karma expression so far, and a
+    /// class without one simply has no Karma.
+    pub karma_skills: Vec<String>,
     /// Three-letter keys from the skills catalogue. EMPTY MEANS ANY,
     /// which is how the Bard is written and is a real answer rather
     /// than a gap.
@@ -103,6 +114,7 @@ impl Class {
 /// The columns a class read asks for. One place, so a select and a
 /// parser cannot drift apart.
 pub const CLASS_COLUMNS: &str = "key,game_id,name,hit_die,primary_abilities,saving_throws,\
+    karma_skills,tool_choices,tool_grants,\
 armor_profs,weapon_profs,extra_attack_levels,skill_choices,skill_options,description";
 
 /* ============================ READING ============================ */
@@ -138,6 +150,9 @@ pub fn from_row(r: &Value) -> Class {
             .and_then(|x| x.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_i64()).collect())
             .unwrap_or_default(),
+        tool_choices: r.get("tool_choices").and_then(|v| v.as_i64()).unwrap_or(0),
+        tool_grants: strs(r, "tool_grants"),
+        karma_skills: strs(r, "karma_skills"),
         skill_choices: r.get("skill_choices").and_then(|x| x.as_i64()).unwrap_or(2),
         skill_options: strs(r, "skill_options"),
         description: r.get("description").and_then(|x| x.as_str()).map(str::to_string),

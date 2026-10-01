@@ -1076,6 +1076,11 @@ async function loadSheet() {
     "level " + sheet.level + " · PB +" + pb +
     " · AC " + sheet.armor_class + hp;
   document.querySelector("#level").value = sheet.level;
+  // 072. FILLED ON EVERY PAINT, like the level beside it. An empty box
+  // under a heading that says "Test PC 1" would read as a field to type
+  // a NEW name into rather than the current one to edit, which is how a
+  // rename box comes to be used as a search box.
+  document.querySelector("#char-rename").value = sheet.name;
 
   // 058/060. The subtabs are painted with the rest of the sheet rather
   // than on tab click: it is all one read, and filling a hidden pane
@@ -5649,6 +5654,23 @@ window.addEventListener("DOMContentLoaded", async () => {
       narrative: val("#patch-narr") || "The stone holds the truth.",
     });
     if (out) await loadRolls();
+  });
+
+  document.querySelector("#save-name").addEventListener("click", async () => {
+    if (!state.characterId) return log("rename_character", "select a character first", true);
+    const ok = await call("rename_character", {
+      characterId: state.characterId,
+      name: val("#char-rename"),
+    });
+    // 072. BOTH, AND IN THIS ORDER. The sheet carries the heading and
+    // the roster carries the list and the folded "who am I reading"
+    // line, and a rename that repainted only one of them would be the
+    // same half-refresh `edit_object` had: a write that landed and a
+    // screen still showing the old answer.
+    if (ok) {
+      await loadSheet();
+      await loadCharacters();
+    }
   });
 
   document.querySelector("#save-level").addEventListener("click", async () => {

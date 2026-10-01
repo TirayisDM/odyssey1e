@@ -35,6 +35,7 @@ mod generation;
 mod holders;
 mod initiative;
 mod locations;
+mod naming;
 mod narrative;
 mod objects;
 mod pin;
@@ -1167,6 +1168,7 @@ pub fn run() {
             list_members,
             commands::characters::list_characters,
             commands::characters::create_character,
+            commands::characters::rename_character,
             // 055: what a character can BE, and therefore which
             // die their hit points come from.
             commands::characters::list_classes,

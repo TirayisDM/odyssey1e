@@ -653,3 +653,12 @@ button.wide{width:100%}
 .iteminfo-desc { margin: .4rem 0 0; line-height: 1.45; opacity: .9; font-size: .9em; }
 
 @media (max-width: 560px) { .iteminfo-grid { grid-template-columns: 1fr; } }
+
+/* 072. THE NAME TAKES THE ROOM. It sits in the same row as the level
+   and is the longer of the two facts by far, so it grows and the
+   number beside it does not. */
+#char-rename {
+  flex: 1 1 18rem;
+  min-width: 10rem;
+  font-size: 1.15rem;
+}

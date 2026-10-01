@@ -336,6 +336,67 @@ fn load_con(token: &str, character_id: &str) -> Option<i64> {
         .and_then(|x| x.as_i64())
 }
 
+/* ============================ RENAMING ============================ */
+
+/// Change what a character is called.
+///
+/// 072. The sheet could set a level and could not set a name. Every
+/// other name in the app had an editor - an object has `rename_object`,
+/// an encounter actor has `rename_actor` - and the one a player types
+/// first was fixed at creation and never again. A typo at the form was
+/// permanent.
+///
+/// TWO COLUMNS, ONE RULE, AND THE RULE IS IN naming.rs. `token_name` is
+/// what the roster and the roll cards actually print, so moving `name`
+/// alone would change the sheet heading and nothing else. Whether the
+/// short name follows is a judgement - it follows when it was a copy
+/// and stays when it was a decision - and judgements belong somewhere
+/// they can be tested, which a command is not.
+///
+/// NOT RETROSPECTIVE. Rolls and actions carry the name that was true
+/// when they happened, by 001's design, and this does not go back and
+/// rewrite them. An actor already standing in an encounter keeps its
+/// own label too; `rename_actor` is the tool for that, and the two are
+/// separate because a disguise is a real thing to want.
+#[tauri::command]
+pub fn rename_character(
+    state: State<AppState>,
+    character_id: String,
+    name: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let wanted = crate::naming::clean(&name)?;
+
+    // READ BEFORE WRITE, because the short name's fate depends on what
+    // the long one used to be. One row, by id.
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "name,token_name"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let Some(row) = rows.as_array().and_then(|a| a.first()) else {
+        return Err("no such character".to_string());
+    };
+    let was = row.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let token_was = row.get("token_name").and_then(|v| v.as_str());
+
+    // NULL IS SENT EXPLICITLY when there was no short name, rather than
+    // left out. The outcome is the same either way - but saying it means
+    // this patch describes the whole of both name columns, and a reader
+    // does not have to know PostgREST merge rules to see that.
+    let short = crate::naming::renamed_token(was, token_was, &wanted);
+
+    supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "name": wanted, "token_name": short }),
+    )
+}
+
 /* ======================== WHAT THEY LOOK LIKE ======================== */
 
 /// Write a character's physical description. 058.

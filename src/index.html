@@ -425,7 +425,17 @@
         </nav>
 
         <div class="sheet-pane" data-sheet="stats">
+          <!-- 072. THE NAME WAS THE ONE THING THE SHEET COULD NOT EDIT.
+               An object has a rename box and so does an encounter
+               actor; the name a player types first was fixed at
+               creation, so a typo at the form was permanent.
+
+               IT LEADS THE ROW because the name is the larger fact and
+               the level is a number beside it - the same order the
+               heading above reads in. -->
           <div class="row">
+            <input id="char-rename" placeholder="character name" />
+            <button id="save-name" class="ghost">Set name</button>
             <input id="level" type="number" min="1" max="20" placeholder="level" />
             <button id="save-level" class="ghost">Set level</button>
           </div>

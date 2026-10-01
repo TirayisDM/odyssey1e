@@ -3580,7 +3580,7 @@ function showEncMode(name) {
 function paintEncounterEditor(e) {
   if (!e) return;
 
-  document.querySelector("#enc-name").value = e.name || "";
+  document.querySelector("#enc-rename").value = e.name || "";
   document.querySelector("#enc-story").value = e.narrative || "";
 
   // The description, in View. 053 is explicit that this is a human's
@@ -6225,7 +6225,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!state.dmEncounterId) return dmSay("open an encounter first", true);
     const r = await tryCall("edit_encounter", {
       encounterId: state.dmEncounterId,
-      name: val("#enc-name"),
+      name: val("#enc-rename"),
       narrative: document.querySelector("#enc-story").value,
     });
     dmSay(r.ok ? "saved" : r.error, !r.ok);

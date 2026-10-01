@@ -212,8 +212,12 @@
 
           <div class="encmode-pane" data-encmode="edit" hidden>
             <div class="row cells">
+              <!-- enc-rename, NOT enc-name. The create box at the top of
+                   this pane is the other one, and querySelector returns
+                   the first of a duplicate id - so the editor was both
+                   painting into and saving from the create box. -->
               <label class="cell wide"><span>called</span>
-                <input id="enc-name" /></label>
+                <input id="enc-rename" /></label>
               <label class="cell wide"><span>where it happens</span>
                 <select id="enc-place"></select></label>
               <button id="set-enc-place" class="ghost">Move here</button>

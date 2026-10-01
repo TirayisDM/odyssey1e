@@ -430,6 +430,25 @@
               <option value="">no species yet</option>
             </select>
             <div class="muted" id="char-species-note"></div>
+
+            <!-- 066. ROLLED HERE, BEFORE THE CHARACTER EXISTS. Seven
+                 scores of 3d6 with every 1 rerolled, and six of them
+                 assigned - the spare is the point, so the worst of the
+                 seven need not be lived with.
+
+                 Each picker offers only what is still unspent, so a
+                 duplicate is impossible by construction. The rule is in
+                 generation::complete anyway, because the next screen
+                 will not have a dropdown. -->
+            <div class="sub">Ability scores</div>
+            <div class="row">
+              <button id="roll-stats" class="ghost">Roll 3d6 (reroll 1s) &times;7</button>
+              <button id="lock-abilities" class="ghost" disabled>Lock abilities</button>
+            </div>
+            <div id="stat-pool" class="pool"></div>
+            <div id="stat-picks" class="picks"></div>
+            <div id="stat-msg" class="dm-msg" hidden></div>
+
             <button id="create-char">Create character</button>
           </div>
 

@@ -25,6 +25,9 @@ let state = {
   classes: [],
   // 056. The peoples, same shape.
   species: [],
+  // 066. Whether the sheet's six ability boxes are open to editing.
+  // False is the default and the point - see paintSheet.
+  abilitiesOpen: false,
   user: null, gameId: null, characterId: null, sheet: null, rolls: [],
   games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
@@ -884,6 +887,133 @@ function sEl(tag, cls, text) {
   return n;
 }
 
+/* ===================== ROLLING A CHARACTER UP (066) ===================== */
+
+// Seven scores, six slots, and the spare is the point.
+//
+// THE POOL IS WHAT THE DICE GAVE, in the order they gave it - the Rust
+// side deliberately does not sort, because the order is what a player
+// watched happen. `taken` maps an ability code to an INDEX into the
+// pool rather than to a value, so two identical rolls of 14 stay two
+// separate things that can be spent separately.
+const chargen = { pool: [], taken: {}, locked: false };
+
+function statSay(msg, bad) {
+  const n = document.querySelector("#stat-msg");
+  if (!n) return;
+  n.hidden = !msg;
+  n.textContent = msg || "";
+  n.classList.toggle("bad", !!bad);
+}
+
+async function rollStats() {
+  // ROLLING AGAIN THROWS THE ASSIGNMENT AWAY, which is the honest
+  // behaviour - half an assignment against a new pool would be picks
+  // pointing at numbers nobody rolled.
+  const vals = await invoke("roll_ability_spread").catch(() => null);
+  if (!vals) return statSay("could not roll", true);
+  chargen.pool = vals;
+  chargen.taken = {};
+  chargen.locked = false;
+  statSay("");
+  paintChargen();
+}
+
+function paintChargen() {
+  const pool = document.querySelector("#stat-pool");
+  const picks = document.querySelector("#stat-picks");
+  const lock = document.querySelector("#lock-abilities");
+  if (!pool || !picks) return;
+
+  pool.innerHTML = "";
+  picks.innerHTML = "";
+
+  if (!chargen.pool.length) {
+    pool.append(sEl("div", "muted", "roll to begin - seven scores, six get used"));
+    if (lock) {
+      lock.disabled = true;
+      // AND ITS LABEL, which the early return used to leave alone - so
+      // a fresh form after a creation still read "Abilities locked"
+      // over an empty pool.
+      lock.textContent = "Lock abilities";
+    }
+    return;
+  }
+
+  // The pool, with the spent ones struck through. Shown even when
+  // locked, because "which one did I discard" is a fair question.
+  const used = new Set(Object.values(chargen.taken));
+  chargen.pool.forEach((v, i) => {
+    const chip = sEl("span", "pool-chip" + (used.has(i) ? " spent" : ""), String(v));
+    chip.title = used.has(i) ? "assigned" : "still to assign";
+    pool.append(chip);
+  });
+  const spare = chargen.pool.length - used.size;
+  pool.append(sEl("span", "muted pool-note",
+    spare === 1 ? "1 left over" : spare + " still to place"));
+
+  for (const code of ABILS) {
+    const row = sEl("label", "pick");
+    row.append(sEl("b", "", code.toUpperCase()));
+
+    const sel = document.createElement("select");
+    sel.disabled = chargen.locked;
+    sel.append(new Option("\u2014", ""));
+    chargen.pool.forEach((v, i) => {
+      // ELIMINATION: an index already spent elsewhere is not offered.
+      // Its own pick stays, or changing a choice would mean clearing it
+      // first.
+      const mine = chargen.taken[code] === i;
+      if (used.has(i) && !mine) return;
+      const o = new Option(String(v), String(i));
+      if (mine) o.selected = true;
+      sel.append(o);
+    });
+    sel.addEventListener("change", () => {
+      if (sel.value === "") delete chargen.taken[code];
+      else chargen.taken[code] = Number(sel.value);
+      paintChargen();
+    });
+    row.append(sel);
+
+    // What it will be worth once the species has had its say. The
+    // bonus is applied on the way to the sheet - 056 - so showing the
+    // raw number alone would surprise somebody who picked 15 and saw
+    // a 17 appear.
+    const i = chargen.taken[code];
+    if (i !== undefined) {
+      const base = chargen.pool[i];
+      const sp = (state.species || []).find(
+        (x) => x.key === val("#char-species"));
+      const bonus = sp ? (sp.ability_bonuses || [])
+        .filter(([c]) => c === code).reduce((n, [, b]) => n + b, 0) : 0;
+      const cap = sp ? ((sp.ability_maxima || [])
+        .find(([c]) => c === code) || [, 20])[1] : 20;
+      const eff = base >= cap ? base : Math.min(base + bonus, cap);
+      row.append(sEl("span", "mod", (eff - 10 >= 0 ? "+" : "") +
+        Math.floor((eff - 10) / 2)));
+      if (bonus) {
+        const b = sEl("span", "species-bump", "+" + bonus);
+        b.title = "species bonus - you picked " + base + ", it plays as " + eff;
+        row.append(b);
+      }
+    }
+    picks.append(row);
+  }
+
+  const done = ABILS.every((c) => chargen.taken[c] !== undefined);
+  if (lock) {
+    lock.disabled = !done || chargen.locked;
+    lock.textContent = chargen.locked ? "Abilities locked" : "Lock abilities";
+  }
+}
+
+// What Create Character will send, or null when nothing was rolled.
+function lockedAbilities() {
+  if (!chargen.locked) return null;
+  return ABILS.map((c) => [c, chargen.pool[chargen.taken[c]]]);
+}
+
 async function loadCharacters() {
   const ul = document.querySelector("#characters");
   ul.innerHTML = "";
@@ -943,6 +1073,22 @@ async function loadSheet() {
   // Abilities
   const box = document.querySelector("#abilities");
   box.innerHTML = "";
+
+  // 066. The lock, and what it is for: the boxes hold the number the
+  // dice gave, and nothing on this sheet needs them touched again
+  // except a level-up or a correction.
+  const lockRow = sEl("div", "abil-lock");
+  const toggle = sEl("button", "tiny ghost",
+    state.abilitiesOpen ? "done editing" : "edit scores");
+  toggle.title = state.abilitiesOpen
+    ? "put the scores back under the lock"
+    : "open all six - they are read-only so a stray keystroke cannot move one";
+  toggle.addEventListener("click", async () => {
+    state.abilitiesOpen = !state.abilitiesOpen;
+    await loadSheet();
+  });
+  lockRow.append(toggle);
+  box.append(lockRow);
   for (const code of ABILS) {
     const a = sheet.abilities[code] || { score: 10, save_prof: false };
     const mod = Math.floor((a.score - 10) / 2);
@@ -963,6 +1109,13 @@ async function loadSheet() {
   // apart precisely so this box can hold the number somebody rolled.
   num.type = "number"; num.min = 1; num.max = 30;
   num.value = a.base ?? a.score;
+  // 066. READ-ONLY BY DEFAULT. Scores are rolled at creation and then
+  // mostly left alone; an editable box invites a stray keystroke into
+  // the one number every modifier on the sheet derives from. The
+  // "edit scores" toggle above opens all six at once, because
+  // unlocking one at a time is a worse answer to the same question.
+  num.readOnly = !state.abilitiesOpen;
+  num.classList.toggle("locked", !state.abilitiesOpen);
 
     const m = document.createElement("span");
     m.className = "mod";
@@ -5225,14 +5378,42 @@ window.addEventListener("DOMContentLoaded", async () => {
       // Left to the command, which takes the SPECIES' size when there
       // is one - an Unt'garoth is Large - and medium otherwise.
       size: null,
+      // 066. Null when nothing was rolled and locked, which leaves the
+      // ten the seed trigger writes.
+      abilities: lockedAbilities(),
     });
-    if (c) await loadCharacters();
+    if (c) {
+      // THE SHEET OPENS ON THE NEW CHARACTER. Creating one and being
+      // left on the form was the gap - the rest of a character is
+      // edited on the sheet, so that is where making one should end.
+      const made = Array.isArray(c) ? c[0] : c;
+      const id = made && made.id;
+      // The pool goes with them: a fresh form for the next character
+      // beats numbers from the last one sitting there.
+      chargen.pool = []; chargen.taken = {}; chargen.locked = false;
+      statSay("");
+      paintChargen();
+      document.querySelector("#char-name").value = "";
+      await loadCharacters();
+      if (id) await selectCharacter(id);
+      else await loadCharacters();
+    }
   });
 
   // Saying what the choice MEANS, at the moment it is made. A class is
   // a die and two saves before it is a name, and the sheet would
   // otherwise be the first place anybody learns what they picked.
   document.querySelector("#char-class").addEventListener("change", paintClassNote);
+  document.querySelector("#roll-stats").addEventListener("click", rollStats);
+  document.querySelector("#lock-abilities").addEventListener("click", () => {
+    if (!ABILS.every((c) => chargen.taken[c] !== undefined)) return;
+    chargen.locked = true;
+    statSay("locked - they will be written when the character is created");
+    paintChargen();
+  });
+  // The species changes what a pick is WORTH, so the modifiers beside
+  // the pickers have to follow it.
+  document.querySelector("#char-species").addEventListener("change", paintChargen);
   document.querySelector("#char-species").addEventListener("change", paintSpeciesNote);
   document.querySelector("#species-pick").addEventListener("change", paintSpeciesView);
 

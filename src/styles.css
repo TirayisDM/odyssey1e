@@ -573,3 +573,32 @@ button.wide{width:100%}
    the turn caret and 062 for the tick boxes. */
 .fo-held { font-size: .78em; opacity: .8; margin-left: .15rem; }
 .forder.held .fo-init { opacity: .45; text-decoration: line-through; }
+
+/* ============ ROLLING A CHARACTER UP (066) ============ */
+
+/* The seven, as they came off the dice. */
+.pool { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin: .3rem 0; }
+.pool-chip {
+  min-width: 2.1rem; text-align: center;
+  padding: .15rem .4rem; border-radius: .25rem;
+  border: 1px solid var(--line, #333);
+  font-variant-numeric: tabular-nums; font-weight: 600;
+}
+/* Spent, not gone - "which one did I discard" is a fair question. */
+.pool-chip.spent { opacity: .35; text-decoration: line-through; font-weight: 400; }
+.pool-note { font-size: .8em; margin-left: .3rem; }
+
+/* Six rows of label, picker, and what it will be worth. */
+.picks { display: grid; grid-template-columns: repeat(2, 1fr); gap: .3rem .8rem; margin: .3rem 0 .5rem; }
+.pick { display: flex; align-items: center; gap: .45rem; }
+.pick b { min-width: 2.6rem; }
+.pick select { flex: 1; min-width: 4rem; }
+
+@media (max-width: 560px) { .picks { grid-template-columns: 1fr; } }
+
+/* A locked score reads as a fact rather than a field. */
+.abil input.locked {
+  background: transparent; border-color: transparent;
+  font-weight: 600; cursor: default;
+}
+.abil-lock { grid-column: 1 / -1; display: flex; justify-content: flex-end; }

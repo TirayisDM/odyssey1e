@@ -31,6 +31,7 @@ mod death;
 mod dice;
 mod encounter;
 mod equipment;
+mod generation;
 mod holders;
 mod initiative;
 mod locations;
@@ -1173,6 +1174,8 @@ pub fn run() {
             commands::characters::list_species,
             // 058: what this particular person looks like.
             commands::characters::set_description,
+            // 066: seven scores for six slots, rolled on this device.
+            commands::characters::roll_ability_spread,
             list_rolls,
             list_encounters,
             list_targets,

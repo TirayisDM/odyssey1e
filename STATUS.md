@@ -316,7 +316,7 @@ amber past one turn's worth. NOTHING REFUSES THE SECOND SWING, which is
 simply allowing it are all ordinary, and the ask was to be able to SEE
 it rather than to stop it.
 
-**525 tests, zero warnings.** `cd src-tauri && cargo test`.
+**538 tests, zero warnings.** `cd src-tauri && cargo test`.
 
 The access model was tested with four real accounts: a non-member sees
 zero rows everywhere; a player can read another player's character but
@@ -2591,6 +2591,72 @@ because he was made a PC to test the shop UI. The sweep took the flag
 at its word and left him alone. Classing him is one update; it would
 also move his maximum from 22 to 28, since he is a character and
 `rederive_hp_max` applies to characters. His call.
+
+## Rolling a character up - BUILT (066, generation.rs)
+
+Seven scores of 3d6 with every 1 rerolled, six assigned by elimination,
+locked, and written when the character is created. The spare is the
+point: the worst of the seven need not be lived with.
+
+**WHAT "REROLL 1s" WAS TAKEN TO MEAN.** A 1 is rerolled, and a reroll
+that is also a 1 is rerolled again - no 1 survives. Each die is
+uniform over 2..=6, a score runs 6 to 18 with a mean of 12, and 3, 4
+and 5 are impossible. The other reading - reroll each 1 ONCE and keep
+what comes back - leaves 1s on the table and means about 11.75. Both
+are in use at real tables; this is the commoner phrasing and the
+kinder. If it is the wrong one, `REROLL_BELOW` and the loop in
+`score_with` are the whole change.
+
+**IN ITS OWN FILE** because `dice.rs` was already at 894 lines, past
+the 800 ceiling ARCHITECTURE.md sets, and because this is a different
+subject: dice.rs resolves a formula somebody typed, generation.rs rolls
+a character up and will grow - starting coin, starting kit, a point-buy
+alternative.
+
+It takes a `Roller` rather than reaching for the RNG, which is what
+makes the rule testable: a fixed sequence in, an exact spread out. The
+reroll loop is capped at twenty per die - not for the RNG, which clears
+a 1 with probability 1, but so a misbehaving Roller fails a test rather
+than hanging the suite.
+
+**THE PICKS KEY ON INDEX, NOT VALUE**, and that is the one thing in the
+screen worth saying. A spread of 16, 14, 14, 11, 9, 13, 7 has two
+fourteens, and they are two separate things to spend. Keyed on the
+value, assigning one would have removed both. Proved in the rig: after
+DEX took the first 14, CON could still see the second.
+
+**THE RULE IS NOT ONLY IN THE DROPDOWN.** The pickers make a duplicate
+impossible by construction, and `generation::complete` says the same
+thing in Rust - six codes, each exactly once, each in range - because
+the next screen will not have a dropdown. It does NOT check a score
+came from the spread: a DM may say a number, and 051's rule holds.
+
+**THE ORDER OF THE WRITE IS THE WHOLE OF IT.**
+`seed_character_abilities` writes ten across the board on insert, so
+the picks land BEFORE hit points are worked out. Reading Constitution
+first would give every character the hit points of a 10 - a Barbarian
+who rolled 16 would be quietly short for their whole career. Verified
+live and rolled back: an Unt'garoth Barbarian with a rolled CON 14
+comes out at 14 hit points (14 +1 species = 15, +2, on a d12); before
+the picks landed the same character would have shipped at 12.
+
+**THE SHEET'S ABILITY BOXES ARE READ-ONLY NOW**, with an "edit scores"
+toggle that opens all six at once. Scores are rolled at creation and
+then mostly left alone, and an editable box invites a stray keystroke
+into the one number every modifier on the sheet derives from.
+
+**CREATING A CHARACTER OPENS THEIR SHEET.** Being left on the form was
+the gap - the rest of a character is edited on the sheet, so that is
+where making one should end. The form clears behind it.
+
+Double-tested. Unit: 538, including the reroll, the impossible 3/4/5,
+a Roller that only gives 1s terminating, roll order being preserved
+rather than sorted, and five ways an assignment can be incomplete.
+Rig: the pool struck through as it is spent, elimination across a
+duplicate value, the lock enabling only on the sixth pick and
+disabling the pickers, and the payload carrying all six pairs with the
+7 discarded. One bug found and fixed in the rig - the Lock button kept
+its "Abilities locked" label over the empty pool of a fresh form.
 
 ## Pick up here
 

@@ -90,6 +90,22 @@ pub fn list_species(
     Ok(species::collapse(rows.as_array().unwrap_or(&Vec::new())))
 }
 
+/// Seven ability scores, 3d6 with every 1 rerolled. 066.
+///
+/// NO DATABASE AND NO CHARACTER. The dice are rolled on this device
+/// before anything exists to put them on - the same decision 012 made
+/// about `create_roll`, and the reason the engine is in Rust at all.
+/// A player sees seven numbers and assigns six of them; the spare is
+/// the point.
+///
+/// NOTHING IS RECORDED. A spread rerolled until it is liked would be a
+/// row per attempt in a log nobody asked for, and whether that is
+/// allowed is a table's business rather than this app's.
+#[tauri::command]
+pub fn roll_ability_spread() -> Vec<i64> {
+    crate::generation::spread()
+}
+
 /* ============================ MAKING ONE ============================ */
 
 /// Make a character.
@@ -120,6 +136,10 @@ pub fn create_character(
     class_key: Option<String>,
     species_key: Option<String>,
     size: Option<String>,
+    // 066. Ability code to score, as the creation screen assigned
+    // them. Absent leaves the ten the seed trigger writes, which is
+    // what every character made before this got.
+    abilities: Option<Vec<(String, i64)>>,
 ) -> Result<Value, String> {
     let session = state
         .current()?
@@ -165,6 +185,14 @@ pub fn create_character(
     // Unt'garoth is Large, and that is a fact about the people rather
     // than a choice at the form - so an explicit argument still wins,
     // but the default comes from the row instead of from `med`.
+    // CHECKED BEFORE THE INSERT, so a bad assignment costs nothing. The
+    // screen's dropdown makes a duplicate impossible by construction,
+    // and `generation::complete` is the rule that does not depend on
+    // there being a dropdown.
+    if let Some(picks) = &abilities {
+        crate::generation::complete(picks)?;
+    }
+
     let size = size
         .as_deref()
         .map(str::trim)
@@ -242,6 +270,26 @@ pub fn create_character(
                 &json!({ "character_id": id, "skill_key": key, "prof": 1.0 }),
                 "character_id,skill_key",
             );
+        }
+    }
+
+    // THE ROLLED SCORES, BEFORE THE HIT POINTS ARE WORKED OUT. The
+    // order is the whole of it: `seed_character_abilities` writes ten
+    // across the board on insert, and reading Constitution before
+    // these land would give every character the hit points of a 10 -
+    // a Barbarian who rolled 16 would be quietly short for their
+    // whole career.
+    if let Some(picks) = &abilities {
+        for (code, score) in picks {
+            supabase::rest_update(
+                token,
+                "character_abilities",
+                &[
+                    ("character_id", &format!("eq.{}", id)),
+                    ("ability", &format!("eq.{}", code)),
+                ],
+                &json!({ "score": score }),
+            )?;
         }
     }
 

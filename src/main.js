@@ -706,7 +706,34 @@ function paintDescription(sheet) {
     dl.append(row);
   }
   b.append(dl);
-  if (body.description) b.append(sEl("p", "species-prose", body.description));
+
+  // --- what this one is, as against what their people are ---
+  //
+  // SHOWN EVEN WHEN EMPTY, saying so. A missing description is a thing
+  // somebody has not written yet, and a silent gap looks like a pane
+  // that forgot to render.
+  document.querySelector("#desc-own-head").textContent =
+    sheet.name ? sheet.name + " in particular" : "In particular";
+  const own = document.querySelector("#desc-own");
+  own.innerHTML = "";
+  if (body.description) {
+    own.append(sEl("p", "species-prose", body.description));
+  } else {
+    own.append(sEl("div", "muted",
+      sp ? "nothing written yet - the words above are their people's, not theirs"
+         : "nothing written yet"));
+  }
+
+  // THE COPY IS AN ACT, NOT A DEFAULT. 058 refused to fill a height in
+  // from the middle of the species band, for the reason that a fact
+  // nobody decided should not appear on a sheet. The same applies to
+  // prose: this button offers the people's words to be edited, and
+  // until somebody presses it the character has none of their own.
+  const from = document.querySelector("#desc-from-species");
+  from.hidden = !(sp && sp.summary);
+  from.textContent = sp && sp.summary
+    ? "start from the " + sp.name + " description"
+    : "";
 
   // Fill the boxes with what is there, so a save does not wipe the
   // fields somebody did not touch.
@@ -6432,6 +6459,22 @@ window.addEventListener("DOMContentLoaded", async () => {
   for (const b of document.querySelectorAll("#sheet-tabs .tab")) {
     b.addEventListener("click", () => showSub("sheet-tabs", "sheet", b.dataset.sheet));
   }
+
+  // Copy the people's prose into the character's box so it can be
+  // edited into theirs. It does not save - the Save button still has
+  // to be pressed, so a mis-click costs nothing.
+  document.querySelector("#desc-from-species").addEventListener("click", () => {
+    const sp = state.sheet && state.sheet.species;
+    if (!sp || !sp.summary) return;
+    const box = document.querySelector("#desc-notes");
+    // APPENDED, NEVER OVERWRITTEN. "Alter or expand" was the ask, and
+    // a button that silently replaced three paragraphs somebody had
+    // written would be the expensive kind of helpful.
+    box.value = box.value.trim()
+      ? box.value.trim() + "\n\n" + sp.summary
+      : sp.summary;
+    box.focus();
+  });
 
   document.querySelector("#save-desc").addEventListener("click", async () => {
     if (!state.characterId) return log("set_description", "no character loaded", true);

@@ -463,6 +463,25 @@
         <div class="sheet-pane" data-sheet="description" hidden>
           <div id="desc-species"></div>
 
+          <!-- THIS ONE IN PARTICULAR. What sat here was a one-line box
+               labelled "anything else worth seeing at a glance", in the
+               same row as the Save button - so the only prose on the
+               pane was the PEOPLE's, and a character's own description
+               read as an afterthought to their hair colour.
+
+               A people is a paragraph about thousands; this is the one
+               about one of them. Separately headed, separately
+               authored, and big enough to write in. -->
+          <div class="sub" id="desc-own-head">In particular</div>
+          <div id="desc-own"></div>
+          <div class="row desc-edit">
+            <textarea id="desc-notes" rows="5"
+              placeholder="who this one is - what their people's description does not say, or says differently"></textarea>
+          </div>
+          <div class="row desc-edit">
+            <button id="desc-from-species" class="linky">start from the people's words</button>
+          </div>
+
           <div class="sub">Physical description</div>
           <div id="desc-body"></div>
           <div class="row desc-edit">
@@ -475,8 +494,7 @@
             <input id="desc-eyes" placeholder="eyes" />
           </div>
           <div class="row desc-edit">
-            <input id="desc-notes" placeholder="anything else worth seeing at a glance" />
-            <button id="save-desc" class="ghost">Save</button>
+            <button id="save-desc" class="ghost">Save description</button>
           </div>
           <div id="desc-msg" class="dm-msg" hidden></div>
 

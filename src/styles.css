@@ -314,6 +314,9 @@ button.wide{width:100%}
   .fight-round{text-align:left}
 }
 
+#desc-notes{width:100%;resize:vertical;font:inherit;line-height:1.45}
+.desc-edit button.linky{padding:0}
+
 .logline .head{gap:.3rem;flex-wrap:wrap}
 .tag.spent{background:#1d2b1d;color:#8fc98f}
 .tag.spent.warn{background:#2f2a16;color:#e0b341}

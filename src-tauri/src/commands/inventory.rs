@@ -485,16 +485,11 @@ pub fn encumbrance(state: State<AppState>, character_id: String) -> Result<Value
         if !mine {
             continue;
         }
-        // `Kind::weight` is already TEXT - holders parsed it on the way
-        // in, because most callers print a weight rather than sum one.
-        // This is one of the few that sums, so it parses back.
-        let each = kinds
-            .iter()
-            .find(|k| k.key == o.item_key)
-            .and_then(|k| k.weight.as_deref())
-            .and_then(|w| w.parse::<f64>().ok())
-            .unwrap_or(0.0);
-        carried += each * (o.quantity as f64);
+        // 071. ASKS, RATHER THAN DECIDING. This used to read the TYPE
+        // weight off `Kind` and multiply - which ignored the object's
+        // own `weight_override` and made the sheet contradict itself,
+        // showing 25 lb on Hapi and 19 lb on the carry line below it.
+        carried += crate::holders::stack_weight(o, &kinds);
     }
 
     // THE EFFECTIVE STRENGTH AND THE CARRYING SIZE, not the stored

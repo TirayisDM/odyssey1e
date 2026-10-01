@@ -719,11 +719,138 @@ pub fn load_world(
     Ok((objects, holders, types))
 }
 
+/// What one of these weighs, in pounds - THE OBJECT'S OWN WEIGHT IF IT
+/// HAS ONE, and the catalogue's otherwise.
+///
+/// 071. This is the same precedence `overrides_of` has applied to size,
+/// damage and price since 049, and the only one of the five that the
+/// encumbrance walk was not using. That walk read the TYPE weight
+/// straight off `Kind`, so a battleaxe renamed Hapi and reweighed to 25
+/// pounds was summed as the 4-pound axe the book prints: the sheet said
+/// 25 lb on the item and 19 lb on the carry line, from the same row.
+///
+/// WRITTEN HERE RATHER THAN IN THE WALK because this is where an `Obj`
+/// and its `Kind` meet, and because a rule that lives in a command
+/// cannot be tested. The walk now asks instead of deciding.
+///
+/// An unknown key and an item with no weight at all both weigh nothing.
+/// That is deliberate - see `kind_from_row`, where a missing weight is
+/// None rather than zero, because some things genuinely are weightless
+/// and a hoard of them should still weigh nothing.
+pub fn unit_weight(o: &Obj, types: &[Kind]) -> f64 {
+    if let Some(w) = o.weight_override {
+        return w;
+    }
+    types
+        .iter()
+        .find(|k| k.key == o.item_key)
+        .and_then(|k| k.weight.as_deref())
+        .and_then(|w| w.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
+/// What the whole row weighs: one of them, times how many.
+///
+/// SEPARATE FROM `unit_weight` because an override is PER ITEM. Twenty
+/// arrows given a weight of 0.1 weigh two pounds, not a tenth of one -
+/// the override replaces what one weighs, never what the stack does.
+pub fn stack_weight(o: &Obj, types: &[Kind]) -> f64 {
+    unit_weight(o, types) * (o.quantity.max(0) as f64)
+}
+
 /* ============================ TESTS ============================ */
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------- weight, 071 ---------- */
+
+    fn weighed(key: &str, w: Option<&str>) -> Kind {
+        kind(key, "med", None, 1.0, None, w)
+    }
+
+    #[test]
+    fn an_object_without_an_override_weighs_what_its_type_weighs() {
+        let types = vec![weighed("battleaxe", Some("4"))];
+        let o = obj("o1", "battleaxe", None);
+        assert_eq!(unit_weight(&o, &types), 4.0);
+    }
+
+    #[test]
+    fn an_override_beats_the_catalogue() {
+        // Hapi. A battleaxe the book weighs at 4 lb, reforged at 25.
+        let types = vec![weighed("battleaxe", Some("4"))];
+        let mut o = obj("o1", "battleaxe", None);
+        o.weight_override = Some(25.0);
+        assert_eq!(unit_weight(&o, &types), 25.0);
+    }
+
+    #[test]
+    fn an_override_of_zero_is_a_weight_and_not_an_absence() {
+        // A feather-light blade weighs nothing BECAUSE somebody said
+        // so. Some(0.0) must not fall through to the type's 4 lb.
+        let types = vec![weighed("battleaxe", Some("4"))];
+        let mut o = obj("o1", "battleaxe", None);
+        o.weight_override = Some(0.0);
+        assert_eq!(unit_weight(&o, &types), 0.0);
+    }
+
+    #[test]
+    fn an_unknown_key_weighs_nothing_rather_than_refusing() {
+        let o = obj("o1", "ghost", None);
+        assert_eq!(unit_weight(&o, &[]), 0.0);
+    }
+
+    #[test]
+    fn a_type_with_no_weight_weighs_nothing() {
+        let types = vec![weighed("the_ember", None)];
+        assert_eq!(unit_weight(&obj("o1", "the_ember", None), &types), 0.0);
+    }
+
+    #[test]
+    fn a_fractional_catalogue_weight_survives_the_round_trip() {
+        let types = vec![weighed("arrow", Some("0.05"))];
+        let mut o = obj("o1", "arrow", None);
+        o.quantity = 20;
+        assert!((stack_weight(&o, &types) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_override_is_per_item_not_per_stack() {
+        let types = vec![weighed("arrow", Some("0.05"))];
+        let mut o = obj("o1", "arrow", None);
+        o.quantity = 20;
+        o.weight_override = Some(0.1);
+        assert!((stack_weight(&o, &types) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_stack_of_none_weighs_nothing() {
+        let types = vec![weighed("arrow", Some("0.05"))];
+        let mut o = obj("o1", "arrow", None);
+        o.quantity = 0;
+        assert_eq!(stack_weight(&o, &types), 0.0);
+    }
+
+    #[test]
+    fn what_test_pc_1_was_actually_carrying() {
+        // The bug as it stood on the screen: a backpack at 5, a leather
+        // jerkin at 10 and Hapi - a battleaxe the catalogue weighs at 4
+        // and the object overrides to 25. The carry line said 19 lb,
+        // which is the sum with the axe counted as the book's.
+        let types = vec![
+            weighed("backpack", Some("5")),
+            weighed("leather", Some("10")),
+            weighed("battleaxe", Some("4")),
+        ];
+        let mut axe = obj("o3", "battleaxe", None);
+        axe.name = Some("Hapi".into());
+        axe.weight_override = Some(25.0);
+        let held = [obj("o1", "backpack", None), obj("o2", "leather", None), axe];
+        let total: f64 = held.iter().map(|o| stack_weight(o, &types)).sum();
+        assert_eq!(total, 40.0);
+    }
 
     fn obj(id: &str, key: &str, holder: Option<&str>) -> Obj {
         Obj {

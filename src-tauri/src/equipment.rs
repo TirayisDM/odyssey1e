@@ -116,10 +116,10 @@ pub struct Item {
     /// because a player looking at a weapon wants to know what it
     /// weighs and what it is worth, and the sheet had no way to say.
     ///
-    /// `description` is NULL on all 89 catalogue rows today - the
-    /// column has existed since 004 and nothing has ever filled it.
-    /// Carried anyway, so the day somebody writes one it appears
-    /// without another migration.
+    /// `description` was NULL on all 89 catalogue rows until 071 -
+    /// the column existed from 004 and nothing wrote to it until this
+    /// field put the gap on screen. A game's own item row still starts
+    /// NULL, so the screen keeps its guard.
     pub description: Option<String>,
     /// Price in `denom`, which is 5e's coin ladder - see currency.rs.
     /// Stored as the pair rather than normalised to copper, because

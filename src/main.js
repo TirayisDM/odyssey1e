@@ -1607,10 +1607,12 @@ function itemInfo(it) {
   }
   box.append(grid);
 
-  // DESCRIPTION IS NULL ON ALL 89 CATALOGUE ROWS. The column has
-  // existed since 004 and nothing has ever filled it, so this renders
-  // only when somebody has - rather than printing an empty heading
-  // under every item in the game.
+  // 071 FILLED ALL 89 CATALOGUE ROWS. The column existed from 004 and
+  // nothing wrote to it until this screen made the gap visible.
+  //
+  // STILL GUARDED, because a game that adds its own item row starts
+  // with a NULL description like everything else used to - and an
+  // empty heading under an item says less than no heading at all.
   const d = it.item && it.item.description;
   if (d) box.append(sEl("p", "iteminfo-desc", d));
   return box;

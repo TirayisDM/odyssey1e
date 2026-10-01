@@ -171,6 +171,98 @@ pub fn collapse(rows: &[Value]) -> Vec<Class> {
 
 /* ============================ TESTS ============================ */
 
+/* ============================ READING ============================ */
+
+/// Which classes this character holds, in the order they took them.
+///
+/// 073. THE ORDER IS THE POINT and it is the database's, not a sort
+/// applied here: `added_at` then `class_key`, which is exactly the
+/// order `sync_character_level` breaks its own tie in. The two have to
+/// agree, because the trigger decides which class `characters.class_key`
+/// names and `multiclass::primary` decides which one the sheet puts
+/// first, and a screen that disagreed with the row it reads would be
+/// the worst kind of wrong - quietly.
+///
+/// TWO ROUND TRIPS, NOT ONE PER CLASS. The rows come back first and
+/// their keys are resolved against the catalogue in a single `in.()`.
+///
+/// A KEY THE CATALOGUE CANNOT FIND KEEPS ITS ROW, with a hit die of
+/// zero. Dropping it would take a class a character genuinely holds off
+/// their own sheet because a DM renamed a catalogue entry - see
+/// `multiclass::Taken::hit_die`, and `load_effective`, which has made
+/// the same call about attacks since 061.
+pub fn load_taken(
+    token: &str,
+    game_id: &str,
+    character_id: &str,
+) -> Result<Vec<crate::multiclass::Taken>, String> {
+    let rows = crate::supabase::rest_get(
+        token,
+        "character_classes",
+        &[
+            ("select", "class_key,level"),
+            ("character_id", &format!("eq.{}", character_id)),
+            ("order", "added_at.asc,class_key.asc"),
+        ],
+    )?;
+    let rows = rows.as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let keys: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.get("class_key").and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .collect();
+    let catalogue = load_map(token, game_id, &keys)?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            let key = r.get("class_key").and_then(|v| v.as_str())?;
+            Some(crate::multiclass::Taken {
+                hit_die: catalogue
+                    .iter()
+                    .find(|c| c.key == key)
+                    .map(|c| c.hit_die)
+                    .unwrap_or(0),
+                key: key.to_string(),
+                level: r.get("level").and_then(|v| v.as_i64()).unwrap_or(1),
+            })
+        })
+        .collect())
+}
+
+/// The catalogue rows for a set of keys, global and game-scoped
+/// collapsed as `collapse` does it.
+///
+/// SPLIT OUT BECAUSE FOUR PLACES WANT IT - the sheet, the effective
+/// loader, creation and the hit-point rederivation - and the `or=`
+/// tenancy filter is the kind of thing that is right in three copies
+/// and wrong in the fourth.
+pub fn load_map(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Class>, String> {
+    let unique: Vec<String> = keys
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if unique.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = crate::supabase::rest_get(
+        token,
+        "classes",
+        &[
+            ("select", CLASS_COLUMNS),
+            ("key", &format!("in.({})", unique.join(","))),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    )?;
+    Ok(collapse(rows.as_array().unwrap_or(&Vec::new())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

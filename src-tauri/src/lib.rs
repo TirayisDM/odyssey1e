@@ -35,6 +35,7 @@ mod generation;
 mod holders;
 mod initiative;
 mod locations;
+mod multiclass;
 mod naming;
 mod narrative;
 mod objects;
@@ -250,12 +251,44 @@ fn get_sheet(state: State<AppState>, character_id: String) -> Result<Sheet, Stri
     character::load_sheet(&token, &character_id)
 }
 
+/// Move a CLASSLESS character's level.
+///
+/// 073 TOOK THE CLASSED CASE AWAY FROM IT, and the refusal below is the
+/// whole point of this comment. A character who holds classes has their
+/// level decided by the sum of those class rows, kept by
+/// `sync_character_level` - so a second writer here would not be a
+/// convenience, it would be the two-places-disagree fault this codebase
+/// has now been bitten by three times. There is no safe way to spread
+/// "make them level 7" across a Fighter 5 / Rogue 3, and guessing is
+/// worse than asking.
+///
+/// WHAT IS LEFT IS REAL, not a vestige: every character made before 055
+/// has no class, and a monster's level is its hit dice. Both still move
+/// through here.
 #[tauri::command]
 fn set_level(state: State<AppState>, character_id: String, level: i64) -> Result<Value, String> {
     if !(1..=20).contains(&level) {
         return Err("level must be 1-20".to_string());
     }
     let token = state.token()?;
+
+    let held = supabase::rest_get(
+        &token,
+        "character_classes",
+        &[
+            ("select", "class_key"),
+            ("character_id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    if let Some(rows) = held.as_array() {
+        if !rows.is_empty() {
+            return Err(
+                "this character's level is the sum of their classes - set it on a class"
+                    .to_string(),
+            );
+        }
+    }
+
     let updated = supabase::rest_update(
         &token,
         "characters",
@@ -1169,6 +1202,8 @@ pub fn run() {
             commands::characters::list_characters,
             commands::characters::create_character,
             commands::characters::rename_character,
+            commands::characters::set_class_level,
+            commands::characters::remove_class,
             // 055: what a character can BE, and therefore which
             // die their hit points come from.
             commands::characters::list_classes,

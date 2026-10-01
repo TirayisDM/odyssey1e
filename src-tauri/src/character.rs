@@ -79,7 +79,21 @@ pub struct Sheet {
     /// Whose sheet this is: the character's name, or the actor's label
     /// for an NPC instance — "Goblin 0001".
     pub name: String,
+    /// THE TOTAL, across every class. 073 made that a sum rather than a
+    /// column: a Fighter 5 / Rogue 3 is level 8, and it is the 8 that
+    /// buys their proficiency bonus. `characters.level` carries it,
+    /// kept in step by `sync_character_level`, so nothing downstream
+    /// has to add anything up to find out how good somebody is.
     pub level: i64,
+    /// What they are, in the order they took it - 073. Empty for every
+    /// monster and for a character made before 055, which is a real
+    /// answer and not a gap.
+    ///
+    /// THE SHEET CARRIES KEYS AND LEVELS, NOT NAMES. The screen already
+    /// holds the class catalogue to fill its dropdowns, and sending a
+    /// display name here would be a second copy of it that goes stale
+    /// the moment a DM renames a class.
+    pub classes: Vec<crate::multiclass::Taken>,
     /// STATED rather than derived, for a monster. A character computes
     /// this from level because levelling is the rule that moves it; a
     /// statblock simply has one. None means derive — see
@@ -714,13 +728,11 @@ pub(crate) fn load_effective(
         token,
         "characters",
         &[
-            ("select", "id,species_key,class_key,level"),
+            ("select", "id,species_key"),
             ("id", &format!("in.({})", list)),
         ],
     )?;
     let mut key_of: HashMap<String, String> = HashMap::new();
-    // (character, class key, level) for the ones that have a class.
-    let mut classed: Vec<(String, String, i64)> = Vec::new();
     for r in chars.as_array().unwrap_or(&Vec::new()) {
         let Some(id) = r.get("id").and_then(|v| v.as_str()) else {
             continue;
@@ -730,12 +742,36 @@ pub(crate) fn load_effective(
                 key_of.insert(id.to_string(), k.to_string());
             }
         }
-        if let Some(c) = r.get("class_key").and_then(|v| v.as_str()) {
-            if !c.is_empty() {
-                let level = r.get("level").and_then(|v| v.as_i64()).unwrap_or(1);
-                classed.push((id.to_string(), c.to_string(), level));
-            }
-        }
+    }
+
+    // 073. WHICH CLASSES, AND AT WHAT LEVEL, FOR EVERYBODY AT ONCE.
+    // This used to come free off the `characters` row - one class, one
+    // level, no extra request - and a character who is two things has
+    // neither. One `in.()` over the whole roster is the price, and it
+    // is one round trip however many people are being asked about.
+    let class_rows = supabase::rest_get(
+        token,
+        "character_classes",
+        &[
+            ("select", "character_id,class_key,level"),
+            ("character_id", &format!("in.({})", list)),
+            ("order", "added_at.asc,class_key.asc"),
+        ],
+    )?;
+    // character -> (class key, level), in the order taken.
+    let mut classed: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+    for r in class_rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(cid) = r.get("character_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(key) = r.get("class_key").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let level = r.get("level").and_then(|v| v.as_i64()).unwrap_or(1);
+        classed
+            .entry(cid.to_string())
+            .or_default()
+            .push((key.to_string(), level));
     }
 
     let rows = supabase::rest_get(
@@ -775,29 +811,27 @@ pub(crate) fn load_effective(
     let mut attacks: HashMap<String, i64> = HashMap::new();
     if !classed.is_empty() {
         let keys: Vec<String> = classed
-            .iter()
-            .map(|(_, k, _)| k.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
+            .values()
+            .flatten()
+            .map(|(k, _)| k.clone())
             .collect();
-        let rows = supabase::rest_get(
-            token,
-            "classes",
-            &[
-                ("select", crate::class::CLASS_COLUMNS),
-                ("key", &format!("in.({})", keys.join(","))),
-                ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            ],
-        )?;
-        let catalogue = crate::class::collapse(rows.as_array().unwrap_or(&Vec::new()));
-        for (cid, key, level) in &classed {
-            // A class_key pointing at nothing leaves the character on
-            // one swing rather than refusing the whole read. 055 cannot
-            // use a foreign key to prevent it, and a dangling reference
+        let catalogue = crate::class::load_map(token, game_id, &keys)?;
+        for (cid, held) in &classed {
+            // THE BEST OF THEM, NOT THE SUM - 5e is explicit that Extra
+            // Attack from two classes does not add up, and
+            // multiclass::attacks is where that is written and tested.
+            //
+            // A class_key pointing at nothing contributes nothing
+            // rather than refusing the whole read. 055 cannot use a
+            // foreign key to prevent it, and a dangling reference
             // should not empty a screen.
-            if let Some(c) = catalogue.iter().find(|c| &c.key == key) {
-                attacks.insert(cid.clone(), c.attacks_at(*level));
-            }
+            let each: Vec<i64> = held
+                .iter()
+                .filter_map(|(key, level)| {
+                    catalogue.iter().find(|c| &c.key == key).map(|c| c.attacks_at(*level))
+                })
+                .collect();
+            attacks.insert(cid.clone(), crate::multiclass::attacks(&each));
         }
     }
 
@@ -979,6 +1013,18 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         apply_species(&mut abilities, sp);
     }
 
+    // 073. One request, and skipped entirely for anybody with no class
+    // rows - see class::load_taken, which returns early on an empty
+    // read rather than asking the catalogue about nothing.
+    // LEAD FIRST, so the screen does not have to decide which class
+    // that is. `load_taken` returns them in the order they were TAKEN,
+    // which is what the hit-point rule reads; what a sheet shows first
+    // is the one with the most levels in it, and both orders are
+    // multiclass.rs's to know.
+    let classes = crate::multiclass::lead_first(
+        &crate::class::load_taken(token, &game_id, character_id)?,
+    );
+
     let line_rows = narrative::load_lines(token, &game_id, &profile.narrative_pack)?;
     let narratives = narrative::resolve_lines(&line_rows, &profile.narrative_pack);
 
@@ -1026,6 +1072,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         game_id,
         name: profile.name,
         level: profile.level,
+        classes,
         // NULL for a player character, so `proficiency_bonus` falls back
         // to the level formula. An instance off a statblock carries the
         // stated value - see 022.
@@ -1081,6 +1128,7 @@ mod tests {
         profs.insert("ste".into(), 0.5);
 
         Sheet {
+            classes: Vec::new(),
             location_id: None,
             character_id: Some("c1".into()),
             game_id: "g1".into(),

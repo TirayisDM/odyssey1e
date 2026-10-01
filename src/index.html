@@ -436,8 +436,22 @@
           <div class="row">
             <input id="char-rename" placeholder="character name" />
             <button id="save-name" class="ghost">Set name</button>
+            <!-- 073. THE CLASS SITS BETWEEN THE NAME AND THE LEVEL
+                 because the level belongs to it: this control reads
+                 "Falon, Fighter, 4" and the number is the FIGHTER's 4,
+                 not the character's. For a multiclassed character the
+                 two differ and the heading above carries the total. -->
+            <select id="class-lead"></select>
             <input id="level" type="number" min="1" max="20" placeholder="level" />
             <button id="save-level" class="ghost">Set level</button>
+          </div>
+
+          <!-- Everything they are besides the one that leads, a row
+               each, built by paintClasses. -->
+          <div id="class-extra"></div>
+          <div class="row">
+            <button id="add-class" class="linky">+ add class</button>
+            <span id="class-note" class="muted"></span>
           </div>
           <div id="abilities" class="abils"></div>
         </div>

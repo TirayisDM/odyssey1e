@@ -33,6 +33,9 @@ let state = {
   listOpen: true,
   // Everybody in this game, so the folded line can name one.
   folk: [],
+  // 073. Whether the blank "which class" row is showing. Cleared by
+  // anything that commits or cancels, and by a fresh sheet read.
+  addingClass: false,
   user: null, gameId: null, characterId: null, sheet: null, rolls: [],
   games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
@@ -1047,6 +1050,9 @@ async function selectCharacter(id) {
   // 068. A fresh pick folds the list. Reopening it is one click and
   // the choice survives, so this is a default rather than a trap.
   state.listOpen = false;
+  // 073. And it puts away a half-filled "which class" row, which
+  // belonged to whoever was being read a moment ago.
+  state.addingClass = false;
   await loadCharacters();
   await loadSheet();
   paintChosen();
@@ -1085,6 +1091,7 @@ async function loadSheet() {
   // 058/060. The subtabs are painted with the rest of the sheet rather
   // than on tab click: it is all one read, and filling a hidden pane
   // costs nothing.
+  paintClasses(sheet);
   paintDescription(sheet);
   paintTalents(sheet);
 
@@ -2511,6 +2518,129 @@ function shopControl(c, onDone) {
 // IT FOLDS THE LIST, IT DOES NOT CLEAR THE CHOICE. "Change" reopens
 // the list with the current character still selected, so backing out
 // of a mis-click costs nothing.
+// WHAT THIS CHARACTER IS, and the controls to change it. 073.
+//
+// `sheet.classes` arrives LEAD FIRST - multiclass::lead_first decides
+// which class that is, in Rust, where it is tested. Nothing here picks
+// a primary; this function only lays out what it was handed.
+//
+// THE LEVEL BESIDE A CLASS IS THAT CLASS'S LEVEL, never the
+// character's. A Fighter 5 / Rogue 3 shows 5 and 3 on these rows and
+// reads "level 8" in the heading above, which is the sum the engine
+// keeps in `characters.level`.
+function paintClasses(sheet) {
+  const held = sheet.classes || [];
+  const lead = held[0] || null;
+
+  // The one that leads, in the row with the name.
+  const sel = document.querySelector("#class-lead");
+  // THE SAME EXCLUSION THE EXTRA ROWS GET. Without it the lead picker
+  // would offer a class an extra row already holds, and committing
+  // that would fold two rows into one - the engine would upsert the
+  // duplicate key and the levels of whichever row lost would vanish
+  // with nothing on screen to say so.
+  classOptions(sel, lead ? lead.key : "", new Set(held.map((t) => t.key)));
+  // A CLASSLESS CHARACTER STILL HAS A LEVEL - every one made before
+  // 055, and every monster. The box shows theirs and the old
+  // `set_level` still moves it.
+  document.querySelector("#level").value = lead ? lead.level : sheet.level;
+
+  const box = document.querySelector("#class-extra");
+  box.innerHTML = "";
+  for (const t of held.slice(1)) box.append(classRow(t));
+  if (state.addingClass) box.append(classRow(null));
+
+  // ADDING A CLASS IS HIDDEN UNTIL THERE IS ONE TO ADD TO. A character
+  // with no class at all picks theirs in the row above; offering "add
+  // a second" to somebody with no first is an invitation to a state
+  // the engine would then have to explain.
+  const add = document.querySelector("#add-class");
+  add.hidden = !lead || state.addingClass;
+
+  const note = document.querySelector("#class-note");
+  note.textContent = held.length > 1
+    ? "level " + sheet.level + " overall \u00b7 " + held.map(classWords).join(" / ")
+    : "";
+}
+
+// "Fighter 5", with the key as a fallback so a class the catalogue has
+// lost still says which one it was.
+function classWords(t) {
+  const c = (state.classes || []).find((x) => x.key === t.key);
+  return (c ? c.name : t.key) + " " + t.level;
+}
+
+// Fill a class picker. `taken` is the set this character already holds
+// and may not take twice; the slot's own class is always offered, so
+// re-committing a row is not blocked by the row itself.
+function classOptions(sel, chosen, taken) {
+  sel.innerHTML = "";
+  sel.append(new Option(chosen ? "\u2014 drop this class \u2014" : "no class yet", ""));
+  for (const c of state.classes || []) {
+    if (taken && c.key !== chosen && taken.has(c.key)) continue;
+    sel.append(new Option(c.name + " \u00b7 d" + c.hit_die, c.key));
+  }
+  sel.value = chosen || "";
+}
+
+// One additional class: which, how far, and a way out. `t` is null for
+// the row "+ add class" opens, which holds nothing yet.
+function classRow(t) {
+  const held = ((state.sheet && state.sheet.classes) || []).map((x) => x.key);
+  const taken = new Set(held);
+
+  const row = sEl("div", "row");
+  const sel = document.createElement("select");
+  classOptions(sel, t ? t.key : "", taken);
+  const lvl = document.createElement("input");
+  lvl.type = "number"; lvl.min = "1"; lvl.max = "20";
+  lvl.value = t ? t.level : 1;
+
+  const save = sEl("button", "ghost", "Set level");
+  save.addEventListener("click", async () => {
+    if (!sel.value) {
+      // Blank on an existing row means drop it; on the pending row it
+      // means never mind.
+      if (t) await dropClass(t.key); else { state.addingClass = false; paintClasses(state.sheet); }
+      return;
+    }
+    const ok = await call("set_class_level", {
+      characterId: state.characterId,
+      classKey: sel.value,
+      level: Number(lvl.value),
+      // WHAT THIS SLOT USED TO HOLD. Swapping Rogue for Cleric in the
+      // same row is a correction, not a third class - without this the
+      // only thing that could ever happen is gaining one.
+      replacing: t ? t.key : null,
+    });
+    if (ok) { state.addingClass = false; await afterClassChange(); }
+  });
+
+  const drop = sEl("button", "ghost", t ? "remove" : "cancel");
+  drop.addEventListener("click", async () => {
+    if (!t) { state.addingClass = false; paintClasses(state.sheet); return; }
+    await dropClass(t.key);
+  });
+
+  row.append(sel, lvl, save, drop);
+  return row;
+}
+
+async function dropClass(key) {
+  const ok = await call("remove_class", { characterId: state.characterId, classKey: key });
+  if (ok) { state.addingClass = false; await afterClassChange(); }
+}
+
+// A CLASS CHANGE MOVES MORE THAN THE CLASS. Hit points are rederived
+// from every class held, the proficiency bonus comes off the new total
+// and the attack count off whichever class grants the most - so the
+// whole sheet is reread rather than the one row repainted. The roster
+// goes with it because the list prints a class and a level too.
+async function afterClassChange() {
+  await loadSheet();
+  await loadCharacters();
+}
+
 function paintChosen() {
   const line = document.querySelector("#pc-chosen");
   const list = document.querySelector("#pc-list");
@@ -5673,13 +5803,42 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  document.querySelector("#add-class").addEventListener("click", () => {
+    state.addingClass = true;
+    paintClasses(state.sheet);
+  });
+
   document.querySelector("#save-level").addEventListener("click", async () => {
     if (!state.characterId) return log("set_level", "select a character first", true);
+    const held = (state.sheet && state.sheet.classes) || [];
+    const lead = held[0] || null;
+    const chosen = val("#class-lead");
+
+    // 073. THREE THINGS THROUGH ONE BUTTON, and which one is decided by
+    // what is in the two controls beside it rather than by a mode:
+    //
+    //   a class chosen  -> that class goes to that level, replacing
+    //                      whatever led before
+    //   blank, had one  -> they drop it and keep the level they reached
+    //   blank, had none -> the old column, which is still the truth for
+    //                      a monster and for anyone made before 055
+    if (chosen) {
+      const ok = await call("set_class_level", {
+        characterId: state.characterId,
+        classKey: chosen,
+        level: Number(val("#level")),
+        replacing: lead ? lead.key : null,
+      });
+      if (ok) await afterClassChange();
+      return;
+    }
+    if (lead) return dropClass(lead.key);
+
     const ok = await call("set_level", {
       characterId: state.characterId,
       level: Number(val("#level")),
     });
-    if (ok) await loadSheet();
+    if (ok) await afterClassChange();
   });
 
   // Preview updates as you type — the point is to see the modifier

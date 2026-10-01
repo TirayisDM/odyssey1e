@@ -213,6 +213,10 @@ pub fn create_character(
         row["species_key"] = json!(sp.key);
     }
     if let Some(c) = &chosen {
+        // Written on the insert as well as into `character_classes`
+        // below. 073's trigger would set it anyway; doing it here means
+        // the row is never momentarily a classed character with no
+        // class, which is a state a concurrent read could see.
         row["class_key"] = json!(c.key);
         // The class's saves and proficiencies, copied onto the
         // character. A SNAPSHOT, on purpose and on the same principle
@@ -236,6 +240,22 @@ pub fn create_character(
     else {
         return Ok(created);
     };
+
+    // 073. THE CLASS GETS ITS OWN ROW, which is what makes a second one
+    // possible later. Level 1, because that is where a character
+    // starts and `characters.level` defaults to the same.
+    //
+    // THIS ROW IS THE STARTING CLASS for the rest of their career - its
+    // `added_at` is what `multiclass::hp` reads to decide whose whole
+    // hit die pays for level one.
+    if let Some(c) = &chosen {
+        supabase::rest_upsert(
+            token,
+            "character_classes",
+            &json!({ "character_id": id, "class_key": c.key, "level": 1 }),
+            "character_id,class_key",
+        )?;
+    }
 
     // A SPECIES WITHOUT A CLASS IS STILL A SPECIES. The skills below are
     // granted either way; only the hit points need a die, so that is
@@ -526,33 +546,29 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
         return Ok(None);
     }
 
-    let Some(key) = row.get("class_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-    else {
+    let game_id = row.get("game_id").and_then(|v| v.as_str()).unwrap_or_default();
+
+    // 073. EVERY CLASS THEY HOLD, in the order they took them, because
+    // the first level's whole hit die belongs to the one they STARTED
+    // as and is paid once in a career. This used to read `class_key`
+    // and one level off the row above, which is the single-class case
+    // of the same question.
+    let taken = class::load_taken(token, game_id, character_id)?;
+    if taken.is_empty() {
         // No class, no die. A monster levels through
         // `commands::dm::set_actor_level`, which has its own rule
         // because its die comes from size.
         return Ok(None);
-    };
-    let level = row.get("level").and_then(|v| v.as_i64()).unwrap_or(1);
-    let game_id = row.get("game_id").and_then(|v| v.as_str()).unwrap_or_default();
+    }
 
-    let class_rows = supabase::rest_get(
-        token,
-        "classes",
-        &[
-            ("select", class::CLASS_COLUMNS),
-            ("key", &format!("eq.{}", key)),
-            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-        ],
-    )?;
-    let Some(c) = class::collapse(class_rows.as_array().unwrap_or(&Vec::new()))
-        .into_iter()
-        .next()
-    else {
-        // A class_key pointing at nothing. 055 cannot use a foreign key
-        // to prevent this, so it is reported rather than guessed around.
-        return Err(format!("{} has an unknown class: {}", character_id, key));
-    };
+    // A class_key pointing at nothing. 055 cannot use a foreign key to
+    // prevent this, so it is reported rather than guessed around -
+    // `load_taken` keeps the row with a die of zero precisely so this
+    // can say which class is missing instead of silently costing the
+    // character the levels they put into it.
+    if let Some(lost) = taken.iter().find(|t| t.hit_die <= 0) {
+        return Err(format!("{} has an unknown class: {}", character_id, lost.key));
+    }
 
     // THE EFFECTIVE CONSTITUTION, species bonus included - the same
     // number creation used. Reading the stored score here is how a
@@ -562,7 +578,7 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
     // places. One loader answers it now for all four: this, the
     // target list, the initiative roll and the level button.
     let eff = crate::character::load_effective(token, game_id, &[character_id.to_string()])?;
-    let hp = vitality::pc_hp(c.hit_die, level, eff.modifier(character_id, "con"));
+    let hp = crate::multiclass::hp(&taken, eff.modifier(character_id, "con"));
     supabase::rest_update(
         token,
         "characters",
@@ -570,4 +586,137 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
         &json!({ "hp_max": hp }),
     )?;
     Ok(Some(hp))
+}
+
+/* ======================== WHAT THEY ARE ======================== */
+
+/// Put a character at `level` in `class_key`, adding the class if they
+/// did not have it.
+///
+/// 073. ONE BUTTON FOR THREE THINGS - take a class, change its level,
+/// swap a slot for a different class - because on screen they are one
+/// control: a dropdown saying which class, a number saying how far, and
+/// a button that commits both. Splitting them into three commands would
+/// make the screen decide which to call, which is the screen deciding a
+/// rule.
+///
+/// `replacing` IS WHAT THAT SLOT USED TO HOLD. A player who had Fighter
+/// in the first slot and picks Rogue has not become a Fighter/Rogue -
+/// they have corrected what they are. Without this the only thing that
+/// could happen is gaining a class, and nothing could ever be undone
+/// except by removing it.
+///
+/// THE HIT POINTS FOLLOW, every time. `characters.level` follows too,
+/// but through `sync_character_level` rather than from here - a trigger
+/// cannot be forgotten and a command can.
+#[tauri::command]
+pub fn set_class_level(
+    state: State<AppState>,
+    character_id: String,
+    class_key: String,
+    level: i64,
+    replacing: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let key = class_key.trim();
+    if key.is_empty() {
+        return Err("choose a class".to_string());
+    }
+
+    let game_id = game_of(&token, &character_id)?;
+
+    // A class named must be a class that exists - the same check
+    // creation makes, for the same reason: writing an unknown key
+    // produces a character whose die nothing can find.
+    let found = class::load_map(&token, &game_id, &[key.to_string()])?;
+    if !found.iter().any(|c| c.key == key) {
+        return Err(format!("no such class: {}", key));
+    }
+
+    // THE CEILING IS ON THE TOTAL, not on the class. Checked against
+    // what they hold now with this class's own levels taken back out,
+    // so raising a Fighter 15 to 16 is one more level rather than
+    // sixteen more - see multiclass::room_for.
+    let mut held = class::load_taken(&token, &game_id, &character_id)?;
+    if let Some(was) = replacing.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        held.retain(|t| t.key != was);
+    }
+    crate::multiclass::room_for(&held, key, level)?;
+
+    // THE SWAP IS A DELETE AND AN INSERT, not an update of the key.
+    // `added_at` is what decides the starting class and the tie for
+    // which class leads, and a character who was never a Fighter should
+    // not inherit the date they stopped being one.
+    if let Some(was) = replacing.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if was != key {
+            supabase::rest_delete(
+                &token,
+                "character_classes",
+                &[
+                    ("character_id", &format!("eq.{}", character_id)),
+                    ("class_key", &format!("eq.{}", was)),
+                ],
+            )?;
+        }
+    }
+
+    let written = supabase::rest_upsert(
+        &token,
+        "character_classes",
+        &json!({ "character_id": character_id, "class_key": key, "level": level }),
+        "character_id,class_key",
+    )?;
+    rederive_hp_max(&token, &character_id)?;
+    Ok(written)
+}
+
+/// Drop a class entirely.
+///
+/// A DELETE RATHER THAN A LEVEL OF ZERO, because zero levels in a class
+/// is not a thing a character is - see the column comment in 073. The
+/// trigger recomputes the total and promotes whatever leads now.
+///
+/// DROPPING THE LAST ONE LEAVES THEM CLASSLESS AT THE LEVEL THEY
+/// REACHED, which is the state every character made before 055 is in,
+/// and `rederive_hp_max` then has nothing to derive from and says so by
+/// writing nothing.
+#[tauri::command]
+pub fn remove_class(
+    state: State<AppState>,
+    character_id: String,
+    class_key: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_delete(
+        &token,
+        "character_classes",
+        &[
+            ("character_id", &format!("eq.{}", character_id)),
+            ("class_key", &format!("eq.{}", class_key.trim())),
+        ],
+    )?;
+    rederive_hp_max(&token, &character_id)?;
+    Ok(json!({ "ok": true }))
+}
+
+/// Which game a character belongs to. One column, by id.
+///
+/// NEEDED BECAUSE THE CATALOGUE IS TENANTED: a class key resolves
+/// against the global rows and this game's, and asking without the game
+/// would let one game's homebrew class be taken by another.
+fn game_of(token: &str, character_id: &str) -> Result<String, String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "game_id"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    rows.as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("game_id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "no such character".to_string())
 }

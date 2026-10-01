@@ -662,3 +662,10 @@ button.wide{width:100%}
   min-width: 10rem;
   font-size: 1.15rem;
 }
+
+/* 073. THE EXTRA CLASSES LINE UP UNDER THE FIRST ONE. Indented, so the
+   row that leads reads as the headline and the rest as what follows
+   from it rather than as four equal rows. */
+#class-extra .row { margin-left: 1.5rem; }
+#class-extra select { min-width: 9rem; }
+#class-lead { min-width: 9rem; }

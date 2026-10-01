@@ -602,3 +602,28 @@ button.wide{width:100%}
   font-weight: 600; cursor: default;
 }
 .abil-lock { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+
+/* ============ THE CHARACTERS TAB, FOLDED (068) ============ */
+
+/* A link rather than a button: making a character is rare and reading
+   one is constant, so the rare thing should not look like the main
+   action on the tab. */
+.linky {
+  background: none; border: none; padding: .15rem 0;
+  color: var(--accent, #6f9bd6); cursor: pointer;
+  font-size: .9em; text-align: left;
+}
+.linky:hover { text-decoration: underline; }
+
+/* The one line the list folds to. */
+.chosen {
+  display: flex; align-items: baseline; gap: .6rem;
+  padding: .3rem 0 .45rem;
+  border-bottom: 1px solid var(--line, #333);
+  margin-bottom: .4rem;
+}
+.chosen-name { font-weight: 600; font-size: 1.05em; }
+
+/* The name over the sheet, so what you are reading is never in doubt
+   once the list it came from is folded away. */
+#sheet-panel h2 { margin-bottom: .2rem; }

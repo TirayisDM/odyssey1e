@@ -287,18 +287,21 @@
             <button class="tab" data-chars="npcs">
               NPCs <span class="count" id="n-npcs"></span>
             </button>
-            <!-- 056. A READING tab, not an editing one. Species are
-                 authored in the database for now; what was missing is
-                 anywhere to SEE what a people gives you, which is half
-                 lore and half mechanics and belongs together. -->
-            <button class="tab" data-chars="species">
-              Species <span class="count" id="n-species"></span>
-            </button>
           </nav>
 
           <div class="chars-pane" data-chars="pcs">
+            <!-- 068. THE LIST FOLDS once somebody is picked. Reading a
+                 sheet and choosing whose sheet to read are different
+                 jobs, and the list only matters for the second. -->
+            <div id="pc-chosen" class="chosen" hidden></div>
             <ul id="pc-list" class="list"></ul>
-            <div class="sub">New character</div>
+
+            <!-- 068. A LINK, NOT A PERMANENT FORM. Making a character is
+                 rare and reading one is constant, so the form that does
+                 the rare thing should not be the tallest thing on the
+                 tab. -->
+            <button id="new-char-toggle" class="linky">+ New character</button>
+            <div id="new-char-panel" hidden>
             <input id="char-name" placeholder="character name" />
             <!-- 055. A class is where a character's hit die comes from,
                  so picking one here is what makes the character arrive
@@ -336,13 +339,7 @@
             <div id="stat-msg" class="dm-msg" hidden></div>
 
             <button id="create-char">Create character</button>
-          </div>
-
-          <div class="chars-pane" data-chars="species" hidden>
-            <div class="row">
-              <select id="species-pick"></select>
             </div>
-            <div id="species-view"></div>
           </div>
 
           <div class="chars-pane" data-chars="npcs" hidden>
@@ -408,7 +405,11 @@
              not the DM, so nesting the sheet inside it would have
              taken every player's own character sheet away. -->
       <section id="sheet-panel" hidden>
-        <h2>Sheet <span id="sheet-who" class="muted"></span></h2>
+        <!-- 068. THE NAME IS THE HEADING. It used to read "Sheet" with
+             the character muted beside it, which was fine while the
+             list above always said who you had picked - and the list
+             folds away now. -->
+        <h2><span id="sheet-name"></span> <span id="sheet-who" class="muted"></span></h2>
 
         <!-- 058. THE SHEET GETS SUBTABS. There will be half a dozen of
              them - combat, spells, background and the rest - and the
@@ -607,6 +608,18 @@
       <div class="pane" data-pane="world" hidden>
         <section id="world-panel" hidden>
           <h2>World <span id="world-who" class="muted"></span></h2>
+          <nav class="tabs mini" id="world-tabs">
+            <button class="tab on" data-world="world">World</button>
+            <!-- 068. SPECIES MOVED HERE from the Characters tab. A
+                 people is a fact about the WORLD rather than about any
+                 one character - the character's own copy is the
+                 Description subtab on their sheet. -->
+            <button class="tab" data-world="species">
+              Species <span class="count" id="n-species"></span>
+            </button>
+          </nav>
+
+          <div class="world-pane" data-world="world">
         <!-- The world. Depth is the whole hierarchy: a universe and a
              broom cupboard are the same kind of row, and the indent is
              computed rather than stored. -->
@@ -669,6 +682,17 @@
           <div class="scene-pane" data-scene="things" hidden>
             <ul id="scene-things" class="list"></ul>
           </div>
+        </div>
+        </div>
+
+        <!-- 068. The species viewer, moved whole from Characters.
+             Same ids, so loadSpecies and paintSpeciesView did not
+             have to learn where they now live. -->
+        <div class="world-pane" data-world="species" hidden>
+          <div class="row">
+            <select id="species-pick"></select>
+          </div>
+          <div id="species-view"></div>
         </div>
         </section>
       </div>

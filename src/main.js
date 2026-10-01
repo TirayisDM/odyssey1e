@@ -28,6 +28,11 @@ let state = {
   // 066. Whether the sheet's six ability boxes are open to editing.
   // False is the default and the point - see paintSheet.
   abilitiesOpen: false,
+  // 068. Whether the character list is showing. False once somebody is
+  // picked; "change" on the folded line puts it back.
+  listOpen: true,
+  // Everybody in this game, so the folded line can name one.
+  folk: [],
   user: null, gameId: null, characterId: null, sheet: null, rolls: [],
   games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
@@ -1039,8 +1044,12 @@ const ABILS = ["str", "dex", "con", "int", "wis", "cha"];
 
 async function selectCharacter(id) {
   state.characterId = id;
+  // 068. A fresh pick folds the list. Reopening it is one click and
+  // the choice survives, so this is a default rather than a trap.
+  state.listOpen = false;
   await loadCharacters();
   await loadSheet();
+  paintChosen();
 }
 
 async function loadSheet() {
@@ -1059,8 +1068,12 @@ async function loadSheet() {
   // the max only; current HP will be max less the damage events once
   // those exist, so there is deliberately nothing to show yet.
   const hp = sheet.vitals && sheet.vitals.hp_max ? " · HP " + sheet.vitals.hp_max : "";
+  // 068. The name carries the heading and the numbers trail it muted,
+  // because the list that used to say who you were reading now folds
+  // away the moment you pick somebody.
+  document.querySelector("#sheet-name").textContent = sheet.name;
   document.querySelector("#sheet-who").textContent =
-    sheet.name + " · level " + sheet.level + " · PB +" + pb +
+    "level " + sheet.level + " · PB +" + pb +
     " · AC " + sheet.armor_class + hp;
   document.querySelector("#level").value = sheet.level;
 
@@ -2272,8 +2285,12 @@ async function loadChars() {
     return;
   }
   const folk = roster.value || [];
+  // Kept so the folded line can name whoever is being read without
+  // asking again.
+  state.folk = folk;
   paintFolk("#pc-list", "#n-pcs", folk.filter((c) => !c.is_npc));
   paintFolk("#npc-list", "#n-npcs", folk.filter((c) => c.is_npc));
+  paintChosen();
 
   // The TYPES, which are a different table and a different idea from
   // the individuals above. 022 is the whole distinction.
@@ -2379,6 +2396,41 @@ function shopControl(c, onDone) {
 
 // One list painter for both sub-tabs. They differ by a filter, not by
 // shape, and two copies would drift the moment one gained a column.
+// WHO IS BEING READ, and a way back to the list. 068.
+//
+// Choosing whose sheet to read and reading it are different jobs, and
+// the list only matters for the first. Once somebody is picked it
+// folds to one line - the name, and a link that brings the list back.
+//
+// IT FOLDS THE LIST, IT DOES NOT CLEAR THE CHOICE. "Change" reopens
+// the list with the current character still selected, so backing out
+// of a mis-click costs nothing.
+function paintChosen() {
+  const line = document.querySelector("#pc-chosen");
+  const list = document.querySelector("#pc-list");
+  if (!line || !list) return;
+
+  const who = (state.folk || []).find((c) => c.id === state.characterId);
+  const folded = !!who && !state.listOpen;
+
+  list.hidden = folded;
+  const toggle = document.querySelector("#new-char-toggle");
+  if (toggle) toggle.hidden = folded;
+
+  line.hidden = !folded;
+  if (!folded) return;
+
+  line.innerHTML = "";
+  line.append(sEl("span", "chosen-name", who.token_name || who.name));
+  const back = sEl("button", "linky", "change");
+  back.title = "show the list again";
+  back.addEventListener("click", () => {
+    state.listOpen = true;
+    paintChosen();
+  });
+  line.append(back);
+}
+
 function paintFolk(listSel, countSel, folk) {
   const ul = document.querySelector(listSel);
   ul.innerHTML = "";
@@ -2408,11 +2460,17 @@ function paintFolk(listSel, countSel, folk) {
     // character, so the goblin opens in exactly the same screen.
     const open = document.createElement("button");
     open.className = "tiny ghost";
-    open.textContent = "open sheet";
+    open.textContent = "Sheet";
     open.addEventListener("click", async (ev) => {
       ev.stopPropagation();
       await selectCharacter(c.id);
-      showTab("play");
+      // 068. STAYS ON THIS TAB. The sheet moved to Characters in 067
+      // and this still sent the reader to Play, which is now a page
+      // with nothing but Rolls on it.
+      showTab("chars");
+      showSub("sheet-tabs", "sheet", "stats");
+      document.querySelector("#sheet-panel")
+        .scrollIntoView({ block: "start", behavior: "smooth" });
     });
     li.append(open);
 
@@ -5394,6 +5452,13 @@ window.addEventListener("DOMContentLoaded", async () => {
       statSay("");
       paintChargen();
       document.querySelector("#char-name").value = "";
+      // 068. AND THE FORM FOLDS AWAY. It opened for one job and the
+      // job is done; leaving it standing over the new character's
+      // sheet would be the clutter the link was meant to remove.
+      const panel = document.querySelector("#new-char-panel");
+      if (panel) panel.hidden = true;
+      const t = document.querySelector("#new-char-toggle");
+      if (t) t.textContent = "+ New character";
       await loadCharacters();
       if (id) {
         await selectCharacter(id);
@@ -5902,6 +5967,26 @@ window.addEventListener("DOMContentLoaded", async () => {
     msg.classList.toggle("bad", !r.ok);
     if (r.ok) await loadSheet();
   });
+
+  // 068. The creation form is behind a link now. It opens, and it
+  // closes again on its own once a character is made - see the create
+  // handler, which clears the pool for the same reason.
+  const newToggle = document.querySelector("#new-char-toggle");
+  if (newToggle) {
+    newToggle.addEventListener("click", () => {
+      const panel = document.querySelector("#new-char-panel");
+      panel.hidden = !panel.hidden;
+      newToggle.textContent = panel.hidden ? "+ New character" : "\u2212 close";
+      if (!panel.hidden) {
+        document.querySelector("#char-name").focus();
+      }
+    });
+  }
+
+  // 068. World gained a strip when Species moved onto it.
+  for (const b of document.querySelectorAll("#world-tabs .tab")) {
+    b.addEventListener("click", () => showSub("world-tabs", "world", b.dataset.world));
+  }
 
   for (const b of document.querySelectorAll("#chars-tabs .tab")) {
     b.addEventListener("click", () => showSub("chars-tabs", "chars", b.dataset.chars));

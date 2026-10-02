@@ -109,6 +109,30 @@ pub fn lead_first(taken: &[Taken]) -> Vec<Taken> {
     out
 }
 
+/// Which saving throws a character's classes grant them.
+///
+/// 078. THE FIRST CLASS GRANTS ALL OF ITS SAVES AND EVERY LATER CLASS
+/// GRANTS NONE. 5e is explicit about this and it is the most
+/// asymmetric rule in multiclassing - a Fighter 4 who takes a level of
+/// Bard keeps Strength and Constitution and gets neither Dexterity nor
+/// Charisma. The reason is that saving throw proficiency is the
+/// strongest thing a class hands out, and letting it accumulate would
+/// make a one-level dip the cheapest defence in the game.
+///
+/// THE ORDER IS THE ORDER TAKEN, which is `character_classes.added_at`
+/// and the same slice `hp` reads for the same reason: the starting
+/// class is a fact about a career rather than about a moment.
+///
+/// GRANTED, NOT THE WHOLE TRUTH. What this returns is what the CLASS
+/// gives. A species or a feat may add others, and a DM may tick one by
+/// hand - so the caller turns these on and never turns anything off.
+pub fn saves_granted(by_class: &[(String, Vec<String>)]) -> Vec<String> {
+    by_class
+        .first()
+        .map(|(_, saves)| saves.clone())
+        .unwrap_or_default()
+}
+
 /// Maximum hit points across every class held.
 ///
 /// THE FULL DIE IS PAID ONCE, by the starting class - `taken[0]`, which
@@ -192,6 +216,60 @@ mod tests {
 
     fn t(key: &str, level: i64, die: i64) -> Taken {
         Taken { key: key.into(), level, hit_die: die }
+    }
+
+    /* ---------- saving throws, 078 ---------- */
+
+    fn saves(pairs: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
+            .collect()
+    }
+
+    #[test]
+    fn one_class_grants_its_own_saves() {
+        let held = saves(&[("fighter", &["str", "con"])]);
+        assert_eq!(saves_granted(&held), vec!["str", "con"]);
+    }
+
+    #[test]
+    fn a_class_taken_later_grants_none_of_its_saves() {
+        // Falon: Fighter 4, then one level of Bard. He keeps Strength
+        // and Constitution and gets neither Dexterity nor Charisma -
+        // which is what stops a one-level dip being the cheapest
+        // defence in the game.
+        let held = saves(&[("fighter", &["str", "con"]), ("bard", &["dex", "cha"])]);
+        assert_eq!(saves_granted(&held), vec!["str", "con"]);
+    }
+
+    #[test]
+    fn which_class_was_started_is_what_decides() {
+        // The same two classes, the other way round.
+        let held = saves(&[("bard", &["dex", "cha"]), ("fighter", &["str", "con"])]);
+        assert_eq!(saves_granted(&held), vec!["dex", "cha"]);
+    }
+
+    #[test]
+    fn it_is_not_the_leading_class_that_grants_them() {
+        // Bard 1 / Fighter 9 LEADS as a fighter - `primary` says so -
+        // and still saves as a bard, because they started as one. The
+        // two questions have the same shape and different answers.
+        let held = saves(&[("bard", &["dex", "cha"]), ("fighter", &["str", "con"])]);
+        let as_taken = [t("bard", 1, 8), t("fighter", 9, 10)];
+        assert_eq!(primary(&as_taken).map(|p| p.key.as_str()), Some("fighter"));
+        assert_eq!(saves_granted(&held), vec!["dex", "cha"]);
+    }
+
+    #[test]
+    fn no_class_grants_nothing() {
+        assert!(saves_granted(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_class_with_no_saves_listed_grants_none() {
+        let held = saves(&[("wanderer", &[])]);
+        assert!(saves_granted(&held).is_empty());
     }
 
     /* ---------- the total ---------- */

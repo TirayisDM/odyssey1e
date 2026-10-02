@@ -257,6 +257,12 @@ pub fn create_character(
         )?;
     }
 
+    // 078. AND THE SAVES THAT CLASS GRANTS. Best effort for the same
+    // reason the skills below are: a save proficiency that fails to
+    // write is worth less than refusing to make the character, and the
+    // sheet shows it missing.
+    let _ = apply_class_saves(token, id);
+
     // A SPECIES WITHOUT A CLASS IS STILL A SPECIES. The skills below are
     // granted either way; only the hit points need a die, so that is
     // what the class guard covers.
@@ -588,6 +594,72 @@ pub(crate) fn rederive_hp_max(token: &str, character_id: &str) -> Result<Option<
     Ok(Some(hp))
 }
 
+/// Turn on the saving throw proficiencies this character's STARTING
+/// class grants.
+///
+/// 078. `classes.saving_throws` has existed since 055, is parsed into
+/// `Class`, and is printed on the creation form's class picker - and
+/// nothing has ever written it to a character. Every character in the
+/// game has been rolling saves short by their proficiency bonus with
+/// nothing on screen to explain it. The same shape as `price_override`,
+/// which 049 added and nothing applied until 070: a column that exists
+/// to serve a rule, and the rule never asks.
+///
+/// ADDITIVE, AND THAT IS DELIBERATE. This turns proficiencies ON and
+/// never off. A species or a feat may grant a save this does not know
+/// about and a DM may tick one by hand, and a re-derivation that
+/// cleared the others would quietly undo both. The cost is that
+/// swapping a starting class leaves the old class's saves behind, which
+/// is a tick to undo rather than a wrong answer nobody can see.
+///
+/// SILENT WHEN THERE IS NOTHING TO GRANT, like `rederive_hp_max`: a
+/// classless character and a monster both pass through writing nothing.
+pub(crate) fn apply_class_saves(token: &str, character_id: &str) -> Result<Vec<String>, String> {
+    let game_id = game_of(token, character_id)?;
+    let taken = class::load_taken(token, &game_id, character_id)?;
+    if taken.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let catalogue = class::load_map(
+        token,
+        &game_id,
+        &taken.iter().map(|t| t.key.clone()).collect::<Vec<_>>(),
+    )?;
+    // IN THE ORDER TAKEN, because the rule reads the first of them and
+    // `load_taken` is already ordered by `added_at`. A class the
+    // catalogue cannot find keeps its place with no saves rather than
+    // being dropped, which would promote the class behind it into a
+    // starting class it never was.
+    let by_class: Vec<(String, Vec<String>)> = taken
+        .iter()
+        .map(|t| {
+            let saves = catalogue
+                .iter()
+                .find(|c| c.key == t.key)
+                .map(|c| c.saving_throws.clone())
+                .unwrap_or_default();
+            (t.key.clone(), saves)
+        })
+        .collect();
+
+    let granted = crate::multiclass::saves_granted(&by_class);
+    if granted.is_empty() {
+        return Ok(granted);
+    }
+
+    supabase::rest_update(
+        token,
+        "character_abilities",
+        &[
+            ("character_id", &format!("eq.{}", character_id)),
+            ("ability", &format!("in.({})", granted.join(","))),
+        ],
+        &json!({ "save_prof": true }),
+    )?;
+    Ok(granted)
+}
+
 /* ======================== WHAT THEY ARE ======================== */
 
 /// Put a character at `level` in `class_key`, adding the class if they
@@ -667,6 +739,11 @@ pub fn set_class_level(
         "character_id,class_key",
     )?;
     rederive_hp_max(&token, &character_id)?;
+    // 078. A character who had NO class and now has one has just
+    // acquired a starting class, and with it their saves. One who
+    // already had a starting class gains nothing here, because
+    // `saves_granted` reads the first row and this is not it.
+    apply_class_saves(&token, &character_id)?;
     Ok(written)
 }
 

@@ -701,7 +701,21 @@ button.wide{width:100%}
 /* WIDER THAN IT WAS. The modifier used to be a bare "+3" in 2rem;
    it now carries the word Mod and clipped at the old width. */
 .abil .mod{width:auto;min-width:3.6rem;text-align:left;margin-left:.35rem}
-.abil-fas{color:var(--muted);font:600 12px ui-monospace,Menlo,monospace}
+/* 083. THE SCORE AND THE SCORE THAT COUNTS.
+   The slash is structure - bold and white, the same weight as a score.
+   The final number is coloured by which way it moved, green up and red
+   down, off the same .up/.down classes the modifier and the source
+   chips use. */
+.abil-fas{display:inline-flex;align-items:baseline;gap:.3rem;
+          font:12px ui-monospace,Menlo,monospace}
+.abil-slash{color:var(--fg);font-weight:700}
+.abil-final{font-weight:700;font-size:14px}
+
+/* THE BASE GIVES UP ITS WEIGHT when a final score sits beside it. Two
+   bold numbers in a row would make the reader pick, and the one that
+   matters is the one every roll uses. */
+.abil input[type=number]{font-weight:700}
+.abil input[type=number].outranked{font-weight:400;color:var(--muted)}
 .abil-sources{display:inline-flex;gap:.35rem;flex-wrap:wrap;margin-left:.35rem}
 .abil-source{font:11px ui-monospace,Menlo,monospace;white-space:nowrap}
 

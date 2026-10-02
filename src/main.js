@@ -1266,11 +1266,22 @@ async function loadSheet() {
     // every roll actually uses, or "15" sitting beside a +3 reads as
     // broken arithmetic. Identical scores show once - a slash with the
     // same number on both sides is noise.
+    //
+    // 083. THREE PIECES, THREE WEIGHTS. The slash is structure and
+    // stays bold white like a score; the final number is coloured by
+    // which way it moved; and the BASE stops being bold when there is
+    // a final score beside it, because the bold one should be the
+    // number every roll actually uses.
     let fas = null;
-    if (a.score !== (a.base ?? a.score)) {
-      fas = sEl("span", "abil-fas", "/ " + a.score);
+    const base = a.base ?? a.score;
+    if (a.score !== base) {
+      fas = sEl("span", "abil-fas");
+      fas.append(sEl("span", "abil-slash", "/"));
+      fas.append(sEl("span", "abil-final " + signClass(a.score - base), String(a.score)));
       fas.title = "final ability score - what every roll uses";
     }
+    // Bold unless something below it is bolder.
+    num.classList.toggle("outranked", !!fas);
 
     const m = document.createElement("span");
     // GREEN UP, RED DOWN, on the modifier and on every source behind

@@ -31,6 +31,7 @@ mod death;
 mod dice;
 mod encounter;
 mod equipment;
+mod features;
 mod generation;
 mod holders;
 mod initiative;
@@ -1253,6 +1254,8 @@ pub fn run() {
             commands::characters::rename_character,
             commands::characters::set_class_level,
             commands::characters::remove_class,
+            commands::features::list_features,
+            commands::features::choose_feature,
             commands::perform::list_audiences,
             commands::perform::perform,
             // 055: what a character can BE, and therefore which

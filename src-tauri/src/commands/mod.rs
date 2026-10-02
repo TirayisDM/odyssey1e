@@ -80,6 +80,7 @@ use tauri::State;
 pub mod characters;
 pub mod containers;
 pub mod dm;
+pub mod features;
 pub mod initiative;
 pub mod inventory;
 pub mod log;

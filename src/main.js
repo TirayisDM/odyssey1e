@@ -1386,6 +1386,7 @@ async function loadSheet() {
 
   await updatePreview();
   await loadInventory();
+  await loadFeatures();
 }
 
 // The equipment panel.
@@ -3008,6 +3009,108 @@ async function afterClassChange() {
 //
 // HIDDEN WITHOUT KARMA. `sheet.karma` is None for every class but the
 // bard, so a fighter never sees this at all.
+// WHAT YOUR CLASSES HAVE GIVEN YOU. 087.
+//
+// Derived in Rust from the class rows and the catalogue - nothing here
+// decides what a character has, which is why a level change needs no
+// granting step and dropping one takes its features with it.
+//
+// TWO LISTS FROM ONE READ. The decisions still waiting go at the top
+// because they are the only part of levelling that needs a person;
+// everything a class gives is below, as a record.
+async function loadFeatures() {
+  const host = document.querySelector("#feat-list");
+  const owedHost = document.querySelector("#feat-owed");
+  const owedBlock = document.querySelector("#feat-owed-block");
+  if (!host) return;
+  host.innerHTML = "";
+  owedHost.innerHTML = "";
+  owedBlock.hidden = true;
+  if (!state.characterId) return;
+
+  const got = await call("list_features", { characterId: state.characterId });
+  if (!got) return;
+  const rows = got.features || [];
+
+  // WHAT IS WAITING IS RUST'S COUNT, not a filter repeated here - a
+  // second place that knows what "waiting" means is a second place
+  // that can be wrong about it.
+  owedBlock.hidden = !got.waiting;
+  document.querySelector("#feat-owed-head").textContent =
+    "Decisions waiting · " + got.waiting;
+  for (const f of rows) {
+    if (f.owed > 0) owedHost.append(featureRow(f, true));
+    host.append(featureRow(f, false));
+  }
+}
+
+function featureRow(f, asking) {
+  const row = sEl("div", "feat-row");
+  row.append(sEl("span", "feat-when", className(f.class_key) + " " + f.level));
+  row.append(sEl("span", "feat-name", f.name));
+  if (f.text && !asking) row.append(sEl("span", "feat-text", f.text));
+
+  // WHAT WAS CHOSEN, named rather than keyed. A sheet saying "str" has
+  // made the reader do the lookup.
+  if ((f.chosen || []).length) {
+    row.append(sEl("span", "feat-chosen",
+      f.chosen.map((c) => optionName(f, c)).join(" \u00b7 ")));
+  }
+
+  // ONE PICKER PER OUTSTANDING PICK. An Ability Score Improvement is
+  // two separate +1s and they may land on different abilities, so two
+  // undecided picks are two dropdowns rather than one that has to be
+  // used twice.
+  if (asking && f.owed > 0) {
+    const next = (f.chosen || []).length + 1;
+    for (let i = 0; i < f.owed; i++) {
+      const sel = document.createElement("select");
+      sel.className = "feat-pick";
+      sel.append(new Option("choose\u2026", ""));
+      for (const o of f.options || []) sel.append(new Option(o.name, o.key));
+      sel.addEventListener("change", async () => {
+        if (!sel.value) return;
+        const r = await tryCall("choose_feature", {
+          characterId: state.characterId,
+          classKey: f.class_key,
+          featureKey: f.key,
+          pick: next + i,
+          choice: sel.value,
+        });
+        if (!r.ok) { log("choose_feature", r.error, true); sel.value = ""; return; }
+        // THE WHOLE SHEET, not just this list. An Ability Score
+        // Improvement moves a score, an Expertise doubles a skill
+        // bonus - both show somewhere else on the sheet, and
+        // repainting only the row that was clicked would leave the
+        // rest of it stale.
+        await loadSheet();
+      });
+      row.append(sel);
+    }
+  } else if (f.owed > 0) {
+    row.append(sEl("span", "feat-owed", f.owed + " to choose"));
+  }
+  return row;
+}
+
+function className(key) {
+  const c = (state.classes || []).find((x) => x.key === key);
+  return c ? c.name : key;
+}
+
+// A chosen key as a word. The options list only comes back for what is
+// still owed, so a decided feature has to be read against the
+// catalogues the sheet already holds.
+function optionName(f, key) {
+  if (f.choose_from === "ability") return key.toUpperCase();
+  if (f.choose_from === "skill") {
+    const s = ((state.sheet && state.sheet.skills) || []).find((x) => x.key === key);
+    return s ? s.name : key;
+  }
+  const o = (f.options || []).find((x) => x.key === key);
+  return o ? o.name : key.replace(/_/g, " ");
+}
+
 function paintPerform(sheet) {
   const block = document.querySelector("#perform-block");
   const k = sheet.karma;

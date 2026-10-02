@@ -759,3 +759,17 @@ button.wide{width:100%}
 .item-slot{font-size:11px;margin:0;padding:.1rem .25rem;width:auto;
            background:#0f1114;color:var(--fg);border:1px solid var(--line);
            border-radius:3px}
+
+/* 087. CLASS FEATURES. A line each: where it came from, what it is,
+   and what was chosen if anything was. */
+.feat-row{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;
+          padding:.3rem 0;border-bottom:1px solid var(--line)}
+.feat-when{font:11px ui-monospace,Menlo,monospace;color:var(--muted);
+           min-width:5.5rem}
+.feat-name{font-weight:600}
+.feat-text{font-size:12px;color:var(--muted);flex:1 1 18rem}
+.feat-chosen{font-size:11px;color:var(--ok)}
+.feat-owed{font-size:11px;color:var(--accent)}
+.feat-pick{font-size:11px;margin:0;padding:.1rem .25rem;width:auto;
+           background:#0f1114;color:var(--fg);border:1px solid var(--line);
+           border-radius:3px}

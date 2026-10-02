@@ -105,8 +105,16 @@ pub fn is_hand(key: &str) -> bool {
 /// sword somewhere that does not exist.
 pub fn admits(slot: &str, item: &Item) -> bool {
     match slot {
-        // A hand takes anything. How many is carry::hands_for.
-        "right_hand" | "left_hand" => true,
+        // A hand takes anything you HOLD. How many is carry::hands_for.
+        //
+        // NOT SOMETHING THAT IS WORN. A ring in the right hand was
+        // counted against the one thing a hand holds, so putting one on
+        // reported "Right hand holds 1 and that is 2: Battleaxe, Ring"
+        // - an error about the axe, for a ring, naming a slot the
+        // player was not thinking about. Anything with a `worn_slot`
+        // has a place of its own and belongs in it; refusing it here
+        // means the message says so and points at that place.
+        "right_hand" | "left_hand" => worn_as(item).is_none(),
         // Tiny and small, which is the sheaths, pouches, potions,
         // wands, rods and daggers of the instruction, without naming
         // any of them.
@@ -234,11 +242,43 @@ mod tests {
     /* ---------- what goes where ---------- */
 
     #[test]
-    fn a_hand_takes_anything() {
+    fn a_hand_takes_anything_you_hold() {
         // Not laziness: a character can pick up a chest, a lantern or
         // a suit of armour. How MANY is the hands budget.
         assert!(admits("right_hand", &item("Treasure Chest", "container", "lg")));
         assert!(admits("left_hand", &weapon("Greatsword", &["two"])));
+    }
+
+    #[test]
+    fn a_ring_does_not_take_up_a_hand() {
+        // The bug, by name. A ring in the right hand was counted
+        // against the one thing a hand holds, so putting one on read
+        // "Right hand holds 1 and that is 2: Battleaxe, Ring" - an
+        // error about an axe, for a ring, naming a slot nobody was
+        // thinking about. Rings have fingers of their own.
+        let ring = worn("Ring of Protection", "ring");
+        assert!(!admits("right_hand", &ring));
+        assert!(!admits("left_hand", &ring));
+        assert!(admits("ring_right", &ring));
+    }
+
+    #[test]
+    fn nor_does_an_amulet_or_a_helm() {
+        assert!(!admits("right_hand", &worn("Amulet of Health", "amulet")));
+        assert!(!admits("left_hand", &worn("Helm", "head")));
+    }
+
+    #[test]
+    fn a_hand_full_of_rings_still_leaves_the_hand_free() {
+        // The whole point: ten rings and a greatsword is a legal
+        // character, because the rings are not in the hands at all.
+        let ring = worn("Ring of Protection", "ring");
+        let great = weapon("Greatsword", &["two"]);
+        let mut p = placed(&[("right_hand", &great)]);
+        for _ in 0..10 {
+            p.push(Placed { slot: "ring_left".into(), item: &ring });
+        }
+        assert!(check(&p).is_ok());
     }
 
     #[test]

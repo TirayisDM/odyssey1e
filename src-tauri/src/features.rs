@@ -110,6 +110,47 @@ pub fn held(classes: &[Taken], catalogue: &[Feature], choices: &[Choice]) -> Vec
     out
 }
 
+/// What the chosen features add to ability scores, named.
+///
+/// 091. An Ability Score Improvement was recorded and applied to
+/// nothing. The choice went into `character_choices`, the sheet listed
+/// it as decided, and the score did not move - the same shape as
+/// `saving_throws`, which 055 stored and 078 finally read, and
+/// `price_override`, which 049 added and 070 finally applied. A feature
+/// that records a decision and changes no number is half a feature.
+///
+/// ONE SOURCE PER FEATURE PER ABILITY. Two picks into Strength read as
+/// "Ability Score Improvement +2" rather than two +1s, because that is
+/// one decision; two picks split across Strength and Dexterity are two
+/// sources of +1, because they are two.
+///
+/// READ OFF `held`, WHICH IS THE POINT. A character who drops the level
+/// that granted an ASI no longer holds that feature, so the bump
+/// vanishes with it and nothing has to be undone - the same property
+/// that makes features derived rather than granted.
+///
+/// Returns (ability code, source name, value), ordered by ability so
+/// a sheet gets the same answer twice.
+pub fn ability_sources(held: &[Held]) -> Vec<(String, String, i64)> {
+    let mut out: Vec<(String, String, i64)> = Vec::new();
+    for h in held {
+        if h.feature.choose_from.as_deref() != Some("ability") {
+            continue;
+        }
+        for code in &h.chosen {
+            match out
+                .iter_mut()
+                .find(|(a, n, _)| a == code && *n == h.feature.name)
+            {
+                Some(found) => found.2 += 1,
+                None => out.push((code.clone(), h.feature.name.clone(), 1)),
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    out
+}
+
 /// The features still waiting on a decision.
 ///
 /// WHAT A LEVEL-UP ACTUALLY ASKS OF SOMEBODY. Everything else about
@@ -138,6 +179,109 @@ pub fn may_choose(h: &Held) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/* ============================ READING ============================ */
+
+/// Every character's ability sources, for a whole roster at once.
+///
+/// 091. TWO REQUESTS FOR ANY NUMBER OF CHARACTERS, which is why this
+/// takes a list rather than being called per person: `load_effective`
+/// reads a target list or an initiative order, and one round trip per
+/// combatant would be a real cost on a screen that already asks for
+/// four things.
+///
+/// EMPTY FOR THE CLASSLESS, and that is every monster - so the usual
+/// case costs nothing but the early return.
+pub fn load_ability_sources(
+    token: &str,
+    game_id: &str,
+    per_character: &[(String, Vec<crate::multiclass::Taken>)],
+) -> Result<std::collections::HashMap<String, Vec<(String, String, i64)>>, String> {
+    use std::collections::HashMap;
+
+    let ids: Vec<String> = per_character
+        .iter()
+        .filter(|(_, cs)| !cs.is_empty())
+        .map(|(id, _)| id.clone())
+        .collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let keys: Vec<String> = per_character
+        .iter()
+        .flat_map(|(_, cs)| cs.iter().map(|t| t.key.clone()))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // ONLY THE FEATURES THAT CAN MOVE A SCORE. Every other row in the
+    // catalogue is irrelevant here, and the filter is the difference
+    // between two rows per class and twenty.
+    let rows = crate::supabase::rest_get(
+        token,
+        "class_features",
+        &[
+            ("select", "class_key,level,key,name,text,choose_from,picks"),
+            ("class_key", &format!("in.({})", keys.join(","))),
+            ("choose_from", "eq.ability"),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    )?;
+    let catalogue: Vec<Feature> = rows
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(feature_from_row)
+        .collect();
+
+    let rows = crate::supabase::rest_get(
+        token,
+        "character_choices",
+        &[
+            ("select", "character_id,class_key,feature_key,pick,choice"),
+            ("character_id", &format!("in.({})", ids.join(","))),
+        ],
+    )?;
+    let mut mine: HashMap<String, Vec<Choice>> = HashMap::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(cid) = r.get("character_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        mine.entry(cid.to_string()).or_default().push(Choice {
+            class_key: as_str(r, "class_key"),
+            feature_key: as_str(r, "feature_key"),
+            pick: r.get("pick").and_then(|v| v.as_i64()).unwrap_or(1),
+            choice: as_str(r, "choice"),
+        });
+    }
+
+    let mut out = HashMap::new();
+    for (id, classes) in per_character {
+        let empty = Vec::new();
+        let chosen = mine.get(id).unwrap_or(&empty);
+        let got = ability_sources(&held(classes, &catalogue, chosen));
+        if !got.is_empty() {
+            out.insert(id.clone(), got);
+        }
+    }
+    Ok(out)
+}
+
+pub fn feature_from_row(r: &serde_json::Value) -> Feature {
+    Feature {
+        class_key: as_str(r, "class_key"),
+        level: r.get("level").and_then(|v| v.as_i64()).unwrap_or(1),
+        key: as_str(r, "key"),
+        name: as_str(r, "name"),
+        text: r.get("text").and_then(|v| v.as_str()).map(str::to_string),
+        choose_from: r.get("choose_from").and_then(|v| v.as_str()).map(str::to_string),
+        picks: r.get("picks").and_then(|v| v.as_i64()).unwrap_or(1),
+    }
+}
+
+fn as_str(r: &serde_json::Value, key: &str) -> String {
+    r.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
 }
 
 /* ============================ TESTS ============================ */
@@ -339,6 +483,67 @@ mod tests {
         let owed = outstanding(&got);
         let names: Vec<&str> = owed.iter().map(|h| h.feature.name.as_str()).collect();
         assert_eq!(names, vec!["Fighting Style", "Ability Score Improvement"]);
+    }
+
+    /* ---------- what a choice adds to a score ---------- */
+
+    #[test]
+    fn an_ability_improvement_raises_what_was_chosen() {
+        // Falon's Fighter 4: one point into Strength, one into
+        // Dexterity. Recorded since 087 and applied to nothing until
+        // this existed.
+        let got = held(
+            &[t("fighter", 4)],
+            &fighter_catalogue(),
+            &[chose("fighter", "asi_4", 1, "str"), chose("fighter", "asi_4", 2, "dex")],
+        );
+        assert_eq!(
+            ability_sources(&got),
+            vec![
+                ("dex".to_string(), "Ability Score Improvement".to_string(), 1),
+                ("str".to_string(), "Ability Score Improvement".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn both_picks_into_one_ability_are_one_source_of_two() {
+        // One decision, so one line on the sheet - "+2" rather than
+        // two "+1"s a reader has to add up.
+        let got = held(
+            &[t("fighter", 4)],
+            &fighter_catalogue(),
+            &[chose("fighter", "asi_4", 1, "str"), chose("fighter", "asi_4", 2, "str")],
+        );
+        assert_eq!(
+            ability_sources(&got),
+            vec![("str".to_string(), "Ability Score Improvement".to_string(), 2)]
+        );
+    }
+
+    #[test]
+    fn an_undecided_improvement_adds_nothing() {
+        let got = held(&[t("fighter", 4)], &fighter_catalogue(), &[]);
+        assert!(ability_sources(&got).is_empty());
+    }
+
+    #[test]
+    fn a_choice_that_is_not_an_ability_adds_nothing() {
+        let got = held(
+            &[t("fighter", 1)],
+            &fighter_catalogue(),
+            &[chose("fighter", "fighting_style", 1, "defense")],
+        );
+        assert!(ability_sources(&got).is_empty());
+    }
+
+    #[test]
+    fn dropping_the_level_takes_the_bump_with_it() {
+        // The property that makes derived features worth the trouble.
+        // The choice rows are still there and simply unread.
+        let picks = [chose("fighter", "asi_4", 1, "str"), chose("fighter", "asi_4", 2, "dex")];
+        assert_eq!(ability_sources(&held(&[t("fighter", 4)], &fighter_catalogue(), &picks)).len(), 2);
+        assert!(ability_sources(&held(&[t("fighter", 3)], &fighter_catalogue(), &picks)).is_empty());
     }
 
     /* ---------- whether a choice may be made ---------- */

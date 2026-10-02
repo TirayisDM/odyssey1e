@@ -169,7 +169,7 @@ pub fn choose_feature(
         return Err(format!("{} has {} to choose", h.feature.name, h.feature.picks));
     }
 
-    supabase::rest_insert(
+    let written = supabase::rest_insert(
         &token,
         "character_choices",
         &json!({
@@ -179,7 +179,20 @@ pub fn choose_feature(
             "pick": pick,
             "choice": want,
         }),
-    )
+    )?;
+
+    // 091. AND THE HIT POINTS, when the choice was Constitution. An
+    // Ability Score Improvement into CON is worth a point per level and
+    // `hp_max` is stored, so it has to be told. Only for an ability
+    // choice - a fighting style moves no number this knows about.
+    //
+    // The same ripple `set_level` and `set_class_level` already do, and
+    // for the reason 029 gave: a maximum nothing recomputes is a
+    // maximum that goes stale the first time anything under it moves.
+    if h.feature.choose_from.as_deref() == Some("ability") {
+        crate::commands::characters::rederive_hp_max(&token, &character_id)?;
+    }
+    Ok(written)
 }
 
 /// The catalogue rows for the classes this character holds.

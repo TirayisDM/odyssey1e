@@ -44,11 +44,14 @@ pub struct Ability {
     /// The species' contribution, for a sheet that wants to show its
     /// working. Zero when there is no species or none for this ability.
     ///
-    /// KEPT ALONGSIDE `sources` RATHER THAN REPLACED BY IT. Several
-    /// callers read this one number and none of them wants a list; the
-    /// list is for the screen that shows the working. When a second
-    /// kind of source exists this becomes the sum of them and the
-    /// comment above becomes a lie, so it is the thing to revisit.
+    /// EVERY SOURCE'S TOTAL, as of 091 - it was the species' alone,
+    /// and the comment here said that when a second kind arrived this
+    /// would have to become the sum. It has: an Ability Score
+    /// Improvement is the second kind.
+    ///
+    /// KEPT ALONGSIDE `sources` because several callers read one number
+    /// and none of them wants a list; the list is for the screen that
+    /// shows the working.
     pub bonus: i64,
     /// WHERE THE BONUS CAME FROM, named. 080.
     ///
@@ -984,6 +987,33 @@ pub(crate) fn load_effective(
         }
     }
 
+    // 091. WHAT THEY CHOSE, FOR EVERYONE AT ONCE. The sheet applies
+    // Ability Score Improvements and so must this - otherwise the
+    // target list, the initiative roll and the hit-point rederivation
+    // would all read a Strength the sheet disagrees with, which is
+    // exactly the fault 056's one-loader note was written about.
+    let per_character: Vec<(String, Vec<crate::multiclass::Taken>)> = classed
+        .iter()
+        .map(|(cid, held)| {
+            (
+                cid.clone(),
+                held.iter()
+                    .map(|(key, level)| crate::multiclass::Taken {
+                        key: key.clone(),
+                        level: *level,
+                        // UNREAD HERE. `features::held` compares levels
+                        // and never asks what a class rolls for hit
+                        // points, and inventing a die to fill a field
+                        // would be the lie this codebase keeps warning
+                        // about.
+                        hit_die: 0,
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    let bumps = crate::features::load_ability_sources(token, game_id, &per_character)?;
+
     let mut peoples: HashMap<String, crate::species::Species> = HashMap::new();
     for (cid, key) in &key_of {
         let Some(sp) = catalogue.get(key) else {
@@ -993,6 +1023,18 @@ pub(crate) fn load_effective(
             apply_species(abilities, sp);
         }
         peoples.insert(cid.clone(), sp.clone());
+    }
+
+    // 091. AFTER THE SPECIES AND OVER EVERYBODY, exactly as load_sheet
+    // does it in the same order. A SEPARATE LOOP because the species
+    // loop walks only characters who HAVE a species - a classed
+    // character with none would have had their Ability Score
+    // Improvement silently dropped, which is the quiet half-application
+    // this whole change exists to end.
+    for (cid, mine) in &bumps {
+        if let Some(abilities) = scores.get_mut(cid) {
+            apply_bumps(abilities, mine, peoples.get(cid));
+        }
     }
 
     Ok(Effective { scores, peoples, attacks })
@@ -1041,6 +1083,40 @@ pub(crate) fn apply_species(
         // an unattributed "+2" the reader has to take on faith.
         a.sources.push(AbilitySource { name: sp.name.clone(), value: bonus });
         a.score = crate::species::effective_score(a.base, bonus, sp.maximum_for(code));
+    }
+}
+
+/// Add what the chosen class features give, named.
+///
+/// 091. AFTER THE SPECIES AND NEVER INSTEAD OF IT. A character has both
+/// - Falon is an Unt'garoth with a Fighter's Ability Score Improvement
+/// - and the point of `sources` is that each says where it came from
+/// rather than arriving as one unexplained number.
+///
+/// THE CEILING IS THE SPECIES' OR TWENTY. 5e caps an improvement at 20
+/// and a species that states a higher maximum raises it - the
+/// Unt'garoth's Strength goes to 21. `effective_score` already applies
+/// the species' own maximum; this applies the same ceiling to what the
+/// improvements add, so the two cannot disagree about where a score
+/// stops.
+pub(crate) fn apply_bumps(
+    abilities: &mut HashMap<String, Ability>,
+    bumps: &[(String, String, i64)],
+    species: Option<&crate::species::Species>,
+) {
+    for (code, name, value) in bumps {
+        let Some(a) = abilities.get_mut(code) else {
+            continue;
+        };
+        // `maximum_for` already falls back to 20, so a character with
+        // no species gets the same ceiling without a second default
+        // written here.
+        let ceiling = species
+            .map(|sp| sp.maximum_for(code))
+            .unwrap_or(crate::species::DEFAULT_MAXIMUM);
+        a.score = (a.score + value).min(ceiling);
+        a.bonus = a.score - a.base;
+        a.sources.push(AbilitySource { name: name.clone(), value: *value });
     }
 }
 
@@ -1157,17 +1233,11 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // BEFORE THE LOADOUT AND BEFORE AC, because it moves the scores
     // both of those read. Applied straight onto the abilities map, so
     // every modifier downstream carries it without knowing why.
-    let species = match profile.species_key.as_deref() {
-        Some(key) => load_species(token, &game_id, key)?,
-        None => None,
-    };
-    if let Some(sp) = &species {
-        apply_species(&mut abilities, sp);
-    }
-
-    // 073. One request, and skipped entirely for anybody with no class
-    // rows - see class::load_taken, which returns early on an empty
-    // read rather than asking the catalogue about nothing.
+    // READ BEFORE THE ABILITIES ARE FINISHED (091). An Ability
+    // Score Improvement moves a score, and the armour class and the
+    // loadout below both read one - so the classes have to be known
+    // before `apply_bumps`, not after.
+    //
     // LEAD FIRST, so the screen does not have to decide which class
     // that is. `load_taken` returns them in the order they were TAKEN,
     // which is what the hit-point rule reads; what a sheet shows first
@@ -1177,6 +1247,28 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         &crate::class::load_taken(token, &game_id, character_id)?,
     );
 
+    let species = match profile.species_key.as_deref() {
+        Some(key) => load_species(token, &game_id, key)?,
+        None => None,
+    };
+    if let Some(sp) = &species {
+        apply_species(&mut abilities, sp);
+    }
+    // 091. AND WHAT THEY CHOSE. An Ability Score Improvement was
+    // recorded by 087 and applied to nothing until this line; a feature
+    // that stores a decision and moves no number is half a feature.
+    let bumps = crate::features::load_ability_sources(
+        token,
+        &game_id,
+        &[(character_id.to_string(), classes.clone())],
+    )?;
+    if let Some(mine) = bumps.get(character_id) {
+        apply_bumps(&mut abilities, mine, species.as_ref());
+    }
+
+    // 073. One request, and skipped entirely for anybody with no class
+    // rows - see class::load_taken, which returns early on an empty
+    // read rather than asking the catalogue about nothing.
     // 076. The catalogue for whatever classes they hold, so Karma can
     // ask which skills this class sums. Costs nothing for the
     // classless - `load_map` returns early on an empty key list, which

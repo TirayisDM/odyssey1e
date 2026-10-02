@@ -476,6 +476,8 @@ and not after.
     traits written down that nothing can apply yet
 097 the Ny'ook live in the moment - the fourth, DEX +2 CHA +2, Small,
     Acrobatics granted, and the first LOWERED ability ceiling: STR 13
+098 a people can be hard to enchant - species.spell_save_bonus, and
+    `wis save vs spell` as a request the engine understands
 
 (066-070, 072, 079-083, 090 and 091 are code-only changesets with no
 migration - the numbering is continuous across both, which is why
@@ -2492,12 +2494,20 @@ Athletics granted.
     with a name and six defaults is worse than no row, because it is
     pickable and gives a character nothing. The Fjell'gar landed in
     096 and the Ny'ook in 097.
-  - A SOURCE THAT CONTRADICTS ITSELF IS RECORDED, NOT RESOLVED. The
-    Ny'ook document says "+2 on saving throws" twice and "advantage"
-    once for the same trait. Neither is seeded as applied - nothing
-    can act on either yet - and the trait text carries both readings
-    so the choice is made once, by Dave, when it matters. Same call
-    056 made for the Unt'garoth's 20-against-21.
+  - A SOURCE THAT CONTRADICTS ITSELF IS RECORDED, NOT RESOLVED - and
+    then resolved by Dave, which is how it is supposed to go. The
+    Ny'ook document said "+2 on saving throws" twice and "advantage"
+    once; 097 seeded neither and carried both readings, and 098 made
+    it the +2 the day he chose.
+  - A CIRCUMSTANCE CAN BE PART OF A REQUEST. `wis save vs spell` is
+    the first one. Every other conditional trait stays a DM call
+    because nothing can detect the condition - Stonecunning doubles
+    on SOME stonework and no request says which - but the player
+    knows at the moment they roll whether a spell is casting it, and
+    the request has always been what they know. Four spellings are
+    accepted; the roll KEY stays `wis_save`, because that is the
+    vocabulary narrative_lines is written in and a key nobody seeded
+    would cost a character their prose.
   - ENDURING MIGHT AND STONECUNNING both grant conditional expertise -
     doubled proficiency on SOME uses of one skill. Nothing can detect
     which use, so both are granted at ordinary proficiency with the

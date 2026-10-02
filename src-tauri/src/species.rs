@@ -98,6 +98,11 @@ pub struct Species {
     pub skill_profs: Vec<String>,
     pub unarmored_ac_base: Option<i64>,
     pub unarmored_ac_ability: Option<String>,
+    /// A flat bonus on a saving throw AGAINST A SPELL - 098, the
+    /// Ny'ook's +2. None for a people without the trait, which is
+    /// almost all of them; Some(0) would be a people that grants
+    /// nothing, and that is a different claim.
+    pub spell_save_bonus: Option<i64>,
 
     /// How tall, in feet. THE FACT the category is a consequence of -
     /// see size.rs. Stored because a campaign running from a 2-foot
@@ -250,7 +255,7 @@ pub fn bump_size(size: &str, steps: i64) -> String {
 
 pub const SPECIES_COLUMNS: &str = "key,game_id,name,ability_bonuses,ability_maxima,size,\
 carry_size_steps,skill_profs,unarmored_ac_base,unarmored_ac_ability,speed,\
-damage_resistances,tongues,height_min_ft,height_max_ft,playable,\
+spell_save_bonus,damage_resistances,tongues,height_min_ft,height_max_ft,playable,\
 summary,appearance,culture,history,roleplaying,\
 age_note,alignment_note,traits";
 
@@ -353,6 +358,7 @@ pub fn from_row(r: &Value) -> Species {
         skill_profs: strs(r, "skill_profs"),
         unarmored_ac_base: r.get("unarmored_ac_base").and_then(|x| x.as_i64()),
         unarmored_ac_ability: opt_text(r, "unarmored_ac_ability"),
+        spell_save_bonus: r.get("spell_save_bonus").and_then(|x| x.as_i64()),
         height_min_ft: min_ft,
         height_max_ft: max_ft,
         derived: Species::derive_size(min_ft, max_ft).map(str::to_string),

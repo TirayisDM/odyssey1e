@@ -368,6 +368,22 @@ pub struct Resolved {
     pub attack: Option<crate::attack::Attack>,
 }
 
+/// Strip a "this save is against a spell" tail off a request, giving
+/// back the save on its own.
+///
+/// FOUR SPELLINGS, because a person typing at a table types what they
+/// say out loud and none of these is wrong. Singular and plural of
+/// both prepositions covers everything anybody has written so far; a
+/// fifth is a line here rather than a shrug on screen.
+fn strip_vs_spell(t: &str) -> Option<&str> {
+    for tail in [" vs spell", " vs spells", " against spell", " against spells"] {
+        if let Some(rest) = t.strip_suffix(tail) {
+            return Some(rest);
+        }
+    }
+    None
+}
+
 /// Long and short ability names, both accepted. Ported from ABIL_NAMES.
 fn ability_code(s: &str) -> Option<&'static str> {
     match s.trim().to_lowercase().as_str() {
@@ -415,14 +431,43 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
         };
     }
 
-    // "<ability> save" / "wis save" / "wisdom save"
-    if let Some(stem) = t.strip_suffix(" save") {
+    // "<ability> save", and the same save with what it is AGAINST:
+    // "wis save vs spell", "dex save against spells".
+    //
+    // THE CIRCUMSTANCE IS PART OF THE REQUEST. 098 gave a people a
+    // bonus that applies only against a spell, and nothing in a bare
+    // `wis save` says whether a spell is casting it. Every other
+    // conditional trait in this schema stays a DM call for exactly
+    // that reason - Stonecunning doubles on SOME stonework and no
+    // request says which. This one is different only because the
+    // player knows at the moment they roll, and the request has always
+    // been what they know.
+    //
+    // THE KEY DOES NOT FORK. It stays `wis_save`, because the key is
+    // the vocabulary narrative_lines and skill_prompts are written in
+    // and a `wis_save_spell` nobody seeded would silently lose a
+    // character their prose.
+    let (stem, vs_spell) = match strip_vs_spell(t.as_str()) {
+        Some(rest) => (rest, true),
+        None => (t.as_str(), false),
+    };
+    if let Some(stem) = stem.strip_suffix(" save") {
         if let Some(code) = ability_code(stem) {
             let pb = sheet.proficiency_bonus();
+            let against_magic = if vs_spell {
+                sheet.species.as_ref().and_then(|sp| sp.spell_save_bonus).unwrap_or(0)
+            } else {
+                0
+            };
             let m = sheet.ability_mod(code)
-                + if sheet.save_prof(code) { pb } else { 0 };
+                + if sheet.save_prof(code) { pb } else { 0 }
+                + against_magic;
             return Resolved {
-                label: format!("{} Save", code.to_uppercase()),
+                label: format!(
+                    "{} Save{}",
+                    code.to_uppercase(),
+                    if vs_spell { " vs Spell" } else { "" }
+                ),
                 formula: d20_formula(m, mode),
                 modifier: m,
                 key: format!("{}_save", code),
@@ -1530,6 +1575,72 @@ mod tests {
         let r = resolve_request(&rodnar(), "wis save", "normal");
         assert_eq!(r.label, "WIS Save");
         assert_eq!(r.modifier, 6);            // WIS +3, proficient
+    }
+
+    /* ---------------- a save against a spell ---------------- */
+
+    /// A Ny'ook: +2 on a save against a spell, and nothing on any
+    /// other save. 098, after Dave chose the +2 over the advantage
+    /// the source also claimed.
+    fn nyook() -> Sheet {
+        let mut s = rodnar();
+        let mut sp = crate::species::from_row(&serde_json::json!({
+            "key": "nyook", "name": "Ny'ook",
+            "ability_bonuses": {}, "size": "sm",
+            "spell_save_bonus": 2, "playable": true
+        }));
+        sp.spell_save_bonus = Some(2);
+        s.species = Some(sp);
+        s
+    }
+
+    #[test]
+    fn a_people_can_be_hard_to_enchant() {
+        let r = resolve_request(&nyook(), "wis save vs spell", "normal");
+        assert_eq!(r.label, "WIS Save vs Spell");
+        assert_eq!(r.modifier, 8, "WIS +3, proficient +3, and the people's +2");
+    }
+
+    #[test]
+    fn the_bonus_waits_to_be_told_what_the_save_is_against() {
+        // The same creature, the same save, no circumstance given.
+        let r = resolve_request(&nyook(), "wis save", "normal");
+        assert_eq!(r.label, "WIS Save");
+        assert_eq!(r.modifier, 6);
+    }
+
+    #[test]
+    fn everybody_elses_save_against_a_spell_is_an_ordinary_save() {
+        let r = resolve_request(&rodnar(), "wis save vs spell", "normal");
+        assert_eq!(r.modifier, 6, "no people, no bonus");
+        // Still labelled, because what the save was against is worth
+        // reading back off the card whoever rolled it.
+        assert_eq!(r.label, "WIS Save vs Spell");
+    }
+
+    #[test]
+    fn four_ways_to_say_it() {
+        for req in [
+            "wis save vs spell",
+            "wis save vs spells",
+            "wis save against spell",
+            "wis save against spells",
+        ] {
+            assert_eq!(resolve_request(&nyook(), req, "normal").modifier, 8, "{}", req);
+        }
+    }
+
+    /// THE KEY MUST NOT FORK. It is the vocabulary narrative_lines and
+    /// skill_prompts are written in, and a `wis_save_spell` nobody
+    /// seeded would cost a character their prose on the one roll that
+    /// mattered.
+    #[test]
+    fn the_circumstance_does_not_change_the_roll_key() {
+        assert_eq!(resolve_request(&nyook(), "wis save", "normal").key, "wis_save");
+        assert_eq!(
+            resolve_request(&nyook(), "wis save vs spell", "normal").key,
+            "wis_save"
+        );
     }
 
     #[test]

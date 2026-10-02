@@ -550,11 +550,18 @@ fn set_item_slot(
     slot: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
-    let want = slot.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let asked = slot.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    // WHAT GETS WRITTEN, which is not always what was asked for - see
+    // slots::route. Declared out here because the write is out here:
+    // routing inside the validation block and writing the original
+    // would have stored a ring on a hand after checking it as a ring
+    // on a finger, which is the one state this whole module exists to
+    // make impossible.
+    let mut want: Option<String> = asked.map(str::to_string);
 
-    if let Some(want) = want {
-        if crate::slots::of(want).is_none() {
-            return Err(format!("there is no {} to put anything in", want));
+    if let Some(asked) = asked {
+        if crate::slots::of(asked).is_none() {
+            return Err(format!("there is no {} to put anything in", asked));
         }
         let obj = objects::load_object(&token, &object_id)?;
         // DIRECTLY held, not merely somewhere. A breastplate at the
@@ -584,11 +591,18 @@ fn set_item_slot(
             .collect();
         after.push(&incoming);
 
+        // 090. WHERE IT ACTUALLY GOES. A ring picked for a hand is a
+        // ring meant for that hand's fingers - see slots::route, which
+        // forgives only this one reflex and only out of a hand.
+        let going = crate::slots::route(asked, &incoming);
+        want = Some(going.clone());
+        let going = going.as_str();
+
         // WILL IT EVEN GO THERE. Asked before the whole-loadout rules,
         // because "a greatsword does not go in the Hip" is a better
         // answer than "that is three hands".
-        if !crate::slots::admits(want, &incoming) {
-            let name = crate::slots::of(want).map(|s| s.name).unwrap_or(want);
+        if !crate::slots::admits(going, &incoming) {
+            let name = crate::slots::of(going).map(|s| s.name).unwrap_or(going);
             return Err(format!("{} does not go in the {}", incoming.name, name));
         }
 
@@ -619,7 +633,7 @@ fn set_item_slot(
                 })
             })
             .collect();
-        placed.push(crate::slots::Placed { slot: want.to_string(), item: &incoming });
+        placed.push(crate::slots::Placed { slot: going.to_string(), item: &incoming });
         crate::slots::check(&placed)?;
     }
 

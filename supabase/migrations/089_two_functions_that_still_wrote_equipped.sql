@@ -1,0 +1,35 @@
+-- 089. TWO FUNCTIONS THAT STILL WROTE `equipped`.
+--
+-- 084 dropped `objects.equipped` and migrated every Rust reader. It did
+-- not migrate the two DATABASE functions that also write it, because
+-- grepping the Rust found the Rust. Both broke immediately and one of
+-- them broke in a way nothing would have caught without using the app:
+--
+--   put_in_container -> record "new" has no field "equipped" (400)
+--
+-- That is `unheld_is_unequipped`, a BEFORE trigger on objects. Moving
+-- an object into a container changes its holder, the trigger fires, and
+-- the whole write fails. DROPPING A COLUMN IS NOT FINISHED WHEN THE
+-- CODE THAT READS IT COMPILES - plpgsql resolves its field names at RUN
+-- TIME, so a trigger naming a column that no longer exists is a clean
+-- build and a broken button.
+--
+-- `instantiate_npc` had the same fault and would have failed the moment
+-- a DM put a monster into a fight.
+--
+-- The applied SQL is in the migration history; this file records what
+-- it did and why. `unheld_is_unequipped` now clears `slot` instead of
+-- `equipped` - the same rule 030 wrote, in 084's vocabulary: a slot is
+-- where something is worn ON SOMEBODY, so an object on the floor or in
+-- a chest has none.
+--
+-- `instantiate_npc` turns a statblock's kit into placed objects using
+-- the same rule as 086's corrected backfill: armour on the body, a
+-- shield in the left hand, the FIRST weapon in the right, anything else
+-- small at the belt. One weapon in hand, because a goblin carrying two
+-- would otherwise be born in a state slots::check refuses.
+--
+-- `npc_items.equipped` SURVIVES and is still right there: a statblock's
+-- kit is a PATTERN of what a monster carries, and a pattern has no
+-- hands to put anything in. 084 only dropped the boolean on the objects
+-- made FROM it.

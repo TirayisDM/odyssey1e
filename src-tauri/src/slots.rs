@@ -135,6 +135,38 @@ fn worn_as(item: &Item) -> Option<&str> {
     item.worn_slot.as_deref().filter(|s| !s.is_empty())
 }
 
+/// Where a thing ACTUALLY goes when somebody picks `slot` for it.
+///
+/// 090. "Ring does not go in the Right hand" is a true sentence and a
+/// useless one. A player putting a ring on picks the hand they mean,
+/// because that is how a hand works - and the ladder's answer was to
+/// refuse them and name a slot further down the list they had not
+/// looked at.
+///
+/// So a worn thing dropped into a hand is routed to the place it is
+/// worn, and a ring takes the SIDE from the hand that was picked. The
+/// rule is not loosened: nothing ends up somewhere `admits` would
+/// reject, and a ring still never occupies a hand.
+///
+/// ONLY FROM A HAND. Picking "Armour" for a helm is a mistake worth
+/// reporting rather than quietly correcting - the hands are the one
+/// place somebody reaches for by reflex, which is why they are the one
+/// place this forgives.
+pub fn route(slot: &str, item: &Item) -> String {
+    let Some(worn) = worn_as(item) else {
+        return slot.to_string();
+    };
+    if !is_hand(slot) {
+        return slot.to_string();
+    }
+    match worn {
+        "ring" if slot == "left_hand" => "ring_left".to_string(),
+        "ring" => "ring_right".to_string(),
+        // `amulet` and `head` are slot keys already.
+        other => other.to_string(),
+    }
+}
+
 /// One thing in one place.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placed<'a> {
@@ -260,6 +292,51 @@ mod tests {
         assert!(!admits("right_hand", &ring));
         assert!(!admits("left_hand", &ring));
         assert!(admits("ring_right", &ring));
+    }
+
+    /* ---------- routing a worn thing out of a hand ---------- */
+
+    #[test]
+    fn a_ring_picked_for_a_hand_goes_on_that_hands_fingers() {
+        // Dave's second report. "Ring does not go in the Right hand"
+        // was true and useless: a player putting a ring on picks the
+        // hand they mean.
+        let ring = worn("Ring of Protection", "ring");
+        assert_eq!(route("right_hand", &ring), "ring_right");
+        assert_eq!(route("left_hand", &ring), "ring_left");
+    }
+
+    #[test]
+    fn routing_lands_somewhere_the_rule_allows() {
+        // The guarantee that makes this forgiveness and not a hole.
+        let ring = worn("Ring of Protection", "ring");
+        for hand in ["right_hand", "left_hand"] {
+            assert!(admits(&route(hand, &ring), &ring));
+        }
+    }
+
+    #[test]
+    fn an_amulet_or_helm_in_a_hand_goes_where_it_is_worn() {
+        let amulet = worn("Amulet of Health", "amulet");
+        let helm = worn("Helm", "head");
+        assert_eq!(route("right_hand", &amulet), "amulet");
+        assert_eq!(route("left_hand", &helm), "head");
+    }
+
+    #[test]
+    fn a_held_thing_is_never_rerouted() {
+        let sword = weapon("Longsword", &[]);
+        assert_eq!(route("right_hand", &sword), "right_hand");
+        assert_eq!(route("hip", &sword), "hip");
+    }
+
+    #[test]
+    fn only_a_hand_forgives() {
+        // Picking Armour for a helm is a mistake worth reporting, not
+        // one worth quietly correcting.
+        let helm = worn("Helm", "head");
+        assert_eq!(route("body", &helm), "body");
+        assert!(!admits("body", &helm), "and it is still refused");
     }
 
     #[test]

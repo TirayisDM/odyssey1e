@@ -471,6 +471,9 @@ and not after.
     a tick comparison, and the four stacking rules
 095 one instantiate_npc, not two - dropping the overload 089 created
     by reordering its parameters
+096 the Fjell'gar come down the mountain - the third people seeded,
+    DEX +2 WIS +1, AC 12 + DEX unarmoured, Athletics granted, and five
+    traits written down that nothing can apply yet
 
 (066-070, 072, 079-083, 090 and 091 are code-only changesets with no
 migration - the numbering is continuous across both, which is why
@@ -2179,7 +2182,7 @@ same vocabularies, and the reading half is what was blocking play.
 ## Size - ONE LADDER (057, size.rs)
 
 **THE CAMPAIGN RUNS FROM TWO FEET TO TWENTY-FIVE.** A rodent people at
-2', the Unt'gar at 4.5', the Felligar at 5.5', the Unt'garoth near 8',
+2', the Unt'gar at 4.5', the Fjell'gar at 5', the Unt'garoth near 8',
 the Jotun at 18', the Imiear at nearly 25'. Size is not a footnote in a
 world shaped like that.
 
@@ -2247,11 +2250,17 @@ Darkvision, Mineral Sense, Trade Savvy and Environmental Resilience are
 written down and applied by nothing - no vision system, no rest system,
 and Adv/Dis is a human choice.
 
-**NOT SEEDED: the Felligar, the Jotun, the Imiear, and the rodent
-people.** Their heights are known and nothing else is. A row with a name
-and six defaults is worse than no row, because it is pickable and gives
-a character nothing. They land when their documents do; 057 is the
-framework that will take them.
+**NOT SEEDED: the Jotun, the Imiear, and the rodent people.** Their
+heights are known and nothing else is. A row with a name and six
+defaults is worse than no row, because it is pickable and gives a
+character nothing. They land when their documents do; 057 is the
+framework that will take them - and 096 is the proof it works, seeding
+the Fjell'gar the day their two documents arrived.
+
+**THEY ARE THE FJELL'GAR, not the "Felligar".** This file called them
+that from 057 until 096, which is how the name was heard rather than
+how Dave writes it. The key is `fjellgar`, dropping the apostrophe the
+way `untgar` and `untgaroth` do.
 
 ## The Description subtab - BUILT (058)
 
@@ -2458,10 +2467,11 @@ Athletics granted.
     size.rs asserts it so it cannot be forgotten. The fix, if it is one,
     is to scale reach, space and carrying off `height_ft` and keep the
     category for the discrete rules.
-  - FOUR SPECIES ARE UNSEEDED - Felligar, Jotun, Imiear, and the rodent
-    people, whose name is not known here. Heights only. A row with a
-    name and six defaults is worse than no row, because it is pickable
-    and gives a character nothing.
+  - THREE SPECIES ARE UNSEEDED - Jotun, Imiear, and the rodent people,
+    whose name is not known here. Heights only. A row with a name and
+    six defaults is worse than no row, because it is pickable and gives
+    a character nothing. The Fjell'gar were the fourth and landed in
+    096.
   - ENDURING MIGHT AND STONECUNNING both grant conditional expertise -
     doubled proficiency on SOME uses of one skill. Nothing can detect
     which use, so both are granted at ordinary proficiency with the

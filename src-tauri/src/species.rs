@@ -236,6 +236,60 @@ pub fn effective_score(base: i64, bonus: i64, maximum: i64) -> i64 {
     (base + bonus).min(maximum)
 }
 
+/// Whether a NATURAL score may be written at all.
+///
+/// `effective_score` deliberately lets a base above the ceiling
+/// through, because it is answering "what does the species ADD" and a
+/// DM who typed 24 meant 24. That left the Ny'ook's cap half built:
+/// no bonus and no Ability Score Improvement could push Strength past
+/// 13, and nothing stopped a player assigning a rolled 16 to it.
+///
+/// THIS IS THE OTHER HALF, and it belongs at the point of WRITING
+/// rather than inside the arithmetic. A cap on what somebody may have
+/// is a refusal, and a refusal has to be able to say no out loud -
+/// quietly lowering 16 to 13 would be the expensive kind of helpful
+/// and the player would never learn why their rolls did not land.
+///
+/// ONLY A STATED MAXIMUM REFUSES. No species, or a species with no
+/// opinion about this ability, means no limit here - and that is not
+/// laziness, it is the Tarrasque. A statblock is a character too and
+/// monsters run to Strength 30; imposing 5e's default 20 on everybody
+/// would make the dragon unwritable to enforce a rule about the
+/// Ny'ook.
+///
+/// NATURAL IS THE WORD THAT MATTERS. A spell or a magical item may
+/// carry somebody over their cap and that is the rule as Dave states
+/// it. Nothing does that yet - 094's effects do not reach ability
+/// scores - and when something does it must add on TOP of the stored
+/// score at read time rather than route through `apply_bumps`, which
+/// clamps to the ceiling because training is exactly what the ceiling
+/// is about.
+pub fn within_natural_cap(
+    species: Option<&Species>,
+    ability: &str,
+    score: i64,
+) -> Result<(), String> {
+    let Some(sp) = species else {
+        return Ok(());
+    };
+    // `maximum_for` falls back to 20 for anything unstated, which is
+    // the right answer for arithmetic and the wrong one for a refusal
+    // - so this asks the map directly.
+    let Some((_, cap)) = sp.ability_maxima.iter().find(|(k, _)| k == ability) else {
+        return Ok(());
+    };
+    if score > *cap {
+        return Err(format!(
+            "a {}'s {} cannot naturally exceed {} - {} was asked for",
+            sp.name,
+            ability.to_uppercase(),
+            cap,
+            score
+        ));
+    }
+    Ok(())
+}
+
 /// One step up the size ladder, per step.
 ///
 /// THIS FUNCTION USED TO CARRY ITS OWN ARRAY OF THE SIX WORDS - the
@@ -428,6 +482,63 @@ mod tests {
                 { "name": "Elemental Resilience", "text": "Fire and cold.", "applied": false }
             ]
         })
+    }
+
+    /* ---------------- the natural ceiling ---------------- */
+
+    /// The Ny'ook: Strength cannot naturally pass 13.
+    fn nyook() -> Species {
+        from_row(&json!({
+            "key": "nyook", "name": "Ny'ook",
+            "ability_bonuses": {"dex": 2, "cha": 2},
+            "ability_maxima": {"str": 13},
+            "size": "sm", "playable": true
+        }))
+    }
+
+    #[test]
+    fn a_stated_ceiling_refuses_a_score_above_it() {
+        let e = within_natural_cap(Some(&nyook()), "str", 16).unwrap_err();
+        assert!(e.contains("Ny'ook"), "{}", e);
+        assert!(e.contains("13"), "{}", e);
+        assert!(e.contains("16"), "the number asked for, so it reads back: {}", e);
+    }
+
+    #[test]
+    fn the_ceiling_itself_is_allowed() {
+        assert!(within_natural_cap(Some(&nyook()), "str", 13).is_ok());
+        assert!(within_natural_cap(Some(&nyook()), "str", 8).is_ok());
+    }
+
+    #[test]
+    fn a_ceiling_binds_only_the_ability_it_names() {
+        assert!(within_natural_cap(Some(&nyook()), "dex", 18).is_ok());
+        assert!(within_natural_cap(Some(&nyook()), "cha", 20).is_ok());
+    }
+
+    /// THE TARRASQUE TEST. A statblock is a character and monsters run
+    /// to Strength 30. Imposing 5e's default 20 on everything with no
+    /// species would make the dragon unwritable in order to enforce a
+    /// rule about the Ny'ook - so an unstated ceiling is no ceiling.
+    #[test]
+    fn no_species_means_no_refusal() {
+        assert!(within_natural_cap(None, "str", 30).is_ok());
+    }
+
+    #[test]
+    fn a_species_with_no_opinion_about_an_ability_does_not_refuse() {
+        // The Unt'garoth state a Strength ceiling and nothing else.
+        let s = from_row(&untgaroth());
+        assert!(within_natural_cap(Some(&s), "con", 25).is_ok());
+    }
+
+    /// A RAISED CEILING IS STILL A CEILING. 21 is the whole point of
+    /// the Unt'garoth, and 22 is still too far.
+    #[test]
+    fn a_raised_ceiling_refuses_above_itself() {
+        let s = from_row(&untgaroth());
+        assert!(within_natural_cap(Some(&s), "str", 21).is_ok());
+        assert!(within_natural_cap(Some(&s), "str", 22).is_err());
     }
 
     #[test]

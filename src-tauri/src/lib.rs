@@ -439,6 +439,23 @@ fn set_ability(
         return Err("score must be 1-30".to_string());
     }
     let token = state.token()?;
+
+    // AND THEIR PEOPLE'S CEILING, if their people states one. The
+    // creation screen refuses an assignment over the cap; this is the
+    // same refusal on the other door, because a sheet that can be
+    // edited to 16 after being created at 13 is not capped at all.
+    //
+    // TWO READS BEFORE A WRITE, on an action a person takes one at a
+    // time by hand. `load_profile` carries the species key and the
+    // game, and a character with no species costs the second read
+    // nothing because `load_species` returns early on an empty key.
+    let profile = character::load_profile(&token, &character_id)?;
+    let people = match profile.species_key.as_deref() {
+        Some(key) => character::load_species(&token, &profile.game_id, key)?,
+        None => None,
+    };
+    species::within_natural_cap(people.as_ref(), &ability, score)?;
+
     let updated = supabase::rest_update(
         &token,
         "character_abilities",

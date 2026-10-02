@@ -191,6 +191,18 @@ pub fn create_character(
     // there being a dropdown.
     if let Some(picks) = &abilities {
         crate::generation::complete(picks)?;
+        // AND THE PEOPLE'S OWN CEILINGS. A Ny'ook cannot naturally
+        // carry a Strength above 13 however the dice fell, so the
+        // assignment is refused here rather than accepted and then
+        // contradicted by every modifier derived from it.
+        //
+        // The spare roll is what makes this fair rather than punishing:
+        // a player holding a 16 they cannot put on Strength has five
+        // other places for it and one to discard - which is what 066
+        // rolled seven for.
+        for (code, score) in picks {
+            species::within_natural_cap(people.as_ref(), code, *score)?;
+        }
     }
 
     let size = size

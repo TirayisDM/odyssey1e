@@ -479,9 +479,10 @@ and not after.
 098 a people can be hard to enchant - species.spell_save_bonus, and
     `wis save vs spell` as a request the engine understands
 
-(066-070, 072, 079-083, 090 and 091 are code-only changesets with no
-migration - the numbering is continuous across both, which is why
-there are gaps here. A gap is expected; a NAME in the database with no
+(066-070, 072, 079-083, 090, 091 and 099 are code-only changesets
+with no migration - the numbering is continuous across both, which is
+why there are gaps here. 099 is the species ability ceiling, enforced
+in Rust at both write paths and needing no schema at all. A gap is expected; a NAME in the database with no
 file is not, and there have been five - see the drift trap.)
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
@@ -2254,23 +2255,37 @@ Darkvision, Mineral Sense, Trade Savvy and Environmental Resilience are
 written down and applied by nothing - no vision system, no rest system,
 and Adv/Dis is a human choice.
 
-**A LOWERED CEILING IS ENFORCED IN ONE PLACE AND NOT THE OTHER.** 056
-built `ability_maxima` for the Unt'garoth's RAISED Strength ceiling of
-21, and 097 is the first row to lower one - the Ny'ook cannot exceed
-13. The two halves behave differently and it is worth knowing which:
+**A STATED CEILING IS ENFORCED ON ALL FOUR PATHS.** 056 built
+`ability_maxima` for the Unt'garoth's RAISED Strength ceiling of 21;
+097 lowered one for the first time - the Ny'ook cannot naturally
+exceed 13 - and 099 closed the two doors still open:
 
     a species bonus   `effective_score` will not add past it
-    an ASI            `apply_bumps` clamps - a Ny'ook spending
-                      improvements on Strength stops at 13. ENFORCED.
-    a rolled score    NOT enforced. `effective_score` returns a base
-                      at or above the maximum unchanged, which is
-                      exactly what a RAISED ceiling needs, so a
-                      Ny'ook assigned a 16 at creation keeps it.
+    an ASI            `apply_bumps` clamps to the ceiling
+    creation          `create_character` refuses an assignment over
+                      it, before anything is written
+    an edit           `set_ability` refuses the same, because a sheet
+                      editable to 16 after being created at 13 is not
+                      capped at all
 
-The trait is marked applied because the engine honours the ceiling
-everywhere it does the adding. Closing the gap means a refusal where a
-score is WRITTEN - chargen and `set_ability` asking the species first -
-and that is a change to two commands rather than to the rule.
+ARITHMETIC CLAMPS, A WRITE REFUSES, and the split is deliberate.
+`effective_score` still lets a base above the ceiling through, because
+it answers "what does the species ADD" and a DM who types 24 means 24.
+A cap on what somebody may HAVE is a different question and it has to
+say no out loud - quietly lowering 16 to 13 would leave a player never
+learning why their rolls did not land.
+
+ONLY A STATED MAXIMUM REFUSES, AND THE TARRASQUE IS WHY. A statblock
+is a character and monsters run to Strength 30. No species, or a
+species with no opinion about that ability, means no refusal;
+imposing 5e's default 20 on everything would make the dragon
+unwritable in order to enforce a rule about the Ny'ook.
+
+NATURAL IS THE LOAD-BEARING WORD. Dave's rule is that a spell or a
+magical item MAY carry somebody over their cap. Nothing does yet -
+094's effects do not reach ability scores - and when something does it
+must add on top at READ time rather than route through `apply_bumps`,
+which clamps because training is exactly what a ceiling is about.
 
 **NOT SEEDED: the Jotun, the Imiear, and the rodent people.** Their
 heights are known and nothing else is. A row with a name and six

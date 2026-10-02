@@ -43,8 +43,37 @@ pub struct Ability {
     pub base: i64,
     /// The species' contribution, for a sheet that wants to show its
     /// working. Zero when there is no species or none for this ability.
+    ///
+    /// KEPT ALONGSIDE `sources` RATHER THAN REPLACED BY IT. Several
+    /// callers read this one number and none of them wants a list; the
+    /// list is for the screen that shows the working. When a second
+    /// kind of source exists this becomes the sum of them and the
+    /// comment above becomes a lie, so it is the thing to revisit.
     pub bonus: i64,
+    /// WHERE THE BONUS CAME FROM, named. 080.
+    ///
+    /// A sheet showing `15 / 17` has to be able to say WHY, and "+2"
+    /// on its own is an assertion rather than an explanation. One entry
+    /// per contributing source, in the order they apply.
+    ///
+    /// ONE SOURCE EXISTS TODAY - the species. Class features, ability
+    /// score improvements and items are all sources in 5e and none of
+    /// them is modelled yet; this is a list rather than a second named
+    /// field so that adding one is a push rather than a schema change
+    /// and a screen change.
+    pub sources: Vec<AbilitySource>,
     pub save_prof: bool,
+}
+
+/// One named contribution to an ability score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbilitySource {
+    /// What to call it on screen - the species' name, and later a
+    /// class feature's or an item's.
+    pub name: String,
+    /// Signed. Negative is as real as positive: 5e has no species that
+    /// subtracts, and exhaustion, curses and a dozen items do.
+    pub value: i64,
 }
 
 impl Ability {
@@ -52,7 +81,7 @@ impl Ability {
     /// Most callers and every fixture want this; `apply_species` is the
     /// only thing that ever moves them apart.
     pub fn plain(score: i64, save_prof: bool) -> Self {
-        Self { score, base: score, bonus: 0, save_prof }
+        Self { score, base: score, bonus: 0, sources: Vec::new(), save_prof }
     }
 }
 
@@ -1008,6 +1037,9 @@ pub(crate) fn apply_species(
             continue;
         }
         a.bonus = bonus;
+        // 080. NAMED, so the sheet can say "Unt'garoth +2" rather than
+        // an unattributed "+2" the reader has to take on faith.
+        a.sources.push(AbilitySource { name: sp.name.clone(), value: bonus });
         a.score = crate::species::effective_score(a.base, bonus, sp.maximum_for(code));
     }
 }

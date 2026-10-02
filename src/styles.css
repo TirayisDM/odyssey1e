@@ -687,3 +687,26 @@ button.wide{width:100%}
 #perform-result .missed { color: var(--bad, #e08585); }
 #perform-result .working { display: block; font-size: 0.85em; opacity: 0.75; }
 #perform-instrument, #perform-audience { min-width: 10rem; }
+
+/* 080. THE ABILITY ROW, showing its working.
+   STR  15 / 17  +3 Mod  [Unt'garoth +2]  [x] saving throw */
+
+/* WIDER THAN IT WAS. The modifier used to be a bare "+3" in 2rem;
+   it now carries the word Mod and clipped at the old width. */
+.abil .mod{width:auto;min-width:3.6rem;text-align:left;margin-left:.35rem}
+.abil-fas{color:var(--muted);font:600 12px ui-monospace,Menlo,monospace}
+.abil-sources{display:inline-flex;gap:.35rem;flex-wrap:wrap;margin-left:.35rem}
+.abil-source{font:11px ui-monospace,Menlo,monospace;white-space:nowrap}
+
+/* THE CHECKBOX GOES TO THE RIGHT EDGE, so six rows line their ticks up
+   whatever is in the middle of them. */
+.abil .abil-save{margin-left:auto;white-space:nowrap}
+
+/* GREEN UP, RED DOWN, carried on a class rather than inline so the
+   modifier and the chips behind it cannot disagree about what green
+   means. --ok and --bad are the palette's own, already used by the
+   burden line and the balance. `flat` is deliberately neutral: a +0
+   that applies is worth seeing and is neither good nor bad. */
+.up{color:var(--ok)}
+.down{color:var(--bad)}
+.flat{color:var(--muted)}

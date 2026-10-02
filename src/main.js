@@ -1257,24 +1257,55 @@ async function loadSheet() {
   num.readOnly = !state.abilitiesOpen;
   num.classList.toggle("locked", !state.abilitiesOpen);
 
-    const m = document.createElement("span");
-    m.className = "mod";
-    m.textContent = (mod >= 0 ? "+" : "") + mod;
+    // 080. BASE OVER EFFECTIVE, when they differ. The box holds the
+    // number somebody rolled and the sheet has to show the number
+    // every roll actually uses, or "15" sitting beside a +3 reads as
+    // broken arithmetic. Identical scores show once - a slash with the
+    // same number on both sides is noise.
+    let fas = null;
+    if (a.score !== (a.base ?? a.score)) {
+      fas = sEl("span", "abil-fas", "/ " + a.score);
+      fas.title = "final ability score - what every roll uses";
+    }
 
-    // 056. Say where the extra came from. Without this an 18 reading
-    // +5 looks like the modifier arithmetic is broken.
+    const m = document.createElement("span");
+    // GREEN UP, RED DOWN, on the modifier and on every source behind
+    // it. A negative modifier is the one a player most needs to see at
+    // a glance and was the same colour as a positive one.
+    m.className = "mod " + signClass(mod);
+    m.textContent = withSign(mod) + " Mod";
+
+    // 080. WHERE IT CAME FROM, BY NAME. "+2" on its own is an
+    // assertion; "Unt'garoth +2" is an explanation. One chip per
+    // source, and the row stays empty for a character who has none -
+    // which is most of them, because the species is the only kind of
+    // source the engine models so far.
     let sp = null;
-    if (fromSpecies) {
-      sp = document.createElement("span");
-      sp.className = "species-bump";
-      sp.textContent = "+" + fromSpecies;
-      sp.title = "species bonus - the box holds your base score";
+    const sources = a.sources || [];
+    if (sources.length) {
+      sp = sEl("span", "abil-sources");
+      for (const src of sources) {
+        const chip = sEl("span", "abil-source " + signClass(src.value),
+          src.name + " " + withSign(src.value));
+        chip.title = "contributes " + withSign(src.value) + " to the final score";
+        sp.append(chip);
+      }
+    } else if (fromSpecies) {
+      // A sheet loaded before 080 carries the bonus and no names.
+      sp = sEl("span", "abil-sources");
+      sp.append(sEl("span", "abil-source " + signClass(fromSpecies),
+        "species " + withSign(fromSpecies)));
     }
 
     const lab = document.createElement("label");
+    lab.className = "abil-save";
     const chk = document.createElement("input");
     chk.type = "checkbox"; chk.checked = a.save_prof;
-    lab.append(chk, document.createTextNode("save"));
+    // SAYS WHAT IT IS. "save" beside five other numbers read as a verb
+    // - a button that would save the row - rather than as the saving
+    // throw proficiency it has always been.
+    lab.append(chk, document.createTextNode("saving throw"));
+    lab.title = "proficient in " + code.toUpperCase() + " saving throws";
 
     const save = async () => {
       await call("set_ability", {
@@ -1288,7 +1319,9 @@ async function loadSheet() {
     num.addEventListener("change", save);
     chk.addEventListener("change", save);
 
-    el.append(tag, num, m);
+    el.append(tag, num);
+    if (fas) el.append(fas);
+    el.append(m);
     if (sp) el.append(sp);
     el.append(lab);
     box.append(el);
@@ -3719,6 +3752,13 @@ function paintTurnBar(encounterId, turns) {
     ? "Begin with " + (who ? who.label : "the top")
     : "Next: " + (who ? who.label : "?") + (up.new_round ? " (round " + (enc.round + 1) + ")" : "");
   next.title = "hand the turn on";
+}
+
+// 080. Which way a number cuts, as a class. Zero is neither - an
+// explicit +0 is information ("this applies and comes to nothing")
+// rather than a good or a bad thing.
+function signClass(n) {
+  return n > 0 ? "up" : n < 0 ? "down" : "flat";
 }
 
 function withSign(n) {

@@ -201,6 +201,7 @@ mod tests {
             name: key.to_string(),
             kind: kind.to_string(),
             base_item: None,
+            grants: None,
             weapon_class: if kind == "weapon" {
                 Some("martialM".into())
             } else {

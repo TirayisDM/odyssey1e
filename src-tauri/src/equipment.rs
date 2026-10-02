@@ -75,6 +75,10 @@ pub struct Item {
     pub kind: String,
     pub base_item: Option<String>,
     pub weapon_class: Option<String>,
+    /// 100. What this KIND of thing grants its wearer, raw. Parsed by
+    /// grants.rs when a loadout is built rather than here, because an
+    /// Item is read in a dozen places that have no wearer to grant to.
+    pub grants: Option<serde_json::Value>,
     pub damage_number: Option<i64>,
     pub damage_denomination: Option<i64>,
     pub damage_types: Vec<String>,
@@ -184,6 +188,15 @@ pub struct Owned {
     /// same answer for the dozen readers that only ever asked whether.
     pub equipped: bool,
     pub attuned: bool,
+    /// 100. WHAT THIS GIVES ITS WEARER, already filtered to the ones
+    /// that are live - in a slot, and attuned where the grant asks
+    /// for it. Both halves are here: the catalogue's, because a Cloak
+    /// of Protection is +1 for everybody, and this object's own,
+    /// because the sword a smith worked on is one sword.
+    ///
+    /// EMPTY FOR ALMOST EVERYTHING, which is the ordinary case and
+    /// costs a Vec nobody allocates into.
+    pub grants: Vec<crate::grants::Grant>,
     /// TRI-STATE, straight off the column. See `is_proficient`.
     pub proficient_override: Option<bool>,
     pub uses_spent: i64,
@@ -572,6 +585,7 @@ fn item_from_row(r: &Value) -> Item {
         kind: as_str(r, "kind"),
         base_item: as_opt_str(r, "base_item"),
         weapon_class: as_opt_str(r, "weapon_class"),
+        grants: r.get("grants").cloned(),
         damage_number: r.get("damage_number").and_then(|x| x.as_i64()),
         damage_denomination: r.get("damage_denomination").and_then(|x| x.as_i64()),
         damage_types: as_strings(r, "damage_types"),
@@ -625,6 +639,7 @@ pub fn blank(name: &str, kind: &str) -> Item {
         name: name.to_string(),
         kind: kind.to_string(),
         base_item: None,
+        grants: None,
         weapon_class: None,
         damage_number: None,
         damage_denomination: None,
@@ -652,7 +667,7 @@ pub fn blank(name: &str, kind: &str) -> Item {
     }
 }
 
-pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
+pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,grants,damage_number,\
 damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap,\
 size,holds_size,weight,accepts,capacity_slots,\
 description,price,denom,rarity,slots,versatile_number,versatile_denomination,worn_slot";
@@ -705,7 +720,7 @@ pub fn load_loadout(
             // columns come from objects.rs so the select cannot drift
             // from the struct that reads them.
             format!(
-                "id,name,item_key,quantity,slot,attuned,proficient_override,uses_spent,uses_max,{}",
+                "id,name,item_key,quantity,slot,attuned,proficient_override,uses_spent,uses_max,grants,{}",
                 crate::objects::OVERRIDE_COLUMNS
             ),
         ),
@@ -778,6 +793,33 @@ pub fn load_loadout(
             slot: as_opt_str(r, "slot"),
             equipped: as_opt_str(r, "slot").is_some(),
             attuned: r.get("attuned").and_then(|x| x.as_bool()).unwrap_or(false),
+            // 100. THE TYPE'S AND THIS ONE'S, TOGETHER. An object's
+            // grants do not replace its item's - a +1 longsword
+            // somebody further enchanted is both - which is the
+            // opposite of how 049's overrides behave, and right for
+            // the opposite reason: an override says what a thing IS
+            // and only one answer can be true.
+            grants: {
+                let named = r
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(item.name.as_str())
+                    .to_string();
+                let mut all = crate::grants::parse(
+                    item.grants.as_ref().unwrap_or(&serde_json::Value::Null),
+                    &item.name,
+                );
+                all.extend(crate::grants::parse(
+                    r.get("grants").unwrap_or(&serde_json::Value::Null),
+                    &named,
+                ));
+                crate::grants::live(
+                    all,
+                    as_opt_str(r, "slot").is_some(),
+                    r.get("attuned").and_then(|x| x.as_bool()).unwrap_or(false),
+                )
+            },
             proficient_override,
             uses_spent: r.get("uses_spent").and_then(|x| x.as_i64()).unwrap_or(0),
             uses_max: r.get("uses_max").and_then(|x| x.as_i64()),
@@ -881,6 +923,11 @@ pub fn load_npc_loadout(
             // exists until instantiate_npc makes one.
             id: String::new(),
             name: None,
+            // AND A PATTERN GRANTS NOTHING. A statblock's kit says
+            // what a monster carries; the grants arrive with the
+            // objects instantiate_npc makes from it, which is where a
+            // slot and an attunement exist to gate them.
+            grants: Vec::new(),
             proficient: proficient_override.unwrap_or(true),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
@@ -1074,6 +1121,7 @@ mod tests {
             name: "Mace of the Deep Song".into(),
             kind: "weapon".into(),
             base_item: Some("mace".into()),
+            grants: None,
             weapon_class: Some("simpleM".into()),
             damage_number: Some(1),
             damage_denomination: Some(6),
@@ -1114,6 +1162,7 @@ mod tests {
             name: "Light Hammer".into(),
             kind: "weapon".into(),
             base_item: Some("lighthammer".into()),
+            grants: None,
             weapon_class: Some("simpleM".into()),
             damage_number: Some(1),
             damage_denomination: Some(4),
@@ -1150,6 +1199,7 @@ mod tests {
             name: "Heavy Crossbow".into(),
             kind: "weapon".into(),
             base_item: Some("heavycrossbow".into()),
+            grants: None,
             weapon_class: Some("martialR".into()),
             damage_number: Some(1),
             damage_denomination: Some(10),
@@ -1186,6 +1236,7 @@ mod tests {
             name: "Scale Mail".into(),
             kind: "armor".into(),
             base_item: Some("scalemail".into()),
+            grants: None,
             weapon_class: None,
             damage_number: None,
             damage_denomination: None,
@@ -1219,6 +1270,7 @@ mod tests {
             name: "Rations".into(),
             kind: "consumable".into(),
             base_item: None,
+            grants: None,
             weapon_class: None,
             damage_number: None,
             damage_denomination: None,
@@ -1535,6 +1587,7 @@ mod tests {
             name: "Shield".into(),
             kind: "armor".into(),
             base_item: Some("shield".into()),
+            grants: None,
             weapon_class: None,
             damage_number: None,
             damage_denomination: None,
@@ -1572,6 +1625,7 @@ mod tests {
             name: "Leather Armor".into(),
             kind: "armor".into(),
             base_item: Some("leather".into()),
+            grants: None,
             weapon_class: None,
             damage_number: None,
             damage_denomination: None,
@@ -1608,6 +1662,7 @@ mod tests {
             name: "Plate Armor".into(),
             kind: "armor".into(),
             base_item: Some("plate".into()),
+            grants: None,
             weapon_class: None,
             damage_number: None,
             damage_denomination: None,

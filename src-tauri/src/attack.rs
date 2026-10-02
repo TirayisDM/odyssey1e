@@ -579,6 +579,7 @@ mod tests {
             name: name.into(),
             kind: "weapon".into(),
             base_item: None,
+            grants: None,
             weapon_class: Some(class.into()),
             damage_number: Some(n),
             damage_denomination: Some(d),
@@ -618,6 +619,7 @@ mod tests {
         Owned {
             id: String::new(),
             name: None,
+            grants: Vec::new(),
             item,
             quantity: 1,
             slot: Some("right_hand".into()),

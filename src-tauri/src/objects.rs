@@ -381,6 +381,7 @@ mod tests {
             name: "Longsword".into(),
             kind: "weapon".into(),
             base_item: None,
+            grants: None,
             weapon_class: Some("martialM".into()),
             damage_number: Some(1),
             damage_denomination: Some(8),

@@ -33,6 +33,7 @@ mod dice;
 mod effects;
 mod encounter;
 mod equipment;
+mod grants;
 mod features;
 mod generation;
 mod holders;

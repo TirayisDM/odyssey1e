@@ -1144,6 +1144,48 @@ pub(crate) fn apply_species(
 /// the species' own maximum; this applies the same ceiling to what the
 /// improvements add, so the two cannot disagree about where a score
 /// stops.
+/// Every ability grant the loadout is carrying, applied on top of a
+/// finished natural score. 100.
+///
+/// NOT CAPPED, and that is the difference between this and
+/// `apply_bumps`. A ceiling is about what training can reach; an item
+/// is the stated exception to it, which is the rule Dave gave in the
+/// same breath as the cap itself.
+///
+/// A SET SETTLES BEFORE THE ADDS LAND, which `grants::apply` owns -
+/// so Gauntlets of Ogre Power and a +2 belt come to the same total on
+/// a wizard and a barbarian, which is what each item claims alone.
+///
+/// EVERY CONTRIBUTION IS NAMED. `Ability::sources` has carried a name
+/// per bonus since 056 and its own comment said "and later an
+/// item's"; this is later. A player asking why their Strength reads
+/// 21 gets the species, the improvement and the gauntlets listed
+/// rather than a number to take on faith.
+pub(crate) fn apply_grants(
+    abilities: &mut HashMap<String, Ability>,
+    loadout: &[equipment::Owned],
+) {
+    let all: Vec<crate::grants::Grant> =
+        loadout.iter().flat_map(|o| o.grants.iter().cloned()).collect();
+    if all.is_empty() {
+        return;
+    }
+    for (code, a) in abilities.iter_mut() {
+        let after = crate::grants::apply(a.score, &all, code);
+        if after == a.score {
+            continue;
+        }
+        for g in crate::grants::sources_for(&all, code) {
+            a.sources.push(AbilitySource {
+                name: g.source.clone(),
+                value: g.value,
+            });
+        }
+        a.score = after;
+        a.bonus = a.score - a.base;
+    }
+}
+
 pub(crate) fn apply_bumps(
     abilities: &mut HashMap<String, Ability>,
     bumps: &[(String, String, i64)],
@@ -1336,6 +1378,22 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         &profile.tool_profs,
         true,
     )?;
+
+    // 100. WHAT THE MAGIC ADDS, AFTER EVERYTHING NATURAL.
+    //
+    // THE ORDER IS THE RULE AND IT IS THE WHOLE POINT. A rolled score,
+    // then the people's bonus, then improvements - all three bound by
+    // 099's ceiling, because that ceiling is about what a body can be
+    // trained to. Then this, which is not bound by it: Dave's rule is
+    // that a spell or an item MAY carry somebody past their cap, and
+    // Gauntlets of Ogre Power would be pointless on a Ny'ook
+    // otherwise.
+    //
+    // EVERY MODIFIER IN THE APP COMES OFF `Ability::score`, so putting
+    // it here is what makes a Headband of Intellect reach Arcana, an
+    // INT save and the carrying rules without any of them being told
+    // about items.
+    apply_grants(&mut abilities, &loadout);
 
     // Computed here rather than stored, from the loadout that was just
     // read. DEX is the live modifier, so a stat change moves AC the same
@@ -1592,6 +1650,88 @@ mod tests {
         sp.spell_save_bonus = Some(2);
         s.species = Some(sp);
         s
+    }
+
+    /* ---------------- what the magic adds ---------------- */
+
+    /// One worn thing that grants something.
+    fn wearing(grants: Vec<crate::grants::Grant>) -> Vec<equipment::Owned> {
+        vec![equipment::Owned {
+            id: "o1".into(),
+            name: Some("Gauntlets of Ogre Power".into()),
+            item: equipment::blank("Gauntlets of Ogre Power", "equipment"),
+            quantity: 1,
+            slot: Some("hands".into()),
+            equipped: true,
+            attuned: true,
+            grants,
+            proficient_override: None,
+            proficient: true,
+            modes: vec![],
+            uses_spent: 0,
+            uses_max: None,
+        }]
+    }
+
+    fn grant(target: &str, mode: crate::grants::Mode, value: i64) -> crate::grants::Grant {
+        crate::grants::Grant {
+            target: target.into(),
+            mode,
+            value,
+            needs_attunement: false,
+            source: "Gauntlets of Ogre Power".into(),
+        }
+    }
+
+    #[test]
+    fn an_item_can_set_a_score_it_finds_too_low() {
+        let mut a = HashMap::new();
+        a.insert("str".to_string(), Ability::plain(8, false));
+        apply_grants(&mut a, &wearing(vec![grant("str", crate::grants::Mode::Set, 19)]));
+        assert_eq!(a["str"].score, 19);
+        assert_eq!(a["str"].base, 8, "what they rolled is untouched");
+        assert_eq!(a["str"].sources.len(), 1);
+        assert_eq!(a["str"].sources[0].name, "Gauntlets of Ogre Power");
+    }
+
+    #[test]
+    fn an_item_that_sets_lower_than_you_are_does_nothing() {
+        let mut a = HashMap::new();
+        a.insert("str".to_string(), Ability::plain(20, false));
+        apply_grants(&mut a, &wearing(vec![grant("str", crate::grants::Mode::Set, 19)]));
+        assert_eq!(a["str"].score, 20);
+        assert!(a["str"].sources.is_empty(), "nothing happened, nothing claimed");
+    }
+
+    /// THE WHOLE POINT OF THE ORDER. 099 stops a Ny'ook writing a
+    /// Strength above 13; Dave's rule in the same breath was that an
+    /// item may carry them past it. The cap binds the natural score
+    /// and the grant lands on top of the capped result.
+    #[test]
+    fn magic_carries_a_capped_people_past_their_ceiling() {
+        let mut a = HashMap::new();
+        a.insert("str".to_string(), Ability::plain(13, false));
+        apply_grants(&mut a, &wearing(vec![grant("str", crate::grants::Mode::Set, 19)]));
+        assert_eq!(a["str"].score, 19, "a Ny'ook in gauntlets");
+    }
+
+    #[test]
+    fn nothing_worn_changes_nothing() {
+        let mut a = HashMap::new();
+        a.insert("str".to_string(), Ability::plain(12, false));
+        apply_grants(&mut a, &[]);
+        assert_eq!(a["str"].score, 12);
+        assert!(a["str"].sources.is_empty());
+    }
+
+    #[test]
+    fn a_grant_on_another_ability_leaves_this_one_alone() {
+        let mut a = HashMap::new();
+        a.insert("str".to_string(), Ability::plain(12, false));
+        a.insert("int".to_string(), Ability::plain(10, false));
+        apply_grants(&mut a, &wearing(vec![grant("int", crate::grants::Mode::Set, 19)]));
+        assert_eq!(a["str"].score, 12);
+        assert_eq!(a["int"].score, 19);
     }
 
     #[test]

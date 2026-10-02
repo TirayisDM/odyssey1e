@@ -414,6 +414,7 @@ fn as_item(t: &Kind) -> crate::equipment::Item {
         kind: String::new(),
         base_item: None,
         weapon_class: None,
+        grants: None,
         damage_number: t.damage_number,
         damage_denomination: t.damage_denomination,
         damage_types: t.damage_types.clone(),

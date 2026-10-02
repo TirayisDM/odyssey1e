@@ -321,6 +321,14 @@ button.wide{width:100%}
   .fight-round{text-align:left}
 }
 
+.grants{margin-top:.5rem}
+.grant-list{display:flex;flex-direction:column;gap:.2rem;margin-bottom:.3rem}
+.grant-row{display:flex;align-items:center;gap:.4rem;padding:.2rem .35rem;
+           border:1px solid var(--line);border-radius:4px;background:#191d24}
+.grant-what{flex:1;font-size:12px}
+.grant-new{align-items:flex-end;flex-wrap:wrap}
+.grant-new label{font-size:10px;color:var(--muted)}
+
 #desc-notes{width:100%;resize:vertical;font:inherit;line-height:1.45}
 #desc-lore details{border:1px solid var(--line);border-radius:6px;
                    padding:.3rem .5rem;margin:.25rem 0;background:#191d24}

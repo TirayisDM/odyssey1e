@@ -3495,7 +3495,16 @@ function paintFolk(listSel, countSel, folk) {
 // The holder is resolved in Rust by holders::resolve, because a
 // container is an object and therefore both the question and half the
 // answer. It is a fold with tests rather than a join.
+// The skill catalogue, cached for the grant editor's menu. One read
+// per game: the alternative is a text box, and a skill key somebody
+// types wrong is a grant that stores cleanly and never applies.
+async function loadSkillKeys() {
+  if (!state.gameId || state.skillKeys) return;
+  state.skillKeys = (await call("list_skill_keys", { gameId: state.gameId })) || [];
+}
+
 async function loadObjects() {
+  await loadSkillKeys();
   const panel = document.querySelector("#objects-panel");
   if (!state.gameId || !amDM()) {
     panel.hidden = true;
@@ -4928,6 +4937,148 @@ function action(label, fn) {
 // The catalogue half comes from state.catalogue rather than a fetch:
 // it is already loaded, it does not change while the tab is open, and
 // asking again per row would be thirty requests to say "dagger".
+// WHAT THIS ONE GRANTS ITS WEARER. 100.
+//
+// SEPARATE FROM THE OVERRIDES ABOVE IT, and the separation is the
+// whole distinction 100 is built on: an override says what a thing IS
+// - a greatsword that rolls 2d8 - and only one answer can be true. A
+// grant says what it GIVES, and several can, so this is a list with
+// an add button rather than a row of boxes.
+//
+// THE TARGET IS A MENU AND NEVER A TEXT BOX. A grant written against
+// `armour` would parse, store, and do nothing for ever: the item is
+// simply not magic and nobody can see why. The command refuses an
+// unknown target as well - a screen is a courtesy and the command is
+// the rule - but the menu means a DM cannot make the mistake in the
+// first place.
+function grantEditor(o) {
+  const wrap = sEl("div", "grants");
+  wrap.append(sEl("div", "sub", "What it grants whoever wears it"));
+
+  // Worked on as a list and sent whole, which is 049's convention for
+  // this panel: an empty list is "not magic any more", and that is a
+  // thing a DM has to be able to say.
+  let rows = Array.isArray(o.grants) ? o.grants.map((g) => ({ ...g })) : [];
+
+  const list = sEl("div", "grant-list");
+  const paint = () => {
+    list.innerHTML = "";
+    if (!rows.length) {
+      list.append(sEl("div", "muted", "nothing - an ordinary object"));
+    }
+    rows.forEach((g, i) => {
+      const line = sEl("div", "grant-row");
+      line.append(sEl("span", "grant-what", grantWords(g)));
+      if (g.needs_attunement) line.append(chip("needs attunement", "use"));
+      line.append(
+        action("remove", () => {
+          rows.splice(i, 1);
+          paint();
+        })
+      );
+      list.append(line);
+    });
+  };
+  paint();
+  wrap.append(list);
+
+  /* ---------------- adding one ---------------- */
+
+  const target = document.createElement("select");
+  for (const [group, opts] of grantTargets()) {
+    const og = document.createElement("optgroup");
+    og.label = group;
+    for (const [value, label] of opts) og.append(new Option(label, value));
+    target.append(og);
+  }
+
+  const mode = document.createElement("select");
+  mode.append(new Option("adds", "add"), new Option("sets at least", "set"));
+
+  const value = document.createElement("input");
+  value.type = "number";
+  value.className = "narrow";
+  value.value = "1";
+
+  const att = document.createElement("input");
+  att.type = "checkbox";
+  const attLabel = document.createElement("label");
+  attLabel.append(att, document.createTextNode("needs attunement"));
+
+  const add = action("add", () => {
+    const v = Number(value.value);
+    if (!v) return dmSay("a grant of zero does nothing", true);
+    rows.push({
+      target: target.value,
+      mode: mode.value,
+      value: v,
+      needs_attunement: att.checked,
+    });
+    paint();
+  });
+
+  const form = sEl("div", "row grant-new");
+  form.append(
+    labelledControl("what it touches", target, "wide"),
+    labelledControl("how", mode),
+    labelledControl("by", value),
+    attLabel,
+    add
+  );
+  wrap.append(form);
+
+  // NOTHING IS WRITTEN UNTIL SAVE. Add and remove work the list in
+  // front of somebody; a mis-click costs nothing until they say so,
+  // which is the same bargain the description editor makes.
+  const save = action("save what it grants", async () => {
+    const r = await tryCall("set_object_grants", { objectId: o.id, grants: rows });
+    dmSay(r.ok ? "saved" : r.error, !r.ok);
+    if (r.ok) await afterObjectChange();
+  });
+  const bar = sEl("div", "row");
+  bar.append(save);
+  wrap.append(bar);
+
+  return wrap;
+}
+
+// A grant as a sentence rather than three fields.
+function grantWords(g) {
+  const names = {
+    ac: "armour class", attack: "attack rolls", damage: "damage",
+    save: "every saving throw",
+  };
+  let what = names[g.target];
+  if (!what && g.target.startsWith("save.")) {
+    what = g.target.slice(5).toUpperCase() + " saves";
+  }
+  if (!what && g.target.startsWith("skill.")) {
+    what = skillName(g.target.slice(6));
+  }
+  if (!what) what = g.target.toUpperCase();
+  return g.mode === "set"
+    ? what + " is at least " + g.value
+    : what + " " + withSign(g.value);
+}
+
+// The vocabulary grants.rs will accept, grouped the way somebody
+// thinks about it. Built from the live skill list where there is one,
+// so a key that does not exist cannot be offered.
+function grantTargets() {
+  const abilities = [
+    ["str", "Strength"], ["dex", "Dexterity"], ["con", "Constitution"],
+    ["int", "Intelligence"], ["wis", "Wisdom"], ["cha", "Charisma"],
+  ];
+  return [
+    ["In a fight", [["ac", "armour class"], ["attack", "attack rolls"],
+                    ["damage", "damage"]]],
+    ["Ability scores", abilities],
+    ["Saving throws", [["save", "every saving throw"]].concat(
+      abilities.map(([k, n]) => ["save." + k, n + " saves"]))],
+    ["Skills", (state.skillKeys || []).map((s) => ["skill." + s.key, s.name])],
+  ].filter(([, opts]) => opts.length);
+}
+
 async function fillDetail(el, o) {
   el.innerHTML = "";
   const item = (state.catalogue || []).find((i) => i.key === o.item_key);
@@ -5158,6 +5309,7 @@ function fillEditor(el, o) {
   // OBJECT rather than a new catalogue row.
   const over = editorOverrides(o, item);
   el.append(over.el);
+  el.append(grantEditor(o));
 
   const save = document.createElement("button");
   save.className = "tiny ghost";

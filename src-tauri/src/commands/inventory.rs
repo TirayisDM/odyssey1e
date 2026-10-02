@@ -1117,3 +1117,89 @@ pub fn clear_object_technique(
 fn uuid_like() -> String {
     (0..4).map(|_| format!("{:02x}", rand::random::<u8>())).collect()
 }
+
+/// What a particular object grants whoever wears it. 100.
+///
+/// THE WHOLE LIST, EVERY TIME. The same convention 049's overrides and
+/// 058's description use: a form sends what it has, and the difference
+/// between clearing a field and not touching one is a difference the
+/// caller gets to express. An empty list is "this is not magic any
+/// more", which is a thing a DM needs to be able to say.
+///
+/// ONLY THIS OBJECT'S. `items.grants` is the catalogue's half and a DM
+/// editing one sword must not silently re-enchant every sword of its
+/// kind - that is a catalogue edit and belongs to whatever screen ever
+/// edits the catalogue.
+///
+/// EVERY TARGET IS CHECKED, and that is the point of the command
+/// existing rather than the screen writing the column. A grant
+/// against `armour` parses, stores, and does nothing for ever; the
+/// item is simply not magic and nobody can see why. Refusing it here
+/// is the cheapest place to turn that into a sentence.
+#[tauri::command]
+pub fn set_object_grants(
+    state: State<AppState>,
+    object_id: String,
+    grants: Value,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let rows = match grants.as_array() {
+        Some(r) => r.clone(),
+        None => return Err("grants must be a list".to_string()),
+    };
+
+    // Parsed by the same function every reader uses, so what is stored
+    // is what will be read back - a row this drops would have been a
+    // row that silently did nothing.
+    let parsed = crate::grants::parse(&grants, "");
+    if parsed.len() != rows.len() {
+        return Err(
+            "every grant needs a target and a value - one of these has neither".to_string(),
+        );
+    }
+
+    for g in &parsed {
+        if !crate::grants::known_target(&g.target) {
+            return Err(format!(
+                "nothing reads '{}' - a grant against it would never apply",
+                g.target
+            ));
+        }
+    }
+
+    // A SKILL KEY IS CHECKED AGAINST THE CATALOGUE, which grants.rs
+    // cannot do and this can: `skill.stealth` is the shape of a real
+    // target and the key is `ste`, so without this the boots would be
+    // written, stored, and silently useless.
+    let wanted: Vec<&str> = parsed.iter().filter_map(|g| crate::grants::skill_key(&g.target)).collect();
+    if !wanted.is_empty() {
+        let obj = objects::load_object(&token, &object_id)?;
+        let known = supabase::rest_get(
+            &token,
+            "skills",
+            &[
+                ("select", "key"),
+                ("or", &format!("(game_id.is.null,game_id.eq.{})", obj.game_id)),
+            ],
+        )?;
+        let known: Vec<String> = known
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .filter_map(|r| r.get("key").and_then(|k| k.as_str()).map(String::from))
+            .collect();
+        for key in wanted {
+            if !known.iter().any(|k| k == key) {
+                return Err(format!("no skill with the key '{}'", key));
+            }
+        }
+    }
+
+    supabase::rest_update(
+        &token,
+        "objects",
+        &[("id", &format!("eq.{}", object_id))],
+        &json!({ "grants": grants }),
+    )
+}

@@ -56,6 +56,14 @@ pub struct Obj {
     /// any depth. Carried here because this is the only loader that
     /// walks a whole game's objects, which is what counting them needs.
     pub attuned: bool,
+    /// 100. Raw, and passed straight out to the editor. Interpreted
+    /// only by grants.rs, like everywhere else.
+    ///
+    /// `default` because every fixture in this file predates the
+    /// column and an absent list is an unenchanted thing, which is
+    /// almost all of them.
+    #[serde(default)]
+    pub grants: serde_json::Value,
     /// The entity it rests in. None is nowhere at all, which 033 kept as
     /// a real answer rather than a gap.
     pub holder_id: Option<String>,
@@ -180,6 +188,13 @@ pub struct Located {
     pub damage_types: Vec<String>,
     pub properties: Vec<String>,
     pub base_ac: Option<i64>,
+    /// 100. WHAT THIS ONE GRANTS ITS WEARER, raw - the editor shows
+    /// and rewrites the list, and grants.rs is still the only thing
+    /// that interprets one. THIS OBJECT'S ONLY: the catalogue's half
+    /// is not merged in here, because a DM editing one sword must be
+    /// able to see what they wrote on it rather than what its kind
+    /// already gave.
+    pub grants: serde_json::Value,
     /// True when anything about this one differs from its type, so a
     /// row can say so without the reader comparing nine fields.
     pub edited: bool,
@@ -356,6 +371,7 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
 
             Located {
                 id: o.id.clone(),
+                grants: o.grants.clone(),
                 item_key: o.item_key.clone(),
                 name: o.name.clone(),
                 quantity: o.quantity,
@@ -651,7 +667,7 @@ pub fn load_world(
         token,
         "objects",
         &[
-            ("select", "id,item_key,name,quantity,slot,attuned,holder_id,entity_id,size_override,holds_size_override,weight_override,price_override,damage_number_override,damage_denomination_override,damage_types_override,properties_override,base_ac_override"),
+            ("select", "id,item_key,name,quantity,slot,attuned,holder_id,entity_id,grants,size_override,holds_size_override,weight_override,price_override,damage_number_override,damage_denomination_override,damage_types_override,properties_override,base_ac_override"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "item_key.asc,acquired_at.asc"),
         ],
@@ -864,6 +880,7 @@ mod tests {
             id: id.into(),
             item_key: key.into(),
             attuned: false,
+            grants: serde_json::Value::Null,
             weight_override: None,
             price_override: None,
             damage_number_override: None,

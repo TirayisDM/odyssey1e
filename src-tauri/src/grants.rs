@@ -171,6 +171,44 @@ pub fn sources_for<'a>(grants: &'a [Grant], target: &str) -> Vec<&'a Grant> {
     grants.iter().filter(|g| g.target == target).collect()
 }
 
+/// The six ability codes, which three of the target forms are built
+/// from.
+pub const ABILITIES: [&str; 6] = ["str", "dex", "con", "int", "wis", "cha"];
+
+/// Whether anything will ever read this target.
+///
+/// THE SILENT NO-OP IS THE FAULT THIS PREVENTS. A grant written
+/// against `armour` parses perfectly, stores perfectly, and does
+/// nothing for ever - the item simply is not magic and nobody can see
+/// why. That is this codebase's named defect class, and the cheapest
+/// place to stop it is the write.
+///
+/// A SKILL KEY IS CHECKED FOR SHAPE AND NOT FOR EXISTENCE. The
+/// catalogue is a table and this module has no database; the command
+/// that writes a grant checks the key against it, which is where the
+/// read already is.
+pub fn known_target(target: &str) -> bool {
+    if ["ac", "attack", "damage", "save"].contains(&target) {
+        return true;
+    }
+    if ABILITIES.contains(&target) {
+        return true;
+    }
+    if let Some(code) = target.strip_prefix("save.") {
+        return ABILITIES.contains(&code);
+    }
+    if let Some(key) = target.strip_prefix("skill.") {
+        return !key.is_empty();
+    }
+    false
+}
+
+/// The skill key a target names, for the one caller that can check it
+/// against the catalogue.
+pub fn skill_key(target: &str) -> Option<&str> {
+    target.strip_prefix("skill.")
+}
+
 /* ============================ TESTS ============================ */
 
 #[cfg(test)]
@@ -311,6 +349,39 @@ mod tests {
         assert_eq!(unattuned[0].target, "ac", "the cloak still works");
 
         assert_eq!(live(gs, true, true).len(), 2);
+    }
+
+    /* ---------------- the vocabulary ---------------- */
+
+    #[test]
+    fn every_target_a_consumer_reads_is_known() {
+        for t in ["ac", "attack", "damage", "save", "str", "dex", "cha"] {
+            assert!(known_target(t), "{}", t);
+        }
+        assert!(known_target("save.dex"));
+        assert!(known_target("skill.ste"));
+    }
+
+    /// THE SILENT NO-OP THIS EXISTS TO STOP. Every one of these parses
+    /// and stores perfectly and would never be read by anything - an
+    /// item that simply is not magic, with nobody able to see why.
+    #[test]
+    fn a_target_nothing_reads_is_refused() {
+        for t in [
+            "armour",      // the other spelling
+            "hp",          // a reasonable guess at a thing we do not do
+            "save.luck",   // not an ability
+            "skill.",      // a prefix with nothing after it
+            "attack.melee" // finer than anything resolves
+        ] {
+            assert!(!known_target(t), "{} should not be accepted", t);
+        }
+    }
+
+    #[test]
+    fn a_skill_target_hands_back_its_key_to_be_checked() {
+        assert_eq!(skill_key("skill.ste"), Some("ste"));
+        assert_eq!(skill_key("ac"), None);
     }
 
     #[test]

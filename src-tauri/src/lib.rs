@@ -1321,6 +1321,7 @@ pub fn run() {
             commands::containers::take_from_container,
             commands::inventory::list_catalogue,
             commands::inventory::set_item_attuned,
+            commands::inventory::set_object_grants,
             commands::inventory::encumbrance,
             commands::inventory::wallet,
             commands::store::quote_object,

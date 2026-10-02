@@ -249,10 +249,17 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .entry.err .val{color:var(--bad)}
 .empty{color:var(--ok)}
 
-.abils{display:grid;grid-template-columns:repeat(2,1fr);gap:.3rem;margin-bottom:.6rem}
-.abil{display:flex;align-items:center;gap:.3rem;border:1px solid var(--line);
-      border-radius:4px;padding:.25rem .4rem}
-.abil b{width:2.1rem;font-size:11px;letter-spacing:.06em;color:var(--muted)}
+/* 082. ONE ABILITY PER LINE. Two columns fitted six rows into three
+   and cost the thing the rows are for: a score with three named
+   sources behind it had nowhere to put them and wrapped. Information
+   over real estate - a sheet is read far more often than it is
+   scrolled. */
+.abils{display:grid;grid-template-columns:1fr;gap:.3rem;margin-bottom:.6rem}
+.abil{display:flex;align-items:center;gap:.45rem;border:1px solid var(--line);
+      border-radius:4px;padding:.4rem .6rem}
+/* THE CODE IS A HEADING NOW, not a cramped label. A full-width row can
+   afford to say which ability it is at a size somebody can scan. */
+.abil b{width:3rem;font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--fg)}
 .abil input[type=number]{width:3.2rem;margin:0;padding:.18rem .3rem;text-align:center}
 .abil .mod{width:2rem;text-align:center;font:600 12px ui-monospace,Menlo,monospace}
 .abil label{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:.15rem}

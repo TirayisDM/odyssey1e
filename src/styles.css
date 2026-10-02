@@ -795,3 +795,14 @@ button.wide{width:100%}
 .use-left{font-size:11px;color:var(--muted)}
 .use-when{font-size:10px;color:var(--muted);text-transform:uppercase;
           letter-spacing:.06em}
+
+/* 094. WHAT IS RUNNING. A chip each, soonest to end first, with the
+   time left on it - the number somebody actually needs. */
+.fxbar{display:flex;gap:.35rem;flex-wrap:wrap;padding:.1rem 0 .4rem}
+.fx{display:inline-flex;align-items:baseline;gap:.35rem;font-size:11px;
+    border:1px solid var(--line);border-radius:999px;padding:.1rem .5rem}
+.fx .who{color:var(--muted)}
+.fx .when{color:var(--accent);font-family:ui-monospace,Menlo,monospace}
+.fx button{font-size:10px;padding:0 .2rem;border:0;background:none;
+           color:var(--muted);cursor:pointer}
+.fx button:hover{color:var(--bad)}

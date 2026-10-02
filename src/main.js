@@ -37,6 +37,8 @@ let state = {
   audiences: [],
   // 092. What time it is, as game_clock last reported it.
   clock: null,
+  // 094. What is running, already filtered and ordered by Rust.
+  effects: [],
   // 084. The slot ladder, straight from slots::LADDER. Read once -
   // where a thing can be worn is a rule, not campaign data, so unlike
   // the audiences nobody edits it.
@@ -385,6 +387,7 @@ async function selectGame(id) {
   await loadAudiences();
   await loadSlots();
   await loadClock();
+  await loadEffects();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1029,6 +1032,48 @@ function sEl(tag, cls, text) {
 // already taught us.
 const CLOCK_PANES = ["play", "run"];
 
+// WHAT IS RUNNING. 094.
+//
+// Soonest to end first, which is effects::active's order and not a
+// sort repeated here. Hidden entirely when nothing is running - an
+// empty "no effects" line is chrome on every session that never uses
+// them.
+async function loadEffects() {
+  if (!state.gameId) return;
+  const got = await call("list_effects", { gameId: state.gameId });
+  if (!got) return;
+  state.effects = got.effects || [];
+  for (const where of CLOCK_PANES) paintEffects(where);
+}
+
+function paintEffects(where) {
+  const host = document.querySelector("#fx-" + where);
+  if (!host) return;
+  host.innerHTML = "";
+  for (const fx of state.effects || []) {
+    const chip = sEl("span", "fx");
+    chip.append(sEl("span", "nm", fx.name));
+    chip.append(sEl("span", "who", whoIs(fx.character_id)));
+    chip.append(sEl("span", "when", fx.said));
+    if (fx.magnitude) chip.title = "d" + fx.magnitude;
+
+    const stop = sEl("button", "", "×");
+    stop.title = "end it now";
+    stop.addEventListener("click", async () => {
+      const r = await tryCall("end_effect", { gameId: state.gameId, effectId: fx.id });
+      if (!r.ok) return log("end_effect", r.error, true);
+      await loadEffects();
+    });
+    chip.append(stop);
+    host.append(chip);
+  }
+}
+
+function whoIs(id) {
+  const c = (state.folk || []).find((x) => x.id === id);
+  return c ? (c.token_name || c.name) : "";
+}
+
 async function loadClock() {
   if (!state.gameId) return;
   const got = await call("game_clock", { gameId: state.gameId });
@@ -1077,6 +1122,10 @@ function restSay(where, text, bad) {
 // moment ago.
 async function afterTimePasses() {
   await loadClock();
+  // 094. AND WHAT IS RUNNING, because an hour passing is exactly what
+  // ends things - a clock that moved without re-reading them would
+  // leave an expired song on screen.
+  await loadEffects();
   if (state.characterId) await loadSheet();
 }
 
@@ -6540,6 +6589,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     out.append(sEl("span", "working",
       r.instrument + (r.proficient ? "" : " (untrained)") +
       " · Karma " + r.karma + " vs " + r.audience + " " + r.audience_rating));
+
+    // 094. WHO THE SONG REACHED. Not everybody, when somebody is
+    // already carrying a better one - effects::admit keeps the best
+    // and says so by leaving them off this list.
+    if (r.made_it && (r.inspired || []).length) {
+      out.append(sEl("span", "working",
+        "inspired for an hour (d" + r.die + "): " + r.inspired.join(", ")));
+    }
+    // AND THE CHIPS MOVE, because the song is now one of them.
+    await loadEffects();
   });
 
   document.querySelector("#add-class").addEventListener("click", () => {

@@ -30,6 +30,7 @@ mod commands;
 mod currency;
 mod death;
 mod dice;
+mod effects;
 mod encounter;
 mod equipment;
 mod features;
@@ -1270,6 +1271,9 @@ pub fn run() {
             commands::characters::rename_character,
             commands::characters::set_class_level,
             commands::characters::remove_class,
+            commands::effects::list_effects,
+            commands::effects::apply_effect,
+            commands::effects::end_effect,
             commands::time::game_clock,
             commands::time::advance_time,
             commands::time::rest_preview,

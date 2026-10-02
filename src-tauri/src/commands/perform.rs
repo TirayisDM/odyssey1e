@@ -108,6 +108,45 @@ pub fn perform(
     let roll = RandomRoller.roll(100);
     let made = crate::karma::made_it(roll, target);
 
+    // 094. AND IT LANDS ON THE PARTY. This is what the chart was for:
+    // a drafted song that inspires compatriots for an hour, and does
+    // not stack with itself.
+    //
+    // ON EVERY PLAYER CHARACTER IN THE GAME, the bard included - an
+    // hour is long enough that working out who was in earshot is a
+    // DM's call rather than a radius this engine could know. A DM who
+    // disagrees ends one.
+    //
+    // `highest` RATHER THAN `replace`, so a second, worse performance
+    // cannot undo a good one - which is the rule effects.rs calls the
+    // subtle one, and the reason a tie goes to what is already running.
+    let mut inspired: Vec<String> = Vec::new();
+    if made {
+        let now = crate::commands::effects::read_tick(&token, &sheet.game_id)?;
+        let band = inspiration_die(karma.rating);
+        for who in party(&token, &sheet.game_id)? {
+            let (outcome, _) = crate::commands::effects::apply_inner(
+                &token,
+                &sheet.game_id,
+                &who.0,
+                "inspired",
+                &format!("Inspired by {}", sheet.name),
+                Some(crate::clock::HOUR),
+                Some(band),
+                "highest",
+                Some(&character_id),
+                Some("perform"),
+                None,
+                now,
+            )?;
+            // KEPT MEANS THEY ALREADY HAD BETTER, which is not a
+            // failure and not a reach - so they are not named.
+            if !matches!(outcome, crate::effects::Outcome::Keep(_)) {
+                inspired.push(who.1);
+            }
+        }
+    }
+
     Ok(json!({
         "character": sheet.name,
         "instrument": held.item.name,
@@ -125,7 +164,55 @@ pub fn perform(
         "roll": roll,
         "made_it": made,
         "margin": crate::karma::margin(roll, target),
+        // WHO IT REACHED, and it is not everybody when somebody is
+        // already carrying a better song - see effects::admit.
+        "inspired": inspired,
+        "die": if made { Some(inspiration_die(karma.rating)) } else { None },
     }))
+}
+
+/// How big the inspiration die is, off the performer's Karma.
+///
+/// DAVE'S SCALE, NOT 5e's. Bardic Inspiration climbs with BARD LEVEL -
+/// d6, d8 at 5, d10 at 10, d12 at 15 - and this is a different feature
+/// on a different axis: a song drafted against the HOPPER chart, where
+/// Karma is what the chart reads. Tying it to Karma keeps one number
+/// deciding both how likely the song was and how much it is worth.
+fn inspiration_die(karma: i64) -> i64 {
+    match karma {
+        k if k >= 20 => 12,
+        k if k >= 14 => 10,
+        k if k >= 8 => 8,
+        _ => 6,
+    }
+}
+
+/// Every player character in the game: (id, name).
+///
+/// PLAYER CHARACTERS ONLY. Inspiring the goblins would be a funny bug
+/// to find in the middle of a fight.
+fn party(token: &str, game_id: &str) -> Result<Vec<(String, String)>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "id,name"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("is_npc", "is.false"),
+            ("is_active", "is.true"),
+        ],
+    )?;
+    Ok(rows
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|r| {
+            Some((
+                r.get("id")?.as_str()?.to_string(),
+                r.get("name")?.as_str()?.to_string(),
+            ))
+        })
+        .collect())
 }
 
 /// One audience row, this game's before the global one.

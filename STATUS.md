@@ -2987,6 +2987,60 @@ carry `#[allow(dead_code)]` with that reason - they are the API the
 effects table will ask. "1 hour, does not stack" is now measurable; it
 still needs somewhere to live.
 
+## Effects - BUILT (094, effects.rs)
+
+The last piece 092's clock was built for, and the bard's Stage 3.
+"Inspires compatriots for 1 hour, max does not stack" is two rules - a
+duration and a stacking rule - and before the clock there was nowhere to
+measure the first and nowhere to enforce the second.
+
+**AN EFFECT IS A ROW WITH A DEADLINE**, in `games.tick`. Expiry is one
+integer comparison, so an effect behaves identically in a fight and on
+the road and nothing sweeps a table to notice an hour has gone.
+
+**NOTHING DELETES AN EXPIRED EFFECT.** It is simply no longer active and
+the row stays as a record of what was true - the same contract as a
+roll. `ended_at` is for one cut short, which is a different fact from
+one that lapsed. There is no DELETE policy at all, so through PostgREST
+nothing can remove one.
+
+**FOUR STACKING BEHAVIOURS**, and which applies is a property of the
+EFFECT rather than of the engine:
+
+| | |
+|---|---|
+| `replace` | the newcomer wins - a fresh song restarts the hour |
+| `highest` | the better survives, and **a tie goes to what is already running** |
+| `stack` | both run - two poisons, two wounds |
+| `refuse` | a second is turned away while the first holds |
+
+`highest` is the subtle one: **a weaker version of something already
+running is NOTHING rather than an error.** Refusing it would let a bard
+who sings badly undo their own good song.
+
+Only the SAME KEY on the SAME CHARACTER is ever in the way. Deciding a
+blessing and a bard's song are "the same bonus" is a rule about those
+two things and not one 5e makes.
+
+**The bard's song now lands.** A successful performance applies
+`inspired` to every player character for an hour, `highest`, with the
+die off the performer's Karma - d6 under 8, d8 at 8, d10 at 14, d12 at
+20. That scale is DAVE'S, not 5e's: Bardic Inspiration climbs with bard
+level and this is a different feature on the HOPPER chart's axis, so one
+number decides both how likely the song was and what it is worth. The
+result names who it reached, and leaves off anybody already carrying
+better.
+
+Effects show as chips on Play and Run, soonest to end first, each with
+the time left and an x to end it early.
+
+**WHAT IS STILL NOT BUILT:** the `songs` table - Stage 2, skipped. A
+drafted song is not yet a record you can name and keep; the performance
+rolls and applies and nothing persists the song itself. Also nothing
+READS an effect yet: `inspired` sits on a character and no roll adds the
+die. That is the next wiring, and it wants the modifier pipeline 080
+started.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

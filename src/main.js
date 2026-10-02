@@ -35,6 +35,10 @@ let state = {
   folk: [],
   // 076. The audience catalogue - global rows and this game's own.
   audiences: [],
+  // 084. The slot ladder, straight from slots::LADDER. Read once -
+  // where a thing can be worn is a rule, not campaign data, so unlike
+  // the audiences nobody edits it.
+  slots: [],
   // 079. Whether the Description pane's two editors are open. Both
   // default closed and both open themselves when there is nothing
   // written yet - see paintDescription.
@@ -377,6 +381,7 @@ async function selectGame(id) {
   // 076. The audience catalogue, beside the class one - both are
   // per-game reference data read once when a game is opened.
   await loadAudiences();
+  await loadSlots();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1395,13 +1400,18 @@ async function loadSheet() {
 // fight with, what you are carrying out, and the rest. The grouping is
 // the catalogue's own `kind` - the same column the engine branches on
 // for the one-armour rule - rather than a classification invented here.
+// 084. ONE DIVISION LEFT, and it is the leftovers.
+//
+// Weapons / Loot / General grouped by WHAT A THING IS, which was the
+// best available answer while nothing recorded where it was. The
+// ladder answers the more useful question - what is on me, and where -
+// and everything it does not place falls through to here.
+//
+// STILL DEFINED AS THE LEFTOVERS rather than as a list, for the reason
+// the old third division was: a slot nobody has thought of yet lands
+// something here instead of making it vanish off the screen.
 const INV_DIVISIONS = [
-  ["#inv-weapons", (it) => it.item.kind === "weapon", "no weapons"],
-  ["#inv-loot", (it) => it.item.kind === "loot", "nothing worth selling"],
-  // EVERYTHING ELSE, defined as the leftovers rather than as a list of
-  // kinds. A kind nobody has thought of yet lands here instead of
-  // vanishing off the screen, which is what an explicit list would do.
-  ["#inv-general", (it) => it.item.kind !== "weapon" && it.item.kind !== "loot", "nothing else"],
+  ["#inv-carried", (it) => !it.slot, "nothing stowed"],
 ];
 
 async function loadInventory() {
@@ -1463,6 +1473,9 @@ async function loadInventory() {
   // THE WHOLE LIST, not the division - a weapon can be put into a
   // backpack, and the backpack is in General.
   state.inventory = items;
+
+  // 084. THE LADDER FIRST, then whatever it did not place.
+  paintSlotLadder(items);
 
   for (const [sel, belongs, empty] of INV_DIVISIONS) {
     const list = document.querySelector(sel);
@@ -1842,23 +1855,89 @@ function itemActions(it) {
   return out;
 }
 
+// WHAT IS WHERE. 084.
+//
+// The ladder comes from Rust - `list_slots` returns slots::LADDER in
+// its own order - so the sheet cannot disagree with the rules about
+// what places exist or how many fit in each. This paints into them.
+//
+// EMPTY SLOTS ARE STILL SHOWN. A right hand with nothing in it is
+// information, and hiding it would make the pane change shape every
+// time somebody drew a sword.
+function paintSlotLadder(items) {
+  const host = document.querySelector("#inv-slots");
+  if (!host) return;
+  host.innerHTML = "";
+
+  for (const slot of state.slots || []) {
+    const held = items.filter((it) => it.slot === slot.key);
+
+    const block = sEl("div", "slot-block");
+    const head = sEl("div", "slot-head");
+    head.append(sEl("span", "slot-name", slot.name));
+    // HOW FULL, only where there is a limit worth watching. "1 of 1"
+    // on every hand is noise; "4 of 6" at the belt is the whole point
+    // of the belt having a number.
+    if (slot.holds != null && slot.holds > 1) {
+      head.append(sEl("span", "slot-count", held.length + " of " + slot.holds));
+    }
+    block.append(head);
+
+    if (!held.length) {
+      block.append(sEl("div", "slot-empty", "empty"));
+    } else {
+      const ul = sEl("ul", "list");
+      for (const it of held) ul.append(inventoryRow(it));
+      block.append(ul);
+    }
+    host.append(block);
+  }
+}
+
+// Where this object can go, as a picker. The engine refuses an
+// impossible placement and the refusal arrives in the log - this only
+// has to offer the ladder, not re-implement `slots::admits`.
+//
+// A SECOND COPY OF THE RULE IS WHAT THIS AVOIDS. Filtering the options
+// to what fits would mean the screen deciding, and a screen that
+// decides is a screen that will eventually disagree with the engine -
+// which is exactly what the Karma preview did before it was mirrored.
+function slotPicker(it) {
+  const sel = document.createElement("select");
+  sel.className = "item-slot";
+  sel.title = "where this is worn or held";
+  sel.append(new Option("carried", ""));
+  for (const slot of state.slots || []) sel.append(new Option(slot.name, slot.key));
+  sel.value = it.slot || "";
+  sel.addEventListener("change", async () => {
+    const r = await tryCall("set_item_slot", {
+      objectId: it.id,
+      slot: sel.value || null,
+    });
+    if (!r.ok) {
+      log("set_item_slot", r.error, true);
+      sel.value = it.slot || "";
+      return;
+    }
+    await loadSheet();
+  });
+  return sel;
+}
+
+async function loadSlots() {
+  const rows = await invoke("list_slots").catch(() => []);
+  state.slots = rows || [];
+}
+
 function inventoryRow(it) {
   const li = document.createElement("li");
   li.className = "flat item" + (it.equipped ? " on" : "");
 
-  // Equip toggle. The one-armor rule is enforced in Rust, so a refusal
-  // arrives as an error in the log and the checkbox snaps back.
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.checked = it.equipped;
-  box.title = "equipped";
-  box.addEventListener("change", async () => {
-    await call("set_item_equipped", {
-      objectId: it.id,
-      equipped: box.checked,
-    });
-    await loadSheet();
-  });
+  // 084. A PLACE, NOT A TICK. The checkbox could say that a sword was
+  // in use and never which hand, which is the whole reason the column
+  // became a slot. Every rule behind it is still Rust's - the picker
+  // offers the ladder and the engine refuses what will not fit.
+  const box = slotPicker(it);
 
   const actions = itemActions(it);
 
@@ -5729,7 +5808,15 @@ function actorKitRow(it, onDone) {
   box.title = "equipped";
   box.addEventListener("change", async () => {
     dmSay("");
-    const r = await tryCall("set_item_equipped", { objectId: it.id, equipped: box.checked });
+    // 084. A MONSTER STILL GETS A TICK. The ladder is a character
+    // sheet's question - which hand, which finger - and a goblin's kit
+    // is a short list the DM glances at. Checking it puts the thing in
+    // the right hand, which is where `instantiate_npc` would have put
+    // it and what the boolean always meant underneath.
+    const r = await tryCall("set_item_slot", {
+      objectId: it.id,
+      slot: box.checked ? "right_hand" : null,
+    });
     if (!r.ok) { dmSay(r.error, true); box.checked = !box.checked; return; }
     await onDone();
   });

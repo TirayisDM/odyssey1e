@@ -543,7 +543,8 @@ fn batch_character_stats(
             &[
                 ("select", "holder_id,item_key"),
                 ("holder_id", &format!("in.({})", holders.join(","))),
-                ("equipped", "is.true"),
+                // 084. Non-null is equipped - see equipment::Owned.
+                ("slot", "not.is.null"),
             ],
         )?
         .as_array()

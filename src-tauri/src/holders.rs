@@ -48,7 +48,9 @@ pub struct Obj {
     /// never merges into a stack.
     pub name: Option<String>,
     pub quantity: i64,
-    pub equipped: bool,
+    /// 084. Where it is worn, and the fact that it is - see
+    /// equipment::Owned for why these are one column and not two.
+    pub slot: Option<String>,
     /// Attuned, which is a fact about the CARRIER rather than about
     /// where the thing is - three across everything somebody holds, at
     /// any depth. Carried here because this is the only loader that
@@ -357,7 +359,7 @@ pub fn resolve(objects: &[Obj], extra: &[Holder], types: &[Kind]) -> Vec<Located
                 item_key: o.item_key.clone(),
                 name: o.name.clone(),
                 quantity: o.quantity,
-                equipped: o.equipped,
+                equipped: o.slot.is_some(),
                 is_container: o.entity_id.is_some(),
                 entity_id: o.entity_id.clone(),
                 holder_kind: kind,
@@ -440,6 +442,10 @@ fn as_item(t: &Kind) -> crate::equipment::Item {
         slots: None,
         versatile_number: None,
         versatile_denomination: None,
+        // 084. An absence for the reason the fields above are: `Kind`
+        // carries what the OBJECT MANAGER needs, and where a thing is
+        // worn is a sheet's question.
+        worn_slot: None,
     }
 }
 
@@ -644,7 +650,7 @@ pub fn load_world(
         token,
         "objects",
         &[
-            ("select", "id,item_key,name,quantity,equipped,attuned,holder_id,entity_id,size_override,holds_size_override,weight_override,price_override,damage_number_override,damage_denomination_override,damage_types_override,properties_override,base_ac_override"),
+            ("select", "id,item_key,name,quantity,slot,attuned,holder_id,entity_id,size_override,holds_size_override,weight_override,price_override,damage_number_override,damage_denomination_override,damage_types_override,properties_override,base_ac_override"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "item_key.asc,acquired_at.asc"),
         ],
@@ -866,7 +872,7 @@ mod tests {
             base_ac_override: None,
             name: None,
             quantity: 1,
-            equipped: false,
+            slot: None,
             holder_id: holder.map(str::to_string),
             entity_id: None,
             size_override: None,

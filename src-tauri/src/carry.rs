@@ -226,6 +226,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,

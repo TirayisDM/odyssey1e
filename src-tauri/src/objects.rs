@@ -402,6 +402,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             accepts: Vec::new(),
             capacity_slots: None,
         }

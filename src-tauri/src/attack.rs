@@ -600,6 +600,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             // Not what these fixtures are about. Written out
             // rather than defaulted, because a fixture that is
             // faithful to the seed makes a failure mean the RULE
@@ -619,6 +620,7 @@ mod tests {
             name: None,
             item,
             quantity: 1,
+            slot: Some("right_hand".into()),
             equipped: true,
             attuned: false,
             proficient_override: None,

@@ -559,30 +559,35 @@
       <div class="sheet-pane" data-sheet="equipment" hidden>
         <div id="burden" class="muted trained burden"></div>
         <div id="purse" class="muted trained"></div>
-        <!-- The designed way to acquire something. Until 026 there was
-             none: equipping an item you did not own created it, because
-             the write underneath was an upsert. -->
+        <!-- 084. WHAT IS WHERE, in the order a person checks
+             themselves: hands first because that is what you reach for
+             under pressure, then the belt, then what you are carrying,
+             then what you are wearing. Built by paintSlots from
+             slots::LADDER, so the order lives in Rust and this is the
+             hook it draws into. -->
+        <div id="inv-slots"></div>
+
+        <!-- EVERYTHING NOT PLACED. Carried, stowed, in a pack - real
+             and not worn. It sits under the ladder rather than above
+             it because the question "what have I got on me" is asked
+             far more often than "what is in the bottom of my bag". -->
+        <div class="sub">Carried</div>
+        <ul id="inv-carried" class="list"></ul>
+
+        <!-- 084. ADDING SOMETHING MOVED TO THE BOTTOM. It was the
+             first thing on the pane and is the rarest thing done here;
+             reading what you have is the common case and now leads.
+
+             The designed way to acquire something. Until 026 there was
+             none: equipping an item you did not own created it,
+             because the write underneath was an upsert. -->
+        <div class="sub">Add equipment</div>
         <div class="row">
           <select id="add-what"></select>
           <input id="add-qty" type="number" min="1" value="1" class="narrow" />
           <button id="add-item" class="ghost">Add</button>
           <button id="check-keys" class="tiny ghost">check keys</button>
         </div>
-
-        <!-- THREE DIVISIONS, IN THIS ORDER, and the order is the point.
-             What you fight with comes first because it is what you
-             reach for under pressure; what you are carrying out comes
-             second because it is what the session was for; everything
-             else is the rest. One list sorted by nothing made a
-             greatsword and a blanket equally hard to find. -->
-        <div class="sub">Weapons</div>
-        <ul id="inv-weapons" class="list"></ul>
-
-        <div class="sub">Loot</div>
-        <ul id="inv-loot" class="list"></ul>
-
-        <div class="sub">General</div>
-        <ul id="inv-general" class="list"></ul>
       </div>
 
       <!-- ================= SKILLS &amp; TALENTS ================= -->

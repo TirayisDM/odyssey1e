@@ -43,6 +43,7 @@ mod objects;
 mod pin;
 mod resolution;
 mod size;
+mod slots;
 mod species;
 mod spent;
 mod store;
@@ -540,14 +541,20 @@ fn list_inventory(
 /// there inserts - and after 026 that key is not even unique, because a
 /// character may hold two shortswords. An id names one of them.
 #[tauri::command]
-fn set_item_equipped(
+fn set_item_slot(
     state: State<AppState>,
     object_id: String,
-    equipped: bool,
+    // 084. WHERE, and None is "not worn at all" - which is what the
+    // old `equipped: false` meant and is now the same fact said once.
+    slot: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
+    let want = slot.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
-    if equipped {
+    if let Some(want) = want {
+        if crate::slots::of(want).is_none() {
+            return Err(format!("there is no {} to put anything in", want));
+        }
         let obj = objects::load_object(&token, &object_id)?;
         // DIRECTLY held, not merely somewhere. A breastplate at the
         // bottom of a backpack is not being worn, and since 031 that is
@@ -576,25 +583,65 @@ fn set_item_equipped(
             .collect();
         after.push(&incoming);
 
+        // WILL IT EVEN GO THERE. Asked before the whole-loadout rules,
+        // because "a greatsword does not go in the Hip" is a better
+        // answer than "that is three hands".
+        if !crate::slots::admits(want, &incoming) {
+            let name = crate::slots::of(want).map(|s| s.name).unwrap_or(want);
+            return Err(format!("{} does not go in the {}", incoming.name, name));
+        }
+
         // Only an armor can break the one-suit rule, so nothing else
         // pays for that check.
         if incoming.kind == "armor" {
             equipment::check_one_armor(&after)?;
         }
 
-        // HANDS, which nothing counted until now. The `two` property has
-        // been on eight weapons since 027 and did nothing, so a
-        // greatsword and a shield were both up at once. Armour costs no
-        // hands, which is why this cannot be a count of equipped rows.
-        carry::check_hands(&after)?;
+        // 084. THE WHOLE LOADOUT, PLACED. `check_hands` counted what
+        // was held and could not say which hand held it; `slots::check`
+        // places everything and then hands the pair to that same
+        // budget, so the greatsword-and-shield rule is still written in
+        // exactly one place.
+        //
+        // THIS OBJECT'S OWN ROW IS REPLACED, NOT ADDED. Moving a sword
+        // from the right hand to the left must not read as a second
+        // sword - which is the same filter `after` above applies, for
+        // the same reason.
+        let mut placed: Vec<crate::slots::Placed> = sheet
+            .loadout
+            .iter()
+            .filter(|e| e.id != object_id)
+            .filter_map(|e| {
+                e.slot.as_ref().map(|s| crate::slots::Placed {
+                    slot: s.clone(),
+                    item: &e.item,
+                })
+            })
+            .collect();
+        placed.push(crate::slots::Placed { slot: want.to_string(), item: &incoming });
+        crate::slots::check(&placed)?;
     }
 
     supabase::rest_update(
         &token,
         "objects",
         &[("id", &format!("eq.{}", object_id))],
-        &json!({ "equipped": equipped }),
+        &json!({ "slot": want }),
     )
+}
+
+/// Every slot there is, in the order a sheet reads them.
+///
+/// THE LADDER COMES FROM RUST, not from a table. Where a thing can be
+/// worn is a rule rather than campaign data - a game that invented an
+/// eleventh slot would need code to mean anything by it - so unlike
+/// `audiences` this is not something a DM edits.
+#[tauri::command]
+fn list_slots() -> Vec<Value> {
+    crate::slots::LADDER
+        .iter()
+        .map(|s| json!({ "key": s.key, "name": s.name, "holds": s.holds }))
+        .collect()
 }
 
 /// Every `techniques.item_key` that resolves to no item.
@@ -1302,7 +1349,8 @@ pub fn run() {
             set_ability,
             set_skill_prof,
             list_inventory,
-            set_item_equipped,
+            set_item_slot,
+            list_slots,
             check_item_keys,
             preview_request,
             roll_named,

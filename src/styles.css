@@ -743,3 +743,19 @@ button.wide{width:100%}
 .statline-sep{color:var(--muted)}
 .statline-total{font-size:.85rem;color:var(--muted)}
 .statline button{margin-left:auto}
+
+/* 084. THE EQUIPMENT LADDER. A heading per slot with what is in it
+   under, and empty slots still shown - a right hand with nothing in it
+   is information, and hiding it would make the pane change shape every
+   time somebody drew a sword. */
+.slot-block{margin:.1rem 0 .5rem}
+.slot-head{display:flex;align-items:baseline;gap:.5rem;
+           padding:.25rem 0 .15rem;border-bottom:1px solid var(--line)}
+.slot-name{font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+           color:var(--muted)}
+.slot-count{font-size:11px;color:var(--muted)}
+.slot-empty{font-size:12px;color:var(--muted);font-style:italic;padding:.25rem 0 .1rem}
+.slot-pick{margin-left:auto}
+.item-slot{font-size:11px;margin:0;padding:.1rem .25rem;width:auto;
+           background:#0f1114;color:var(--fg);border:1px solid var(--line);
+           border-radius:3px}

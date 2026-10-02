@@ -139,6 +139,16 @@ pub struct Item {
     /// mode. Shown so the number is visible while that is true.
     pub versatile_number: Option<i64>,
     pub versatile_denomination: Option<i64>,
+    /// 084. WHERE THIS IS WORN, when neither its size nor its kind can
+    /// say. A ring, an amulet and a helm are all small pieces of
+    /// equipment and nothing else about them distinguishes one from
+    /// another - so they state it, and `slots::admits` reads it.
+    ///
+    /// NULL FOR ALMOST EVERYTHING, which is the honest default: a
+    /// sword is not worn anywhere in particular, it is held, and a
+    /// backpack is placed by its kind. Only the three slots that
+    /// cannot be deduced use this.
+    pub worn_slot: Option<String>,
     pub accepts: Vec<String>,
     /// Containers only: how much room, in slots. None is an unfinished
     /// catalogue row rather than "bottomless" - see containers::Profile,
@@ -165,6 +175,13 @@ pub struct Owned {
     pub quantity: i64,
     /// In hand or worn. Always true in a sheet loadout; meaningful in a
     /// full inventory read.
+    /// 084. WHERE it is worn or held - see slots.rs. None is not worn
+    /// at all, which is what carried-but-stowed means.
+    pub slot: Option<String>,
+    /// THAT it is worn, derived from `slot` and never stored beside
+    /// it. 084 dropped `objects.equipped` rather than keep a boolean
+    /// that could disagree with the column saying where; this is the
+    /// same answer for the dozen readers that only ever asked whether.
     pub equipped: bool,
     pub attuned: bool,
     /// TRI-STATE, straight off the column. See `is_proficient`.
@@ -587,13 +604,58 @@ fn item_from_row(r: &Value) -> Item {
         slots: supabase::numeric_text_at(r, "slots"),
         versatile_number: r.get("versatile_number").and_then(|x| x.as_i64()),
         versatile_denomination: r.get("versatile_denomination").and_then(|x| x.as_i64()),
+        worn_slot: as_opt_str(r, "worn_slot"),
+    }
+}
+
+/// An item with nothing filled in but a name and a kind.
+///
+/// TEST SCAFFOLDING, and `#[cfg(test)]` rather than `#[allow(dead_code)]`
+/// so it is not compiled into the shipped library - the same call
+/// dice.rs made for `SequenceRoller`. `Item` carries twenty-eight
+/// fields and a test about one of them should not have to name the
+/// other twenty-seven.
+///
+/// `size` defaults to med because the column does, not because medium
+/// is a neutral answer - a test about size must still say which.
+#[cfg(test)]
+pub fn blank(name: &str, kind: &str) -> Item {
+    Item {
+        key: name.to_lowercase().replace(' ', "_"),
+        name: name.to_string(),
+        kind: kind.to_string(),
+        base_item: None,
+        weapon_class: None,
+        damage_number: None,
+        damage_denomination: None,
+        damage_types: Vec::new(),
+        properties: Vec::new(),
+        range_reach: None,
+        range_value: None,
+        range_long: None,
+        armor_category: None,
+        base_ac: None,
+        dex_cap: None,
+        size: "med".to_string(),
+        holds_size: None,
+        weight: None,
+        accepts: Vec::new(),
+        capacity_slots: None,
+        description: None,
+        price: None,
+        denom: None,
+        rarity: None,
+        slots: None,
+        versatile_number: None,
+        versatile_denomination: None,
+        worn_slot: None,
     }
 }
 
 pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,damage_number,\
 damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap,\
 size,holds_size,weight,accepts,capacity_slots,\
-description,price,denom,rarity,slots,versatile_number,versatile_denomination";
+description,price,denom,rarity,slots,versatile_number,versatile_denomination,worn_slot";
 
 /// Global rows plus this game's overrides, collapsed so an override
 /// replaces the global row sharing its key. Same two-pass shape as the
@@ -643,7 +705,7 @@ pub fn load_loadout(
             // columns come from objects.rs so the select cannot drift
             // from the struct that reads them.
             format!(
-                "id,name,item_key,quantity,equipped,attuned,proficient_override,uses_spent,uses_max,{}",
+                "id,name,item_key,quantity,slot,attuned,proficient_override,uses_spent,uses_max,{}",
                 crate::objects::OVERRIDE_COLUMNS
             ),
         ),
@@ -651,7 +713,10 @@ pub fn load_loadout(
         ("order", "acquired_at.asc".to_string()),
     ];
     if equipped_only {
-        query.push(("equipped", "is.true".to_string()));
+        // 084. NON-NULL IS EQUIPPED. The boolean is gone and the slot
+        // carries both facts, so "what is in use" is "what is
+        // somewhere".
+        query.push(("slot", "not.is.null".to_string()));
     }
     let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
@@ -710,7 +775,8 @@ pub fn load_loadout(
             ),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
-            equipped: r.get("equipped").and_then(|x| x.as_bool()).unwrap_or(false),
+            slot: as_opt_str(r, "slot"),
+            equipped: as_opt_str(r, "slot").is_some(),
             attuned: r.get("attuned").and_then(|x| x.as_bool()).unwrap_or(false),
             proficient_override,
             uses_spent: r.get("uses_spent").and_then(|x| x.as_i64()).unwrap_or(0),
@@ -818,6 +884,12 @@ pub fn load_npc_loadout(
             proficient: proficient_override.unwrap_or(true),
             modes: modes(&item),
             quantity: r.get("quantity").and_then(|x| x.as_i64()).unwrap_or(1),
+            // `npc_items` KEEPS ITS BOOLEAN. 084 dropped the column on
+            // `objects`, not here: a statblock's kit is a pattern of
+            // what a monster carries and has no hands to place it in.
+            // The slot is filled when instantiate_npc makes a real
+            // object out of it.
+            slot: None,
             equipped: r.get("equipped").and_then(|x| x.as_bool()).unwrap_or(true),
             attuned: false,
             proficient_override,
@@ -1023,6 +1095,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             // Not what these fixtures are about. Written out
             // rather than defaulted, because a fixture that is
             // faithful to the seed makes a failure mean the RULE
@@ -1062,6 +1135,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1097,6 +1171,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1129,6 +1204,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1164,6 +1240,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1325,6 +1402,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1478,6 +1556,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1514,6 +1593,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             size: "med".into(),
             holds_size: None,
             weight: None,
@@ -1548,6 +1628,7 @@ mod tests {
             slots: None,
             versatile_number: None,
             versatile_denomination: None,
+            worn_slot: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,

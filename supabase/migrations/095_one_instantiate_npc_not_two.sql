@@ -1,0 +1,59 @@
+-- =====================================================================
+-- 095_one_instantiate_npc_not_two.sql
+-- odyssey1e — the overload nobody meant to create
+-- =====================================================================
+--
+-- Enrolling a monster into an encounter stopped working. The error is
+-- not in any log the app keeps, because PostgREST refuses before
+-- anything runs:
+--
+--   function public.instantiate_npc(p_npc_key => text,
+--                                   p_game_id => uuid,
+--                                   p_label => unknown) is not unique
+--   HINT: Could not choose a best candidate function.
+--
+-- ---------------------------------------------------------------------
+-- REORDERING THE PARAMETERS MADE A SECOND FUNCTION
+-- ---------------------------------------------------------------------
+--
+-- 022 wrote `instantiate_npc(p_npc_key text, p_game_id uuid, p_label
+-- text)`. 089, fixing the `equipped` fault, wrote:
+--
+--   create or replace function instantiate_npc(
+--     p_game_id uuid, p_npc_key text, p_label text)
+--
+-- Same three names, same three types, DIFFERENT ORDER - and Postgres
+-- identifies a function by its argument types in order. So that was
+-- not a replacement. It was a new function beside the old one, and
+-- `create or replace` said nothing, because nothing was wrong with it.
+--
+-- The old one survived with 084's dropped column still in it. The new
+-- one is correct. Both answer to the same three parameter NAMES, which
+-- is what PostgREST dispatches on, so every call became ambiguous and
+-- every enrolment failed - including the one 089 was written to fix.
+--
+-- A FIX THAT LEAVES THE BUG IN PLACE AND ADDS AN AMBIGUITY ON TOP is
+-- the shape worth remembering here. The new function was tested and
+-- worked when called by its own signature; what nobody called was the
+-- app.
+--
+-- ---------------------------------------------------------------------
+-- WHAT THIS DOES
+-- ---------------------------------------------------------------------
+--
+-- Drops the 022 signature and keeps 089's. Dropping by exact argument
+-- types, because that is the only way to name one of two functions
+-- that share a name - and `if exists` so a database that somehow has
+-- only the good one does not fail here.
+--
+-- Nothing else needs to change: PostgREST passes arguments by name, so
+-- the parameter ORDER was never what the Rust depended on. dm.rs sends
+-- {p_npc_key, p_game_id, p_label} and will go on doing so.
+-- =====================================================================
+
+drop function if exists public.instantiate_npc(text, uuid, text);
+
+-- Belt and braces on the survivor's grants: 089 set these, and a drop
+-- of its neighbour is a cheap place to assert they are still right.
+revoke all on function public.instantiate_npc(uuid, text, text) from public, anon;
+grant execute on function public.instantiate_npc(uuid, text, text) to authenticated;

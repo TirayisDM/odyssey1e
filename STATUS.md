@@ -450,9 +450,32 @@ and not after.
 077 the trigger surface goes back to zero - the EXECUTE revoke that 002
     and 017 established, applied to the fifteen trigger functions
     written since, and three search paths repinned to ''
+078 a class grants its saves - the two saving throws a class gives,
+    which 055 named and nothing read
+084 where a thing is worn - `objects.slot` replaces the `equipped`
+    boolean, because a hand and a back are different answers
+085 what hangs off a belt - the hip slot, and what is small enough
+086 put the backfill somewhere possible - 084's placement rule,
+    corrected: one weapon in hand, the rest at the belt
+087 what a class gives you - class_features and character_choices.
+    Features are DERIVED from the catalogue and the level; a choice is
+    the only part stored
+088 the twelve classes level by level - 176 feature rows
+089 two functions that still wrote `equipped` - unheld_is_unequipped
+    and instantiate_npc, which 084 broke and nothing compiled against
+092 a game knows what time it is - games.tick in six-second rounds,
+    last_long_rest, hit_dice_spent, character_uses
+093 what runs out and what brings it back - uses and recharge for the
+    features that have them
+094 something that is true for a while - the effects table, expiry as
+    a tick comparison, and the four stacking rules
+095 one instantiate_npc, not two - dropping the overload 089 created
+    by reordering its parameters
 
-(066 to 070 and 072 are code-only changesets with no migration - the
-numbering is continuous across both, which is why there are gaps here.)
+(066-070, 072, 079-083, 090 and 091 are code-only changesets with no
+migration - the numbering is continuous across both, which is why
+there are gaps here. A gap is expected; a NAME in the database with no
+file is not, and there have been five - see the drift trap.)
 
 All applied. Files in `supabase/migrations/`. **Read the comments** -
 each one carries why it exists, and 003 and 004 are fixes for my own
@@ -593,6 +616,74 @@ thrown. The `check keys` button on the equipment panel runs it.
 ## Traps already paid for
 
 Do not rediscover these.
+
+**THE DATABASE CAN HOLD SCHEMA THAT GIT DOES NOT. CHECK AFTER EVERY
+PULL.** Five migrations have now been applied to the live database
+with no file in the repo, or with a file holding no SQL:
+
+    087  class_features and character_choices   file missing
+    089  the two functions 084 broke            file had COMMENTS ONLY
+    092  the game clock                         file missing
+    093  what runs out and what brings it back  file missing
+    094  effects                                file missing
+
+Every one was recovered on 2026-10-02 from
+`supabase_migrations.schema_migrations`, which keeps the statements it
+ran - in this project's case with the comment headers intact, so the
+recovered files are the originals rather than a reconstruction. All
+five were verified by MD5 against that record before being committed.
+
+WHY IT MATTERS EVEN THOUGH THE APP WAS FINE. The running app reads the
+live schema and never noticed. What broke was the chain: 088 seeds the
+table 087 creates, so the migrations as committed could not run in
+order, and a fresh clone could not build this database. That is also
+exactly what a second developer gets handed.
+
+THE CHECK, after every pull and after any session that applied a
+migration:
+
+    select version, name from supabase_migrations.schema_migrations
+     where version > '<the last one you know about>' order by version;
+
+against `ls supabase/migrations`. A name in the database with no file
+is the fault; gaps in the NUMBERING are not - several numbers are
+code-only changesets, which is recorded under the migration list.
+
+AND A FILE THAT IS ALL COMMENTS COUNTS AS MISSING. 089's header said
+the applied SQL was in the migration history and the file recorded
+what it did - which reads as deliberate and leaves a clone running
+084's column drop with neither repair after it. `grep -c -v '^--\|^$'`
+over the migrations directory finds that one.
+
+**A `create or replace function` THAT REORDERS THE PARAMETERS CREATES A
+SECOND FUNCTION.** Postgres identifies a function by its argument types
+IN ORDER, so this is not a replacement:
+
+    022  instantiate_npc(p_npc_key text, p_game_id uuid, p_label text)
+    089  instantiate_npc(p_game_id uuid, p_npc_key text, p_label text)
+
+It is an overload beside the old one, and `create or replace` says
+nothing, because nothing about it is wrong. The old body kept the
+column 084 had dropped.
+
+WHAT MAKES IT BITE IS POSTGREST, which dispatches an RPC on parameter
+NAMES. Both functions answered to the same three, so every call became
+
+    function public.instantiate_npc(p_npc_key => text, p_game_id =>
+      uuid, p_label => unknown) is not unique
+
+and every enrolment failed - including the one 089 was written to fix.
+A repair that leaves the original fault in place and adds an ambiguity
+on top of it. 095 drops the 022 signature by exact argument types,
+which is the only way to name one of two functions sharing a name.
+
+The lesson is narrow and worth keeping: changing a function's
+SIGNATURE is a drop and a create, never a replace. Count them
+afterwards:
+
+    select proname, pg_get_function_identity_arguments(oid)
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and proname = '<the one you changed>';
 
 **A column default runs as the caller.** Revoking EXECUTE on a function
 used in a DEFAULT silently breaks every insert. Only trigger bodies are
@@ -3184,6 +3275,60 @@ sits ahead of the dice; it is one small select and it has not been worth
 fixing yet, but that is where the latency is if it ever matters.
 
 ## Loose ends
+
+- **DELETING A GAME IS A TWENTY-FOUR TABLE CASCADE, AND NOTHING WARNS
+  YOU.** Every tenanted table points at `games` with ON DELETE CASCADE
+  - characters, rolls, actions, hp_events, objects, entities,
+  locations, encounters, effects, and the per-game rows of every
+  reference table. One delete takes a campaign's entire history with
+  it, silently, in one statement.
+
+  IT HAS ALREADY HAPPENED ONCE. Between 2026-10-01 and 10-02 three of
+  the four games went, and with them 16 characters, ~130 rolls, 70
+  actions, 34 hp_events, the Inn's location tree and four encounters
+  including the Baseline Test fight. It may well have been deliberate
+  housekeeping before the chargen work - it is recorded here because
+  nothing in the app or the database would have told anybody either
+  way. What survived is `Test Game 1`, Falon (fighter 4 / bard 1, the
+  same row) and Goblin 0001. Reference data was untouched: the
+  catalogue rows are global, with `game_id` null.
+
+  THE CASCADE ITSELF IS RIGHT. A game's data belongs to the game and
+  orphaning it would be worse. What is missing is everything around
+  it:
+
+      no confirmation      no command asks twice, or at all - the
+                           deletes so far have been by hand in SQL
+      no archive           053 chose `archived` over deleting an
+                           ENCOUNTER because rolls point at it. The
+                           same argument applies with more force to a
+                           game, and games never got the treatment
+      no backup            see below - nothing in git holds play data
+
+  The obvious shape is 053's, one level up: `games.archived`, and a
+  delete that refuses while any roll in that game exists. Not built,
+  and worth building before a second person is at the table.
+
+- **NOTHING BACKS UP THE PLAY DATA, and the schema is not the
+  problem.** The migrations are the schema's backup and now genuinely
+  are again (see the drift trap). What exists nowhere but the live
+  database is what people DID: characters, rolls, actions, hit point
+  history, objects, locations. The whole database is ~15 MB, of which
+  the catalogue - items, techniques, class features, species - rebuilds
+  from migrations and is not worth saving.
+
+  Before anything destructive, and periodically:
+
+      supabase db dump --data-only -f backup-YYYY-MM-DD.sql
+
+  It wants the CLI and the database password. Whether this project's
+  plan includes automatic daily backups has not been checked - it is
+  Database -> Backups in the dashboard, and worth knowing before
+  relying on it rather than after.
+
+  TODAY'S MISSING MIGRATIONS WERE NOT A BACKUP PROBLEM and a backup
+  would not have caught them. Keep the two apart: git holds the shape,
+  a dump holds the contents, and each is useless for the other's job.
 
 - **Rotate `ROLLLOG_WEBHOOK_SECRET`** in the old Apps Script project's
   Script Properties and in the AppSheet webhook body. The value was

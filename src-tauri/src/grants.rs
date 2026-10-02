@@ -149,6 +149,42 @@ pub fn apply(natural: i64, grants: &[Grant], target: &str) -> i64 {
     floored + total_add(grants, target)
 }
 
+/// The named steps between a natural value and what `apply` returns.
+///
+/// FOR A SCREEN THAT SHOWS ITS WORKING. "Performance +2" is a number
+/// to take on faith; "Performance +1 + Pipes +1" is an account of
+/// itself, and this app has spent its whole life refusing the first
+/// one - the attack preview spells out STR and the proficiency bonus
+/// for exactly this reason.
+///
+/// THE STEPS SUM TO THE DIFFERENCE, always. A floor contributes the
+/// distance it lifted the value, so a set from 10 to 19 reads as +9
+/// against the thing that did it - and a set that lifted nothing
+/// contributes nothing and is not listed, because an item that
+/// changed no number should not appear in the arithmetic.
+pub fn breakdown(natural: i64, grants: &[Grant], target: &str) -> Vec<(String, i64)> {
+    let mut steps = Vec::new();
+    let running = natural;
+
+    if let Some(set) = best_set(grants, target) {
+        if set > running {
+            let who = grants
+                .iter()
+                .filter(|g| g.mode == Mode::Set && g.target == target && g.value == set)
+                .map(|g| g.source.clone())
+                .next()
+                .unwrap_or_default();
+            steps.push((who, set - running));
+        }
+    }
+    for g in grants.iter().filter(|g| g.mode == Mode::Add && g.target == target) {
+        if g.value != 0 {
+            steps.push((g.source.clone(), g.value));
+        }
+    }
+    steps
+}
+
 /// Which grants are live on a creature right now.
 ///
 /// WORN OR HELD, which 084 made `slot` the one answer for: a +1 sword
@@ -349,6 +385,49 @@ mod tests {
         assert_eq!(unattuned[0].target, "ac", "the cloak still works");
 
         assert_eq!(live(gs, true, true).len(), 2);
+    }
+
+    /* ---------------- showing the working ---------------- */
+
+    #[test]
+    fn a_bonus_is_listed_against_whatever_gave_it() {
+        let gs = vec![Grant { source: "Pipes".into(), ..g("skill.prf", Mode::Add, 1) }];
+        assert_eq!(breakdown(1, &gs, "skill.prf"), vec![("Pipes".to_string(), 1)]);
+    }
+
+    /// THE STEPS SUM TO THE DIFFERENCE. Whatever is listed has to
+    /// account for the whole of the change, or the working is a
+    /// decoration rather than an explanation.
+    #[test]
+    fn the_steps_add_up_to_what_apply_returns() {
+        let gs = vec![
+            Grant { source: "Gauntlets".into(), ..g("str", Mode::Set, 19) },
+            Grant { source: "Belt".into(), ..g("str", Mode::Add, 2) },
+        ];
+        for natural in [8, 13, 19, 20, 22] {
+            let shown: i64 = breakdown(natural, &gs, "str").iter().map(|(_, v)| v).sum();
+            assert_eq!(natural + shown, apply(natural, &gs, "str"), "from {}", natural);
+        }
+    }
+
+    #[test]
+    fn a_floor_reads_as_the_distance_it_lifted_you() {
+        let gs = vec![Grant { source: "Gauntlets".into(), ..g("str", Mode::Set, 19) }];
+        assert_eq!(breakdown(10, &gs, "str"), vec![("Gauntlets".to_string(), 9)]);
+    }
+
+    /// An item that changed nothing must not appear in the sum. A
+    /// barbarian at 20 wearing gauntlets that set 19 is not "+0 from
+    /// the gauntlets" - they are wearing jewellery.
+    #[test]
+    fn a_floor_that_lifted_nothing_is_not_mentioned() {
+        let gs = vec![Grant { source: "Gauntlets".into(), ..g("str", Mode::Set, 19) }];
+        assert!(breakdown(20, &gs, "str").is_empty());
+    }
+
+    #[test]
+    fn nothing_granted_shows_nothing() {
+        assert!(breakdown(5, &[], "skill.prf").is_empty());
     }
 
     /* ---------------- the vocabulary ---------------- */

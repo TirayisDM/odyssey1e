@@ -293,10 +293,23 @@ impl Sheet {
     pub fn skill_modifier(&self, key: &str) -> i64 {
         match self.find_skill(key) {
             Some(s) => crate::grants::apply(
-                self.ability_mod(&s.ability) + self.skill_prof_bonus(&s.key),
+                self.skill_modifier_natural(key),
                 &worn_grants(&self.loadout),
                 &format!("skill.{}", s.key),
             ),
+            None => 0,
+        }
+    }
+
+    /// The same without anything magical in it.
+    ///
+    /// SPLIT OUT FOR THE KARMA LINE, which shows its working and must
+    /// be able to say "Performance +1 + Pipes +1" rather than folding
+    /// the two into a +2 nobody can account for. Everything else
+    /// wants the total and calls `skill_modifier`.
+    pub fn skill_modifier_natural(&self, key: &str) -> i64 {
+        match self.find_skill(key) {
+            Some(s) => self.ability_mod(&s.ability) + self.skill_prof_bonus(&s.key),
             None => 0,
         }
     }
@@ -327,11 +340,31 @@ impl Sheet {
                 .find(|c| c.key == held.key && !c.karma_skills.is_empty())
         })?;
 
-        let parts: Vec<(String, i64)> = c
-            .karma_skills
-            .iter()
-            .map(|k| (k.clone(), self.skill_modifier(k)))
-            .collect();
+        // EVERY CONTRIBUTION IS ITS OWN TERM, and named. A pair of
+        // enchanted pipes is not part of somebody's Performance - it
+        // is a thing they are carrying - so the line reads "Insight
+        // +1 + Performance +1 + Pipes +1" rather than quietly
+        // reporting a +2 the bard cannot account for.
+        //
+        // THE LABELS ARE RESOLVED HERE because this is where the
+        // skill catalogue is. The screen used to turn a key into a
+        // name and now prints what it is given, which is also what
+        // lets an item sit in the same list as a skill.
+        let worn = worn_grants(&self.loadout);
+        let mut parts: Vec<(String, i64)> = Vec::new();
+        for k in &c.karma_skills {
+            let natural = self.skill_modifier_natural(k);
+            let name = self
+                .find_skill(k)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| k.clone());
+            parts.push((name, natural));
+            parts.extend(crate::grants::breakdown(
+                natural,
+                &worn,
+                &format!("skill.{}", k),
+            ));
+        }
         let each: Vec<i64> = parts.iter().map(|(_, m)| *m).collect();
         Some(Karma {
             class_key: c.key.clone(),

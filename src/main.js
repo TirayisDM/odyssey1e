@@ -3306,8 +3306,14 @@ function paintPerform(sheet) {
 
   // THE WORKING, NOT JUST THE TOTAL. A bard who disagrees with their
   // own Karma should be able to see which half is wrong.
+  // ALREADY LABELLED, and that is the change. These used to be skill
+  // KEYS that this turned into names, which left no room for a term
+  // that is not a skill - and a pair of enchanted pipes is not part
+  // of somebody's Performance, it is a thing they are carrying.
+  // character.rs resolves the labels now, because that is where the
+  // skill catalogue is, and an item sits in the same list.
   const parts = (k.parts || [])
-    .map(([key, mod]) => skillName(key) + " " + withSign(mod))
+    .map(([label, mod]) => label + " " + withSign(mod))
     .join(" + ");
   const pinned = k.raw > k.rating
     ? " \u00b7 " + k.raw + " before the chart's ceiling of " + k.rating
@@ -3331,9 +3337,16 @@ function paintPerform(sheet) {
   paintOdds();
 }
 
+// TWO PLACES A SKILL NAME CAN COME FROM, because two screens want one.
+// The sheet carries the catalogue for the character it is showing; the
+// Objects tab has no character and loads the keys on their own. Asking
+// both means an enchanted pair of boots reads "Stealth +2" on the
+// Objects tab rather than "ste +2".
 function skillName(key) {
-  const s = ((state.sheet && state.sheet.skills) || []).find((x) => x.key === key);
-  return s ? s.name : key;
+  const onSheet = ((state.sheet && state.sheet.skills) || []).find((x) => x.key === key);
+  if (onSheet) return onSheet.name;
+  const loaded = (state.skillKeys || []).find((x) => x.key === key);
+  return loaded ? loaded.name : key;
 }
 
 // WHAT THE CHART SAYS BEFORE THE DICE DO. Shown as you change the

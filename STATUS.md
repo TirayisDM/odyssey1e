@@ -474,6 +474,8 @@ and not after.
 096 the Fjell'gar come down the mountain - the third people seeded,
     DEX +2 WIS +1, AC 12 + DEX unarmoured, Athletics granted, and five
     traits written down that nothing can apply yet
+097 the Ny'ook live in the moment - the fourth, DEX +2 CHA +2, Small,
+    Acrobatics granted, and the first LOWERED ability ceiling: STR 13
 
 (066-070, 072, 079-083, 090 and 091 are code-only changesets with no
 migration - the numbering is continuous across both, which is why
@@ -2250,6 +2252,24 @@ Darkvision, Mineral Sense, Trade Savvy and Environmental Resilience are
 written down and applied by nothing - no vision system, no rest system,
 and Adv/Dis is a human choice.
 
+**A LOWERED CEILING IS ENFORCED IN ONE PLACE AND NOT THE OTHER.** 056
+built `ability_maxima` for the Unt'garoth's RAISED Strength ceiling of
+21, and 097 is the first row to lower one - the Ny'ook cannot exceed
+13. The two halves behave differently and it is worth knowing which:
+
+    a species bonus   `effective_score` will not add past it
+    an ASI            `apply_bumps` clamps - a Ny'ook spending
+                      improvements on Strength stops at 13. ENFORCED.
+    a rolled score    NOT enforced. `effective_score` returns a base
+                      at or above the maximum unchanged, which is
+                      exactly what a RAISED ceiling needs, so a
+                      Ny'ook assigned a 16 at creation keeps it.
+
+The trait is marked applied because the engine honours the ceiling
+everywhere it does the adding. Closing the gap means a refusal where a
+score is WRITTEN - chargen and `set_ability` asking the species first -
+and that is a change to two commands rather than to the rule.
+
 **NOT SEEDED: the Jotun, the Imiear, and the rodent people.** Their
 heights are known and nothing else is. A row with a name and six
 defaults is worse than no row, because it is pickable and gives a
@@ -2467,11 +2487,17 @@ Athletics granted.
     size.rs asserts it so it cannot be forgotten. The fix, if it is one,
     is to scale reach, space and carrying off `height_ft` and keep the
     category for the discrete rules.
-  - THREE SPECIES ARE UNSEEDED - Jotun, Imiear, and the rodent people,
-    whose name is not known here. Heights only. A row with a name and
-    six defaults is worse than no row, because it is pickable and gives
-    a character nothing. The Fjell'gar were the fourth and landed in
-    096.
+  - TWO SPECIES AND ONE PEOPLE ARE UNSEEDED - Jotun, Imiear, and the
+    rodent people, whose name is not known here. Heights only. A row
+    with a name and six defaults is worse than no row, because it is
+    pickable and gives a character nothing. The Fjell'gar landed in
+    096 and the Ny'ook in 097.
+  - A SOURCE THAT CONTRADICTS ITSELF IS RECORDED, NOT RESOLVED. The
+    Ny'ook document says "+2 on saving throws" twice and "advantage"
+    once for the same trait. Neither is seeded as applied - nothing
+    can act on either yet - and the trait text carries both readings
+    so the choice is made once, by Dave, when it matters. Same call
+    056 made for the Unt'garoth's 20-against-21.
   - ENDURING MIGHT AND STONECUNNING both grant conditional expertise -
     doubled proficiency on SOME uses of one skill. Nothing can detect
     which use, so both are granted at ordinary proficiency with the

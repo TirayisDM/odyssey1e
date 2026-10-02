@@ -161,6 +161,21 @@ pub struct Sheet {
     pub skills: Vec<SkillDef>,
     /// Skill key -> proficiency multiplier. Absent means untrained.
     pub profs: HashMap<String, f64>,
+    /// Skill key -> the finished modifier: ability, proficiency, and
+    /// any enchantment on what they are wearing.
+    ///
+    /// SENT BECAUSE THE SCREEN WAS WORKING IT OUT ITSELF. main.js
+    /// carried `abilMod + floor(prof * pb)` inline, which was right
+    /// until an item could change it - and then Falon's amulet
+    /// granted +3 Perception, the roll took it, the Karma line took
+    /// it, and the skills list went on printing the number it had
+    /// always computed. Four places derived a skill modifier and
+    /// three of them asked the engine.
+    ///
+    /// NOT DESERIALISED. Nothing parses a Sheet back, and the map is
+    /// derived from the rest of it.
+    #[serde(skip_deserializing)]
+    pub skill_mods: HashMap<String, i64>,
     /// Which narrative_lines pack voices this character's roll cards.
     pub narrative_pack: String,
     /// Roll key -> the lines available for it, pack precedence and game
@@ -1519,6 +1534,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         abilities,
         skills,
         profs,
+        skill_mods: HashMap::new(),
         narrative_pack: profile.narrative_pack,
         narratives,
         weapon_profs: profile.weapon_profs,
@@ -1545,6 +1561,18 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // facts the sheet has and none of them is a fact this function had
     // before it built one - so Karma is derived from the sheet rather
     // than assembled in parallel beside it.
+    // AFTER THE SHEET EXISTS, because `skill_modifier` is a method on
+    // it and needs the abilities, the proficiencies and the loadout
+    // all in place - the same reason karma is resolved here.
+    let keys: Vec<String> = sheet.skills.iter().map(|s| s.key.clone()).collect();
+    sheet.skill_mods = keys
+        .into_iter()
+        .map(|k| {
+            let m = sheet.skill_modifier(&k);
+            (k, m)
+        })
+        .collect();
+
     sheet.karma = sheet.derive_karma(&class_catalogue);
     Ok(sheet)
 }
@@ -1590,6 +1618,7 @@ mod tests {
             abilities,
             skills,
             profs,
+            skill_mods: HashMap::new(),
             // Resolution is arithmetic and string matching; the prose
             // rides along on the sheet but has no part in it. The
             // lines themselves are tested in narrative.rs.

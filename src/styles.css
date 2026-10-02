@@ -321,6 +321,11 @@ button.wide{width:100%}
   .fight-round{text-align:left}
 }
 
+.bonus.enchanted{color:#9ecbff}
+.iteminfo-grants{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;
+                 margin-top:.3rem;padding-top:.3rem;border-top:1px solid var(--line)}
+.iteminfo-grants .grant-what{flex:0 0 auto;color:#9ecbff;font-size:11px}
+
 .grants{margin-top:.5rem}
 .grant-list{display:flex;flex-direction:column;gap:.2rem;margin-bottom:.3rem}
 .grant-row{display:flex;align-items:center;gap:.4rem;padding:.2rem .35rem;

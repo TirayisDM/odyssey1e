@@ -1491,8 +1491,16 @@ async function loadSheet() {
   list.innerHTML = "";
   for (const sk of sheet.skills) {
     const prof = sheet.profs[sk.key] ?? 0;
+    // THE ENGINE'S ANSWER, not a second one. This used to be
+    // `abilMod + floor(prof * pb)` computed here, which was correct
+    // until an item could change a skill - and then an amulet
+    // granting +3 Perception moved the roll and the Karma line and
+    // left this list printing the old number.
     const abilMod = Math.floor(((sheet.abilities[sk.ability]?.score ?? 10) - 10) / 2);
-    const bonus = abilMod + Math.floor(prof * pb);
+    const bonus = sheet.skill_mods?.[sk.key] ?? (abilMod + Math.floor(prof * pb));
+    // What the magic put in, so a +7 Perception on a WIS 12 character
+    // is not a number to take on faith.
+    const fromKit = bonus - (abilMod + Math.floor(prof * pb));
 
     const el = document.createElement("div");
     el.className = "skillrow";
@@ -1516,8 +1524,12 @@ async function loadSheet() {
     });
 
     const b = document.createElement("span");
-    b.className = "bonus";
+    b.className = "bonus" + (fromKit ? " enchanted" : "");
     b.textContent = (bonus >= 0 ? "+" : "") + bonus;
+    if (fromKit) {
+      b.title = "ability and proficiency " + withSign(bonus - fromKit) +
+                ", carried " + withSign(fromKit);
+    }
 
     el.append(nm, sel, b);
     list.append(el);
@@ -1941,6 +1953,24 @@ function itemInfo(it) {
   // STILL GUARDED, because a game that adds its own item row starts
   // with a NULL description like everything else used to - and an
   // empty heading under an item says less than no heading at all.
+  // 100. WHAT IT DOES FOR WHOEVER IS WEARING IT, which is the one
+  // thing about a magic item a player actually wants from this panel
+  // and the only fact here that is not about the object itself.
+  //
+  // `Owned::grants` is already filtered to what is LIVE - in a slot,
+  // attuned where the grant asks - so an item listing nothing here
+  // either grants nothing or is not in a position to. The Objects tab
+  // is where the unfiltered list is edited.
+  const gs = it.grants || [];
+  if (gs.length) {
+    const box2 = sEl("div", "iteminfo-grants");
+    box2.append(sEl("span", "iteminfo-key", "grants"));
+    for (const g of gs) {
+      box2.append(sEl("span", "grant-what", grantWords(g)));
+    }
+    box.append(box2);
+  }
+
   const d = it.item && it.item.description;
   if (d) box.append(sEl("p", "iteminfo-desc", d));
   return box;

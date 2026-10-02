@@ -281,9 +281,22 @@ impl Sheet {
     /// written inline in `resolve`, and Karma needs the same answer -
     /// so it is one method now and `resolve` calls it. A second copy
     /// is a second answer, and the second one is always the stale one.
+    /// 100's skill grants are applied HERE, not at the call site, and
+    /// the first live one is why. Boots that grant `skill.prf` were
+    /// wired into `resolve_request` so a Performance ROLL picked them
+    /// up - and `derive_karma` reads this function instead, so a
+    /// bard's Karma went on being computed from the unenchanted
+    /// number. Two answers for one skill, which is the fault this
+    /// codebase keeps producing and the reason a rule belongs at the
+    /// bottom of the stack rather than at whichever top somebody
+    /// happened to be looking at.
     pub fn skill_modifier(&self, key: &str) -> i64 {
         match self.find_skill(key) {
-            Some(s) => self.ability_mod(&s.ability) + self.skill_prof_bonus(&s.key),
+            Some(s) => crate::grants::apply(
+                self.ability_mod(&s.ability) + self.skill_prof_bonus(&s.key),
+                &worn_grants(&self.loadout),
+                &format!("skill.{}", s.key),
+            ),
             None => 0,
         }
     }
@@ -492,15 +505,9 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
 
     // Skill, by key ("ins") or by name ("insight")
     if let Some(s) = sheet.find_skill(&t) {
-        // 100. An item that helps with ONE skill - Boots of Elvenkind
-        // on Stealth. There is deliberately no all-skills target: 5e
-        // has no item that does that, and a vocabulary with a word
-        // nothing can say is a word somebody will misuse.
-        let m = crate::grants::apply(
-            sheet.skill_modifier(&s.key),
-            &worn_grants(&sheet.loadout),
-            &format!("skill.{}", s.key),
-        );
+        // The grant is inside `skill_modifier` - applying it again
+        // here would double every enchanted skill.
+        let m = sheet.skill_modifier(&s.key);
         return Resolved {
             label: format!("{} ({})", s.name, s.ability.to_uppercase()),
             formula: d20_formula(m, mode),

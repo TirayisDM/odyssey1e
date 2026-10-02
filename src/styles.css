@@ -710,3 +710,15 @@ button.wide{width:100%}
 .up{color:var(--ok)}
 .down{color:var(--bad)}
 .flat{color:var(--muted)}
+
+/* 081. WHO THEY ARE, WHEN THE CONTROLS ARE AWAY. Deliberately the
+   largest thing on the pane - it replaces a row of full-size inputs
+   and shrinking to a caption would make the read-only state feel like
+   less than the editing one. */
+.statline{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;
+          padding:.45rem .1rem .55rem}
+.statline-name{font-size:1.35rem;font-weight:600;letter-spacing:.01em}
+.statline-class{font-size:1.05rem;color:var(--fg)}
+.statline-sep{color:var(--muted)}
+.statline-total{font-size:.85rem;color:var(--muted)}
+.statline button{margin-left:auto}

@@ -40,6 +40,9 @@ let state = {
   // written yet - see paintDescription.
   descEditing: false,
   bodyEditing: false,
+  // 081. Whether the Stats pane's name-and-class controls are open.
+  // False once they have a class; `edit` on the folded line reopens.
+  statsEditing: false,
   // 073. Whether the blank "which class" row is showing. Cleared by
   // anything that commits or cancels, and by a fresh sheet read.
   addingClass: false,
@@ -1163,10 +1166,11 @@ async function selectCharacter(id) {
   // 073. And it puts away a half-filled "which class" row, which
   // belonged to whoever was being read a moment ago.
   state.addingClass = false;
-  // 079. Same for the description editors - they were open on somebody
+  // 079/081. Same for the other editors - they were open on somebody
   // else's sheet.
   state.descEditing = false;
   state.bodyEditing = false;
+  state.statsEditing = false;
   await loadCharacters();
   await loadSheet();
   paintChosen();
@@ -2735,6 +2739,17 @@ function paintClasses(sheet) {
   const held = sheet.classes || [];
   const lead = held[0] || null;
 
+  // 081. A CLASS IS WHAT MAKES IT SET. The name is never absent - the
+  // column is NOT NULL - so "has the sheet been filled in" is really
+  // "have they chosen a path", and that is the class. A classless
+  // character opens on the controls, which is the whole job of a sheet
+  // nobody has finished.
+  const editing = !lead || state.statsEditing;
+  document.querySelector("#stats-editor").hidden = !editing;
+  const read = document.querySelector("#stats-read");
+  read.hidden = editing;
+  if (!editing) paintStatLine(read, sheet, held);
+
   // The one that leads, in the row with the name.
   const sel = document.querySelector("#class-lead");
   // THE SAME EXCLUSION THE EXTRA ROWS GET. Without it the lead picker
@@ -2768,6 +2783,32 @@ function paintClasses(sheet) {
 
 // "Fighter 5", with the key as a fallback so a class the catalogue has
 // lost still says which one it was.
+// The headline: who they are and what they are, with a way back.
+function paintStatLine(host, sheet, held) {
+  host.innerHTML = "";
+  const line = sEl("div", "statline");
+  line.append(sEl("span", "statline-name", sheet.name));
+  for (const t of held) {
+    line.append(sEl("span", "statline-sep", "\u00b7"));
+    line.append(sEl("span", "statline-class", classWords(t)));
+  }
+  // THE TOTAL ONLY WHEN IT IS NOT ALREADY OBVIOUS. A single-classed
+  // character's level is the number already printed beside their
+  // class, and saying "level 4 overall" after "Fighter 4" is the sheet
+  // talking to itself.
+  if (held.length > 1) {
+    line.append(sEl("span", "statline-total", "level " + sheet.level + " overall"));
+  }
+  const edit = sEl("button", "ghost", "edit");
+  edit.addEventListener("click", () => {
+    state.statsEditing = true;
+    paintClasses(sheet);
+    document.querySelector("#char-rename").focus();
+  });
+  line.append(edit);
+  host.append(line);
+}
+
 function classWords(t) {
   const c = (state.classes || []).find((x) => x.key === t.key);
   return (c ? c.name : t.key) + " " + t.level;
@@ -2776,9 +2817,14 @@ function classWords(t) {
 // Fill a class picker. `taken` is the set this character already holds
 // and may not take twice; the slot's own class is always offered, so
 // re-committing a row is not blocked by the row itself.
+// 081. NO BLANK ONCE A CLASS IS CHOSEN. Blanking a picker used to
+// drop the class, and a path taken is a path taken - see the note on
+// classRow. The empty option survives only for a character who has not
+// chosen yet, where it is the honest starting state rather than an
+// undo.
 function classOptions(sel, chosen, taken) {
   sel.innerHTML = "";
-  sel.append(new Option(chosen ? "\u2014 drop this class \u2014" : "no class yet", ""));
+  if (!chosen) sel.append(new Option("no class yet", ""));
   for (const c of state.classes || []) {
     if (taken && c.key !== chosen && taken.has(c.key)) continue;
     sel.append(new Option(c.name + " \u00b7 d" + c.hit_die, c.key));
@@ -2802,9 +2848,10 @@ function classRow(t) {
   const save = sEl("button", "ghost", "Set level");
   save.addEventListener("click", async () => {
     if (!sel.value) {
-      // Blank on an existing row means drop it; on the pending row it
-      // means never mind.
-      if (t) await dropClass(t.key); else { state.addingClass = false; paintClasses(state.sheet); }
+      // Only the pending row can be blank now, and blank there means
+      // never mind rather than drop.
+      state.addingClass = false;
+      paintClasses(state.sheet);
       return;
     }
     const ok = await call("set_class_level", {
@@ -2819,19 +2866,32 @@ function classRow(t) {
     if (ok) { state.addingClass = false; await afterClassChange(); }
   });
 
-  const drop = sEl("button", "ghost", t ? "remove" : "cancel");
-  drop.addEventListener("click", async () => {
-    if (!t) { state.addingClass = false; paintClasses(state.sheet); return; }
-    await dropClass(t.key);
-  });
+  // 081. A CLASS TAKEN IS A CLASS TAKEN. The remove button is gone -
+  // choosing a path is a decision the sheet should hold you to, not a
+  // setting to toggle. Only the row that has not been committed yet
+  // offers a way out, and that is a cancel rather than a removal.
+  //
+  // THE COMMAND SURVIVES. `remove_class` is registered and tested and
+  // simply has no button, so a genuine mis-click is one call away for
+  // whoever is running the game. Deleting the rule because the screen
+  // stopped offering it would make the mistake unrecoverable rather
+  // than inconvenient.
+  //
+  // CHANGING a slot is still allowed and is a different thing: picking
+  // Cleric where the row said Rogue is a correction, and `replacing`
+  // carries it - see set_class_level.
+  if (!t) {
+    const cancel = sEl("button", "ghost", "cancel");
+    cancel.addEventListener("click", () => {
+      state.addingClass = false;
+      paintClasses(state.sheet);
+    });
+    row.append(sel, lvl, save, cancel);
+    return row;
+  }
 
-  row.append(sel, lvl, save, drop);
+  row.append(sel, lvl, save);
   return row;
-}
-
-async function dropClass(key) {
-  const ok = await call("remove_class", { characterId: state.characterId, classKey: key });
-  if (ok) { state.addingClass = false; await afterClassChange(); }
 }
 
 // A CLASS CHANGE MOVES MORE THAN THE CLASS. Hit points are rederived
@@ -2840,6 +2900,10 @@ async function dropClass(key) {
 // whole sheet is reread rather than the one row repainted. The roster
 // goes with it because the list prints a class and a level too.
 async function afterClassChange() {
+  // 081. AND IT FOLDS. The controls opened for one decision and the
+  // decision is made; leaving them standing would say the change had
+  // not taken.
+  state.statsEditing = false;
   await loadSheet();
   await loadCharacters();
 }
@@ -6093,6 +6157,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     // same half-refresh `edit_object` had: a write that landed and a
     // screen still showing the old answer.
     if (ok) {
+      // 081. AND IT FOLDS, the same as a class change. One edit
+      // session, one decision, back to reading - which is the rule the
+      // Description pane already follows. Changing two things is two
+      // visits rather than a session with no end.
+      state.statsEditing = false;
       await loadSheet();
       await loadCharacters();
     }
@@ -6137,14 +6206,17 @@ window.addEventListener("DOMContentLoaded", async () => {
     const lead = held[0] || null;
     const chosen = val("#class-lead");
 
-    // 073. THREE THINGS THROUGH ONE BUTTON, and which one is decided by
-    // what is in the two controls beside it rather than by a mode:
+    // 073, narrowed by 081. TWO THINGS THROUGH ONE BUTTON:
     //
     //   a class chosen  -> that class goes to that level, replacing
     //                      whatever led before
-    //   blank, had one  -> they drop it and keep the level they reached
-    //   blank, had none -> the old column, which is still the truth for
-    //                      a monster and for anyone made before 055
+    //   blank, had none -> the old level column, which is still the
+    //                      truth for a monster and for anyone made
+    //                      before 055
+    //
+    // There is no longer a third. Blanking the picker used to drop the
+    // class and the picker no longer offers a blank once one is
+    // chosen, because a path taken is a path taken.
     if (chosen) {
       const ok = await call("set_class_level", {
         characterId: state.characterId,
@@ -6155,7 +6227,6 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (ok) await afterClassChange();
       return;
     }
-    if (lead) return dropClass(lead.key);
 
     const ok = await call("set_level", {
       characterId: state.characterId,

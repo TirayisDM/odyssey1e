@@ -65,10 +65,30 @@ pub fn list_features(state: State<AppState>, character_id: String) -> Result<Val
     // `sheet.classes` arrives lead-first, and features::held keeps that
     // order so this list reads in the same order as the headline.
     let held = crate::features::held(&sheet.classes, &catalogue, &choices);
+    // 092. WHAT HAS BEEN SPENT, in one read for the whole sheet.
+    let spent = load_spent(&token, &character_id)?;
 
     let out: Vec<Value> = held
         .iter()
         .map(|h| {
+            // THE CLASS'S LEVEL, which is the whole reason this is not
+            // one number: a Fighter 4 / Bard 1 gets one Action Surge.
+            let level = sheet
+                .classes
+                .iter()
+                .find(|t| t.key == h.feature.class_key)
+                .map(|t| t.level)
+                .unwrap_or(1);
+            let ctx = crate::commands::time::context_for(&sheet, level);
+            // A MALFORMED EXPRESSION READS AS NO LIMIT HERE rather than
+            // emptying the list. uses::count refuses it loudly and the
+            // spend path still will - a typo in the catalogue should
+            // not take every other feature off the screen with it.
+            let max = crate::uses::count(h.feature.uses.as_deref(), &ctx).unwrap_or(None);
+            let used = spent
+                .get(&(h.feature.class_key.clone(), h.feature.key.clone()))
+                .copied()
+                .unwrap_or(0);
             json!({
                 "class_key": h.feature.class_key,
                 "level": h.feature.level,
@@ -79,6 +99,15 @@ pub fn list_features(state: State<AppState>, character_id: String) -> Result<Val
                 "picks": h.feature.picks,
                 "chosen": h.chosen,
                 "owed": h.owed,
+                // 092. WHAT IS LEFT, worked out per class level - a
+                // Fighter 4 / Bard 1 gets one Action Surge because
+                // they are a Fighter 4, never the two a level 5 might
+                // suggest. None means no limit worth tracking, which
+                // must not read the same as none left.
+                "uses": max,
+                "spent": used,
+                "left": crate::uses::left(max, used),
+                "recharge": h.feature.recharge,
                 // ONLY FOR WHAT IS STILL OWED. Building the option list
                 // for a decided feature would be work nobody reads.
                 "options": if h.owed > 0 { options_for(h, &sheet) } else { json!([]) },
@@ -212,7 +241,7 @@ fn load_catalogue(
         token,
         "class_features",
         &[
-            ("select", "class_key,level,key,name,text,choose_from,picks"),
+            ("select", "class_key,level,key,name,text,choose_from,picks,uses,recharge"),
             ("class_key", &format!("in.({})", keys.join(","))),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
         ],
@@ -221,15 +250,9 @@ fn load_catalogue(
         .as_array()
         .unwrap_or(&Vec::new())
         .iter()
-        .map(|r| Feature {
-            class_key: as_str(r, "class_key"),
-            level: r.get("level").and_then(|v| v.as_i64()).unwrap_or(1),
-            key: as_str(r, "key"),
-            name: as_str(r, "name"),
-            text: r.get("text").and_then(|v| v.as_str()).map(str::to_string),
-            choose_from: r.get("choose_from").and_then(|v| v.as_str()).map(str::to_string),
-            picks: r.get("picks").and_then(|v| v.as_i64()).unwrap_or(1),
-        })
+        // ONE READER, in features.rs, so the two places that load a
+        // catalogue cannot come to disagree about what a row means.
+        .map(crate::features::feature_from_row)
         .collect())
 }
 
@@ -251,6 +274,32 @@ fn load_choices(token: &str, character_id: &str) -> Result<Vec<Choice>, String> 
             feature_key: as_str(r, "feature_key"),
             pick: r.get("pick").and_then(|v| v.as_i64()).unwrap_or(1),
             choice: as_str(r, "choice"),
+        })
+        .collect())
+}
+
+/// What this character has spent, keyed by (class, feature).
+fn load_spent(
+    token: &str,
+    character_id: &str,
+) -> Result<std::collections::HashMap<(String, String), i64>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "character_uses",
+        &[
+            ("select", "class_key,feature_key,spent"),
+            ("character_id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    Ok(rows
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(|r| {
+            (
+                (as_str(r, "class_key"), as_str(r, "feature_key")),
+                r.get("spent").and_then(|v| v.as_i64()).unwrap_or(0),
+            )
         })
         .collect())
 }

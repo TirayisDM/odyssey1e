@@ -88,6 +88,7 @@ pub mod locations;
 pub mod perform;
 pub mod session;
 pub mod store;
+pub mod time;
 
 /// Everything a command needs from the session, resolved once.
 ///

@@ -99,6 +99,25 @@
       <div class="pane" data-pane="play">
 
       <section>
+        <!-- 092. THE CLOCK, on both the tabs a session is actually
+             run from. The same markup twice with different ids rather
+             than one bar moved about: Play and Run are different panes
+             and a session lives in whichever one suits it.
+
+             EXPLICIT JUMPS, because outside a fight nothing can know
+             how long anything took and an engine that guessed would be
+             confidently wrong. -->
+        <div class="clockbar">
+          <span class="clock-now" id="clock-play"></span>
+          <span class="clock-steps" id="steps-play"></span>
+          <button class="ghost tiny" data-rest="short" data-clock="play">Short rest</button>
+          <button class="ghost tiny" data-rest="long" data-clock="play">Long rest</button>
+        </div>
+        <div class="muted" id="restsay-play"></div>
+
+      </section>
+
+      <section>
         <h2>Rolls</h2>
         <div class="row">
           <input id="named-request" placeholder="insight, wis save, ath…" />
@@ -143,6 +162,23 @@
       <div class="pane" data-pane="run" hidden>
         <section id="run-panel" hidden>
         <h2>DM <span id="dm-who" class="muted"></span></h2>
+
+        <!-- 092. THE CLOCK, on both the tabs a session is actually
+             run from. The same markup twice with different ids rather
+             than one bar moved about: Play and Run are different panes
+             and a session lives in whichever one suits it.
+
+             EXPLICIT JUMPS, because outside a fight nothing can know
+             how long anything took and an engine that guessed would be
+             confidently wrong. -->
+        <div class="clockbar">
+          <span class="clock-now" id="clock-run"></span>
+          <span class="clock-steps" id="steps-run"></span>
+          <button class="ghost tiny" data-rest="short" data-clock="run">Short rest</button>
+          <button class="ghost tiny" data-rest="long" data-clock="run">Long rest</button>
+        </div>
+        <div class="muted" id="restsay-run"></div>
+
 
         <div class="row">
           <input id="enc-name" placeholder="new encounter name" />

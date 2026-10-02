@@ -40,6 +40,13 @@ pub struct Feature {
     /// How many to choose. An Ability Score Improvement is 2 picks of
     /// +1, which is exactly 5e's "one by 2, or two by 1".
     pub picks: i64,
+    /// 092. How many times before a rest, as a uses.rs expression.
+    /// None is no limit worth tracking - Evasion has no number and
+    /// Second Wind does, and "unlimited" must not read as "none left".
+    pub uses: Option<String>,
+    /// What brings it back: short, long, day, dawn. None with a `uses`
+    /// means it never comes back on its own.
+    pub recharge: Option<String>,
 }
 
 /// A feature this character has, with whatever they chose for it.
@@ -277,6 +284,8 @@ pub fn feature_from_row(r: &serde_json::Value) -> Feature {
         text: r.get("text").and_then(|v| v.as_str()).map(str::to_string),
         choose_from: r.get("choose_from").and_then(|v| v.as_str()).map(str::to_string),
         picks: r.get("picks").and_then(|v| v.as_i64()).unwrap_or(1),
+        uses: r.get("uses").and_then(|v| v.as_str()).map(str::to_string),
+        recharge: r.get("recharge").and_then(|v| v.as_str()).map(str::to_string),
     }
 }
 
@@ -299,6 +308,8 @@ mod tests {
             text: None,
             choose_from: None,
             picks: 1,
+            uses: None,
+            recharge: None,
         }
     }
 

@@ -35,6 +35,8 @@ let state = {
   folk: [],
   // 076. The audience catalogue - global rows and this game's own.
   audiences: [],
+  // 092. What time it is, as game_clock last reported it.
+  clock: null,
   // 084. The slot ladder, straight from slots::LADDER. Read once -
   // where a thing can be worn is a rule, not campaign data, so unlike
   // the audiences nobody edits it.
@@ -382,6 +384,7 @@ async function selectGame(id) {
   // per-game reference data read once when a game is opened.
   await loadAudiences();
   await loadSlots();
+  await loadClock();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1011,6 +1014,93 @@ function sEl(tag, cls, text) {
   if (cls) n.className = cls;
   if (text != null) n.textContent = text;
   return n;
+}
+
+/* ===================== THE CLOCK, AND RESTING (092) ===================== */
+//
+// What time it is, the jumps a DM can take, and the two rests. Painted
+// into both Play and Run, because a session is run from whichever suits
+// it and the clock is not a property of either.
+//
+// NOTHING HERE DECIDES ANYTHING. The steps come from clock::STEPS, the
+// reading from clock::reading, and whether a long rest is allowed from
+// clock::may_long_rest. A screen that recomputed any of it would be a
+// second opinion that eventually disagrees - which the Karma preview
+// already taught us.
+const CLOCK_PANES = ["play", "run"];
+
+async function loadClock() {
+  if (!state.gameId) return;
+  const got = await call("game_clock", { gameId: state.gameId });
+  if (!got) return;
+  state.clock = got;
+  for (const where of CLOCK_PANES) paintClock(where, got);
+}
+
+function paintClock(where, got) {
+  const now = document.querySelector("#clock-" + where);
+  const steps = document.querySelector("#steps-" + where);
+  if (!now || !steps) return;
+
+  now.textContent = got.reading;
+  now.title = "tick " + got.tick + " - six seconds each";
+
+  steps.innerHTML = "";
+  for (const step of got.steps || []) {
+    const b = sEl("button", "ghost tiny", "+" + step.label);
+    b.title = step.ticks + " ticks";
+    b.addEventListener("click", async () => {
+      const r = await tryCall("advance_time", {
+        gameId: state.gameId,
+        ticks: step.ticks,
+      });
+      if (!r.ok) return log("advance_time", r.error, true);
+      restSay(where, r.value.passed + " passes");
+      await afterTimePasses();
+    });
+    steps.append(b);
+  }
+}
+
+function restSay(where, text, bad) {
+  for (const w of CLOCK_PANES) {
+    const el = document.querySelector("#restsay-" + w);
+    if (!el) continue;
+    el.textContent = w === where ? text : "";
+    el.classList.toggle("warn", w === where && !!bad);
+  }
+}
+
+// EVERYTHING TIME TOUCHES. A rest brings uses back, heals, and returns
+// hit dice - so the sheet, the clock and the feature list all move, and
+// repainting one of them would leave the others saying what was true a
+// moment ago.
+async function afterTimePasses() {
+  await loadClock();
+  if (state.characterId) await loadSheet();
+}
+
+async function doRest(where, long) {
+  if (!state.gameId) return log("take_rest", "select a game first", true);
+
+  // WHO IT WOULD REFUSE, BEFORE IT HAPPENS. Somebody who slept four
+  // hours ago is not a surprise worth finding out about afterwards.
+  const look = await call("rest_preview", { gameId: state.gameId, long });
+  if (!look) return;
+  const blocked = (look.who || []).filter((p) => p.refused);
+  if (blocked.length) {
+    restSay(where, blocked.map((p) => p.name + ": " + p.refused).join(" \u00b7 "), true);
+  }
+
+  const r = await tryCall("take_rest", { gameId: state.gameId, long });
+  if (!r.ok) return log("take_rest", r.error, true);
+
+  const said = [];
+  if (r.value.rested.length) said.push(r.value.rested.join(", ") + " rested");
+  for (const no of r.value.refused || []) said.push(no.name + ": " + no.why);
+  said.push("it is " + r.value.reading);
+  restSay(where, said.join(" \u00b7 "), (r.value.refused || []).length > 0);
+  await afterTimePasses();
 }
 
 /* ===================== ROLLING A CHARACTER UP (066) ===================== */
@@ -3055,6 +3145,54 @@ function featureRow(f, asking) {
   if ((f.chosen || []).length) {
     row.append(sEl("span", "feat-chosen",
       f.chosen.map((c) => optionName(f, c)).join(" \u00b7 ")));
+  }
+
+  // 092. WHAT IS LEFT, AND A BUTTON TO SPEND IT. Pips rather than a
+  // number because four dots says "four Ki" faster than the words do,
+  // and the spent ones stay visible so the cost of the fight so far is
+  // on screen.
+  //
+  // `left` IS NULL FOR A FEATURE WITH NO LIMIT, which is most of them -
+  // and null must not render as zero, because "always true" and
+  // "nothing left" are opposite facts.
+  if (f.left !== null && f.left !== undefined && !asking) {
+    const pips = sEl("span", "use-pips");
+    for (let i = 0; i < f.uses; i++) {
+      pips.append(sEl("span", i < f.left ? "here" : "gone", i < f.left ? "●" : "○"));
+    }
+    row.append(pips);
+    row.append(sEl("span", "use-left", f.left + " of " + f.uses));
+    if (f.recharge) row.append(sEl("span", "use-when", f.recharge + " rest"));
+
+    const use = sEl("button", "ghost tiny", "Use");
+    use.disabled = f.left <= 0;
+    use.addEventListener("click", async () => {
+      const r = await tryCall("spend_use", {
+        characterId: state.characterId,
+        classKey: f.class_key,
+        featureKey: f.key,
+      });
+      if (!r.ok) return log("spend_use", r.error, true);
+      await loadFeatures();
+    });
+    row.append(use);
+
+    // A MISCLICK IS A THING. Giving one back is not a rule, it is an
+    // undo, and a DM needs it more often than anybody needs it refused.
+    if (f.spent > 0) {
+      const back = sEl("button", "ghost tiny", "+1");
+      back.title = "give one back";
+      back.addEventListener("click", async () => {
+        const r = await tryCall("restore_use", {
+          characterId: state.characterId,
+          classKey: f.class_key,
+          featureKey: f.key,
+        });
+        if (!r.ok) return log("restore_use", r.error, true);
+        await loadFeatures();
+      });
+      row.append(back);
+    }
   }
 
   // ONE PICKER PER OUTSTANDING PICK. An Ability Score Improvement is
@@ -6367,6 +6505,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       await loadCharacters();
     }
   });
+
+  // 092. Both panes carry the same two buttons; one handler reads
+  // which pane and which rest off the element rather than four
+  // near-identical listeners.
+  for (const b of document.querySelectorAll("[data-rest]")) {
+    b.addEventListener("click", () =>
+      doRest(b.dataset.clock, b.dataset.rest === "long"));
+  }
 
   document.querySelector("#perform-audience").addEventListener("change", paintOdds);
 

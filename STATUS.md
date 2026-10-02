@@ -2920,6 +2920,73 @@ is a coding one. Estimated at ~8 hours once the time model is settled,
 and it pays off across everything else queued - haste, action surge,
 legendary actions, poison, rage, exhaustion all want the same table.
 
+## Game time - BUILT (092, 093, clock.rs, uses.rs)
+
+The engine counted rounds inside a fight and had no idea what time it
+was outside one. That blocked every timed effect - the bard's song,
+concentration, exhaustion, and the rest cycle that brings Action Surge
+back.
+
+**ONE COUNTER, IN SIX-SECOND TICKS**, on `games.tick`. A round IS six
+seconds, so every 5e duration is a whole number of them and there is no
+second time system to keep in step:
+
+```text
+    1 round                              1
+    1 minute                            10
+    10 minutes  (Bardic Inspiration)   100
+    1 hour      (short rest, attune)   600
+    8 hours     (long rest)          4,800
+    24 hours    (the rest limit)    14,400
+```
+
+An effect is not "an hour", it is `expires_at = now + HOUR`, and expiry
+is one integer comparison that reads the same in a fight and on the
+road. **Combat time and travel time stopped being different systems.**
+
+GAME TIME, NEVER WALL TIME. Nothing reads `now()`. A session that breaks
+for pizza has not aged anybody.
+
+ONE CLOCK PER GAME. A party shares a timeline; a clock each would mean
+reconciling them the moment somebody scouted ahead. The 24-hour long
+rest limit is per CHARACTER though - `characters.last_long_rest` - because
+5e's rule is on the creature, and a party splitting its watch does not
+all sleep at once.
+
+**THE DM MOVES IT.** Explicit jumps - 10 minutes, 1 hour, 4, 8, 24 - on
+both Play and Run, because outside a fight nothing can know how long
+anything took and an engine that inferred it would be confidently wrong.
+
+**Uses and recharge.** `class_features.uses` is an EXPRESSION, because
+almost none of them are a number: Action Surge is `1@2,2@17`, Ki is
+`level`, Bardic Inspiration is `cha_mod`. Four forms cover nearly
+everything - see uses.rs. The level is always THE CLASS'S, so a
+Fighter 4 / Bard 1 gets one Action Surge rather than the two a level 5
+might suggest.
+
+`recharge` is short / long / day / dawn, and `Rest::restores` holds the
+asymmetry: **a long rest gives back everything a short one would, and
+not the reverse.** Verified on a rolled-back probe - a short rest cleared
+Action Surge and Second Wind and left Indomitable spent; the long rest
+cleared all three.
+
+**Hit dice** are per class on `character_classes.hit_dice_spent`, because
+the die is the class's - a Fighter 4 / Bard 1 spends a d10 or a d8 and
+they are not interchangeable. A long rest returns half the total,
+minimum one (5e's own minimum, and the reason `dice_back` is a function:
+half of one is zero).
+
+**A long rest heals by RECORDING, not erasing.** Current HP is `hp_max`
+plus the sum of the deltas, so wiping `hp_events` would also reach full
+and would throw away every wound ever taken. 001's rule holds: a night's
+sleep is one more event.
+
+**NOT BUILT YET, and this is what the clock was for:** the `effects`
+table. `clock::expired` and `clock::remaining` are written, tested and
+carry `#[allow(dead_code)]` with that reason - they are the API the
+effects table will ask. "1 hour, does not stack" is now measurable; it
+still needs somewhere to live.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

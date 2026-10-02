@@ -24,6 +24,7 @@ mod attack;
 mod carry;
 mod character;
 mod class;
+mod clock;
 mod containers;
 mod commands;
 mod currency;
@@ -49,6 +50,7 @@ mod species;
 mod spent;
 mod store;
 mod supabase;
+mod uses;
 mod vitality;
 
 use character::{Resolved, Sheet};
@@ -1268,6 +1270,12 @@ pub fn run() {
             commands::characters::rename_character,
             commands::characters::set_class_level,
             commands::characters::remove_class,
+            commands::time::game_clock,
+            commands::time::advance_time,
+            commands::time::rest_preview,
+            commands::time::take_rest,
+            commands::time::spend_use,
+            commands::time::restore_use,
             commands::features::list_features,
             commands::features::choose_feature,
             commands::perform::list_audiences,

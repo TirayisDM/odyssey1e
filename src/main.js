@@ -35,6 +35,11 @@ let state = {
   folk: [],
   // 076. The audience catalogue - global rows and this game's own.
   audiences: [],
+  // 079. Whether the Description pane's two editors are open. Both
+  // default closed and both open themselves when there is nothing
+  // written yet - see paintDescription.
+  descEditing: false,
+  bodyEditing: false,
   // 073. Whether the blank "which class" row is showing. Cleared by
   // anything that commits or cancels, and by a fresh sheet read.
   addingClass: false,
@@ -707,6 +712,26 @@ function paintDescription(sheet) {
   }
   b.append(dl);
 
+  // 079. WRITTEN MEANS READ-ONLY UNTIL ASKED, the same rule the prose
+  // below follows. "Described" is ANY of the five, not all of them: a
+  // half-filled body is still a body somebody has started, and the
+  // edit button is one click away. Nothing repaints while you type, so
+  // a part-filled form cannot fold under you mid-entry - only a save
+  // gets here.
+  const described = [body.height_ft, body.weight_lb, body.hair, body.skin, body.eyes]
+    .some((v) => v !== null && v !== undefined && v !== "");
+  const bodyEditing = !described || state.bodyEditing;
+  document.querySelector("#body-editor").hidden = !bodyEditing;
+  if (described && !bodyEditing) {
+    b.append(
+      action("edit", () => {
+        state.bodyEditing = true;
+        paintDescription(sheet);
+        document.querySelector("#desc-height").focus();
+      })
+    );
+  }
+
   // --- what this one is, as against what their people are ---
   //
   // SHOWN EVEN WHEN EMPTY, saying so. A missing description is a thing
@@ -730,6 +755,10 @@ function paintDescription(sheet) {
   // cleared by the save, so putting something in folds it away again.
   const editing = !body.description || state.descEditing;
   document.querySelector("#desc-editor").hidden = !editing;
+  // 079. THE SAVE BELONGS TO WHICHEVER IS OPEN. It writes both halves
+  // in one call, so it shows while either is being edited and goes
+  // away only when the whole pane is read-only.
+  document.querySelector("#desc-save-row").hidden = !(editing || bodyEditing);
   if (body.description && !editing) {
     own.append(
       action("edit", () => {
@@ -1134,6 +1163,10 @@ async function selectCharacter(id) {
   // 073. And it puts away a half-filled "which class" row, which
   // belonged to whoever was being read a moment ago.
   state.addingClass = false;
+  // 079. Same for the description editors - they were open on somebody
+  // else's sheet.
+  state.descEditing = false;
+  state.bodyEditing = false;
   await loadCharacters();
   await loadSheet();
   paintChosen();
@@ -6546,7 +6579,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     // FOLD ONLY ON SUCCESS. A refused save that hid the box would hide
     // the words somebody just wrote along with it.
     if (r.ok) {
+      // 079. BOTH SECTIONS, because one button saved both. The prose
+      // editor and the five physical boxes are one form wearing two
+      // headings, and leaving half of it standing open after a save
+      // would say the save only half happened.
       state.descEditing = false;
+      state.bodyEditing = false;
       await loadSheet();
     }
   });

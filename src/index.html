@@ -491,16 +491,32 @@
 
           <div class="sub">Physical description</div>
           <div id="desc-body"></div>
-          <div class="row desc-edit">
-            <input id="desc-height" class="narrow" placeholder="height ft" />
-            <input id="desc-weight" class="narrow" placeholder="weight lb" />
+          <!-- 079. FOLDS THE SAME WAY THE PROSE ABOVE DOES. Five boxes
+               standing open under the five facts they already say is
+               the sheet asking a question it has the answer to. An
+               undescribed character opens on the boxes; a described one
+               reads as text with `edit` after it.
+
+               THE SAVE BUTTON IS INSIDE THE FOLD, deliberately - it
+               belongs to the editing and has nothing to do when there
+               is none. It closes this section and the prose editor
+               together, because one button saved both. -->
+          <div id="body-editor">
+            <div class="row desc-edit">
+              <input id="desc-height" class="narrow" placeholder="height ft" />
+              <input id="desc-weight" class="narrow" placeholder="weight lb" />
+            </div>
+            <div class="row desc-edit">
+              <input id="desc-hair" placeholder="hair" />
+              <input id="desc-skin" placeholder="skin" />
+              <input id="desc-eyes" placeholder="eyes" />
+            </div>
           </div>
-          <div class="row desc-edit">
-            <input id="desc-hair" placeholder="hair" />
-            <input id="desc-skin" placeholder="skin" />
-            <input id="desc-eyes" placeholder="eyes" />
-          </div>
-          <div class="row desc-edit">
+          <!-- OUTSIDE BOTH FOLDS, because it saves both. Inside the
+               body editor it would vanish for a character whose height
+               was filled in and whose prose was not - the box open, the
+               words typed, and no way to keep them. -->
+          <div class="row desc-edit" id="desc-save-row">
             <button id="save-desc" class="ghost">Save description</button>
           </div>
           <div id="desc-msg" class="dm-msg" hidden></div>

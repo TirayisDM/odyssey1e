@@ -541,7 +541,13 @@ fn batch_character_stats(
             token,
             "objects",
             &[
-                ("select", "holder_id,item_key"),
+                // 100. GRANTS AND ATTUNEMENT COME TOO. Without
+                // them this computes an AC from the armour alone and
+                // the sheet computes one with the Ring of Protection
+                // in it - two answers for the number a goblin's
+                // attack is resolved against, which is the exact
+                // fault the species floor had before 27fb2af.
+                ("select", "holder_id,item_key,attuned,grants"),
                 ("holder_id", &format!("in.({})", holders.join(","))),
                 // 084. Non-null is equipped - see equipment::Owned.
                 ("slot", "not.is.null"),
@@ -577,6 +583,10 @@ fn batch_character_stats(
     }
 
     let mut worn: HashMap<String, Vec<Item>> = HashMap::new();
+    // What each one's kit GIVES them, as against what it is. Built
+    // here rather than asked of load_loadout because this path reads
+    // a whole roster at once and that one reads a character.
+    let mut granted: HashMap<String, Vec<crate::grants::Grant>> = HashMap::new();
     for r in &owned {
         // Back from the holder to whose it is. A row whose holder is not
         // in the map belongs to somebody outside this encounter, which
@@ -585,6 +595,21 @@ fn batch_character_stats(
             continue;
         };
         if let Some(item) = catalogue.get(&as_str(r, "item_key")) {
+            // Both halves, filtered to what is live - and everything
+            // here is in a slot already, because the query said so.
+            let mut all = crate::grants::parse(
+                item.grants.as_ref().unwrap_or(&Value::Null),
+                &item.name,
+            );
+            all.extend(crate::grants::parse(
+                r.get("grants").unwrap_or(&Value::Null),
+                &item.name,
+            ));
+            granted.entry(cid.clone()).or_default().extend(crate::grants::live(
+                all,
+                true,
+                r.get("attuned").and_then(|x| x.as_bool()).unwrap_or(false),
+            ));
             worn.entry(cid.clone()).or_default().push(item.clone());
         }
     }
@@ -596,12 +621,19 @@ fn batch_character_stats(
         out.insert(
             id.clone(),
             CharStats {
-                ac: equipment::armor_class(
-                    eff.modifier(&id, "dex"),
-                    &items,
-                    AcMode::parse(&as_str(r, "ac_mode")),
-                    r.get("ac_override").and_then(|x| x.as_i64()),
-                    eff.unarmored(&id),
+                // 100's magic on the outside, exactly as the sheet
+                // applies it - same function, same order, so the two
+                // cannot come to different numbers.
+                ac: crate::grants::apply(
+                    equipment::armor_class(
+                        eff.modifier(&id, "dex"),
+                        &items,
+                        AcMode::parse(&as_str(r, "ac_mode")),
+                        r.get("ac_override").and_then(|x| x.as_i64()),
+                        eff.unarmored(&id),
+                    ),
+                    granted.get(&id).map(|v| v.as_slice()).unwrap_or(&[]),
+                    "ac",
                 ),
                 hp_max: r.get("hp_max").and_then(|x| x.as_i64()),
                 successes: r.get("death_successes").and_then(|x| x.as_i64()).unwrap_or(0),

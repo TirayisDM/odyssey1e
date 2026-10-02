@@ -99,6 +99,11 @@ pub struct Attack {
     /// difference between the Mace at +5 and the Heavy Crossbow at +1.
     pub proficiency_bonus: i64,
     pub to_hit: i64,
+    /// 100. WHAT THE ENCHANTMENT PUT IN, separately from the rest.
+    /// Every other part of a to-hit explains itself on the preview -
+    /// "STR +1, prof +3" - and a +1 appearing in the total with no
+    /// account of itself is the thing this app keeps refusing to do.
+    pub magic: i64,
     /// Ready for the dice engine: "1d6+1".
     pub damage: String,
     pub crit_min: i64,
@@ -108,6 +113,28 @@ pub struct Attack {
 }
 
 /* ============================ RULES ============================ */
+
+/// The grants that reach an attack made with one particular weapon.
+///
+/// A +1 SWORD BUFFS ITS OWN SWINGS AND NOTHING ELSE. That is what 5e
+/// means by a +1 weapon - "attack and damage rolls made with it" - so
+/// the axe in the other hand is untouched, and taking the whole
+/// loadout's attack grants would have made a character's best weapon
+/// improve all the others.
+///
+/// EVERYTHING THAT IS NOT A WEAPON APPLIES TO EVERYTHING. A ring or a
+/// cloak granting `attack` means every attack; it has no particular
+/// swing to belong to.
+fn reaching(loadout: &[Owned], weapon: &Owned) -> Vec<crate::grants::Grant> {
+    let mut out = weapon.grants.clone();
+    out.extend(
+        loadout
+            .iter()
+            .filter(|o| o.item.kind != "weapon")
+            .flat_map(|o| o.grants.iter().cloned()),
+    );
+    out
+}
 
 /// Which ability swings this weapon.
 ///
@@ -215,6 +242,8 @@ pub fn resolve(
         let (ability, ability_mod) =
             ability_for(&owned.item.properties, t.mode, str_mod, dex_mod);
 
+        let gs = reaching(loadout, owned);
+        let plain = to_hit(ability_mod, owned.proficient, proficiency_bonus);
         return Some(Attack {
             item_key: owned.item.key.clone(),
             weapon_name: owned.item.name.clone(),
@@ -223,8 +252,15 @@ pub fn resolve(
             ability_mod,
             proficient: owned.proficient,
             proficiency_bonus: if owned.proficient { proficiency_bonus } else { 0 },
-            to_hit: to_hit(ability_mod, owned.proficient, proficiency_bonus),
-            damage: damage_formula(&t.dice, ability_mod),
+            to_hit: crate::grants::apply(plain, &gs, "attack"),
+            magic: crate::grants::apply(plain, &gs, "attack") - plain,
+            // DAMAGE TAKES ITS OWN TARGET, not the attack one: a
+            // weapon that is +1 to hit and +2 to damage is two grants
+            // and says so, rather than one number doing both jobs.
+            damage: damage_formula(
+                &t.dice,
+                crate::grants::apply(ability_mod, &gs, "damage"),
+            ),
             crit_min: t.crit_min,
             fumble_max: t.fumble_max,
             technique: Some(t.name.clone()),
@@ -248,6 +284,8 @@ pub fn resolve(
             let n = owned.item.damage_number?;
             let d = owned.item.damage_denomination?;
 
+            let gs = reaching(loadout, owned);
+            let plain = to_hit(ability_mod, owned.proficient, proficiency_bonus);
             return Some(Attack {
                 item_key: owned.item.key.clone(),
                 weapon_name: owned.item.name.clone(),
@@ -256,8 +294,12 @@ pub fn resolve(
                 ability_mod,
                 proficient: owned.proficient,
                 proficiency_bonus: if owned.proficient { proficiency_bonus } else { 0 },
-                to_hit: to_hit(ability_mod, owned.proficient, proficiency_bonus),
-                damage: damage_formula(&format!("{}d{}", n, d), ability_mod),
+                to_hit: crate::grants::apply(plain, &gs, "attack"),
+                magic: crate::grants::apply(plain, &gs, "attack") - plain,
+                damage: damage_formula(
+                    &format!("{}d{}", n, d),
+                    crate::grants::apply(ability_mod, &gs, "damage"),
+                ),
                 // Standard thresholds. Only a technique widens them.
                 crit_min: 20,
                 fumble_max: 1,
@@ -639,6 +681,84 @@ mod tests {
             owned(weapon("light_hammer", "Light Hammer", "simpleM", 1, 4, &["lgt", "thr"]), true),
             owned(weapon("heavy_crossbow", "Heavy Crossbow", "martialR", 1, 10, &["amm", "hvy", "lod", "two"]), false),
         ]
+    }
+
+    /* ---------------- what the magic reaches ---------------- */
+
+    fn gr(target: &str, value: i64) -> crate::grants::Grant {
+        crate::grants::Grant {
+            target: target.into(),
+            mode: crate::grants::Mode::Add,
+            value,
+            needs_attunement: false,
+            source: "enchantment".into(),
+        }
+    }
+
+    /// A +1 mace: one more to hit and one more damage, and the working
+    /// says where it came from.
+    #[test]
+    fn a_plus_one_weapon_hits_harder_with_itself() {
+        let mut kit = party();
+        kit[0].grants = vec![gr("attack", 1), gr("damage", 1)];
+
+        let a = resolve("mace of the deep song", &kit, &[], 5, PB, STR, DEX).unwrap();
+        assert_eq!(a.to_hit, 6, "STR +2, prof +3, magic +1");
+        assert_eq!(a.magic, 1);
+        assert_eq!(a.damage, "1d6+3", "STR +2 and the weapon's +1");
+    }
+
+    /// THE RULE THAT IS EASY TO GET WRONG. 5e says a +1 weapon applies
+    /// to "attack and damage rolls made WITH IT" - so the hammer in
+    /// the other hand is untouched, and a character's best weapon must
+    /// not quietly improve all the others.
+    #[test]
+    fn a_plus_one_weapon_does_nothing_for_the_other_one() {
+        let mut kit = party();
+        kit[0].grants = vec![gr("attack", 1), gr("damage", 1)];
+
+        let a = resolve("light hammer", &kit, &[], 5, PB, STR, DEX).unwrap();
+        assert_eq!(a.to_hit, 5, "STR +2, prof +3, and nothing from the mace");
+        assert_eq!(a.magic, 0);
+        assert_eq!(a.damage, "1d4+2");
+    }
+
+    /// A ring or a cloak has no particular swing to belong to, so it
+    /// reaches every one of them.
+    #[test]
+    fn a_worn_thing_that_is_not_a_weapon_helps_every_attack() {
+        let mut kit = party();
+        let mut ring = owned(weapon("ring", "Ring of the Sure Hand", "simpleM", 1, 1, &[]), true);
+        ring.item.kind = "equipment".into();
+        ring.grants = vec![gr("attack", 1)];
+        kit.push(ring);
+
+        assert_eq!(resolve("mace of the deep song", &kit, &[], 5, PB, STR, DEX).unwrap().to_hit, 6);
+        assert_eq!(resolve("light hammer", &kit, &[], 5, PB, STR, DEX).unwrap().to_hit, 6);
+    }
+
+    /// A technique rolls the weapon's dice, so it carries the weapon's
+    /// enchantment too - and the thresholds the technique set are
+    /// untouched by it.
+    #[test]
+    fn a_technique_swung_with_a_magic_weapon_carries_the_bonus() {
+        let mut kit = party();
+        kit[0].grants = vec![gr("attack", 1), gr("damage", 1)];
+
+        let a = resolve("heavy smash", &kit, &[heavy_smash()], 5, PB, STR, DEX).unwrap();
+        assert_eq!(a.magic, 1);
+        assert_eq!(a.to_hit, 6);
+    }
+
+    /// An unattuned item whose grant asks for attunement never reaches
+    /// `Owned::grants` at all - `grants::live` filtered it out when the
+    /// loadout was read - so there is nothing here to add.
+    #[test]
+    fn nothing_granted_is_nothing_added() {
+        let a = resolve("mace of the deep song", &party(), &[], 5, PB, STR, DEX).unwrap();
+        assert_eq!(a.magic, 0);
+        assert_eq!(a.to_hit, 5, "unchanged from before 100");
+        assert_eq!(a.damage, "1d6+2");
     }
 
     fn heavy_smash() -> Technique {

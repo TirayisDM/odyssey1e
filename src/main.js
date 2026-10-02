@@ -6339,6 +6339,13 @@ async function updatePreview() {
           ", prof +" + r.attack.proficiency_bonus
         : "   " + r.attack.ability.toUpperCase() + " +" + r.attack.ability_mod +
           ", NOT proficient";
+      // 100. THE ENCHANTMENT NAMES ITSELF. A +1 that appeared in the
+      // total with nothing to account for it would read as the
+      // arithmetic being wrong, which is the same reason the
+      // proficiency bonus is spelled out beside it.
+      if (r.attack.magic) {
+        line += ", magic " + withSign(r.attack.magic);
+      }
       if (r.attack.crit_min !== 20 || r.attack.fumble_max !== 1) {
         line += "   crit " + r.attack.crit_min + "+, fumble " + r.attack.fumble_max + "-";
       }

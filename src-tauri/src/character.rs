@@ -459,9 +459,23 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
             } else {
                 0
             };
-            let m = sheet.ability_mod(code)
-                + if sheet.save_prof(code) { pb } else { 0 }
-                + against_magic;
+            // 100. TWO TARGETS, BECAUSE ITEMS SAY BOTH THINGS. A Cloak
+            // of Protection is +1 on every save and grants `save`; a
+            // ring that steadies the hand grants `save.dex`. They add
+            // where both apply, which is what two items doing
+            // different jobs should do.
+            let worn = worn_grants(&sheet.loadout);
+            let m = crate::grants::apply(
+                crate::grants::apply(
+                    sheet.ability_mod(code)
+                        + if sheet.save_prof(code) { pb } else { 0 }
+                        + against_magic,
+                    &worn,
+                    "save",
+                ),
+                &worn,
+                &format!("save.{}", code),
+            );
             return Resolved {
                 label: format!(
                     "{} Save{}",
@@ -478,7 +492,15 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
 
     // Skill, by key ("ins") or by name ("insight")
     if let Some(s) = sheet.find_skill(&t) {
-        let m = sheet.skill_modifier(&s.key);
+        // 100. An item that helps with ONE skill - Boots of Elvenkind
+        // on Stealth. There is deliberately no all-skills target: 5e
+        // has no item that does that, and a vocabulary with a word
+        // nothing can say is a word somebody will misuse.
+        let m = crate::grants::apply(
+            sheet.skill_modifier(&s.key),
+            &worn_grants(&sheet.loadout),
+            &format!("skill.{}", s.key),
+        );
         return Resolved {
             label: format!("{} ({})", s.name, s.ability.to_uppercase()),
             formula: d20_formula(m, mode),
@@ -1161,12 +1183,21 @@ pub(crate) fn apply_species(
 /// item's"; this is later. A player asking why their Strength reads
 /// 21 gets the species, the improvement and the gauntlets listed
 /// rather than a number to take on faith.
+/// Every live grant on everything worn, in one list.
+///
+/// ONE PLACE TO FLATTEN IT, because three consumers want the same pile
+/// and the fourth will too. `Owned::grants` is already filtered to
+/// what is live - in a slot, attuned where the grant asks - so this is
+/// only the gathering.
+pub(crate) fn worn_grants(loadout: &[equipment::Owned]) -> Vec<crate::grants::Grant> {
+    loadout.iter().flat_map(|o| o.grants.iter().cloned()).collect()
+}
+
 pub(crate) fn apply_grants(
     abilities: &mut HashMap<String, Ability>,
     loadout: &[equipment::Owned],
 ) {
-    let all: Vec<crate::grants::Grant> =
-        loadout.iter().flat_map(|o| o.grants.iter().cloned()).collect();
+    let all = worn_grants(loadout);
     if all.is_empty() {
         return;
     }
@@ -1416,12 +1447,22 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // Resolved here because this is where the abilities are; equipment
     // does not know what an ability is.
     let unarmored = unarmored_rule(species.as_ref(), &abilities);
-    let armor_class = equipment::armor_class(
-        ability_mod_of(&abilities, "dex"),
-        &worn,
-        equipment::AcMode::parse(&profile.vitals.ac_mode),
-        profile.vitals.ac_override,
-        unarmored,
+    // 100. THE MAGIC GOES ON THE OUTSIDE, and `armor_class` never
+    // learns that items can be enchanted. It answers what armour, a
+    // shield and a species floor come to; a Ring of Protection is a
+    // bonus on that answer and Barkskin ("your AC is 16") is a floor
+    // under it - which is `grants::apply`, the same two rules in the
+    // same order as every other target.
+    let armor_class = crate::grants::apply(
+        equipment::armor_class(
+            ability_mod_of(&abilities, "dex"),
+            &worn,
+            equipment::AcMode::parse(&profile.vitals.ac_mode),
+            profile.vitals.ac_override,
+            unarmored,
+        ),
+        &worn_grants(&loadout),
+        "ac",
     );
 
     let mut sheet = Sheet {

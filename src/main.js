@@ -7113,9 +7113,69 @@ async function loadSkillPicker() {
 }
 
 /// Show what the request would roll, before committing to it.
+// 118. THE REQUEST THE ENGINE SEES, with the circumstance on it.
+//
+// `resolve_request` has understood " vs spell" since 098 and nothing
+// ever typed it. A Ny'ook's +2 against spells was real, tested and
+// unreachable: the roll box's own placeholder offers "wis save", which
+// is the spelling that does NOT get the bonus, and the only mention of
+// the suffix anywhere was in the species prose on the Description pane.
+//
+// THE SUFFIX RATHER THAN A SECOND PARAMETER. The engine's vocabulary
+// is the request string - that is what narrative_lines and
+// skill_prompts are keyed on, and what a replayed roll carries - so
+// the checkbox writes words the engine already reads rather than
+// adding a flag that would have to be threaded through the roll row,
+// the log and the replay.
+//
+// ONE FUNCTION, because the preview and the roll must agree. Two
+// copies of this would be the fault where a preview promises a number
+// the dice do not deliver.
+function requestNow() {
+  const base = val("#named-request");
+  if (!base) return base;
+  const vs = document.querySelector("#vs-spell");
+  return vs && vs.checked && looksLikeSave(base)
+    ? base.trim() + " vs spell"
+    : base;
+}
+
+// Whether this request is a saving throw, which is the only kind of
+// roll the circumstance means anything on.
+//
+// DELIBERATELY LOOSE. It gates a checkbox, not a rule - the engine
+// decides what a request is, and a false positive here shows a control
+// that then changes no number, which is visible and harmless. A false
+// NEGATIVE would hide the bonus again, which is the bug being fixed.
+function looksLikeSave(req) {
+  return /\bsaves?\b/.test(String(req).toLowerCase());
+}
+
+// Show the circumstance only where it applies, and say what it is
+// worth to THIS character - nothing at all for most of them.
+function paintVsSpell() {
+  const row = document.querySelector("#vs-spell-row");
+  const why = document.querySelector("#vs-spell-why");
+  if (!row) return;
+  row.hidden = !looksLikeSave(val("#named-request"));
+
+  // WHOSE BONUS, NAMED. A checkbox that moves a number by two with no
+  // account of itself is the thing this app keeps refusing to show -
+  // and a player whose people have no such bonus should be able to see
+  // that ticking it does nothing, rather than wonder.
+  const sp = (state.sheet && state.sheet.species) || null;
+  const n = sp && sp.spell_save_bonus;
+  if (why) {
+    why.textContent = n
+      ? withSign(n) + " from " + sp.name
+      : "no bonus from this character's people";
+  }
+}
+
 async function updatePreview() {
+  paintVsSpell();
   const el = document.querySelector("#preview");
-  const req = val("#named-request");
+  const req = requestNow();
   if (!state.characterId || !req) {
     el.textContent = "—";
     el.classList.remove("live");
@@ -7466,6 +7526,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Preview updates as you type — the point is to see the modifier
   // before you commit, not after.
   document.querySelector("#named-request").addEventListener("input", updatePreview);
+  // 118. The circumstance changes the number, so it changes the
+  // preview - the same way the Adv/Dis dropdown does.
+  document.querySelector("#vs-spell").addEventListener("change", updatePreview);
   document.querySelector("#mode").addEventListener("change", updatePreview);
 
   // The hand-typed fields only exist for the case with no encounter to
@@ -7524,7 +7587,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     const r = await call("roll_named", {
       characterId: state.characterId,
-      request: val("#named-request") || "insight",
+      request: requestNow() || "insight",
       mode: document.querySelector("#mode").value,
       targetValue: target ? target.value : null,
       targetKind: target ? target.kind : null,

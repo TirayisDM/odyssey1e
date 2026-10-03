@@ -144,6 +144,27 @@
             <option value="dis">Dis</option>
           </select>
         </div>
+        <!-- 118. WHAT THE SAVE IS AGAINST.
+             098 gave a people a bonus that applies only against a
+             spell, and resolve_request has read it since - but only
+             from the words " vs spell" typed on the end of the
+             request. Nothing said so. The placeholder beside this box
+             offers "wis save", which is the one spelling that does
+             NOT get it, and a Ny'ook's +2 was unreachable by anybody
+             who had not read the species prose.
+             A CIRCUMSTANCE OF THE ROLL, like advantage, so it belongs
+             beside advantage as a control rather than as an
+             incantation. It writes the suffix the engine has always
+             understood - the vocabulary does not change, only the way
+             in. Shown only for a save, because it means nothing on an
+             Athletics check. -->
+        <div class="row" id="vs-spell-row" hidden>
+          <label class="check" for="vs-spell">
+            <input type="checkbox" id="vs-spell" />
+            against a spell
+          </label>
+          <span class="muted" id="vs-spell-why"></span>
+        </div>
         <!-- Optional. "no target" means the roll is not judged at
              all, which is not the same as failing it. The list is the
              active encounter's actors and challenges; typing a number

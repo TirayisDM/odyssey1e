@@ -299,6 +299,13 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .resist-row .degree.vulnerable{color:var(--bad)}
 .resist-row .skill-from{font-size:11px;color:#9ecbff;text-align:right;
                         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 118. The circumstance beside the roll, laid out like the ability
+   row's save checkbox so the two read as the same kind of control. */
+label.check{font-size:11px;color:var(--fg);display:flex;align-items:center;
+            gap:.3rem;white-space:nowrap;cursor:pointer}
+label.check input[type=checkbox]{margin:0;width:auto}
+#vs-spell-row{align-items:center;gap:.5rem}
+#vs-spell-why{font-size:11px}
 .preview{font:12px ui-monospace,Menlo,monospace;padding:.3rem 0 .5rem}
 .preview.live{color:var(--accent)}
 #mode{width:6rem;background:#0f1114;color:var(--fg);border:1px solid var(--line);

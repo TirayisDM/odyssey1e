@@ -47,6 +47,9 @@ let state = {
   // across repaints - a fold that closed itself every time you
   // prepared something would be worse than no fold.
   openLevels: {},
+  // 109. Whether the add-a-prayer section is open. Closed by default:
+  // adding happens at a long rest and reading happens constantly.
+  addOpen: false,
   // 084. The slot ladder, straight from slots::LADDER. Read once -
   // where a thing can be worn is a rule, not campaign data, so unlike
   // the audiences nobody edits it.
@@ -1211,7 +1214,16 @@ function paintMine(got) {
     mine.append(levelBlock("prep", lvl, here, got, (sp) => forgetButton(sp.key), true));
   }
   if (!held.length) {
-    mine.append(sEl("div", "muted", "nothing prepared - add one below"));
+    // A NUDGE THAT DOES THE THING. An empty list telling somebody to
+    // look below, when below is folded shut, is an instruction rather
+    // than a help.
+    const hint = sEl("button", "linky", "nothing prepared - open the list");
+    hint.addEventListener("click", () => {
+      state.addOpen = true;
+      paintPrepList(state.prayers);
+      document.querySelector("#prep-find").focus();
+    });
+    mine.append(hint);
   }
 
   const count = document.querySelector("#prepared-count");
@@ -1303,6 +1315,18 @@ function paintPrepList(got) {
   const free = (state.spells || []).filter((sp) =>
     !have.has(sp.key) &&
     (!find || (sp.name + " " + (sp.description || "")).toLowerCase().includes(find)));
+
+  // 109. THE SECTION'S OWN FOLD. Painted here rather than in its
+  // click handler so the count on it follows the search.
+  const head = document.querySelector("#add-prayer-head");
+  const body = document.querySelector("#add-prayer-body");
+  if (head && body) {
+    head.querySelector(".caret").textContent = state.addOpen ? "▾" : "▸";
+    head.classList.toggle("open", !!state.addOpen);
+    body.hidden = !state.addOpen;
+    document.querySelector("#add-prayer-count").textContent =
+      free.length + (find ? " matching" : " available");
+  }
 
   host.innerHTML = "";
   // A SEARCH OPENS EVERY LEVEL THAT MATCHED. Typing "cure" and then
@@ -7105,6 +7129,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     const el = document.querySelector(sel);
     if (el) el.addEventListener("input", paintSpellBook);
   }
+  const addHead = document.querySelector("#add-prayer-head");
+  if (addHead) addHead.addEventListener("click", () => {
+    state.addOpen = !state.addOpen;
+    if (state.prayers) paintPrepList(state.prayers);
+    if (state.addOpen) document.querySelector("#prep-find").focus();
+  });
+
   const prepFind = document.querySelector("#prep-find");
   if (prepFind) prepFind.addEventListener("input", () => {
     if (state.prayers) paintPrepList(state.prayers);

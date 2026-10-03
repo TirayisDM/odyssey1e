@@ -720,11 +720,22 @@
         <div class="sub slots-head">Spell slots</div>
         <div id="prayer-slots" class="slotbar"></div>
 
-        <div class="sub">Add a prayer</div>
-        <div class="row">
-          <input id="prep-find" placeholder="search the cleric list" />
+        <!-- 109. THE WHOLE ADD SECTION FOLDS, with the per-level folds
+             inside it. Adding a prayer happens at a long rest and
+             reading the list happens constantly, so the rare thing
+             should not be the tallest thing on the tab - the same
+             reasoning 068 applied to the character creation form. -->
+        <button id="add-prayer-head" class="lvlhead section">
+          <span class="caret">&#9656;</span>
+          <span class="lvlname">Add a prayer</span>
+          <span class="lvlcount" id="add-prayer-count"></span>
+        </button>
+        <div id="add-prayer-body" hidden>
+          <div class="row">
+            <input id="prep-find" placeholder="search the cleric list" />
+          </div>
+          <div id="prep-list"></div>
         </div>
-        <div id="prep-list"></div>
       </div>
       </section>
       </div>

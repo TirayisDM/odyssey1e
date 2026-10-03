@@ -868,3 +868,9 @@ button.wide{width:100%}
 .slotchip{display:inline-flex;align-items:center;gap:.35rem;font-size:11px;
           border:1px solid var(--line);border-radius:999px;padding:.15rem .5rem}
 .slotchip .nm{font-weight:600}
+
+/* 109. THE SECTION HEADER reads heavier than the level folds inside
+   it - it is a part of the tab rather than a row in a list. */
+.lvlhead.section{border-bottom:1px solid var(--line-strong,var(--line));
+                 margin-top:.6rem;padding:.45rem .2rem}
+.lvlhead.section .lvlname{font-size:14px}

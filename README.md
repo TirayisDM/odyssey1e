@@ -26,7 +26,7 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 22 dice parity tests
+cargo test           # 884 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
@@ -62,23 +62,90 @@ window closed and the command re-run.
 
 ---
 
+## Working on this with someone else
+
+**You need nothing secret.** This repo is public, and the only
+credential in it is the Supabase *publishable* key, which is designed to
+ship inside clients. Clone, install the prerequisites above, run it.
+
+**Sign up in the app with your own email.** That gives you your own
+account and your own campaign, not a view of somebody else's. Every
+catalogue row — items, spells, species, classes, class features, skills
+— is global (`game_id IS NULL`) and readable by any signed-in user, so a
+brand-new account opens onto the full 5e reference data with nothing
+borrowed. Create a game and you have somewhere to put characters.
+
+You can write rules, write tests, and drive the whole app this way
+without touching anybody else's data, because `games` is the tenant root
+and everything under it is gated on `is_game_member`.
+
+Two things that are **not** included and are asked for separately:
+
+| to | you need |
+|---|---|
+| push to this repo | a GitHub collaborator invite, or fork and open a PR |
+| apply a migration | an invite to the `Odyssey RPG` Supabase org |
+| see somebody's actual campaign | their game's join code, via Join by code |
+
+Without the Supabase invite you can still write
+`supabase/migrations/NNN_name.sql` and have whoever holds the project
+apply it. That is the normal arrangement and it keeps one person
+accountable for the schema.
+
+**Never put a service-role key or the database password in this repo.**
+A service-role key bypasses RLS completely; `supabase.rs` says in as
+many words that one appearing there is a bug.
+
+---
+
 ## Layout
 
 ```
 src/                     frontend. Vanilla JS, no framework, no build step.
-                         Currently an access-test rig, not the real UI.
+  index.html             every pane, including the ones that start hidden
+  main.js                ~8k lines. All of it.
+  styles.css
 src-tauri/src/
-  lib.rs                 Tauri commands. Thin wrappers only — no rules logic.
-  dice.rs                the dice engine + its tests
+  *.rs                   THE RULES. Pure, tested, no Tauri, no network.
+  commands/*.rs          THE PLUMBING. Tauri commands and row reading.
   supabase.rs            auth and PostgREST transport
+  lib.rs                 the command registry, and the roll path
 supabase/migrations/     schema, applied in order. Read the comments.
 ```
+
+### The one architectural line that matters
+
+`src/*.rs` are **rules**: pure functions over plain data, with tests, no
+Tauri attributes and no network. `src/commands/*.rs` are **plumbing**:
+they read rows, call a rule, and write rows back. Plumbing has no tests
+because there is nothing in it to test.
+
+The failure this prevents has happened in this codebase more than any
+other: **a fact written down in more than one place.** Four places once
+derived a skill modifier and three of them asked the engine; a species'
+save bonus lived in the roll path and nowhere the sheet could see it.
+Every time, the fix was to make one place right and have everything else
+ask it. If you find yourself computing a game number in `main.js` or in
+a `commands/` file, that is the smell.
+
+A second rule with the same cause: **800 lines per file is the point to
+split, not the ceiling to reach,** and a new subsystem gets a new file.
 
 ### Calling Rust from JS
 
 A `#[tauri::command]` becomes callable from the frontend. Arguments are
 `snake_case` in Rust and `camelCase` in JS; Tauri converts. Getting that
-backwards is the standard first-day confusion.
+backwards is the standard first-day confusion. There are about 140 of
+them (136 at the time of writing), all registered in `lib.rs`.
+
+### Testing the frontend without the app
+
+`main.js` is loaded by a stub that fakes `window.__TAURI__`, so the real
+frontend can be driven in an ordinary browser against fixtures. Copy
+`src/` somewhere, inject a `stub.js` that defines
+`window.__TAURI__.core.invoke`, and serve it with `python -m http.server`.
+This is how the layout work gets checked at several widths without
+clicking through a Tauri window.
 
 ---
 
@@ -119,6 +186,29 @@ Run the security advisor after every DDL change. Three
 `is_game_member`, `is_game_dm` and `join_game` need `authenticated` to
 hold `EXECUTE` or every policy fails closed.
 
+### The migrations folder cannot rebuild the database
+
+Read this before you trust it. There are **92 files numbered up to 118**,
+and the 26 gaps are migrations that were applied to the live project and
+whose `.sql` file was never committed:
+
+```
+066-070  072  079-083  090  091  099  101-112
+```
+
+They are real schema — the spell catalogue and the cleric list are in
+there — so the live database is ahead of this folder and `supabase db
+reset` would produce something that does not match it.
+
+Seven of the 26 (101–107) are recoverable from
+`supabase_migrations.schema_migrations`, which stores the statements.
+The rest were applied by a route that does not record them and would
+have to be reconstructed from the schema.
+
+**The habit that caused it:** applying a migration and writing the file
+afterwards, which means never, rather than writing the file and applying
+it in the same breath. Do the second one.
+
 ---
 
 ## Principles carried over from the old system
@@ -146,10 +236,37 @@ could not do.
 
 ## State
 
-Working: auth, games, join-by-code, characters, rolls, the dice engine
-with parity tests against the original `diceroller.js`.
+About 32k lines of Rust - 24k of rules across 37 modules, 7.5k of
+plumbing across 15 command files - with 884 tests, 36 tables, and a
+frontend of 8.2k lines of plain JS.
+`STATUS.md` is the detailed handoff; this is the shape of it.
 
-Next: migration 005 — the character sheet, so a named request like
-`insight` resolves to a formula instead of one being typed in. The seed
-data (~700 rows: 360 narrative lines, 80 dice faces, skills, spells,
-techniques) is inventoried in `HANDOFF_rust_port.html`.
+**The app has seven top-level tabs** — Play, Run, World, Characters,
+Objects, Cleric Prayers, Trade — and the character sheet has five
+subtabs: Stats, Description, Equipment, Skills & Talents, Prayers.
+
+Working, roughly in the order it was built:
+
+* **Access** — auth, games, join-by-code, RLS verified with four accounts
+* **Dice** — the engine, with parity tests against the original
+  `diceroller.js`, plus crit/fumble thresholds and formula doubling
+* **Characters** — abilities, skills, saves, species (bonuses, maxima,
+  unarmoured rules, traits), multiclassing, class features and the
+  choices they force, Karma
+* **Rolls** — a named request resolves to a formula; a roll is a record,
+  snapshotted and never rewritten
+* **Equipment** — a ten-slot ladder with six hip places, containers,
+  weight and encumbrance, attunement, and `grants`: one vocabulary for
+  everything an item does to whoever wears it
+* **Combat** — attacks and techniques, initiative, action economy, death
+  saves and massive damage, damage resistance/immunity/vulnerability
+* **Time** — one game clock in six-second ticks, short and long rests,
+  hit dice, feature uses and recharges, effects that expire
+* **Casting** — the cleric spell list, prepared prayers, slots by level,
+  concentration, and effects that reach the dice (Bless adds its d4)
+* **Trade** — merchants, pricing, haggling, coin
+
+Not done, and the honest list is in `STATUS.md`: subclasses and their
+features, spells for the other eleven classes, four species still
+unseeded, and the `skill_choices` a class offers at creation are
+recorded but not enforced.

@@ -1,9 +1,14 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17, updated 2026-09-27 after the character stack:
-classes, species, size, and the sheet's subtabs.**
+**Written 2026-09-17. Updated 2026-10-03 after the casting stack:
+the spell catalogue, cleric prayers, effects that reach the dice,
+damage resistance, and saves you can roll from the ability row.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
+
+This is a chronological log and it is long. A newcomer should read
+`README.md`, then **"Pick up here"** at the bottom of this file, and
+treat everything between as history to search rather than to read.
 
 ---
 
@@ -13,10 +18,17 @@ file is only where things stand and what comes next.
 |---|---|
 | Desktop (execution) | `C:\Users\tiray\Dev\odyssey1e` |
 | Laptop (planning) | `C:\Users\tiray\odyssey1e` |
-| Remote | `github.com/TirayisDM/odyssey1e` (private) |
+| Remote | `github.com/TirayisDM/odyssey1e` (**public**) |
 
 Both on Rust 1.98.1. Commit on either, `git pull` on the other. Same
 two-machine pattern as `odyssey-engine`.
+
+**The repo is public.** It said "private" here until 2026-10-03 and had
+been public since it was created. That is survivable - the only
+credential in the tree is the Supabase publishable key, which is built
+to ship in clients, and the security boundary is RLS. It is not
+survivable if a service-role key or the database password ever lands in
+a commit. Nothing else needs to be kept out.
 
 **Not related to `odyssey-engine`** - that implements the HOPPER
 rulebook. This is D&D 5e. Shared patterns, nothing else.
@@ -3193,6 +3205,108 @@ READS an effect yet: `inspired` sits on a character and no roll adds the
 die. That is the next wiring, and it wants the modifier pipeline 080
 started.
 
+## Enchantment, as one vocabulary - BUILT (100, 114, 115, grants.rs)
+
+A column per effect - `attack_bonus`, `ac_bonus`, `str_bonus` - is a
+migration every time somebody invents an item, and six readers that each
+know a different subset. A **grant** says what it touches, how, and by
+how much, and every consumer asks `grants.rs` the same question:
+
+```json
+{"target": "attack", "mode": "add", "value": 1, "source": "a +1 sword"}
+{"target": "str",    "mode": "set", "value": 19}
+{"target": "save",   "mode": "add", "dice": "1d4", "source": "Bless"}
+```
+
+`add` is signed and cumulative; `set` is a FLOOR, which is how 5e words
+every item that uses it ("your Strength is 19 unless it is already
+higher"). A set that LOWERS is not expressible on purpose - that is a
+curse, and a curse is a negative `add`.
+
+114 added `dice`, because Bless is +1d4 and not +2. A die never collapses
+into a number: `effect_grants` appends it to the formula so the roll
+shows `1d20+7+1d4` and the card says what it rolled.
+
+`known_target` refuses a target nothing reads. A grant written against
+`armour` parses perfectly, stores perfectly, and does nothing for ever -
+the item simply is not magic and nobody can see why. **That is this
+codebase's named defect class and the cheapest place to stop it is the
+write.**
+
+115 is the correction migration: I had invented two spell grants.
+Protection from Evil and Good does not add 1d4, and Resistance is one
+save rather than every save. Corrected in a new migration rather than by
+editing 114, because 114 had been applied.
+
+## Spells and prayers - BUILT (101-112, prayers.rs, spellcast.rs)
+
+A spell catalogue rather than one character's list - 006 had ported
+spells with a single character's numbers baked in (spell_atk +7, DC 15),
+flagged BAKED in the column comments. 101 replaced that with a real
+catalogue; 102-104 seeded the whole cleric list; 106 and 107 gave a
+character prepared prayers and slots that can actually be spent.
+
+`prayers.rs` is the 5e arithmetic - prepared maximum is WIS + cleric
+level, the full-caster slot table, save DC and attack bonus.
+`spellcast.rs` reads a spell's own text to decide what it COSTS (action,
+bonus, reaction, or too long to cast in a fight) and how long it LASTS,
+so a 1-minute Bless becomes an effect and an instantaneous Cure Wounds
+does not.
+
+A cast spends a slot, writes an action row, lands an effect on its
+target and ends whatever the caster was concentrating on. That last
+clause is 5e's most-forgotten rule and it is enforced on the CASTER
+rather than the target, so Bless on three allies is one concentration.
+
+## Damage resistance - BUILT (116, 117, 118, resist.rs)
+
+`species.damage_resistances` had existed since 056 and the sheet printed
+it followed by "(DM applies)" - an honest label for a thing that did
+nothing. A resistance is a grant now: `resist.fire`, `immune.poison`,
+`vulnerable.cold`, which bought items, spells and class features at once.
+
+Immunity is not more resistance - half of a large number still kills and
+none of it never does - so the three degrees are a `Degree` and not a
+scale. 5e's stacking rule is that there is **no** stacking, and both
+sources are still shown, because hiding the redundant one hides the fact
+that ending Rage will not lift the species half.
+
+A feature with no `uses` grants passively; one with uses grants only
+while its effect runs. Getting that backwards would make every barbarian
+permanently resistant to bludgeoning, piercing and slashing.
+
+Protection from Energy asks a question - "choose one of acid, cold,
+fire, lightning, or thunder" is one grant naming five types, settled at
+the cast and refused rather than guessed.
+
+Applied where damage lands, after the dice and after the crit. The roll
+row keeps what it rolled; the hit point event carries the reduced number
+and the log says which resistance did it.
+
+117 retired the trait prose that said "there is no resistance system
+yet, so halve it at the table". **An instruction left standing after the
+feature lands is worse than the missing feature was, because somebody
+follows it.**
+
+## Saves - BUILT (118, 119, Sheet::save_line)
+
+Two faults, one cause.
+
+The Ny'ook's +2 against spells was real, tested, and unreachable: it
+applied only when the request string ended in " vs spell", and the roll
+box's own placeholder offered "wis save", which is the spelling that
+does not get it. It is a checkbox beside Adv/Dis now - a circumstance is
+a control, not an incantation - and it writes the suffix the engine
+always read, so the vocabulary did not change.
+
+And the ability rows carried a proficiency checkbox and no number at
+all, so a Constitution save was invisible until somebody typed it into
+the roll box. `Sheet::save_line` owns the arithmetic; `resolve_request`
+is a caller. The row shows every modifier with its name on it, and
+"saving throw" is a button that rolls it. A DC prompt opens below -
+`state.scriptedSave` already short-circuits it, so a trap that knows its
+own difficulty is a line of wiring rather than a rewrite.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square
@@ -3204,6 +3318,15 @@ Inventory is now real on both sides: a catalogue to pick from, a
 designed way to acquire, and objects that can be named, split, dropped
 and destroyed.
 
+**As of 2026-10-03** there is also a game clock, rests that spend and
+return hit dice, feature uses with recharges, effects that expire on a
+tick, the cleric spell list with prepared prayers and slots, casting
+that lands on a target and holds concentration, enchantment as one grant
+vocabulary that reaches the dice, damage resistance with its provenance,
+and saves you can roll from the ability row. The UI is no longer a test
+rig: seven tabs and five sheet subtabs, and nothing on screen computes a
+game number.
+
 Since the last handoff: an object edit now reaches the sheet and not
 just the Objects tab (five other object writes had the same staleness);
 the encumbrance walk applies an object's own `weight_override` instead
@@ -3213,11 +3336,20 @@ on all 89 catalogue rows - the column had existed since 004 and nothing
 had ever written to it until 070 put it on screen. Characters can be
 renamed, can be more than one class, and a bard can play to a room.
 
-What AppSheet did that this still does not is *deliver*. `rolls.status`
-goes `pending -> resolved -> delivered` and nothing in this codebase
-moves a row to `delivered`. There is no die art, no rests and no spell
-slots, and the UI is a test rig. A PIN now saves you
-retyping a password, but the session still lives in memory.
+**What AppSheet did that this still does not is *deliver*.**
+`rolls.status` goes `pending -> resolved -> delivered` and nothing in
+this codebase moves a row to `delivered`. There is still no die art, and
+the session still lives in memory - a PIN saves you retyping a password,
+but a restart signs you out and persisting it wants the OS keychain
+rather than a file.
+
+**The migration folder cannot rebuild the database.** 92 files numbered
+to 118; the 26 gaps (066-070, 072, 079-083, 090, 091, 099, 101-112) were
+applied and never committed. 101-107 are recoverable from
+`supabase_migrations.schema_migrations`, which stores the statements;
+the rest would have to be reconstructed from the live schema. The habit
+that caused it is applying first and writing the file afterwards, which
+means never. Write the file and apply it in the same breath.
 
 006 is applied and every seeded table was checksum-verified against the
 spreadsheet. Read the 006 header: spells and techniques were ported
@@ -3325,7 +3457,11 @@ Roughly in order:
    two numbers to keep in agreement. Weight's own job is what a PERSON
    can carry, which is STR x 15 in 5e and is a rule about a person
    rather than about a sack.
-10. A real phone-first UI. What exists is a desktop test rig.
+10. A real phone-first UI. What exists is a working desktop UI - seven
+    tabs, five sheet subtabs, and every number on it coming from the
+    engine - but it is laid out for a wide window. The left column sits
+    around 550px in practice, which is already tight enough that the
+    ability rows wrap their save half onto a second line.
 11. Android via `npm run tauri android init`. iOS needs a Mac.
 
 Two small things worth doing while they are cheap: `preview_request`
@@ -3334,6 +3470,16 @@ use for - a `load_sheet_lite` would fix it, at the cost of two loaders
 that can drift. And `load_sheet` runs on every roll, so the pack read
 sits ahead of the dice; it is one small select and it has not been worth
 fixing yet, but that is where the latency is if it ever matters.
+
+**That cost has grown and is worth watching.** `load_sheet` now also
+reads the passive class features and the live effects, and 116 made the
+damage path load the TARGET's whole sheet to find out what they resist.
+That was deliberate - "the same answer the sheet would give", and a
+second cheaper loader would be a second answer to one question, which is
+the fault this codebase keeps producing. But a swing against a creature
+is now a full sheet read on both ends. If a fight ever feels slow, that
+is where to look first, and the fix is caching a sheet for the length of
+a turn rather than writing a second loader.
 
 ## Loose ends
 

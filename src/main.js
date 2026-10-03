@@ -1948,16 +1948,19 @@ async function loadSheet() {
     // which way it moved; and the BASE stops being bold when there is
     // a final score beside it, because the bold one should be the
     // number every roll actually uses.
-    let fas = null;
+    // 119. ALWAYS PRESENT, EMPTY WHEN THERE IS NOTHING TO SAY. The row
+    // is a grid now, and a column that appears on some rows and not
+    // others slides everything after it sideways - which is exactly
+    // what the skill rows became a grid to stop.
+    const fas = sEl("span", "abil-fas");
     const base = a.base ?? a.score;
     if (a.score !== base) {
-      fas = sEl("span", "abil-fas");
       fas.append(sEl("span", "abil-slash", "/"));
       fas.append(sEl("span", "abil-final " + signClass(a.score - base), String(a.score)));
       fas.title = "final ability score - what every roll uses";
     }
     // Bold unless something below it is bolder.
-    num.classList.toggle("outranked", !!fas);
+    num.classList.toggle("outranked", a.score !== base);
 
     const m = document.createElement("span");
     // GREEN UP, RED DOWN, on the modifier and on every source behind
@@ -1971,10 +1974,9 @@ async function loadSheet() {
     // source, and the row stays empty for a character who has none -
     // which is most of them, because the species is the only kind of
     // source the engine models so far.
-    let sp = null;
+    const sp = sEl("span", "abil-sources");
     const sources = a.sources || [];
     if (sources.length) {
-      sp = sEl("span", "abil-sources");
       for (const src of sources) {
         const chip = sEl("span", "abil-source " + signClass(src.value),
           src.name + " " + withSign(src.value));
@@ -1983,20 +1985,75 @@ async function loadSheet() {
       }
     } else if (fromSpecies) {
       // A sheet loaded before 080 carries the bonus and no names.
-      sp = sEl("span", "abil-sources");
       sp.append(sEl("span", "abil-source " + signClass(fromSpecies),
         "species " + withSign(fromSpecies)));
+    }
+
+    // 119. THE SAVE HALF OF THE ROW, behind a rule.
+    //
+    // Everything to the left of the pipe is the ABILITY - the score,
+    // what moved it, the modifier every roll derives from. Everything
+    // to the right is one particular roll made with it. They were run
+    // together with nothing between them, and a proficiency checkbox
+    // sitting among five numbers reads as a sixth number.
+    const pipe = sEl("span", "abil-pipe", "");
+    pipe.setAttribute("aria-hidden", "true");
+
+    // THE ENGINE'S NUMBER, never a second one computed here. A save is
+    // the ability modifier, the proficiency bonus, 100's two grant
+    // targets and anything running - and the screen deriving its own
+    // is the fault `skill_mods` already exists to have fixed once.
+    const line = (sheet.save_lines || {})[code] || null;
+
+    const savewrap = sEl("span", "abil-savemods");
+    savewrap.append(sEl("span", "abil-savelabel", "Save Mods"));
+
+    // EVERY MODIFIER WITH ITS LABEL, which is the whole ask. A chip per
+    // source, coloured the way the ability sources beside them are, and
+    // nothing at all for a character who has none - which is most of
+    // them on most abilities.
+    for (const md of (line && line.mods) || []) {
+      const amount = md.dice
+        ? (md.value ? withSign(md.value) + " " : "") + md.dice
+        : withSign(md.value || 0);
+      const chip = sEl(
+        "span",
+        "abil-source " + (md.dice ? "dice" : signClass(md.value || 0)) +
+          (md.only_vs_spell ? " conditional" : ""),
+        md.name + " " + amount
+      );
+      // 118. A CONDITIONAL BONUS SAYS SO ON ITS FACE. The Ny'ook's +2
+      // is not part of a bare save, and a chip that looked like the
+      // others would overstate every save they ever make.
+      chip.title = md.only_vs_spell
+        ? "only against a spell - tick “against a spell” when rolling"
+        : md.dice
+          ? "rolled with the save"
+          : "counted in the number on the button";
+      savewrap.append(chip);
     }
 
     const lab = document.createElement("label");
     lab.className = "abil-save";
     const chk = document.createElement("input");
     chk.type = "checkbox"; chk.checked = a.save_prof;
-    // SAYS WHAT IT IS. "save" beside five other numbers read as a verb
-    // - a button that would save the row - rather than as the saving
-    // throw proficiency it has always been.
-    lab.append(chk, document.createTextNode("saving throw"));
+    // THE TICK KEEPS ITS JOB AND LOSES ITS WORDS. "saving throw" has
+    // become the button beside it, so the label would have named the
+    // wrong control - it says what the TICK means instead.
+    lab.append(chk, document.createTextNode("prof"));
     lab.title = "proficient in " + code.toUpperCase() + " saving throws";
+
+    // AND THE ROLL ITSELF. This was a word for three releases. A save
+    // is the one roll a player makes constantly and never initiates -
+    // somebody else's trap, somebody else's spell - so it was the one
+    // roll you had to go and type out by hand.
+    const roll = sEl("button", "ghost tiny abil-roll",
+      "saving throw" + (line ? "  " + withSign(line.total) : ""));
+    roll.title = line
+      ? code.toUpperCase() + " save at " + withSign(line.total) +
+        (line.proficient ? " (proficient)" : "")
+      : code.toUpperCase() + " save";
+    roll.addEventListener("click", () => askSaveDC(code, line));
 
     const save = async () => {
       await call("set_ability", {
@@ -2010,11 +2067,16 @@ async function loadSheet() {
     num.addEventListener("change", save);
     chk.addEventListener("change", save);
 
-    el.append(tag, num);
-    if (fas) el.append(fas);
-    el.append(m);
-    if (sp) el.append(sp);
-    el.append(lab);
+    // ONE CELL FOR THE WHOLE SAVE HALF, so it can drop to its own line
+    // intact when the panel is too narrow to carry it beside the
+    // ability. The left column of this app is about 350 pixels and the
+    // nine pieces will not fit there - but Dave would "rather have the
+    // info here than try to save real-estate", so the answer is a
+    // second line rather than a truncation.
+    const side = sEl("span", "abil-saveside");
+    side.append(pipe, savewrap, lab, roll);
+
+    el.append(tag, num, fas, m, sp, side);
     box.append(el);
   }
 
@@ -2088,6 +2150,114 @@ async function loadSheet() {
   await loadFeatures();
   await loadPrayers(sheet);
   await loadCastable();
+}
+
+// 119. HOW HARD WAS IT?
+//
+// A SAVE IS THE ONE ROLL NOBODY CHOOSES TO MAKE. An attack has a target
+// on the screen whose armour class the engine already knows; a save is
+// made because somebody else did something, and the difficulty comes
+// from that thing rather than from the character. So it has to be
+// asked for - and asking is the whole of what stood between a player
+// and rolling their own Constitution save without typing it out.
+//
+// A PANEL RATHER THAN window.prompt. A browser modal blocks the
+// webview, cannot be styled, cannot carry the "against a spell" tick,
+// and - the reason that actually decides it - cannot be filled in by
+// anything but a person. A trap or a poisoned drink knows its own DC,
+// and when scripted actions arrive they set `state.scriptedSave` and
+// this never opens at all. The hook is here now so that is one line
+// later rather than a rewrite.
+function askSaveDC(code, line) {
+  const host = document.querySelector("#save-prompt");
+  if (!host) return;
+
+  // ALREADY ANSWERED. A scripted action that knows its own difficulty
+  // rolls straight through - which is the shape the later work needs
+  // and costs nothing to honour now.
+  const scripted = state.scriptedSave;
+  if (scripted && scripted.dc) {
+    state.scriptedSave = null;
+    return rollSave(code, scripted.dc, !!scripted.vsSpell, scripted.label || null);
+  }
+
+  host.innerHTML = "";
+  host.hidden = false;
+
+  host.append(sEl("span", "nm", code.toUpperCase() + " saving throw"));
+  if (line) {
+    host.append(sEl("span", "muted",
+      withSign(line.total) + (line.conditional ? "" : "")));
+  }
+
+  const dc = document.createElement("input");
+  dc.type = "number"; dc.min = 1; dc.max = 40; dc.className = "save-dc";
+  dc.placeholder = "DC";
+  // 017's convention: no default difficulty. A pre-filled 10 would be
+  // the engine deciding how hard somebody else's trap was.
+  host.append(dc);
+
+  // THE CIRCUMSTANCE TRAVELS WITH THE ROLL, the same control 118 put
+  // beside the roll box - a poison save and a Hold Person save are the
+  // same character and different numbers. Offered only where it would
+  // change one.
+  let vs = null;
+  const conditional = ((line && line.mods) || []).filter((m) => m.only_vs_spell);
+  if (conditional.length) {
+    const lab = sEl("label", "check", "");
+    vs = document.createElement("input");
+    vs.type = "checkbox";
+    lab.append(vs, document.createTextNode("against a spell"));
+    lab.title = conditional.map((m) => m.name + " " + withSign(m.value || 0)).join(", ");
+    host.append(lab);
+  }
+
+  const go = sEl("button", "tiny", "roll");
+  const no = sEl("button", "ghost tiny", "cancel");
+  const fire = () => {
+    const n = Number(dc.value);
+    // REFUSED RATHER THAN GUESSED, and said out loud. A save rolled
+    // against nothing is not judged at all, which is not the same as
+    // failing it - and silently rolling an unjudged save would look
+    // like the DC had been accepted.
+    if (!n) return log("roll_named", "a saving throw needs a difficulty", true);
+    host.hidden = true;
+    rollSave(code, n, !!(vs && vs.checked), null);
+  };
+  go.addEventListener("click", fire);
+  no.addEventListener("click", () => { host.hidden = true; });
+  dc.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") fire();
+    if (e.key === "Escape") host.hidden = true;
+  });
+  host.append(go, no);
+  dc.focus();
+}
+
+// Roll it, through the one path every other d20 in this app goes
+// through.
+//
+// THE REQUEST STRING, NOT A NEW COMMAND. "con save" is the vocabulary
+// `resolve_request` already speaks and what narrative_lines and
+// skill_prompts are keyed on; a `roll_save` command would be a second
+// way to make the same d20 and a second thing to keep in step.
+async function rollSave(code, dc, vsSpell, label) {
+  const request = code + " save" + (vsSpell ? " vs spell" : "");
+  const r = await tryCall("roll_named", {
+    characterId: state.characterId,
+    request,
+    mode: document.querySelector("#mode").value,
+    // A DIFFICULTY, NOT AN ARMOUR CLASS. 017: a natural 20 does not
+    // pass a save outright the way it hits, and `resolution` needs to
+    // be told which kind of number this is.
+    targetValue: dc,
+    targetKind: "dc",
+    targetLabel: label,
+    encounterId: state.encounterId || null,
+    actorId: performerActorId(),
+  });
+  if (!r.ok) return log("roll_named", r.error, true);
+  await loadRolls();
 }
 
 // 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL, AND WHY.

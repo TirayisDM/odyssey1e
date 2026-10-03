@@ -555,6 +555,19 @@
           </div>
           <div id="abilities" class="abils"></div>
 
+          <!-- 119. HOW HARD WAS IT?
+               A save is the one roll nobody chooses to make - somebody
+               else's trap, somebody else's spell - so the difficulty
+               comes from that thing rather than from the character, and
+               has to be asked for. One prompt under the six rows rather
+               than a box on each: only one save is ever being rolled.
+               NOT window.prompt, which blocks the webview, cannot carry
+               the "against a spell" tick, and cannot be filled in by
+               anything but a person. A trap knows its own DC; when
+               scripted actions arrive they set state.scriptedSave and
+               this never opens. -->
+          <div class="row" id="save-prompt" hidden></div>
+
           <!-- 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL.
                `species.damage_resistances` has existed since 056 and
                the only place it appeared was the Description pane,

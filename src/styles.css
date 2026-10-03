@@ -255,8 +255,45 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
    over real estate - a sheet is read far more often than it is
    scrolled. */
 .abils{display:grid;grid-template-columns:1fr;gap:.3rem;margin-bottom:.6rem}
-.abil{display:flex;align-items:center;gap:.45rem;border:1px solid var(--line);
+/* 119. A GRID RATHER THAN A FLEX ROW, for the reason the skill rows
+   became one: the eye needs the numbers under each other. The row grew
+   a save half, and with everything flexing, "SAVE MODS" started at a
+   different place on every line depending on how long the ability's
+   own sources happened to be.
+   FIVE CELLS AND THEN THE SAVE. Every cell is emitted on every row
+   even when empty - a column that comes and goes slides everything
+   after it sideways, which is the whole reason for the grid.
+   THE SAVE HALF WRAPS TO ITS OWN LINE BY DEFAULT. This app's left
+   column is around 350 pixels and the nine pieces do not fit there;
+   squeezed onto one line they collided, with an ability's sources
+   running into "SAVE MODS". Dave would rather have the information
+   than save the real estate, so it takes a second line and keeps all
+   of it. Where there IS room, it goes back beside the ability - see
+   the container query below. */
+#abilities{container-type:inline-size}
+.abil{display:grid;
+      grid-template-columns:3rem 3.4rem 3.4rem 3.6rem minmax(0,1fr);
+      grid-template-areas:"code score fas mod src"
+                          "save save save save save";
+      align-items:center;gap:.3rem .45rem;border:1px solid var(--line);
       border-radius:4px;padding:.4rem .6rem}
+.abil > b{grid-area:code}
+.abil > input[type=number]{grid-area:score}
+.abil > .abil-fas{grid-area:fas}
+.abil > .mod{grid-area:mod}
+.abil > .abil-sources{grid-area:src;min-width:0}
+.abil > .abil-saveside{grid-area:save;display:flex;align-items:center;
+                       gap:.45rem;min-width:0;flex-wrap:wrap}
+/* ON ITS OWN LINE THE PIPE WOULD BE A STRAY MARK. It separates two
+   halves of one line; stacked, the line break already does that. */
+.abil > .abil-saveside > .abil-pipe{display:none}
+
+@container (min-width: 680px) {
+  .abil{grid-template-columns:3rem 3.4rem 3.4rem 3.6rem minmax(0,1fr)
+                              minmax(0,1.9fr);
+        grid-template-areas:"code score fas mod src save"}
+  .abil > .abil-saveside > .abil-pipe{display:block}
+}
 /* THE CODE IS A HEADING NOW, not a cramped label. A full-width row can
    afford to say which ability it is at a size somebody can scan. */
 .abil b{width:3rem;font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--fg)}
@@ -264,6 +301,34 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .abil .mod{width:2rem;text-align:center;font:600 12px ui-monospace,Menlo,monospace}
 .abil label{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:.15rem}
 .abil input[type=checkbox]{margin:0;width:auto}
+/* 119. THE SAVE HALF OF THE ROW.
+   Everything left of the pipe is the ABILITY; everything right of it is
+   one roll made with that ability. They ran together, and a proficiency
+   checkbox among five numbers reads as a sixth number. */
+/* THE PIPE DAVE ASKED FOR, and it has to be SEEN to do its job - at
+   one hairline of --line it was there and invisible, which is the same
+   as not being there. Brighter and full height: it is the only thing
+   saying that the left of the row is who you are and the right is one
+   roll you make. */
+.abil .abil-pipe{align-self:stretch;background:var(--line);
+                 box-shadow:0 0 0 .5px var(--line)}
+.abil .abil-savemods{display:flex;align-items:center;gap:.3rem;flex:1;min-width:0;
+                     flex-wrap:wrap}
+.abil .abil-savelabel{font-size:10px;color:var(--muted);letter-spacing:.04em;
+                      text-transform:uppercase;white-space:nowrap}
+/* A DIE IS NOT A NUMBER, so it is not green or red - nothing yet knows
+   which way 1d4 will fall. */
+.abil .abil-source.dice{color:#9ecbff}
+/* 118. A CONDITIONAL BONUS SAYS SO ON ITS FACE. Dashed, because a chip
+   that looked like the others would overstate every save they make. */
+.abil .abil-source.conditional{border-style:dashed;opacity:.8}
+.abil .abil-roll{white-space:nowrap;font-variant-numeric:tabular-nums;
+                 min-width:8.5rem;text-align:center}
+#save-prompt{align-items:center;gap:.45rem;flex-wrap:wrap;margin-top:.35rem;
+             padding:.35rem .5rem;border:1px solid var(--accent);border-radius:4px}
+#save-prompt .nm{font:600 12px ui-monospace,Menlo,monospace}
+#save-prompt .muted{font:12px ui-monospace,Menlo,monospace}
+#save-prompt input.save-dc{width:4.2rem;margin:0;padding:.18rem .3rem;text-align:center}
 /* A GRID RATHER THAN space-between, because the row grew from three
    things to five and the eye needs the numbers under each other: the
    name stretches, the natural bonus sits in one column, what carried

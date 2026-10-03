@@ -105,6 +105,71 @@ pub struct SkillLine {
     pub total: i64,
 }
 
+/// One named thing that moves a saving throw.
+///
+/// 119. A LABEL IS THE WHOLE POINT. The ability rows were about to grow
+/// a "Save Mods" column, and a column of bare numbers is the thing this
+/// sheet has refused to show since the attack preview spelled out STR
+/// and proficiency separately.
+#[derive(Debug, Clone, Serialize)]
+pub struct SaveMod {
+    /// What to call it: an item's name, a people's name, a spell's.
+    pub name: String,
+    /// A flat number, where it is one.
+    pub value: Option<i64>,
+    /// 114. A DIE, where the thing granting it rolls - Bless is +1d4
+    /// on every save and is not a +2. Both may be present.
+    pub dice: Option<String>,
+    /// 118. TRUE FOR A BONUS THAT ONLY APPLIES AGAINST A SPELL, which
+    /// the Ny'ook have. Shown either way and counted only when the
+    /// circumstance is ticked - a conditional bonus folded silently
+    /// into the total would be wrong on most saves, and one left out
+    /// entirely is the invisibility 118 just finished fixing.
+    pub only_vs_spell: bool,
+}
+
+/// One saving throw as the sheet shows it.
+///
+/// THE SAME THREE FACTS `SkillLine` CARRIES, for the same reason: what
+/// the character is worth unaided, what moved it and by how much, and
+/// the number to roll with.
+///
+/// `total` COUNTS THE UNCONDITIONAL MODIFIERS ONLY. A Ny'ook's +2 is
+/// real and is not part of a bare Constitution save, so it rides in
+/// `mods` with its flag set and the screen adds it when the
+/// circumstance is ticked. Dice are never in the total - "+1d4" is not
+/// a number and `effect_grants` appends it to the formula at roll time
+/// so the roll shows what it rolled.
+#[derive(Debug, Clone, Serialize)]
+pub struct SaveLine {
+    /// The ability modifier and, where they are proficient, the
+    /// proficiency bonus. What a bare save rolls.
+    pub natural: i64,
+    /// Whether the proficiency bonus is in `natural`, so the screen can
+    /// say so without recomputing the test.
+    pub proficient: bool,
+    /// Everything that moves it, named.
+    pub mods: Vec<SaveMod>,
+    /// `natural` plus every unconditional flat modifier.
+    pub total: i64,
+}
+
+impl SaveLine {
+    /// What the conditional modifiers come to - the Ny'ook's +2, and
+    /// anything else that applies only against a spell.
+    ///
+    /// SEPARATE FROM `total` so one line can serve both rolls. A save
+    /// against a dragon's breath and a save against Hold Person are the
+    /// same character and different numbers.
+    pub fn conditional(&self) -> i64 {
+        self.mods
+            .iter()
+            .filter(|m| m.only_vs_spell)
+            .filter_map(|m| m.value)
+            .sum()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillDef {
     pub key: String,
@@ -261,6 +326,17 @@ pub struct Sheet {
     pub techniques: Vec<crate::attack::Technique>,
     /// HP, death saves, exhaustion, size. 010.
     pub vitals: Vitals,
+    /// 119. Ability code -> the saving throw, with its working.
+    ///
+    /// SENT BECAUSE THE SHEET IS ABOUT TO ROLL ONE. The ability rows
+    /// carried a proficiency checkbox and no number at all, so a
+    /// Constitution save was invisible until somebody typed it into the
+    /// roll box - and the screen must not derive it itself, which is
+    /// the fault `skill_mods` exists to have already fixed once.
+    ///
+    /// NOT DESERIALISED, like `skill_mods`: derived from the rest.
+    #[serde(skip_deserializing)]
+    pub save_lines: HashMap<String, SaveLine>,
     /// 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL, and WHY.
     ///
     /// DERIVED FROM FOUR PLACES AND STORED IN NONE. A species states
@@ -313,6 +389,73 @@ impl Sheet {
 
     pub fn save_prof(&self, code: &str) -> bool {
         self.abilities.get(code).map(|a| a.save_prof).unwrap_or(false)
+    }
+
+    /// One saving throw, with everything that moves it named.
+    ///
+    /// 119. THE ONE PLACE A SAVE IS WORKED OUT. `resolve_request` had
+    /// this arithmetic inline and the sheet had none at all, so a
+    /// Constitution save was invisible until somebody typed it into the
+    /// roll box. Giving the screen its own copy would be the fault
+    /// `skill_mods` already exists to have fixed once - four places
+    /// derived a skill modifier and three of them asked the engine.
+    ///
+    /// `live` IS WHAT IS RUNNING ON THEM, and the caller decides
+    /// whether to pass any. The SHEET passes them, so Bless shows in
+    /// the Save Mods column; `resolve_request` passes NOTHING, because
+    /// `effect_grants` appends those dice to the formula at roll time
+    /// and counting them here as well would roll Bless twice.
+    ///
+    /// A CONDITIONAL BONUS IS LISTED AND NOT TOTALLED. The Ny'ook +2
+    /// applies only against a spell, so it rides in `mods` with its
+    /// flag set - folding it into `total` would be wrong on most saves
+    /// and leaving it out entirely is the invisibility 118 fixed.
+    pub fn save_line(&self, code: &str, live: &[crate::grants::Grant]) -> SaveLine {
+        let proficient = self.save_prof(code);
+        let natural = self.ability_mod(code)
+            + if proficient { self.proficiency_bonus() } else { 0 };
+        let worn = worn_grants(&self.loadout);
+        let both = format!("save.{}", code);
+
+        // TWO TARGETS, IN THE ORDER `resolve_request` APPLIES THEM. A
+        // Cloak of Protection grants `save` and a steadying ring grants
+        // `save.dex`; both land, and a floor set by either settles
+        // before the adds on top of it - see `grants::apply`.
+        let mut mods = Vec::new();
+        for (name, value) in crate::grants::breakdown(natural, &worn, "save") {
+            mods.push(SaveMod { name, value: Some(value), dice: None, only_vs_spell: false });
+        }
+        let after_save = crate::grants::apply(natural, &worn, "save");
+        for (name, value) in crate::grants::breakdown(after_save, &worn, &both) {
+            mods.push(SaveMod { name, value: Some(value), dice: None, only_vs_spell: false });
+        }
+        let total = crate::grants::apply(after_save, &worn, &both);
+
+        // WHAT IS RUNNING ON THEM, where the caller wanted it counted.
+        // A die rather than a number, so the chip reads "Bless +1d4"
+        // and nothing tries to add it to anything.
+        for g in live.iter().filter(|g| g.target == "save" || g.target == both) {
+            mods.push(SaveMod {
+                name: g.source.clone(),
+                value: (g.value != 0).then_some(g.value),
+                dice: g.dice.clone(),
+                only_vs_spell: false,
+            });
+        }
+
+        // 118. AND THE ONE THAT ONLY APPLIES AGAINST A SPELL.
+        if let Some(sp) = &self.species {
+            if let Some(n) = sp.spell_save_bonus.filter(|n| *n != 0) {
+                mods.push(SaveMod {
+                    name: sp.name.clone(),
+                    value: Some(n),
+                    dice: None,
+                    only_vs_spell: true,
+                });
+            }
+        }
+
+        SaveLine { natural, proficient, mods, total }
     }
 
     /// The proficiency contribution for a skill. floor(multiplier * PB),
@@ -548,29 +691,18 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
     };
     if let Some(stem) = stem.strip_suffix(" save") {
         if let Some(code) = ability_code(stem) {
-            let pb = sheet.proficiency_bonus();
-            let against_magic = if vs_spell {
-                sheet.species.as_ref().and_then(|sp| sp.spell_save_bonus).unwrap_or(0)
-            } else {
-                0
-            };
-            // 100. TWO TARGETS, BECAUSE ITEMS SAY BOTH THINGS. A Cloak
-            // of Protection is +1 on every save and grants `save`; a
-            // ring that steadies the hand grants `save.dex`. They add
-            // where both apply, which is what two items doing
-            // different jobs should do.
-            let worn = worn_grants(&sheet.loadout);
-            let m = crate::grants::apply(
-                crate::grants::apply(
-                    sheet.ability_mod(code)
-                        + if sheet.save_prof(code) { pb } else { 0 }
-                        + against_magic,
-                    &worn,
-                    "save",
-                ),
-                &worn,
-                &format!("save.{}", code),
-            );
+            // 119. ASKED, NOT REPEATED. The ability mod, the
+            // proficiency bonus and 100's two grant targets were
+            // worked out here and nowhere else, so the sheet could
+            // show a proficiency checkbox and no number. One method
+            // owns it now and this is a caller - the same move
+            // `skill_modifier` made when four places derived a skill.
+            //
+            // NOTHING LIVE IS PASSED. `effect_grants` appends a running
+            // Bless to the formula at roll time, and counting it here
+            // as well would roll the d4 twice.
+            let line = sheet.save_line(code, &[]);
+            let m = line.total + if vs_spell { line.conditional() } else { 0 };
             return Resolved {
                 label: format!(
                     "{} Save{}",
@@ -1573,9 +1705,12 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     resist_sources.extend(crate::resist::from_grants(
         &crate::features::load_passive_grants(token, &game_id, &classes)?,
     ));
-    if let Ok(live) = crate::commands::effects::grants_on(token, &game_id, character_id) {
-        resist_sources.extend(crate::resist::from_grants(&live));
-    }
+    // READ ONCE AND USED TWICE. The resistances want these and so do
+    // the save lines - a Bless running on somebody is a save modifier
+    // and belongs in the column beside the others.
+    let live = crate::commands::effects::grants_on(token, &game_id, character_id)
+        .unwrap_or_default();
+    resist_sources.extend(crate::resist::from_grants(&live));
     let resistances = crate::resist::standing(&resist_sources);
 
     let mut sheet = Sheet {
@@ -1610,6 +1745,12 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         vitals: profile.vitals,
         armor_class,
         resistances,
+        // SET BELOW, off the finished sheet - a save needs the
+        // abilities with the species bonus in them, the proficiency
+        // bonus derived from the level and the loadout in place, which
+        // is the same reason Karma and the skill lines are resolved
+        // after this struct exists.
+        save_lines: HashMap::new(),
         techniques,
         loadout,
     };
@@ -1636,6 +1777,14 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
             };
             (k, line)
         })
+        .collect();
+
+    // 119. AND THE SIX SAVES, with whatever is running on them. The
+    // ability rows are about to roll these, so the number has to come
+    // from the engine rather than be assembled on the screen.
+    sheet.save_lines = crate::grants::ABILITIES
+        .iter()
+        .map(|code| (code.to_string(), sheet.save_line(code, &live)))
         .collect();
 
     sheet.karma = sheet.derive_karma(&class_catalogue);
@@ -1724,6 +1873,11 @@ mod tests {
             // 116. Rodnar is human and wearing nothing enchanted, so
             // everything hurts him exactly as much as it says.
             resistances: Vec::new(),
+            // 119. Derived off the finished sheet in load_sheet, the
+            // same as skill_mods beside it. The save ARITHMETIC is
+            // tested through `save_line` and `resolve_request`, which
+            // ask the fixture rather than this map.
+            save_lines: HashMap::new(),
         }
     }
 
@@ -1935,6 +2089,152 @@ mod tests {
         // Still labelled, because what the save was against is worth
         // reading back off the card whoever rolled it.
         assert_eq!(r.label, "WIS Save vs Spell");
+    }
+
+    /* ---------- 119. the save line the sheet shows ---------- */
+
+    fn saver(grants: Vec<crate::grants::Grant>) -> Sheet {
+        Sheet { loadout: wearing(grants), ..rodnar() }
+    }
+
+    fn named(target: &str, value: i64, who: &str) -> crate::grants::Grant {
+        crate::grants::Grant {
+            target: target.into(),
+            mode: crate::grants::Mode::Add,
+            value,
+            dice: None,
+            needs_attunement: false,
+            source: who.into(),
+        }
+    }
+
+    #[test]
+    fn a_bare_save_is_the_ability_and_the_proficiency() {
+        // Rodnar: WIS 16 (+3), proficient, PB +3.
+        let line = rodnar().save_line("wis", &[]);
+        assert_eq!(line.natural, 6);
+        assert_eq!(line.total, 6);
+        assert!(line.proficient);
+        assert!(line.mods.is_empty(), "nothing moved it");
+    }
+
+    #[test]
+    fn an_unproficient_save_leaves_the_bonus_out_and_says_so() {
+        // STR 8 is -1, and Rodnar is not proficient in STR saves.
+        let line = rodnar().save_line("str", &[]);
+        assert_eq!(line.natural, -1);
+        assert!(!line.proficient);
+    }
+
+    /// THE WHOLE POINT OF THE COLUMN. A +1 that appears in a total
+    /// with nothing to account for it reads as the arithmetic being
+    /// wrong - which is why the attack preview has spelled out STR and
+    /// proficiency separately since 100.
+    #[test]
+    fn every_modifier_arrives_with_its_name_on_it() {
+        let line = saver(vec![named("save", 1, "Cloak of Protection")])
+            .save_line("wis", &[]);
+        assert_eq!(line.total, 7);
+        assert_eq!(line.mods.len(), 1);
+        assert_eq!(line.mods[0].name, "Cloak of Protection");
+        assert_eq!(line.mods[0].value, Some(1));
+    }
+
+    #[test]
+    fn two_items_doing_different_jobs_both_land() {
+        // 100's two targets: a cloak is every save, a ring is one.
+        let line = saver(vec![
+            named("save", 1, "Cloak of Protection"),
+            named("save.wis", 2, "a steadying ring"),
+        ])
+        .save_line("wis", &[]);
+        assert_eq!(line.total, 9);
+        assert_eq!(line.mods.len(), 2);
+    }
+
+    #[test]
+    fn a_ring_for_another_ability_is_not_this_saves_business() {
+        let line = saver(vec![named("save.dex", 2, "a steadying ring")])
+            .save_line("wis", &[]);
+        assert_eq!(line.total, 6);
+        assert!(line.mods.is_empty());
+    }
+
+    /// 114. A DIE IS NOT A NUMBER and must never be averaged into one.
+    /// `effect_grants` appends it to the formula at roll time so the
+    /// roll shows what it rolled.
+    #[test]
+    fn a_running_bless_is_shown_as_a_die_and_not_added_to_the_total() {
+        let bless = crate::grants::Grant {
+            target: "save".into(),
+            mode: crate::grants::Mode::Add,
+            value: 0,
+            dice: Some("1d4".into()),
+            needs_attunement: false,
+            source: "Bless".into(),
+        };
+        let line = rodnar().save_line("wis", &[bless]);
+        assert_eq!(line.total, 6, "the die is not worth a number");
+        assert_eq!(line.mods.len(), 1);
+        assert_eq!(line.mods[0].dice.as_deref(), Some("1d4"));
+        assert_eq!(line.mods[0].value, None);
+    }
+
+    /// THE SHEET COUNTS IT AND THE ROLL DOES NOT, which is the one
+    /// place these two callers must differ: `effect_grants` puts a
+    /// running Bless into the formula, so `resolve_request` passing it
+    /// here as well would roll the d4 twice.
+    #[test]
+    fn the_roll_path_is_told_nothing_about_live_effects() {
+        let r = resolve_request(&rodnar(), "wis save", "normal");
+        assert_eq!(r.modifier, rodnar().save_line("wis", &[]).total);
+    }
+
+    #[test]
+    fn a_conditional_bonus_is_listed_but_not_in_the_total() {
+        // A Ny'ook's +2 is real and is not part of a bare save.
+        let line = nyook().save_line("wis", &[]);
+        assert_eq!(line.total, 6, "a bare save is unchanged");
+        assert_eq!(line.conditional(), 2);
+        let only = line.mods.iter().find(|m| m.only_vs_spell).unwrap();
+        assert_eq!(only.name, "Ny'ook");
+    }
+
+    #[test]
+    fn a_people_with_no_such_bonus_lists_nothing_conditional() {
+        let line = rodnar().save_line("wis", &[]);
+        assert_eq!(line.conditional(), 0);
+        assert!(line.mods.iter().all(|m| !m.only_vs_spell));
+    }
+
+    /// ONE ANSWER, WHICHEVER WAY YOU ASK. The sheet's column and the
+    /// roll box must never disagree - that is the fault `skill_mods`
+    /// exists to have fixed once already, where four places derived a
+    /// skill modifier and three of them asked the engine.
+    #[test]
+    fn the_line_and_the_roll_agree_for_every_ability_both_ways() {
+        let sheets = [
+            ("rodnar", rodnar()),
+            ("nyook", nyook()),
+            ("laden", saver(vec![named("save", 1, "Cloak of Protection")])),
+        ];
+        for (who, sheet) in sheets {
+            for code in crate::grants::ABILITIES {
+                let line = sheet.save_line(code, &[]);
+
+                let plain = resolve_request(&sheet, &format!("{} save", code), "normal");
+                assert_eq!(plain.modifier, line.total, "{} {} save", who, code);
+
+                let magic =
+                    resolve_request(&sheet, &format!("{} save vs spell", code), "normal");
+                assert_eq!(
+                    magic.modifier,
+                    line.total + line.conditional(),
+                    "{} {} save vs spell",
+                    who, code
+                );
+            }
+        }
     }
 
     #[test]

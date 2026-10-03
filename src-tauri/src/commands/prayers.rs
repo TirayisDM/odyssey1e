@@ -316,11 +316,22 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
 /// slot is 5e's own rule, and the reason 107 tracks slots by level
 /// rather than by spell.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn cast_prayer(
     state: State<AppState>,
     character_id: String,
     spell_key: String,
     at_level: Option<i64>,
+    // 112. WHO IT IS AIMED AT, and it reaches the engine now. 111 put a
+    // picker on the panel and used the answer only to write a log line
+    // - so Luci cast Bless on Falon four times, four slots went, and
+    // nothing was recorded, nothing landed on Falon, and no action row
+    // was written. The slot was the only thing that moved.
+    target_character_id: Option<String>,
+    target_actor_id: Option<String>,
+    target_label: Option<String>,
+    encounter_id: Option<String>,
+    actor_id: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
@@ -370,6 +381,75 @@ pub fn cast_prayer(
         used = Some(want);
     }
 
+    // ---- THE RECORD. A cast is a thing that happened and 001's rule
+    // covers it: the action row is what makes it findable later, and
+    // its absence is why four slots vanished with nothing to show.
+    let full = spell.get("duration").and_then(|v| v.as_str());
+    let concentrates = spell
+        .get("concentration")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if let Some(enc) = encounter_id.as_deref().filter(|s| !s.is_empty()) {
+        let mut row = json!({
+            "game_id": sheet.game_id,
+            "character_id": character_id,
+            "encounter_id": enc,
+            "request": c.name,
+            "label": crate::spellcast::label(&c),
+            "key": "spell",
+            "status": "resolved",
+            "cost": c.cost.as_str(),
+        });
+        if let Some(a) = actor_id.as_deref().filter(|s| !s.is_empty()) {
+            row["actor_id"] = json!(a);
+        }
+        if let Some(t) = target_actor_id.as_deref().filter(|s| !s.is_empty()) {
+            row["target_actor_id"] = json!(t);
+        }
+        supabase::rest_insert(&token, "actions", &row)?;
+    }
+
+    // ---- AND WHAT IT LEAVES BEHIND. Bless is a minute of +1d4 on
+    // somebody; Cure Wounds is over the moment it lands. `lasts` tells
+    // them apart, and an instantaneous spell makes no effect at all.
+    let mut landed: Option<String> = None;
+    if let Some(on) = target_character_id.as_deref().filter(|s| !s.is_empty()) {
+        let ticks = match crate::spellcast::lasts(full) {
+            crate::spellcast::Lasts::Instant => None,
+            crate::spellcast::Lasts::Ticks(n) => Some(Some(n)),
+            crate::spellcast::Lasts::Indefinite => Some(None),
+        };
+        if let Some(for_ticks) = ticks {
+            let now = crate::commands::effects::read_tick(&token, &sheet.game_id)?;
+
+            // ONE CONCENTRATION AT A TIME, which is 5e and is the rule
+            // a table forgets most often. Casting a second ends the
+            // first - and it is the CASTER's concentration, so this
+            // looks for what they are holding rather than what is on
+            // the target.
+            if concentrates {
+                crate::commands::effects::drop_concentration(&token, &sheet.game_id, &character_id, now)?;
+            }
+
+            let (_, said) = crate::commands::effects::apply_inner(
+                &token,
+                &sheet.game_id,
+                on,
+                &spell_key,
+                &c.name,
+                for_ticks,
+                c.dice.as_deref().and_then(dice_size),
+                "replace",
+                Some(&character_id),
+                if concentrates { Some("concentration") } else { Some("spell") },
+                None,
+                now,
+            )?;
+            landed = Some(said);
+        }
+    }
+
     Ok(json!({
         "name": c.name,
         "label": crate::spellcast::label(&c),
@@ -380,7 +460,26 @@ pub fn cast_prayer(
         "save_ability": c.save_ability,
         "dice": c.dice,
         "slot_used": used,
+        "target": target_label,
+        // What is now true of the target, where anything is. None for
+        // an instantaneous spell, which is most of the damage ones.
+        "landed": landed,
+        "concentration": concentrates,
     }))
+}
+
+/// The die size out of a dice string, for an effect's magnitude.
+///
+/// `1d4` is a 4. Used by `highest` stacking so a better Bless beats a
+/// worse one, and shown on the chip. A formula this cannot read gives
+/// None rather than a guess.
+fn dice_size(d: &str) -> Option<i64> {
+    d.split('d').nth(1)?
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
 }
 
 /// Spend one.

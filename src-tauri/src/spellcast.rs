@@ -119,6 +119,61 @@ pub fn cost(casting_time: Option<&str>) -> Cost {
     }
 }
 
+/// How long a spell hangs around.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Lasts {
+    /// Nothing lingers. Cure Wounds heals and is over; there is no
+    /// effect to create, which is a different answer from one that
+    /// lasts no time.
+    Instant,
+    /// This many ticks - see clock.rs.
+    Ticks(i64),
+    /// Until something ends it. "Until dispelled", and the handful the
+    /// book marks Special.
+    Indefinite,
+}
+
+/// Read the catalogue's duration text.
+///
+/// 112. TEXT, BECAUSE 5e'S OWN IS. "Up to 1 minute", "Until dispelled",
+/// "Instantaneous" - a column of ticks would have had to decide what
+/// Special means at seed time, and it does not mean a number.
+///
+/// "UP TO" IS CONCENTRATION'S WORDING and changes nothing here: a
+/// concentrating caster can end it sooner, which is what ending an
+/// effect early already does.
+pub fn lasts(duration: Option<&str>) -> Lasts {
+    let t = duration.unwrap_or("").trim().to_lowercase();
+    if t.is_empty() || t.starts_with("instant") {
+        return Lasts::Instant;
+    }
+    if t.starts_with("until") || t.starts_with("special") {
+        return Lasts::Indefinite;
+    }
+
+    // The first number in the text, and the unit after it.
+    let digits: String = t.chars().skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit()).collect();
+    let Ok(n) = digits.parse::<i64>() else {
+        // A duration nobody has written a rule for lingers rather than
+        // vanishing - an effect a DM can see and end beats one that
+        // silently never existed.
+        return Lasts::Indefinite;
+    };
+    let per = if t.contains("round") {
+        crate::clock::ROUND
+    } else if t.contains("minute") {
+        crate::clock::MINUTE
+    } else if t.contains("hour") {
+        crate::clock::HOUR
+    } else if t.contains("day") {
+        crate::clock::DAY
+    } else {
+        return Lasts::Indefinite;
+    };
+    Lasts::Ticks(n * per)
+}
+
 /// Everything a turn needs to know about casting one spell.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cast {
@@ -345,6 +400,52 @@ mod tests {
     fn everything_else_does() {
         assert!(cure_wounds().needs_slot);
         assert!(guiding_bolt().needs_slot);
+    }
+
+    /* ---------- how long it lasts ---------- */
+
+    #[test]
+    fn instantaneous_leaves_nothing_behind() {
+        // Different from lasting no time: there is no effect to make.
+        assert_eq!(lasts(Some("Instantaneous")), Lasts::Instant);
+        assert_eq!(lasts(None), Lasts::Instant);
+        assert_eq!(lasts(Some("")), Lasts::Instant);
+    }
+
+    #[test]
+    fn bless_lasts_a_minute() {
+        // "Up to" is concentration's wording and changes nothing - ten
+        // rounds either way, and a caster may drop it sooner.
+        assert_eq!(lasts(Some("Up to 1 minute")), Lasts::Ticks(crate::clock::MINUTE));
+    }
+
+    #[test]
+    fn spirit_guardians_lasts_ten() {
+        assert_eq!(lasts(Some("Up to 10 minutes")), Lasts::Ticks(100));
+    }
+
+    #[test]
+    fn the_longer_ones_read_too() {
+        assert_eq!(lasts(Some("1 hour")), Lasts::Ticks(crate::clock::HOUR));
+        assert_eq!(lasts(Some("8 hours")), Lasts::Ticks(8 * crate::clock::HOUR));
+        assert_eq!(lasts(Some("24 hours")), Lasts::Ticks(crate::clock::DAY));
+        assert_eq!(lasts(Some("10 days")), Lasts::Ticks(10 * crate::clock::DAY));
+        assert_eq!(lasts(Some("1 round")), Lasts::Ticks(1));
+    }
+
+    #[test]
+    fn until_dispelled_has_no_end() {
+        assert_eq!(lasts(Some("Until dispelled")), Lasts::Indefinite);
+        assert_eq!(lasts(Some("Until dispelled or triggered")), Lasts::Indefinite);
+        assert_eq!(lasts(Some("Special")), Lasts::Indefinite);
+    }
+
+    #[test]
+    fn something_unreadable_lingers_rather_than_vanishing() {
+        // An effect a DM can see and end beats one that silently never
+        // existed.
+        assert_eq!(lasts(Some("as long as the song holds")), Lasts::Indefinite);
+        assert_eq!(lasts(Some("3 fortnights")), Lasts::Indefinite);
     }
 
     /* ---------- the card ---------- */

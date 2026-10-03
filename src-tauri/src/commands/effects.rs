@@ -206,6 +206,42 @@ pub(crate) fn end_one(token: &str, effect_id: &str, now: i64) -> Result<(), Stri
     Ok(())
 }
 
+/// End whatever this caster is concentrating on.
+///
+/// 112. ONE AT A TIME, which is 5e and the rule a table forgets most
+/// often. It is the CASTER's concentration, so this looks for what
+/// THEY are holding rather than what is on any one target - Bless on
+/// three allies is one concentration and ending it ends all three.
+pub(crate) fn drop_concentration(
+    token: &str,
+    game_id: &str,
+    caster_id: &str,
+    now: i64,
+) -> Result<Vec<String>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "effects",
+        &[
+            ("select", "id,name"),
+            ("game_id", &format!("eq.{}", game_id)),
+            ("source_character_id", &format!("eq.{}", caster_id)),
+            ("source_feature", "eq.concentration"),
+            ("ended_at", "is.null"),
+        ],
+    )?;
+    let mut ended = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(id) = r.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        end_one(token, id, now)?;
+        if let Some(n) = r.get("name").and_then(|v| v.as_str()) {
+            ended.push(n.to_string());
+        }
+    }
+    Ok(ended)
+}
+
 /// Every effect in the game, expired ones included.
 ///
 /// THE EXPIRED ONES ARE READ ON PURPOSE. `effects::admit` decides what

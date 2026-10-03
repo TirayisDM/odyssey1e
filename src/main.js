@@ -1134,14 +1134,22 @@ function castTargetPicker(sp) {
 // The cast spends the slot and says what to roll; the roll goes
 // through the box below, where every other d20 in this app goes.
 async function doCast(sp, targetId) {
+  // 112. THE TARGET REACHES THE ENGINE NOW. It was picked here and used
+  // only for a log line, so Luci cast Bless on Falon four times, four
+  // slots went, and nothing was written down or landed on anybody.
+  const at = (state.targets || []).find((t) => t.id === targetId) || null;
+
   const r = await tryCall("cast_prayer", {
     characterId: state.characterId,
     spellKey: sp.key,
     atLevel: null,
+    targetCharacterId: at ? at.character_id || null : null,
+    targetActorId: at && at.row === "actor" ? at.id : null,
+    targetLabel: at ? at.label : null,
+    encounterId: state.encounterId || null,
+    actorId: performerActorId(),
   });
   if (!r.ok) return log("cast_prayer", r.error, true);
-
-  const at = (state.targets || []).find((t) => t.id === targetId) || null;
 
   const said = [r.value.name];
   if (at) said.push("at " + at.label);
@@ -1155,6 +1163,8 @@ async function doCast(sp, targetId) {
       (r.value.save_ability || "").toUpperCase() + " save vs DC " + r.value.save_dc);
   }
   if (r.value.dice) said.push(r.value.dice);
+  // WHAT IS NOW TRUE OF THEM, where the spell left anything behind.
+  if (r.value.landed) said.push(r.value.landed);
   log("cast_prayer", said.join(" \u00b7 "));
 
   // THE TO-HIT GOES IN THE ROLL BOX rather than being rolled here. An
@@ -1168,8 +1178,10 @@ async function doCast(sp, targetId) {
     if (pick && targetId) { pick.value = targetId; pick.dispatchEvent(new Event("change")); }
     updatePreview();
   }
-  // The slots moved, and so did the sheet's view of them.
+  // The slots moved, the effect chips moved, and so did the log.
   await loadCastable();
+  await loadEffects();
+  await loadRolls();
   if (state.prayers) await loadPrayers(state.sheet);
 }
 

@@ -43,6 +43,9 @@ let state = {
   // own numbers as list_prayers last reported them.
   spells: [],
   prayers: null,
+  // 110. What this character can cast on their turn, as castable()
+  // last reported it.
+  castable: [],
   // 108. Which level folds are open, by "prep1" / "add3". Remembered
   // across repaints - a fold that closed itself every time you
   // prepared something would be worse than no fold.
@@ -1031,6 +1034,99 @@ function sEl(tag, cls, text) {
   return n;
 }
 
+/* ===================== CASTING, ON A TURN (110) ===================== */
+//
+// A cleric in initiative needs their prepared list where the rolling
+// happens. Luci stood in the Tavern with initiative rolled, no weapons
+// and nothing to click.
+//
+// EVERY NUMBER IS RUST'S. What it costs, what it rolls, whether it can
+// be cast at all - spellcast.rs decides, and this paints the answer.
+async function loadCastable() {
+  const panel = document.querySelector("#cast-panel");
+  if (!panel) return;
+  panel.hidden = true;
+  if (!state.characterId) return;
+
+  // CASTS NOTHING IS NOT AN ERROR. Everybody who is not a cleric
+  // refuses this, which is the honest answer and the reason the panel
+  // hides rather than showing an empty list.
+  const rows = await invoke("castable", { characterId: state.characterId })
+    .catch(() => null);
+  if (!rows || !rows.length) return;
+
+  state.castable = rows;
+  panel.hidden = false;
+  document.querySelector("#cast-who").textContent =
+    (state.sheet && state.sheet.name) || "";
+  paintCastable();
+}
+
+function paintCastable() {
+  const host = document.querySelector("#cast-list");
+  if (!host) return;
+  host.innerHTML = "";
+
+  for (const sp of state.castable || []) {
+    const row = sEl("div", "castrow " + sp.stance + (sp.blocked ? " blocked" : ""));
+
+    const go = sEl("button", "ghost tiny", sp.cost === "bonus" ? "cast (bonus)" : "cast");
+    go.disabled = !!sp.blocked;
+    go.addEventListener("click", () => doCast(sp));
+    row.append(go);
+
+    row.append(sEl("span", "castname", sp.name));
+    row.append(sEl("span", "caststance", sp.stance));
+    row.append(sEl("span", "castlvl", sp.level === 0 ? "cantrip" : "lvl " + sp.level));
+
+    // WHAT IT TAKES TO LAND, from spellcast::label - the to-hit, the
+    // save and its DC, the dice. The whole reason a caster looks at
+    // this list rather than the catalogue.
+    const bits = [];
+    if (sp.to_hit != null) bits.push(withSign(sp.to_hit) + " to hit");
+    if (sp.save_dc != null) bits.push((sp.save_ability || "").toUpperCase() + " save DC " + sp.save_dc);
+    if (sp.dice) bits.push(sp.dice);
+    if (sp.range) bits.push(sp.range);
+    if (sp.concentration) bits.push("concentration");
+    if (bits.length) row.append(sEl("span", "castfacts", bits.join(" \u00b7 ")));
+
+    if (sp.blocked) row.append(sEl("span", "castwhy", sp.blocked));
+    host.append(row);
+  }
+}
+
+// CASTING AND ROLLING ARE TWO STEPS, which is the engine's own shape.
+// The cast spends the slot and says what to roll; the roll goes
+// through the box below, where every other d20 in this app goes.
+async function doCast(sp) {
+  const r = await tryCall("cast_prayer", {
+    characterId: state.characterId,
+    spellKey: sp.key,
+    atLevel: null,
+  });
+  if (!r.ok) return log("cast_prayer", r.error, true);
+
+  const said = [r.value.name];
+  if (r.value.slot_used) said.push("level " + r.value.slot_used + " slot");
+  else said.push("no slot");
+  if (r.value.save_dc) {
+    said.push((r.value.save_ability || "").toUpperCase() + " save DC " + r.value.save_dc);
+  }
+  if (r.value.dice) said.push(r.value.dice);
+  log("cast_prayer", said.join(" \u00b7 "));
+
+  // THE TO-HIT GOES IN THE ROLL BOX rather than being rolled here. An
+  // attack spell is a d20 like any other and belongs in the one place
+  // that makes them.
+  if (r.value.to_hit != null) {
+    const box = document.querySelector("#named-request");
+    if (box) { box.value = r.value.name; updatePreview(); }
+  }
+  // The slots moved, and so did the sheet's view of them.
+  await loadCastable();
+  if (state.prayers) await loadPrayers(state.sheet);
+}
+
 /* ===================== CLERIC PRAYERS (106) ===================== */
 //
 // Two surfaces off one catalogue. The TAB is a reference book - every
@@ -1898,6 +1994,7 @@ async function loadSheet() {
   await loadInventory();
   await loadFeatures();
   await loadPrayers(sheet);
+  await loadCastable();
 }
 
 // The equipment panel.

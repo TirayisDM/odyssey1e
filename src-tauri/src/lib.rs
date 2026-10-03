@@ -50,6 +50,7 @@ mod resolution;
 mod size;
 mod slots;
 mod species;
+mod spellcast;
 mod spent;
 mod store;
 mod supabase;
@@ -1294,6 +1295,8 @@ pub fn run() {
             commands::prayers::list_prayers,
             commands::prayers::prepare_prayer,
             commands::prayers::forget_prayer,
+            commands::prayers::castable,
+            commands::prayers::cast_prayer,
             commands::prayers::spend_spell_slot,
             commands::prayers::restore_spell_slot,
             commands::effects::list_effects,

@@ -211,6 +211,178 @@ pub fn forget_prayer(
     Ok(json!({ "ok": true }))
 }
 
+/// What this cleric can cast right now, as turn actions.
+///
+/// 110. PREPARED AND CANTRIPS ONLY, which is the whole point - the
+/// catalogue is 106 long and what a cleric can do on their turn is the
+/// dozen they are holding.
+///
+/// WHAT CANNOT BE CAST IS STILL LISTED, with the reason on it. Prayer
+/// of Healing takes ten minutes and a fight is six seconds a round, so
+/// it is shown as too long rather than hidden - a cleric reaching for
+/// it should be told why rather than wondering where it went.
+#[tauri::command]
+pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    let sheet = crate::character::load_sheet(&token, &character_id)?;
+    let Some(cleric) = sheet.classes.iter().find(|t| t.key == "cleric") else {
+        return Err(format!("{} is not a cleric", sheet.name));
+    };
+    let wis = sheet.ability_mod("wis");
+    let pb = sheet.proficiency_bonus();
+
+    let chosen = load_chosen(&token, &character_id)?;
+    if chosen.is_empty() {
+        return Ok(json!([]));
+    }
+    let keys: Vec<String> = chosen.iter().map(|(k, _)| k.clone()).collect();
+    let rows = supabase::rest_get(
+        &token,
+        "spells",
+        &[
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,range,duration,concentration"),
+            ("key", &format!("in.({})", keys.join(","))),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", sheet.game_id)),
+        ],
+    )?;
+
+    let spent = load_slots(&token, &character_id)?;
+    let left = prayers::slots_left(cleric.level, &spent);
+
+    let mut out: Vec<Value> = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let c = crate::spellcast::cast(
+            r.get("key").and_then(|v| v.as_str()).unwrap_or(""),
+            r.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+            r.get("level").and_then(|v| v.as_i64()).unwrap_or(0),
+            r.get("cast_type").and_then(|v| v.as_str()).unwrap_or(""),
+            r.get("casting_time").and_then(|v| v.as_str()),
+            r.get("save_ability").and_then(|v| v.as_str()),
+            r.get("dice").and_then(|v| v.as_str()),
+            pb,
+            wis,
+        );
+        // WHY IT CANNOT BE CAST, where it cannot. Two different
+        // problems and they want different words: it takes too long,
+        // or there is no slot left to carry it.
+        let blocked = if !c.cost.in_a_fight() {
+            Some(format!(
+                "takes {}",
+                r.get("casting_time").and_then(|v| v.as_str()).unwrap_or("too long")
+            ))
+        } else if c.needs_slot && left[(c.level - 1).max(0) as usize] == 0 {
+            Some(format!("no level {} slots left", c.level))
+        } else {
+            None
+        };
+
+        out.push(json!({
+            "key": c.key, "name": c.name, "level": c.level,
+            "stance": c.stance.as_str(),
+            "cost": c.cost.as_str(),
+            "to_hit": c.to_hit,
+            "save_dc": c.save_dc,
+            "save_ability": c.save_ability,
+            "dice": c.dice,
+            "needs_slot": c.needs_slot,
+            "label": crate::spellcast::label(&c),
+            "range": r.get("range"),
+            "duration": r.get("duration"),
+            "concentration": r.get("concentration"),
+            "blocked": blocked,
+        }));
+    }
+    // Cantrips last: they cost nothing and are what is left when the
+    // slots are gone, so the things that run out lead.
+    out.sort_by_key(|v| {
+        let lvl = v.get("level").and_then(|x| x.as_i64()).unwrap_or(0);
+        (
+            lvl == 0,
+            lvl,
+            v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        )
+    });
+    Ok(json!(out))
+}
+
+/// Cast one: spend the slot, and say what to roll.
+///
+/// THE SLOT IS SPENT HERE AND THE DICE ARE ROLLED BY THE ROLL PATH,
+/// deliberately. A cast is a cost plus a roll, and the roll already has
+/// somewhere to go. Rolling here would be a second way to make a d20
+/// happen.
+///
+/// `at_level` CARRIES AN UPCAST. Casting Cure Wounds with a 3rd-level
+/// slot is 5e's own rule, and the reason 107 tracks slots by level
+/// rather than by spell.
+#[tauri::command]
+pub fn cast_prayer(
+    state: State<AppState>,
+    character_id: String,
+    spell_key: String,
+    at_level: Option<i64>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let sheet = crate::character::load_sheet(&token, &character_id)?;
+    let Some(cleric) = sheet.classes.iter().find(|t| t.key == "cleric") else {
+        return Err(format!("{} is not a cleric", sheet.name));
+    };
+
+    let held = load_chosen(&token, &character_id)?;
+    if !held.iter().any(|(k, _)| *k == spell_key) {
+        return Err("they do not have that prepared".to_string());
+    }
+
+    let spell = one_spell_full(&token, &sheet.game_id, &spell_key)?;
+    let c = crate::spellcast::cast(
+        &spell_key,
+        spell.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+        spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0),
+        spell.get("cast_type").and_then(|v| v.as_str()).unwrap_or(""),
+        spell.get("casting_time").and_then(|v| v.as_str()),
+        spell.get("save_ability").and_then(|v| v.as_str()),
+        spell.get("dice").and_then(|v| v.as_str()),
+        sheet.proficiency_bonus(),
+        sheet.ability_mod("wis"),
+    );
+
+    if !c.cost.in_a_fight() {
+        return Err(format!(
+            "{} takes {} - not something to do on a turn",
+            c.name,
+            spell.get("casting_time").and_then(|v| v.as_str()).unwrap_or("too long")
+        ));
+    }
+
+    // A CANTRIP COSTS NOTHING, which is the whole of what makes it one.
+    let mut used: Option<i64> = None;
+    if c.needs_slot {
+        let want = at_level.unwrap_or(c.level);
+        if want < c.level {
+            return Err(format!(
+                "{} is a level {} spell - a level {} slot will not carry it",
+                c.name, c.level, want
+            ));
+        }
+        let spent = load_slots(&token, &character_id)?;
+        prayers::may_spend_slot(cleric.level, &spent, want)?;
+        write_slot(&token, &character_id, want, spent[(want - 1) as usize] + 1)?;
+        used = Some(want);
+    }
+
+    Ok(json!({
+        "name": c.name,
+        "label": crate::spellcast::label(&c),
+        "stance": c.stance.as_str(),
+        "cost": c.cost.as_str(),
+        "to_hit": c.to_hit,
+        "save_dc": c.save_dc,
+        "save_ability": c.save_ability,
+        "dice": c.dice,
+        "slot_used": used,
+    }))
+}
+
 /// Spend one.
 ///
 /// BY LEVEL AND NOT BY SPELL. A slot is a slot - a 3rd-level slot can
@@ -336,6 +508,24 @@ fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, bool)>, S
             ))
         })
         .collect())
+}
+
+/// One catalogue row with everything casting needs.
+fn one_spell_full(token: &str, game_id: &str, key: &str) -> Result<Value, String> {
+    let rows = supabase::rest_get(
+        token,
+        "spells",
+        &[
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice"),
+            ("key", &format!("eq.{}", key)),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("order", "game_id.asc.nullslast"),
+        ],
+    )?;
+    rows.as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .ok_or_else(|| format!("no spell with key '{}'", key))
 }
 
 /// One catalogue row, this game's before the global one.

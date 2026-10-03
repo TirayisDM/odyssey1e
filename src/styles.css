@@ -874,3 +874,19 @@ button.wide{width:100%}
 .lvlhead.section{border-bottom:1px solid var(--line-strong,var(--line));
                  margin-top:.6rem;padding:.45rem .2rem}
 .lvlhead.section .lvlname{font-size:14px}
+
+/* 110. WHAT A CASTER CAN DO, one line each. The stance colours the
+   left edge - a glance says what is aimed outward and what inward. */
+.castrow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+         padding:.3rem .4rem;border-left:3px solid var(--line);
+         border-bottom:1px solid var(--line)}
+.castrow.offensive{border-left-color:var(--bad)}
+.castrow.defensive{border-left-color:var(--ok)}
+.castrow.neutral{border-left-color:var(--muted)}
+.castrow.blocked{opacity:.5}
+.castname{font-weight:600;min-width:9rem}
+.caststance{font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+            color:var(--muted)}
+.castlvl{font-size:11px;color:var(--muted)}
+.castfacts{font:11px ui-monospace,Menlo,monospace;color:var(--fg)}
+.castwhy{font-size:11px;color:var(--bad);margin-left:auto}

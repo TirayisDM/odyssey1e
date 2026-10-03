@@ -444,6 +444,8 @@ pub fn cast_prayer(
                 Some(&character_id),
                 if concentrates { Some("concentration") } else { Some("spell") },
                 None,
+                // WHAT IT DOES WHILE IT LASTS, copied off the spell.
+                spell.get("grants").unwrap_or(&json!([])),
                 now,
             )?;
             landed = Some(said);
@@ -615,7 +617,7 @@ fn one_spell_full(token: &str, game_id: &str, key: &str) -> Result<Value, String
         token,
         "spells",
         &[
-            ("select", "key,name,level,cast_type,casting_time,save_ability,dice"),
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants"),
             ("key", &format!("eq.{}", key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("order", "game_id.asc.nullslast"),

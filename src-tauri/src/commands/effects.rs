@@ -79,6 +79,7 @@ pub fn apply_effect(
         source_character_id.as_deref(),
         source_feature.as_deref(),
         note.as_deref(),
+        &json!([]),
         now,
     )?;
     Ok(match outcome {
@@ -114,6 +115,11 @@ pub(crate) fn apply_inner(
     source_character_id: Option<&str>,
     source_feature: Option<&str>,
     note: Option<&str>,
+    // 114. WHAT IT DOES TO WHOEVER CARRIES IT, in grants.rs's
+    // vocabulary. COPIED ONTO THE ROW rather than looked up later: a
+    // DM retuning Bless next month must not silently change what is
+    // already running on somebody - 001's snapshot rule.
+    grants: &Value,
     now: i64,
 ) -> Result<(Outcome, String), String> {
     let rule = Stacking::parse(stacks);
@@ -166,6 +172,7 @@ pub(crate) fn apply_inner(
             "expires_at": incoming.expires_at,
             "stacks": rule.as_str(),
             "note": note,
+            "grants": grants,
         }),
     )?;
 
@@ -204,6 +211,43 @@ pub(crate) fn end_one(token: &str, effect_id: &str, now: i64) -> Result<(), Stri
         &json!({ "ended_at": now, "expires_at": now }),
     )?;
     Ok(())
+}
+
+/// Every grant currently running on one character.
+///
+/// 114. WHAT THE ROLL PATH ASKS. Live effects only - an expired Bless
+/// is a record and not a bonus - and the grants come off the row
+/// rather than the catalogue, so what is running is what was true when
+/// it was cast.
+pub(crate) fn grants_on(
+    token: &str,
+    game_id: &str,
+    character_id: &str,
+) -> Result<Vec<crate::grants::Grant>, String> {
+    let now = read_tick(token, game_id)?;
+    let rows = supabase::rest_get(
+        token,
+        "effects",
+        &[
+            ("select", "name,grants,started_at,expires_at"),
+            ("character_id", &format!("eq.{}", character_id)),
+            ("ended_at", "is.null"),
+        ],
+    )?;
+    let mut out = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let expires = r.get("expires_at").and_then(|v| v.as_i64());
+        if let Some(at) = expires {
+            if crate::clock::expired(now, at) {
+                continue;
+            }
+        }
+        let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("an effect");
+        if let Some(g) = r.get("grants") {
+            out.extend(crate::grants::parse(g, name));
+        }
+    }
+    Ok(out)
 }
 
 /// End whatever this caster is concentrating on.

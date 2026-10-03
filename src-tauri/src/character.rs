@@ -1811,6 +1811,7 @@ mod tests {
             target: target.into(),
             mode,
             value,
+            dice: None,
             needs_attunement: false,
             source: "Gauntlets of Ogre Power".into(),
         }

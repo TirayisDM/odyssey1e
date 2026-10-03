@@ -690,6 +690,7 @@ mod tests {
             target: target.into(),
             mode: crate::grants::Mode::Add,
             value,
+            dice: None,
             needs_attunement: false,
             source: "enchantment".into(),
         }

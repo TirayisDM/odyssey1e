@@ -65,6 +65,19 @@ pub struct Grant {
     pub target: String,
     pub mode: Mode,
     pub value: i64,
+    /// 114. A DIE RATHER THAN A NUMBER, where the thing granting it
+    /// rolls. Bless is +1d4 to attacks and saves, not +2 - and a
+    /// vocabulary that could only say "+2" would have forced either a
+    /// second mechanism for spells or an average nobody agreed to.
+    ///
+    /// `value` AND `dice` ARE BOTH ALLOWED and both apply: a grant of
+    /// +1 and 1d4 is a real thing to write. A grant with neither is
+    /// not a grant and `parse` drops it.
+    ///
+    /// NEVER ON A `set`. "Your Strength is 1d4" is not a sentence 5e
+    /// ever writes, and a floor that moved every time you looked at it
+    /// would be a different rule.
+    pub dice: Option<String>,
     /// Whether this waits for attunement. Default false: plenty of
     /// magic needs none, and a default that quietly switched items off
     /// would read as the grants not working at all.
@@ -94,10 +107,27 @@ pub fn parse(list: &Value, source: &str) -> Vec<Grant> {
             if target.is_empty() {
                 return None;
             }
-            let value = g.get("value")?.as_i64()?;
+            // 114. EITHER A VALUE OR A DIE, and a grant with neither
+            // is not a grant. `value` defaults to 0 so a pure die
+            // grant can leave it out rather than writing a zero that
+            // reads like a deliberate nothing.
+            let value = g.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
+            let dice = g
+                .get("dice")
+                .and_then(|d| d.as_str())
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+                .map(str::to_string);
+            if value == 0 && dice.is_none() {
+                return None;
+            }
+            let mode = Mode::parse(g.get("mode").and_then(|m| m.as_str()).unwrap_or("add"));
             Some(Grant {
                 target,
-                mode: Mode::parse(g.get("mode").and_then(|m| m.as_str()).unwrap_or("add")),
+                // A die on a `set` is dropped rather than honoured -
+                // see the note on `dice`.
+                dice: dice.filter(|_| mode == Mode::Add),
+                mode,
                 value,
                 needs_attunement: g
                     .get("needs_attunement")
@@ -115,6 +145,19 @@ pub fn parse(list: &Value, source: &str) -> Vec<Grant> {
 }
 
 /* ============================ RULES ============================ */
+
+/// Every die added to one target, as formula terms.
+///
+/// 114. SEPARATE FROM `total_add` BECAUSE A DIE IS NOT A NUMBER. The
+/// flat adds collapse into one integer and the dice cannot - "+1d4"
+/// has to reach the formula as itself so the roll shows what it rolled.
+pub fn dice_for(grants: &[Grant], target: &str) -> Vec<String> {
+    grants
+        .iter()
+        .filter(|g| g.mode == Mode::Add && g.target == target)
+        .filter_map(|g| g.dice.clone())
+        .collect()
+}
 
 /// Everything added to one target, summed.
 pub fn total_add(grants: &[Grant], target: &str) -> i64 {
@@ -250,6 +293,73 @@ pub fn skill_key(target: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------------- a grant that rolls (114) ---------------- */
+
+    #[test]
+    fn a_grant_can_carry_a_die_instead_of_a_number() {
+        // Bless is +1d4, not +2 - and a vocabulary that could only say
+        // "+2" would have forced an average nobody agreed to.
+        let list = serde_json::json!([
+            { "target": "attack", "mode": "add", "dice": "1d4" }
+        ]);
+        let got = parse(&list, "Bless");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].dice.as_deref(), Some("1d4"));
+        assert_eq!(got[0].value, 0, "a pure die grant leaves value out");
+    }
+
+    #[test]
+    fn a_grant_with_neither_a_value_nor_a_die_is_not_a_grant() {
+        let list = serde_json::json!([{ "target": "attack", "mode": "add" }]);
+        assert!(parse(&list, "x").is_empty());
+    }
+
+    #[test]
+    fn a_value_and_a_die_both_apply() {
+        let list = serde_json::json!([
+            { "target": "save", "mode": "add", "value": 1, "dice": "1d4" }
+        ]);
+        let got = parse(&list, "x");
+        assert_eq!(got[0].value, 1);
+        assert_eq!(got[0].dice.as_deref(), Some("1d4"));
+    }
+
+    #[test]
+    fn a_die_on_a_set_is_dropped() {
+        // "Your Strength is 1d4" is not a sentence 5e ever writes, and
+        // a floor that moved every time you looked at it would be a
+        // different rule.
+        let list = serde_json::json!([
+            { "target": "str", "mode": "set", "value": 19, "dice": "1d4" }
+        ]);
+        let got = parse(&list, "Belt");
+        assert_eq!(got[0].value, 19);
+        assert_eq!(got[0].dice, None);
+    }
+
+    #[test]
+    fn dice_for_collects_only_the_matching_target() {
+        let list = serde_json::json!([
+            { "target": "attack", "mode": "add", "dice": "1d4" },
+            { "target": "save",   "mode": "add", "dice": "1d4" }
+        ]);
+        let got = parse(&list, "Bless");
+        assert_eq!(dice_for(&got, "attack"), vec!["1d4"]);
+        assert_eq!(dice_for(&got, "save"), vec!["1d4"]);
+        assert!(dice_for(&got, "damage").is_empty());
+    }
+
+    #[test]
+    fn bane_is_bless_with_a_minus_on_it() {
+        // The clearest argument for one shape: a curse is an add with
+        // a sign, exactly as 056 said of AbilitySource.
+        let list = serde_json::json!([
+            { "target": "attack", "mode": "add", "dice": "-1d4" }
+        ]);
+        assert_eq!(dice_for(&parse(&list, "Bane"), "attack"), vec!["-1d4"]);
+    }
+
     use serde_json::json;
 
     fn g(target: &str, mode: Mode, value: i64) -> Grant {
@@ -257,6 +367,7 @@ mod tests {
             target: target.to_string(),
             mode,
             value,
+            dice: None,
             needs_attunement: false,
             source: "a test".to_string(),
         }

@@ -137,6 +137,9 @@ pub fn perform(
                 Some(&character_id),
                 Some("perform"),
                 None,
+                // The song is tracked and read by a person, not by the
+                // dice - its die is on the chip rather than in a roll.
+                &serde_json::json!([]),
                 now,
             )?;
             // KEPT MEANS THEY ALREADY HAD BETTER, which is not a

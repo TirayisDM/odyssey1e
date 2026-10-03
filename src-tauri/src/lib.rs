@@ -843,7 +843,27 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
     // network. To-hit, the verdict, and the damage it earned are all
     // worked out on the device, so the write below records something
     // that already happened rather than asking for it to happen.
-    let first = dice::roll_formula_as(&resolved.formula, thresholds)?;
+    // 114. WHAT IS RUNNING ON THE ROLLER. Bless sat on Falon for a
+    // minute with a d4 on it and his d20 never saw it - the effect was
+    // tracked and read by nobody.
+    //
+    // WHICH TARGET THIS ROLL IS depends on what it is: an attack asks
+    // for `attack` grants, a saving throw for `save` and `save.<code>`.
+    // A plain ability check asks for nothing, because 5e has no
+    // standing bonus to checks and Guidance - the one thing that looks
+    // like one - is a single use the DM spends.
+    //
+    // THE DICE ARE APPENDED TO THE FORMULA rather than averaged into
+    // the modifier, so the roll shows what it rolled: 1d20+7+1d4 is
+    // what happened and "+9" is a story about it.
+    let formula = match effect_grants(&session.access_token, sheet, &resolved) {
+        Ok(terms) if !terms.is_empty() => format!("{}{}", resolved.formula, terms.join("")),
+        // A FAILURE HERE DOES NOT STOP THE ROLL. The bonus is the
+        // smaller fact; refusing to roll because the effects could not
+        // be read would turn a slow network into a blocked table.
+        _ => resolved.formula.clone(),
+    };
+    let first = dice::roll_formula_as(&formula, thresholds)?;
     let verdict = target
         .as_ref()
         .map(|t| resolution::resolve(first.total, first.outcome, t));
@@ -1211,6 +1231,54 @@ fn roll_row(
     }
 
     row
+}
+
+/// The formula terms that active effects add to this roll.
+///
+/// 114. THE ROLL DECIDES WHICH GRANTS APPLY. An attack reads `attack`,
+/// a saving throw reads `save` and the one for its own ability, and a
+/// check reads neither - which is 5e: there is no standing bonus to an
+/// ability check, and Guidance is a single use rather than a duration.
+///
+/// SIGNED TERMS, so Bane's "-1d4" appends as itself and Bless's "1d4"
+/// gets the plus it needs. A grant that already carries its sign is
+/// left alone, which is how a curse and a blessing use one shape.
+fn effect_grants(
+    token: &str,
+    sheet: &Sheet,
+    resolved: &character::Resolved,
+) -> Result<Vec<String>, String> {
+    let Some(character_id) = sheet.character_id.as_deref() else {
+        return Ok(Vec::new());
+    };
+    // WHICH TARGETS THIS ROLL ANSWERS TO.
+    let mut want: Vec<String> = Vec::new();
+    if resolved.attack.is_some() {
+        want.push("attack".to_string());
+    } else if let Some(code) = resolved.key.strip_suffix("_save") {
+        want.push("save".to_string());
+        want.push(format!("save.{}", code));
+    }
+    if want.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let live = commands::effects::grants_on(token, &sheet.game_id, character_id)?;
+    let mut terms: Vec<String> = Vec::new();
+    for target in &want {
+        for d in grants::dice_for(&live, target) {
+            terms.push(if d.starts_with('-') || d.starts_with('+') {
+                d
+            } else {
+                format!("+{}", d)
+            });
+        }
+        let flat = grants::total_add(&live, target);
+        if flat != 0 {
+            terms.push(format!("{}{}", if flat > 0 { "+" } else { "-" }, flat.abs()));
+        }
+    }
+    Ok(terms)
 }
 
 /// Both target inputs or neither.

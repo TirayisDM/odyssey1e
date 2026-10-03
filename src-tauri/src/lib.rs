@@ -817,6 +817,20 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
 
     let resolved = character::resolve_request(sheet, &request, &mode);
 
+    // 111. WHAT THIS ROLL MAY BE AIMED AT. The target picker offers a
+    // creature and a creature's number is their armour class, whatever
+    // you happen to be rolling - so an Insight check picked against
+    // Falon resolved as a failure against AC 14, a number with nothing
+    // to do with the question.
+    //
+    // REFUSED HERE RATHER THAN CORRECTED, because there is no right DC
+    // to substitute: an Insight check against a person is contested by
+    // THEIR Deception, and inventing a difficulty would be the engine
+    // deciding something that belongs to the DM.
+    if let Some(t) = &target {
+        resolution::admits(resolved.attack.is_some(), t.kind, &resolved.label)?;
+    }
+
     // A technique brings its own crit and fumble range; everything else
     // uses 20 and 1. Thresholds::new refuses a pair whose ranges meet,
     // so a bad technique row fails here rather than deciding a roll.

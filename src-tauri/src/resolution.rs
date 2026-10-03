@@ -22,6 +22,37 @@
 
 use crate::dice::Outcome;
 
+/// Whether this roll can be resolved against this kind of target.
+///
+/// 111. AN ARMOUR CLASS IS WHAT AN ATTACK IS ROLLED AGAINST. Anything
+/// else - a skill check, a saving throw - is rolled against a
+/// difficulty, and resolving one against somebody's AC is a category
+/// error rather than a hard roll.
+///
+/// It was not caught because the target picker offers a creature and a
+/// creature's number is their AC, whatever you happen to be rolling.
+/// Luci picked Falon, rolled Insight, and the engine reported a failure
+/// against armour class 14 - a number that had nothing to do with the
+/// question.
+///
+/// REFUSED RATHER THAN CORRECTED. There is no right DC to substitute:
+/// an Insight check against a person is contested by THEIR Deception,
+/// and inventing a number would be the engine deciding a difficulty
+/// that belongs to the DM.
+///
+/// AN ATTACK AGAINST A DC IS ALLOWED, because it is a real thing a DM
+/// does - swinging at a rope, a lock, a door. Only the one direction is
+/// nonsense.
+pub fn admits(is_attack: bool, kind: TargetKind, what: &str) -> Result<(), String> {
+    if !is_attack && kind == TargetKind::Ac {
+        return Err(format!(
+            "{} is not rolled against armour class - pick a difficulty, or no target",
+            what
+        ));
+    }
+    Ok(())
+}
+
 /// What a roll was trying to beat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
@@ -141,6 +172,31 @@ mod tests {
     }
     fn dc(value: i64) -> Target {
         Target { value, kind: TargetKind::Dc, label: None }
+    }
+
+    /* ---------------- what a roll may be aimed at (111) -------------- */
+
+    #[test]
+    fn an_attack_belongs_against_an_armour_class() {
+        assert!(admits(true, TargetKind::Ac, "Battleaxe").is_ok());
+    }
+
+    #[test]
+    fn a_check_against_an_armour_class_is_refused_by_name() {
+        // Luci picked Falon, rolled Insight, and got a failure against
+        // AC 14 - a number with nothing to do with the question.
+        assert!(admits(false, TargetKind::Dc, "Insight (WIS)").is_ok());
+
+        let err = admits(false, TargetKind::Ac, "Insight (WIS)").unwrap_err();
+        assert!(err.contains("Insight"), "says which roll: {}", err);
+        assert!(err.contains("armour class"), "says what is wrong: {}", err);
+    }
+
+    #[test]
+    fn an_attack_against_a_difficulty_is_allowed() {
+        // Swinging at a rope, a lock, a door. Only the one direction is
+        // nonsense.
+        assert!(admits(true, TargetKind::Dc, "Battleaxe").is_ok());
     }
 
     /* ---------------- the ordinary case ----------------------------- */

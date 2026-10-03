@@ -1072,8 +1072,20 @@ function paintCastable() {
 
     const go = sEl("button", "ghost tiny", sp.cost === "bonus" ? "cast (bonus)" : "cast");
     go.disabled = !!sp.blocked;
-    go.addEventListener("click", () => doCast(sp));
     row.append(go);
+
+    // 111. AT WHOM. The whole reason this panel was unusable: casting
+    // had no target, and the roll box's picker is a separate control
+    // somebody had to find and set afterwards.
+    //
+    // THE SAME LIST THE ROLL BOX USES - `state.targets`, straight off
+    // list_targets, which already carries creatures AND objects. 052
+    // made an object a challenge rather than a third kind of target, so
+    // a door and a goblin arrive on one list and nothing here has to
+    // know the difference.
+    const at = castTargetPicker(sp);
+    row.append(at);
+    go.addEventListener("click", () => doCast(sp, at.value));
 
     row.append(sEl("span", "castname", sp.name));
     row.append(sEl("span", "caststance", sp.stance));
@@ -1095,10 +1107,33 @@ function paintCastable() {
   }
 }
 
+// Who this spell is aimed at. Everything in the encounter, grouped so
+// a creature and a door are told apart at a glance.
+//
+// A HEAL OFFERS THE SAME LIST AS AN ATTACK, deliberately. Who is a
+// legal target for Cure Wounds is a rule about the spell and this does
+// not know it - offering only enemies would be the screen deciding, and
+// a cleric healing a charmed ally is a real thing.
+function castTargetPicker(sp) {
+  const sel = document.createElement("select");
+  sel.className = "casttarget";
+  sel.title = "who it is aimed at";
+  sel.append(new Option("no target", ""));
+  for (const t of state.targets || []) {
+    const where = t.row === "actor" ? "" : " (" + t.row + ")";
+    sel.append(new Option(t.label + where, t.id));
+  }
+  // Follow whatever the roll box is already aimed at, so picking a
+  // goblin once aims both.
+  const picked = (document.querySelector("#target-pick") || {}).value;
+  if (picked && (state.targets || []).some((t) => t.id === picked)) sel.value = picked;
+  return sel;
+}
+
 // CASTING AND ROLLING ARE TWO STEPS, which is the engine's own shape.
 // The cast spends the slot and says what to roll; the roll goes
 // through the box below, where every other d20 in this app goes.
-async function doCast(sp) {
+async function doCast(sp, targetId) {
   const r = await tryCall("cast_prayer", {
     characterId: state.characterId,
     spellKey: sp.key,
@@ -1106,21 +1141,32 @@ async function doCast(sp) {
   });
   if (!r.ok) return log("cast_prayer", r.error, true);
 
+  const at = (state.targets || []).find((t) => t.id === targetId) || null;
+
   const said = [r.value.name];
+  if (at) said.push("at " + at.label);
   if (r.value.slot_used) said.push("level " + r.value.slot_used + " slot");
   else said.push("no slot");
+  // A SAVE IS THE TARGET'S ROLL, not the caster's. Saying whose it is
+  // and against what is the whole of what a DM needs here - the engine
+  // does not roll for somebody else's character.
   if (r.value.save_dc) {
-    said.push((r.value.save_ability || "").toUpperCase() + " save DC " + r.value.save_dc);
+    said.push((at ? at.label : "the target") + " makes a " +
+      (r.value.save_ability || "").toUpperCase() + " save vs DC " + r.value.save_dc);
   }
   if (r.value.dice) said.push(r.value.dice);
   log("cast_prayer", said.join(" \u00b7 "));
 
   // THE TO-HIT GOES IN THE ROLL BOX rather than being rolled here. An
   // attack spell is a d20 like any other and belongs in the one place
-  // that makes them.
+  // that makes them - AIMED, so the follow-up roll needs no second
+  // choice of target.
   if (r.value.to_hit != null) {
     const box = document.querySelector("#named-request");
-    if (box) { box.value = r.value.name; updatePreview(); }
+    if (box) { box.value = r.value.name; }
+    const pick = document.querySelector("#target-pick");
+    if (pick && targetId) { pick.value = targetId; pick.dispatchEvent(new Event("change")); }
+    updatePreview();
   }
   // The slots moved, and so did the sheet's view of them.
   await loadCastable();

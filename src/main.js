@@ -1497,10 +1497,14 @@ async function loadSheet() {
     // granting +3 Perception moved the roll and the Karma line and
     // left this list printing the old number.
     const abilMod = Math.floor(((sheet.abilities[sk.ability]?.score ?? 10) - 10) / 2);
-    const bonus = sheet.skill_mods?.[sk.key] ?? (abilMod + Math.floor(prof * pb));
-    // What the magic put in, so a +7 Perception on a WIS 12 character
-    // is not a number to take on faith.
-    const fromKit = bonus - (abilMod + Math.floor(prof * pb));
+    // THREE FACTS FROM THE ENGINE. The fallback is the arithmetic this
+    // screen used to do alone, kept only for a sheet that somehow
+    // arrives without the map.
+    const line = sheet.skill_mods?.[sk.key] ?? {
+      natural: abilMod + Math.floor(prof * pb),
+      parts: [],
+      total: abilMod + Math.floor(prof * pb),
+    };
 
     const el = document.createElement("div");
     el.className = "skillrow";
@@ -1523,15 +1527,27 @@ async function loadSheet() {
       await loadSheet();
     });
 
+    // WHAT THEY ARE WORTH UNAIDED, always in the same column so a
+    // list of skills still reads down the page.
     const b = document.createElement("span");
-    b.className = "bonus" + (fromKit ? " enchanted" : "");
-    b.textContent = (bonus >= 0 ? "+" : "") + bonus;
-    if (fromKit) {
-      b.title = "ability and proficiency " + withSign(bonus - fromKit) +
-                ", carried " + withSign(fromKit);
-    }
+    b.className = "bonus";
+    b.textContent = withSign(line.natural);
 
-    el.append(nm, sel, b);
+    // WHAT CARRIED IT, named, and nothing at all when nothing did.
+    const from = document.createElement("span");
+    from.className = "skill-from";
+    from.textContent = line.parts
+      .map(([who, v]) => withSign(v) + " " + who)
+      .join("  ");
+
+    // THE NUMBER TO ROLL WITH, last and tinted, and only when it
+    // differs - a column of totals identical to the column beside it
+    // is noise on sixteen of the eighteen rows.
+    const tot = document.createElement("span");
+    tot.className = "bonus total";
+    if (line.total !== line.natural) tot.textContent = withSign(line.total);
+
+    el.append(nm, sel, b, from, tot);
     list.append(el);
   }
 

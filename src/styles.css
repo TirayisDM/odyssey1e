@@ -264,12 +264,20 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .abil .mod{width:2rem;text-align:center;font:600 12px ui-monospace,Menlo,monospace}
 .abil label{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:.15rem}
 .abil input[type=checkbox]{margin:0;width:auto}
-.skillrow{display:flex;align-items:center;justify-content:space-between;gap:.4rem;
+/* A GRID RATHER THAN space-between, because the row grew from three
+   things to five and the eye needs the numbers under each other: the
+   name stretches, the natural bonus sits in one column, what carried
+   it in the next, and the total last. */
+.skillrow{display:grid;grid-template-columns:1fr auto 2.4rem minmax(0,9rem) 2.4rem;
+          align-items:center;gap:.4rem;
           padding:.22rem .45rem;border:1px solid var(--line);border-radius:4px;margin-bottom:.2rem}
 .skillrow span{font:12px ui-monospace,Menlo,monospace}
 .skillrow select{width:auto;margin:0;padding:.1rem .25rem;font-size:11px;background:#0f1114;
                  color:var(--fg);border:1px solid var(--line);border-radius:3px}
-.skillrow .bonus{color:var(--accent);font-weight:600;width:2.2rem;text-align:right}
+.skillrow .bonus{color:var(--accent);font-weight:600;text-align:right}
+.skillrow .skill-from{font-size:11px;color:#9ecbff;text-align:right;
+                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skillrow .bonus.total{color:#9ecbff}
 .preview{font:12px ui-monospace,Menlo,monospace;padding:.3rem 0 .5rem}
 .preview.live{color:var(--accent)}
 #mode{width:6rem;background:#0f1114;color:var(--fg);border:1px solid var(--line);

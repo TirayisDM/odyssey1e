@@ -88,6 +88,23 @@ impl Ability {
     }
 }
 
+/// A skill as the sheet shows it: what the character is worth before
+/// anything was carried, what carried it, and the total.
+///
+/// THREE FACTS BECAUSE THE SCREEN SHOWS THREE. A +5 Perception on a
+/// Wisdom 12 character is a number to take on faith; "+3, Amulet +2,
+/// +5" is an account of itself, and the sheet has spelled out its
+/// arithmetic everywhere else since the attack preview.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillLine {
+    /// Ability and proficiency, with nothing worn counted.
+    pub natural: i64,
+    /// Each enchantment that moved it, named - `grants::breakdown`.
+    pub parts: Vec<(String, i64)>,
+    /// What to roll with.
+    pub total: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillDef {
     pub key: String,
@@ -175,7 +192,7 @@ pub struct Sheet {
     /// NOT DESERIALISED. Nothing parses a Sheet back, and the map is
     /// derived from the rest of it.
     #[serde(skip_deserializing)]
-    pub skill_mods: HashMap<String, i64>,
+    pub skill_mods: HashMap<String, SkillLine>,
     /// Which narrative_lines pack voices this character's roll cards.
     pub narrative_pack: String,
     /// Roll key -> the lines available for it, pack precedence and game
@@ -1565,11 +1582,17 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // it and needs the abilities, the proficiencies and the loadout
     // all in place - the same reason karma is resolved here.
     let keys: Vec<String> = sheet.skills.iter().map(|s| s.key.clone()).collect();
+    let worn = worn_grants(&sheet.loadout);
     sheet.skill_mods = keys
         .into_iter()
         .map(|k| {
-            let m = sheet.skill_modifier(&k);
-            (k, m)
+            let natural = sheet.skill_modifier_natural(&k);
+            let line = SkillLine {
+                natural,
+                parts: crate::grants::breakdown(natural, &worn, &format!("skill.{}", k)),
+                total: sheet.skill_modifier(&k),
+            };
+            (k, line)
         })
         .collect();
 

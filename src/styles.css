@@ -838,3 +838,33 @@ button.wide{width:100%}
 .spell-mat{font-size:11px;color:var(--muted);font-style:italic}
 .spell-text{font-size:12px;margin:.25rem 0 0;line-height:1.45}
 #prayer-find,#prep-find{flex:1 1 14rem}
+
+/* 108. A LEVEL, FOLDED. The header carries the count and the slots,
+   because the slots are the number the decision turns on. */
+.lvlblock{margin:0 0 .3rem}
+.lvlhead{display:flex;align-items:center;gap:.5rem;width:100%;text-align:left;
+         background:none;border:0;border-bottom:1px solid var(--line);
+         padding:.3rem .2rem;cursor:pointer;color:var(--fg)}
+.lvlhead:hover{background:#13161b}
+.lvlhead .caret{color:var(--muted);width:.8rem}
+.lvlname{font-weight:600;font-size:13px}
+.lvlcount{font-size:11px;color:var(--muted)}
+.lvlslots{margin-left:auto;font:13px ui-monospace,Menlo,monospace;letter-spacing:.1em}
+.lvlslots .here{color:var(--ok)}
+.lvlslots .gone{color:var(--muted)}
+.lvlleft{font-size:11px;color:var(--muted);min-width:4rem;text-align:right}
+
+/* PREPARED READS LIGHTER than the list you add from - it is a record
+   of a decision already made, not a thing to act on. */
+.lvlblock.lighter .lvlname{font-weight:400;color:var(--muted)}
+.lvlblock.lighter .spell-text{color:var(--muted)}
+
+/* 107/108. THE SLOTS STICK to the top of the scrolling pane - they are
+   what a cleric checks before every choice below them. */
+.slots-head{position:sticky;top:0;z-index:2;background:var(--bg);padding-top:.4rem}
+.slotbar{position:sticky;top:1.9rem;z-index:2;background:var(--bg);
+         display:flex;gap:.5rem;flex-wrap:wrap;padding:.1rem 0 .5rem;
+         border-bottom:1px solid var(--line)}
+.slotchip{display:inline-flex;align-items:center;gap:.35rem;font-size:11px;
+          border:1px solid var(--line);border-radius:999px;padding:.15rem .5rem}
+.slotchip .nm{font-weight:600}

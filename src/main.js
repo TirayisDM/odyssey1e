@@ -43,6 +43,10 @@ let state = {
   // own numbers as list_prayers last reported them.
   spells: [],
   prayers: null,
+  // 108. Which level folds are open, by "prep1" / "add3". Remembered
+  // across repaints - a fold that closed itself every time you
+  // prepared something would be worse than no fold.
+  openLevels: {},
   // 084. The slot ladder, straight from slots::LADDER. Read once -
   // where a thing can be worn is a rule, not campaign data, so unlike
   // the audiences nobody edits it.
@@ -1145,14 +1149,34 @@ async function loadPrayers(sheet) {
 
   // THE SLOTS, SHOWN AND NOT YET SPENT - 106 says why. Labelled so
   // nobody reads them as a counter that is stuck.
+  // 107. THE SLOTS, SPENDABLE. Click a pip to spend one; the + gives
+  // one back. A long rest returns them all, which the rest path does.
   const slots = document.querySelector("#prayer-slots");
   slots.innerHTML = "";
-  (got.slots || []).forEach((n, i) => {
-    if (!n) return;
-    const chipEl = sEl("span", "fx");
-    chipEl.append(sEl("span", "nm", "level " + (i + 1)));
-    chipEl.append(sEl("span", "when", String(n)));
-    chipEl.title = "not spent yet - casting is not wired";
+  (got.slots || []).forEach((have, i) => {
+    if (!have) return;
+    const lvl = i + 1;
+    const left = (got.slots_left || [])[i];
+    const chipEl = sEl("span", "slotchip");
+    chipEl.append(sEl("span", "nm", ordinal(lvl)));
+
+    const pips = sEl("span", "use-pips");
+    for (let n = 0; n < have; n++) {
+      pips.append(sEl("span", n < left ? "here" : "gone", n < left ? "\u25cf" : "\u25cb"));
+    }
+    chipEl.append(pips);
+
+    const spend = sEl("button", "ghost tiny", "cast");
+    spend.disabled = left <= 0;
+    spend.addEventListener("click", () => slotMove("spend_spell_slot", lvl));
+    chipEl.append(spend);
+
+    if (left < have) {
+      const back = sEl("button", "ghost tiny", "+1");
+      back.title = "give one back";
+      back.addEventListener("click", () => slotMove("restore_spell_slot", lvl));
+      chipEl.append(back);
+    }
     slots.append(chipEl);
   });
 
@@ -1160,6 +1184,12 @@ async function loadPrayers(sheet) {
   paintPrepList(got);
 }
 
+// 108. WHAT IS PREPARED, FOLDED BY LEVEL. Ten spells open at once is
+// a wall; a cleric wants the level they are about to cast from.
+//
+// WHICH LEVELS ARE OPEN IS REMEMBERED across repaints, in
+// `state.openLevels` - a fold that closed itself every time you
+// prepared something would be worse than no fold at all.
 function paintMine(got) {
   const byKey = (k) => (state.spells || []).find((sp) => sp.key === k);
 
@@ -1174,13 +1204,71 @@ function paintMine(got) {
 
   const mine = document.querySelector("#my-prayers");
   mine.innerHTML = "";
-  for (const k of got.prepared) {
-    const sp = byKey(k);
-    if (sp) mine.append(spellRow(sp, forgetButton(k)));
+  const held = got.prepared.map(byKey).filter(Boolean);
+  for (let lvl = 1; lvl <= 9; lvl++) {
+    const here = held.filter((sp) => sp.level === lvl);
+    if (!here.length) continue;
+    mine.append(levelBlock("prep", lvl, here, got, (sp) => forgetButton(sp.key), true));
   }
+  if (!held.length) {
+    mine.append(sEl("div", "muted", "nothing prepared - add one below"));
+  }
+
   const count = document.querySelector("#prepared-count");
   count.textContent = got.prepared.length + " of " + got.prepared_max;
   count.classList.toggle("warn", got.prepared.length >= got.prepared_max);
+}
+
+// A level, folded, with what is left at it on the header.
+//
+// THE SLOT COUNT IS ON EVERY HEADER because that is the number the
+// decision turns on - "can I still cast a third" is asked far more
+// often than "what is in my list".
+function levelBlock(which, lvl, spells, got, button, lighter) {
+  const key = which + lvl;
+  const open = !!state.openLevels[key];
+
+  const box = sEl("div", "lvlblock" + (lighter ? " lighter" : ""));
+  const head = sEl("button", "lvlhead" + (open ? " open" : ""));
+  head.append(sEl("span", "caret", open ? "\u25be" : "\u25b8"));
+  head.append(sEl("span", "lvlname", lvl === 0 ? "Cantrips" : "Level " + lvl));
+  head.append(sEl("span", "lvlcount", spells.length + ""));
+
+  // SLOTS ONLY WHERE THEY MEAN SOMETHING. A cantrip costs none, and a
+  // level this cleric cannot reach has none to show.
+  if (lvl >= 1 && got && (got.slots || [])[lvl - 1] > 0) {
+    const left = (got.slots_left || [])[lvl - 1];
+    const have = got.slots[lvl - 1];
+    const pips = sEl("span", "lvlslots");
+    for (let i = 0; i < have; i++) {
+      pips.append(sEl("span", i < left ? "here" : "gone", i < left ? "\u25cf" : "\u25cb"));
+    }
+    head.append(pips);
+    head.append(sEl("span", "lvlleft", left + " of " + have));
+  }
+
+  head.addEventListener("click", () => {
+    state.openLevels[key] = !state.openLevels[key];
+    if (state.prayers) { paintMine(state.prayers); paintPrepList(state.prayers); }
+  });
+  box.append(head);
+
+  if (open) {
+    const ul = sEl("ul", "list");
+    for (const sp of spells) ul.append(spellRow(sp, button(sp)));
+    box.append(ul);
+  }
+  return box;
+}
+
+async function slotMove(cmd, lvl) {
+  const r = await tryCall(cmd, { characterId: state.characterId, slotLevel: lvl });
+  if (!r.ok) return log(cmd, r.error, true);
+  await loadPrayers(state.sheet);
+}
+
+function ordinal(n) {
+  return n + (["th","st","nd","rd"][n] || "th");
 }
 
 function forgetButton(key) {
@@ -1199,28 +1287,35 @@ function forgetButton(key) {
 // WHAT IS LEFT TO TAKE. Already-held spells are left off rather than
 // shown disabled - the list is 106 long and the ones you cannot pick
 // are noise.
+// 108. THE WHOLE LIST, FOLDED BY LEVEL. The dropdown that used to
+// filter it is gone: a header per level does the same job and shows
+// the slots at the same time, which the dropdown never could.
+//
+// EVERY LEVEL IS LISTED, including the ones this cleric cannot reach
+// yet - closed, with no slot pips, so the shape of the list does not
+// change as they level and a player can see what is coming.
 function paintPrepList(got) {
   const host = document.querySelector("#prep-list");
   if (!host) return;
   const have = new Set([...(got.prepared || []), ...(got.cantrips || [])]);
   const find = (val("#prep-find") || "").toLowerCase();
-  const lvl = val("#prep-level");
 
-  const shown = (state.spells || []).filter((sp) =>
+  const free = (state.spells || []).filter((sp) =>
     !have.has(sp.key) &&
-    (!lvl || String(sp.level) === lvl) &&
     (!find || (sp.name + " " + (sp.description || "")).toLowerCase().includes(find)));
 
   host.innerHTML = "";
-  // THE WHOLE LIST IS 106 LONG. Unfiltered it would bury the tab, so
-  // it waits for a search or a level rather than opening on everything.
-  if (!find && !lvl) {
-    host.append(sEl("div", "muted", "search, or pick a level, to see what is on the list"));
-    return;
+  // A SEARCH OPENS EVERY LEVEL THAT MATCHED. Typing "cure" and then
+  // having to open four folds to find it would be the fold getting in
+  // the way of the search.
+  for (let lvl = 0; lvl <= 9; lvl++) {
+    const here = free.filter((sp) => sp.level === lvl);
+    if (!here.length) continue;
+    if (find) state.openLevels["add" + lvl] = true;
+    host.append(levelBlock("add", lvl, here, got, prepareButton, false));
   }
-  for (const sp of shown.slice(0, 40)) host.append(spellRow(sp, prepareButton(sp)));
-  if (shown.length > 40) {
-    host.append(sEl("div", "muted", (shown.length - 40) + " more - narrow it down"));
+  if (!free.length) {
+    host.append(sEl("div", "muted", find ? "nothing matches" : "everything is taken"));
   }
 }
 
@@ -7010,12 +7105,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     const el = document.querySelector(sel);
     if (el) el.addEventListener("input", paintSpellBook);
   }
-  for (const sel of ["#prep-find", "#prep-level"]) {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("input", () => {
-      if (state.prayers) paintPrepList(state.prayers);
-    });
-  }
+  const prepFind = document.querySelector("#prep-find");
+  if (prepFind) prepFind.addEventListener("input", () => {
+    if (state.prayers) paintPrepList(state.prayers);
+  });
 
   document.querySelector("#perform-audience").addEventListener("change", paintOdds);
 

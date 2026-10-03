@@ -108,6 +108,53 @@ pub fn attack_bonus(prof_bonus: i64, wis_mod: i64) -> i64 {
     prof_bonus + wis_mod
 }
 
+/// How many slots of each level are left, given what has been spent.
+///
+/// 107. NEVER BELOW ZERO. A level lost, or a DM editing a class row,
+/// can leave somebody having spent more than they now have, and
+/// "minus one slot" helps nobody.
+pub fn slots_left(cleric_level: i64, spent: &[i64; 9]) -> [i64; 9] {
+    let have = slots_at(cleric_level);
+    let mut left = [0; 9];
+    for i in 0..9 {
+        left[i] = (have[i] - spent[i].max(0)).max(0);
+    }
+    left
+}
+
+/// Whether a slot of this level can be spent.
+///
+/// A SLOT IS A SLOT. Nothing here asks what spell it is for, because a
+/// 3rd-level slot can carry a 1st-level spell and often should -
+/// tying expenditure to the spell would make upcasting
+/// unrepresentable.
+pub fn may_spend_slot(cleric_level: i64, spent: &[i64; 9], level: i64) -> Result<(), String> {
+    if !(1..=9).contains(&level) {
+        return Err("a spell slot is level 1 to 9".to_string());
+    }
+    let i = (level - 1) as usize;
+    if slots_at(cleric_level)[i] == 0 {
+        return Err(format!("they have no level {} slots", level));
+    }
+    if slots_left(cleric_level, spent)[i] == 0 {
+        return Err(format!("no level {} slots left until they rest", level));
+    }
+    Ok(())
+}
+
+/// What a rest gives back, for a cleric.
+///
+/// EVERYTHING ON A LONG REST AND NOTHING ON A SHORT ONE. That is the
+/// cleric's rule and not everybody's - a warlock's Pact Magic comes
+/// back on a short rest - which is why this takes the class rather
+/// than being a property of the slot.
+pub fn slots_restored(class_key: &str, long: bool) -> bool {
+    match class_key {
+        "warlock" => true,
+        _ => long,
+    }
+}
+
 /// Whether a spell may be prepared, given what is already prepared.
 ///
 /// FOUR REFUSALS AND THEY ARE DIFFERENT MISTAKES: a cantrip is not
@@ -295,6 +342,59 @@ mod tests {
         let held: Vec<String> = vec!["sp_bless".into()];
         let err = may_prepare(1, 1, -5, &held, "sp_bless").unwrap_err();
         assert!(err.contains("already"), "unhelpful: {}", err);
+    }
+
+    /* ---------- spending a slot ---------- */
+
+    #[test]
+    fn what_is_left_is_what_is_left() {
+        // Cleric 5 has 4/3/2.
+        let spent = [1, 0, 2, 0, 0, 0, 0, 0, 0];
+        assert_eq!(slots_left(5, &spent)[0..3], [3, 3, 0]);
+    }
+
+    #[test]
+    fn never_below_zero_however_it_got_there() {
+        let spent = [9, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(slots_left(5, &spent)[0], 0);
+    }
+
+    #[test]
+    fn a_slot_they_have_may_be_spent() {
+        assert!(may_spend_slot(5, &[0; 9], 1).is_ok());
+        assert!(may_spend_slot(5, &[0; 9], 3).is_ok());
+    }
+
+    #[test]
+    fn a_level_they_cannot_reach_says_so() {
+        let err = may_spend_slot(5, &[0; 9], 4).unwrap_err();
+        assert!(err.contains("no level 4"), "unhelpful: {}", err);
+    }
+
+    #[test]
+    fn an_empty_level_says_to_rest() {
+        let spent = [0, 0, 2, 0, 0, 0, 0, 0, 0];
+        let err = may_spend_slot(5, &spent, 3).unwrap_err();
+        assert!(err.contains("rest"), "unhelpful: {}", err);
+    }
+
+    #[test]
+    fn a_slot_outside_one_to_nine_is_not_a_slot() {
+        assert!(may_spend_slot(20, &[0; 9], 0).is_err());
+        assert!(may_spend_slot(20, &[0; 9], 10).is_err());
+    }
+
+    #[test]
+    fn a_cleric_gets_them_back_on_a_long_rest_and_not_a_short_one() {
+        assert!(slots_restored("cleric", true));
+        assert!(!slots_restored("cleric", false));
+    }
+
+    #[test]
+    fn a_warlock_gets_them_back_on_either() {
+        // Pact Magic, and the reason this takes a class at all.
+        assert!(slots_restored("warlock", true));
+        assert!(slots_restored("warlock", false));
     }
 
     #[test]

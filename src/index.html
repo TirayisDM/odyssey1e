@@ -704,24 +704,27 @@
       <div class="sheet-pane" data-sheet="prayers" hidden>
         <div id="prayer-head" class="muted"></div>
 
-        <!-- SLOTS ARE SHOWN AND NOT YET SPENT. Casting wants a path
-             that does not exist; saying so on the tab is better than a
-             row of counters that never move. -->
-        <div class="sub">Spell slots</div>
-        <div id="prayer-slots" class="fxbar"></div>
+        <!-- 108. WHAT IS PREPARED, FIRST. It is what a cleric reads
+             most and it was under the slots and the cantrips. Folded
+             by level, because ten prepared spells open at once is a
+             wall. -->
+        <div class="sub">Prepared <span id="prepared-count" class="muted"></span></div>
+        <div id="my-prayers"></div>
 
         <div class="sub">Cantrips <span id="cantrip-count" class="muted"></span></div>
         <div id="my-cantrips" class="list"></div>
 
-        <div class="sub">Prepared <span id="prepared-count" class="muted"></span></div>
-        <div id="my-prayers" class="list"></div>
+        <!-- 107/108. THE SLOTS STICK. They are the number a cleric
+             checks before every decision on this tab, and scrolling to
+             the add-list used to take them off screen. -->
+        <div class="sub slots-head">Spell slots</div>
+        <div id="prayer-slots" class="slotbar"></div>
 
         <div class="sub">Add a prayer</div>
         <div class="row">
           <input id="prep-find" placeholder="search the cleric list" />
-          <select id="prep-level"><option value="">every level</option></select>
         </div>
-        <div id="prep-list" class="list"></div>
+        <div id="prep-list"></div>
       </div>
       </section>
       </div>

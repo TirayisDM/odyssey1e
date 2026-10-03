@@ -121,6 +121,13 @@ pub fn take_rest(state: State<AppState>, game_id: String, long: bool) -> Result<
         // would, and not the reverse.
         recharge(&token, &p.id, kind)?;
 
+        // 107. AND THE SPELL SLOTS, if the class gets them back from
+        // this kind of rest. A cleric's return on a long rest and not
+        // a short one; a warlock's on either, which is why
+        // prayers::slots_restored takes the class rather than it being
+        // a property of the slot.
+        restore_slots(&token, &p.id, kind)?;
+
         if long {
             // ALL HIT POINTS, BY RECORDING THE HEALING RATHER THAN
             // ERASING THE WOUNDS. Current hit points are the maximum
@@ -319,6 +326,35 @@ fn load_resters(token: &str, game_id: &str) -> Result<Vec<Rester>, String> {
             })
         })
         .collect())
+}
+
+/// Hand back spell slots, for whichever classes get them from this
+/// rest.
+///
+/// PER CLASS, because the rule is. A Cleric 5 / Warlock 2 on a short
+/// rest gets their pact slots and not their cleric ones - which falls
+/// out of asking the question once per class rather than once per
+/// character.
+fn restore_slots(token: &str, character_id: &str, kind: Rest) -> Result<(), String> {
+    let rows = supabase::rest_get(
+        token,
+        "character_classes",
+        &[
+            ("select", "class_key"),
+            ("character_id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let gives_back = rows
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|r| r.get("class_key").and_then(|v| v.as_str()))
+        .any(|k| crate::prayers::slots_restored(k, kind == Rest::Long));
+
+    if gives_back {
+        crate::commands::prayers::clear_slots(token, character_id)?;
+    }
+    Ok(())
 }
 
 /// Clear what this rest brings back.

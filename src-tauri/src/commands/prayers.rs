@@ -93,6 +93,8 @@ pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Valu
         .collect();
 
     let slots = prayers::slots_at(level);
+    let spent = load_slots(&token, &character_id)?;
+    let left = prayers::slots_left(level, &spent);
     Ok(json!({
         "cleric_level": level,
         "wis_mod": wis,
@@ -103,9 +105,12 @@ pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Valu
         "cantrips": cantrips,
         "cantrips_known": prayers::cantrips_known(level),
         "top_slot": prayers::top_slot(level),
-        // 1st-level slots first. Shown and not yet spent - 106's note
-        // says why: spending wants a cast path that does not exist.
+        // 1st-level slots first. 107 made the spending real, so these
+        // are three different facts and the tab needs all three: how
+        // many they have, how many are gone, how many are left.
         "slots": slots,
+        "slots_spent": spent,
+        "slots_left": left,
     }))
 }
 
@@ -206,7 +211,109 @@ pub fn forget_prayer(
     Ok(json!({ "ok": true }))
 }
 
+/// Spend one.
+///
+/// BY LEVEL AND NOT BY SPELL. A slot is a slot - a 3rd-level slot can
+/// carry a 1st-level spell, and asking which spell it was for would
+/// make upcasting unrepresentable.
+#[tauri::command]
+pub fn spend_spell_slot(
+    state: State<AppState>,
+    character_id: String,
+    slot_level: i64,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let level = cleric_level(&token, &character_id)?;
+    let spent = load_slots(&token, &character_id)?;
+    prayers::may_spend_slot(level, &spent, slot_level)?;
+
+    let i = (slot_level - 1) as usize;
+    write_slot(&token, &character_id, slot_level, spent[i] + 1)?;
+    Ok(json!({ "left": prayers::slots_left(level, &spent)[i] - 1 }))
+}
+
+/// Give one back, for a misclick or a DM's say-so.
+#[tauri::command]
+pub fn restore_spell_slot(
+    state: State<AppState>,
+    character_id: String,
+    slot_level: i64,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let level = cleric_level(&token, &character_id)?;
+    let spent = load_slots(&token, &character_id)?;
+    if !(1..=9).contains(&slot_level) {
+        return Err("a spell slot is level 1 to 9".to_string());
+    }
+    let i = (slot_level - 1) as usize;
+    if spent[i] <= 0 {
+        return Err("nothing to give back".to_string());
+    }
+    write_slot(&token, &character_id, slot_level, spent[i] - 1)?;
+    Ok(json!({ "left": prayers::slots_left(level, &spent)[i] + 1 }))
+}
+
 /* ======================== THE WORKING PARTS ======================== */
+
+/// What this character has spent, 1st-level first.
+pub(crate) fn load_slots(token: &str, character_id: &str) -> Result<[i64; 9], String> {
+    let rows = supabase::rest_get(
+        token,
+        "character_slots",
+        &[
+            ("select", "slot_level,spent"),
+            ("character_id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let mut out = [0i64; 9];
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(lvl) = r.get("slot_level").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        if (1..=9).contains(&lvl) {
+            out[(lvl - 1) as usize] = r.get("spent").and_then(|v| v.as_i64()).unwrap_or(0);
+        }
+    }
+    Ok(out)
+}
+
+fn write_slot(token: &str, character_id: &str, level: i64, spent: i64) -> Result<(), String> {
+    supabase::rest_upsert(
+        token,
+        "character_slots",
+        &json!({
+            "character_id": character_id,
+            "slot_level": level,
+            "spent": spent.max(0),
+        }),
+        "character_id,slot_level",
+    )?;
+    Ok(())
+}
+
+/// The cleric level, refusing anybody who is not one.
+fn cleric_level(token: &str, character_id: &str) -> Result<i64, String> {
+    let sheet = crate::character::load_sheet(token, character_id)?;
+    sheet
+        .classes
+        .iter()
+        .find(|t| t.key == "cleric")
+        .map(|t| t.level)
+        .ok_or_else(|| format!("{} is not a cleric", sheet.name))
+}
+
+/// Hand every slot back. Called by the rest path.
+///
+/// A DELETE RATHER THAN A ZERO because the rows carry nothing else -
+/// an unspent level has no fact worth a row, and clearing them keeps
+/// the table the size of what is actually spent.
+pub(crate) fn clear_slots(token: &str, character_id: &str) -> Result<(), String> {
+    supabase::rest_delete(
+        token,
+        "character_slots",
+        &[("character_id", &format!("eq.{}", character_id))],
+    )
+}
 
 /// (spell key, prepared) for this character.
 fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, bool)>, String> {

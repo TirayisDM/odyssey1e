@@ -1294,6 +1294,8 @@ pub fn run() {
             commands::prayers::list_prayers,
             commands::prayers::prepare_prayer,
             commands::prayers::forget_prayer,
+            commands::prayers::spend_spell_slot,
+            commands::prayers::restore_spell_slot,
             commands::effects::list_effects,
             commands::effects::apply_effect,
             commands::effects::end_effect,

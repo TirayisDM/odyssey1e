@@ -981,8 +981,13 @@ function paintSpeciesView() {
       sp.unarmored_ac_base + " + " + (sp.unarmored_ac_ability || "").toUpperCase(),
     ]);
   }
+  // 116. NO LONGER "(DM APPLIES)". It applies: these reach a
+  // character's Resistances block beside their ability scores, and a
+  // swing of bludgeoning at a resistant creature now writes half the
+  // hit points. The label said the honest thing for as long as it was
+  // true and would be a lie now.
   if ((sp.damage_resistances || []).length) {
-    facts.push(["resistances", sp.damage_resistances.join(", ") + " (DM applies)"]);
+    facts.push(["resistances", sp.damage_resistances.join(", ")]);
   }
   if ((sp.languages || []).length) facts.push(["languages", sp.languages.join(", ")]);
   if (sp.age_note) facts.push(["age", sp.age_note]);
@@ -1085,7 +1090,21 @@ function paintCastable() {
     // know the difference.
     const at = castTargetPicker(sp);
     row.append(at);
-    go.addEventListener("click", () => doCast(sp, at.value));
+
+    // 116. AND AGAINST WHAT, for the one spell that asks. Protection
+    // from Energy is "choose one of acid, cold, fire, lightning, or
+    // thunder", and the engine refuses the cast without an answer
+    // rather than picking an element for the cleric.
+    //
+    // ASKED OF THE SPELL, not listed here. `choices` comes off the
+    // grants, so a new grant that offers a choice gets this dropdown
+    // for free and nothing on this screen holds a list of spells that
+    // need one.
+    const pickKind = (sp.choices || []).length ? kindPicker(sp.choices) : null;
+    if (pickKind) row.append(pickKind);
+
+    go.addEventListener("click", () =>
+      doCast(sp, at.value, pickKind ? pickKind.value : null));
 
     row.append(sEl("span", "castname", sp.name));
     row.append(sEl("span", "caststance", sp.stance));
@@ -1130,10 +1149,24 @@ function castTargetPicker(sp) {
   return sel;
 }
 
+// Which damage type, for a spell that makes its caster choose.
+//
+// NO BLANK OPTION. The engine refuses a cast with no choice, and an
+// empty first entry would make that refusal the default experience of
+// the spell - unlike the target picker, where "no target" is a real
+// thing to cast at.
+function kindPicker(kinds) {
+  const sel = document.createElement("select");
+  sel.className = "casttarget";
+  sel.title = "which damage type this protects against";
+  for (const k of kinds) sel.append(new Option("vs " + k, k));
+  return sel;
+}
+
 // CASTING AND ROLLING ARE TWO STEPS, which is the engine's own shape.
 // The cast spends the slot and says what to roll; the roll goes
 // through the box below, where every other d20 in this app goes.
-async function doCast(sp, targetId) {
+async function doCast(sp, targetId, choice) {
   // 112. THE TARGET REACHES THE ENGINE NOW. It was picked here and used
   // only for a log line, so Luci cast Bless on Falon four times, four
   // slots went, and nothing was written down or landed on anybody.
@@ -1148,6 +1181,7 @@ async function doCast(sp, targetId) {
     targetLabel: at ? at.label : null,
     encounterId: state.encounterId || null,
     actorId: performerActorId(),
+    choice: choice || null,
   });
   if (!r.ok) return log("cast_prayer", r.error, true);
 
@@ -1851,6 +1885,7 @@ async function loadSheet() {
   // than on tab click: it is all one read, and filling a hidden pane
   // costs nothing.
   paintClasses(sheet);
+  paintResistances(sheet);
   paintPerform(sheet);
   paintDescription(sheet);
   paintTalents(sheet);
@@ -2053,6 +2088,60 @@ async function loadSheet() {
   await loadFeatures();
   await loadPrayers(sheet);
   await loadCastable();
+}
+
+// 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL, AND WHY.
+//
+// FOUR SOURCES AND ONE LIST. A species states its own; an item, a
+// class feature and a running spell each say so with a grant. The
+// engine collects them, applies 5e's no-stacking rule and hands over
+// one entry per damage type - this screen does no arithmetic, which is
+// the whole reason `resistances` is on the sheet rather than four
+// arrays for the panel to reconcile.
+//
+// EVERY LINE NAMES ITS SOURCES, which was the instruction. "resistant
+// to fire" invites the question "why"; "fire — Unt'garoth, Ring of
+// Fire Resistance" answers it, and a barbarian who stops raging can
+// watch the Rage half go without the species half following it.
+//
+// BOTH REASONS ARE SHOWN even though 5e makes the second one change
+// nothing. Two sources of fire resistance is still half, and hiding the
+// redundant one would be hiding a fact rather than simplifying one -
+// a DM needs to see that ending Rage will not lift the resistance.
+function paintResistances(sheet) {
+  const block = document.querySelector("#resist-block");
+  const list = document.querySelector("#resist-list");
+  if (!block || !list) return;
+
+  const rows = sheet.resistances || [];
+  block.hidden = rows.length === 0;
+  list.innerHTML = "";
+
+  for (const r of rows) {
+    const el = sEl("div", "resist-row");
+
+    // THE DEGREE LEADS, because it is the fact that changes the
+    // arithmetic. Immunity is not simply more resistance - half of a
+    // large number still kills somebody and none of it never does - so
+    // the three read differently rather than as shades of one thing.
+    const deg = sEl("span", "degree " + r.degree, r.degree);
+    deg.title =
+      r.degree === "immune" ? "takes none of it"
+      : r.degree === "vulnerable" ? "takes double"
+      : "takes half, rounded down";
+
+    const kind = sEl("span", "nm", r.damage_type);
+
+    // WHAT PUT IT THERE. The instruction was to lace these back to
+    // whatever activates them, and this is that line.
+    const from = sEl("span", "skill-from", (r.from || []).join(", "));
+    from.title = (r.from || []).length > 1
+      ? "two reasons, which 5e counts as one - ending either leaves the other"
+      : "where it comes from";
+
+    el.append(deg, kind, from);
+    list.append(el);
+  }
 }
 
 // The equipment panel.
@@ -7452,6 +7541,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       actorId: performerActorId(),
     });
     if (r) {
+      // 116. WHY THE DICE AND THE HIT POINTS DISAGREE.
+      //
+      // SAID OUT LOUD, because without a word of explanation a damage
+      // roll reading 9 beside a goblin that lost 4 looks like a bug -
+      // and a DM who cannot see WHICH resistance did it cannot tell a
+      // correct halving from a stale effect nobody ended. The roll row
+      // keeps what it rolled; this is the separate fact about the
+      // target, naming the degree, the damage type and every source.
+      if (r.resisted) log("roll_named", r.resisted);
       await loadRolls();
       // Damage just landed, so the target list is stale — the goblin has
       // fewer hit points than the dropdown is showing.

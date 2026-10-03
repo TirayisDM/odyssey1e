@@ -47,6 +47,32 @@ pub struct Feature {
     /// What brings it back: short, long, day, dawn. None with a `uses`
     /// means it never comes back on its own.
     pub recharge: Option<String>,
+    /// 116. WHAT IT DOES TO WHOEVER HOLDS IT, in grants.rs's
+    /// vocabulary. Rage has read "resistance to bludgeoning, piercing,
+    /// and slashing damage" in its `text` column since 087 with
+    /// nothing able to act on it - prose is for a person and a grant is
+    /// for the engine.
+    ///
+    /// Empty for almost every feature, which is an answer: Extra
+    /// Attack and Evasion change rules rather than numbers and have
+    /// nothing to put here.
+    pub grants: Vec<crate::grants::Grant>,
+}
+
+impl Feature {
+    /// Whether holding this feature is enough, or whether it has to be
+    /// SPENT before it does anything.
+    ///
+    /// 116. `uses` IS THE WHOLE TEST, and it is a fact already on the
+    /// row rather than a second column that could disagree with it.
+    /// Purity of Body has no uses and is simply true from level 10
+    /// onward; Rage has five a day and a barbarian who is not raging is
+    /// not resistant to anything. A column saying "passive: true"
+    /// beside a use count would be the two-places fault this codebase
+    /// keeps producing.
+    pub fn is_passive(&self) -> bool {
+        self.uses.is_none()
+    }
 }
 
 /// A feature this character has, with whatever they chose for it.
@@ -275,6 +301,58 @@ pub fn load_ability_sources(
     Ok(out)
 }
 
+/// The grants a character holds passively, from the classes they have
+/// taken to the levels they have taken them.
+///
+/// ONE REQUEST, AND THE WHOLE CATALOGUE. A `grants=neq.[]` clause
+/// would have trimmed it in Postgres, and a jsonb literal in a query
+/// string is the one thing in this path that cannot be checked by a
+/// test - so it is not worth saving a few rows for. A class has
+/// between two features and twenty, which is what `load_ability_sources`
+/// already says about the same table.
+///
+/// NOTHING AT ALL FOR THE CLASSLESS, which is every monster in the
+/// game: an empty key list means no request.
+pub fn load_passive_grants(
+    token: &str,
+    game_id: &str,
+    classes: &[Taken],
+) -> Result<Vec<crate::grants::Grant>, String> {
+    if classes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys: Vec<String> = classes.iter().map(|t| t.key.clone()).collect();
+    let rows = crate::supabase::rest_get(
+        token,
+        "class_features",
+        &[
+            ("select", "class_key,level,key,name,text,choose_from,picks,uses,recharge,grants"),
+            ("class_key", &format!("in.({})", keys.join(","))),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    )?;
+
+    // LEVEL GATED, because a catalogue row is not a thing somebody has.
+    // Purity of Body is a monk 10 feature and a monk 4 does not have it.
+    //
+    // AND THE PASSIVE RULE IS APPLIED IN RUST, not in the query. A
+    // `uses is.null` clause here would read correctly and would be a
+    // second, untested copy of `Feature::is_passive` - the one-fact-in-
+    // two-places fault this codebase keeps producing. The `grants`
+    // filter above stays in Postgres because it is an efficiency and
+    // not a rule: a feature granting nothing contributes nothing by
+    // either route.
+    let held: Vec<Held> = rows
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(feature_from_row)
+        .filter(|f| classes.iter().any(|t| t.key == f.class_key && t.level >= f.level))
+        .map(|feature| Held { feature, chosen: Vec::new(), owed: 0 })
+        .collect();
+    Ok(passive_grants(&held))
+}
+
 pub fn feature_from_row(r: &serde_json::Value) -> Feature {
     Feature {
         class_key: as_str(r, "class_key"),
@@ -286,7 +364,30 @@ pub fn feature_from_row(r: &serde_json::Value) -> Feature {
         picks: r.get("picks").and_then(|v| v.as_i64()).unwrap_or(1),
         uses: r.get("uses").and_then(|v| v.as_str()).map(str::to_string),
         recharge: r.get("recharge").and_then(|v| v.as_str()).map(str::to_string),
+        // THE FEATURE'S NAME AS THE FALLBACK SOURCE, so a grant row
+        // that forgot to name itself still reads as "Rage" on a sheet
+        // rather than as a blank.
+        grants: match r.get("grants") {
+            Some(g) => crate::grants::parse(g, &as_str(r, "name")),
+            None => Vec::new(),
+        },
     }
+}
+
+/// Every grant that is simply TRUE of this character, from the features
+/// they hold.
+///
+/// PASSIVE ONLY. A spent feature's grants belong to the effect its
+/// spending creates - Rage is three resistances for a minute, not three
+/// resistances for ever - and collecting them here would make every
+/// barbarian permanently resistant to the three physical damage types,
+/// which is the single most consequential thing anybody could get wrong
+/// about 5e.
+pub fn passive_grants(held: &[Held]) -> Vec<crate::grants::Grant> {
+    held.iter()
+        .filter(|h| h.feature.is_passive())
+        .flat_map(|h| h.feature.grants.clone())
+        .collect()
 }
 
 fn as_str(r: &serde_json::Value, key: &str) -> String {
@@ -310,6 +411,7 @@ mod tests {
             picks: 1,
             uses: None,
             recharge: None,
+            grants: Vec::new(),
         }
     }
 
@@ -319,6 +421,58 @@ mod tests {
 
     fn t(key: &str, level: i64) -> Taken {
         Taken { key: key.into(), level, hit_die: 10 }
+    }
+
+    /* ---------- 116. passive against spent ---------- */
+
+    fn granting(mut feature: Feature, target: &str, uses: Option<&str>) -> Held {
+        feature.grants = vec![crate::grants::Grant {
+            target: target.into(),
+            mode: crate::grants::Mode::Add,
+            value: 0,
+            dice: None,
+            needs_attunement: false,
+            source: feature.name.clone(),
+        }];
+        feature.uses = uses.map(str::to_string);
+        Held { feature, chosen: Vec::new(), owed: 0 }
+    }
+
+    #[test]
+    fn a_feature_with_no_uses_is_simply_true() {
+        // Purity of Body: a monk 10 is immune to poison and does not
+        // have to do anything about it.
+        let h = granting(f("monk", 10, "purity_of_body", "Purity of Body"), "immune.poison", None);
+        assert!(h.feature.is_passive());
+        let got = passive_grants(&[h]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].source, "Purity of Body");
+    }
+
+    /// THE MOST CONSEQUENTIAL THING ANYBODY COULD GET WRONG ABOUT 5e.
+    /// Rage is three resistances for a minute, and collecting it here
+    /// would make every barbarian permanently resistant to the three
+    /// physical damage types - which is most of the damage in the game.
+    #[test]
+    fn a_feature_that_has_to_be_spent_grants_nothing_until_it_is() {
+        let h = granting(
+            f("barbarian", 1, "rage", "Rage"),
+            "resist.bludgeoning",
+            Some("2@1,3@3"),
+        );
+        assert!(!h.feature.is_passive());
+        assert!(passive_grants(&[h]).is_empty());
+    }
+
+    #[test]
+    fn a_passive_feature_that_grants_nothing_contributes_nothing() {
+        // Evasion changes a rule rather than a number.
+        let h = Held {
+            feature: f("rogue", 7, "evasion", "Evasion"),
+            chosen: Vec::new(),
+            owed: 0,
+        };
+        assert!(passive_grants(&[h]).is_empty());
     }
 
     fn chose(class: &str, key: &str, pick: i64, what: &str) -> Choice {

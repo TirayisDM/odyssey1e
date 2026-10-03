@@ -261,6 +261,23 @@ pub struct Sheet {
     pub techniques: Vec<crate::attack::Technique>,
     /// HP, death saves, exhaustion, size. 010.
     pub vitals: Vitals,
+    /// 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL, and WHY.
+    ///
+    /// DERIVED FROM FOUR PLACES AND STORED IN NONE. A species states
+    /// its own; an item, a class feature and a running spell each say
+    /// so with a grant. `species.damage_resistances` has existed since
+    /// 056 and the sheet printed it followed by "(DM applies)", which
+    /// was an honest label for a thing that did nothing.
+    ///
+    /// EVERY ENTRY NAMES ITS SOURCES. A sheet saying "resistant to
+    /// fire" invites the question "why", and a barbarian who stops
+    /// raging must lose the Rage half without taking the Unt'garoth
+    /// half with it.
+    ///
+    /// NOT DESERIALISED, like `skill_mods`: nothing parses a Sheet
+    /// back and this is derived from the rest of it.
+    #[serde(skip_deserializing)]
+    pub resistances: Vec<crate::resist::Standing>,
     /// DERIVED, NEVER STORED. What it takes to hit this character,
     /// computed from the loadout every time the sheet is read.
     ///
@@ -1537,6 +1554,30 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         "ac",
     );
 
+    // 116. EVERY REASON DAMAGE LANDS DIFFERENTLY ON THIS PERSON.
+    //
+    // FOUR SOURCES, ONE VOCABULARY. The species has its own column
+    // from 056; the other three speak 100's grant language, which is
+    // the whole reason resistance needed no table of its own.
+    //
+    // THE RUNNING SPELLS ARE READ LAST AND DO NOT STOP THE SHEET. An
+    // effect is the only one of the four that needs the game clock, and
+    // a sheet that refused to load because the effects table was slow
+    // would be a worse failure than a missing resistance - the same
+    // judgement `swing` makes about a Bless it cannot read.
+    let mut resist_sources: Vec<crate::resist::Source> = Vec::new();
+    if let Some(sp) = &species {
+        resist_sources.extend(crate::resist::from_species(&sp.damage_resistances, &sp.name));
+    }
+    resist_sources.extend(crate::resist::from_grants(&worn_grants(&loadout)));
+    resist_sources.extend(crate::resist::from_grants(
+        &crate::features::load_passive_grants(token, &game_id, &classes)?,
+    ));
+    if let Ok(live) = crate::commands::effects::grants_on(token, &game_id, character_id) {
+        resist_sources.extend(crate::resist::from_grants(&live));
+    }
+    let resistances = crate::resist::standing(&resist_sources);
+
     let mut sheet = Sheet {
         location_id: profile.location_id,
         character_id: Some(profile.character_id),
@@ -1568,6 +1609,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         body: profile.body,
         vitals: profile.vitals,
         armor_class,
+        resistances,
         techniques,
         loadout,
     };
@@ -1679,6 +1721,9 @@ mod tests {
             // the fact that it is 15 rather than the export's 14, are
             // tested where the rule lives in equipment.rs.
             armor_class: 12,
+            // 116. Rodnar is human and wearing nothing enchanted, so
+            // everything hurts him exactly as much as it says.
+            resistances: Vec::new(),
         }
     }
 

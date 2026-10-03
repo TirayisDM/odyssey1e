@@ -241,7 +241,7 @@ fn load_catalogue(
         token,
         "class_features",
         &[
-            ("select", "class_key,level,key,name,text,choose_from,picks,uses,recharge"),
+            ("select", "class_key,level,key,name,text,choose_from,picks,uses,recharge,grants"),
             ("class_key", &format!("in.({})", keys.join(","))),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
         ],

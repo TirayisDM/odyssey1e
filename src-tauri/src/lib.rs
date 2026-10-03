@@ -46,6 +46,7 @@ mod narrative;
 mod objects;
 mod pin;
 mod prayers;
+mod resist;
 mod resolution;
 mod size;
 mod slots;
@@ -925,6 +926,37 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
         }
     }
 
+    // 116. AND WHAT THE TARGET MAKES OF IT. Resistance halves,
+    // vulnerability doubles, immunity ignores - applied AFTER the dice
+    // and after the crit, which is where 5e puts it: "resistance and
+    // then vulnerability are applied after all other modifiers to
+    // damage."
+    //
+    // THE ROLL ROW KEEPS WHAT IT ROLLED. 1d8+3 came to 9 and the row
+    // says 9; the five that actually reached a raging barbarian is a
+    // separate fact about the target, recorded as the hit point event
+    // and said out loud. A roll is a record of dice - 001 - and
+    // rewriting its total to account for somebody else's hide would
+    // make the log disagree with itself.
+    //
+    // ONLY AGAINST SOMETHING WITH A CHARACTER ROW. Resistance comes
+    // from a species, a loadout, a feature and a running spell, and an
+    // actor with no character has none of those to read.
+    let mut resisted: Option<String> = None;
+    if let (Some(total), Some(a), Some(cid)) =
+        (damage_total, &resolved.attack, target_character_id.as_deref())
+    {
+        if let Some((after, said)) = damage_after_resistance(
+            &session.access_token,
+            cid,
+            total,
+            &a.damage_types,
+        ) {
+            damage_total = Some(after);
+            resisted = Some(said);
+        }
+    }
+
     // WHAT THE DAMAGE DID, read fresh rather than taken from the client.
     // Whether a hit kills outright, and whether it costs a death save,
     // are rules with a body on the end of them - the dropdown's copy of
@@ -1017,7 +1049,7 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
     // cost land together or not at all — see 012 and 014. A goblin that
     // took damage from a swing that does not exist is the failure this
     // prevents.
-    supabase::rpc(
+    let mut out = supabase::rpc(
         &session.access_token,
         "write_action",
         &json!({
@@ -1036,7 +1068,21 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
             "p_hp": hp,
             "p_vitals": vitals_update,
         }),
-    )
+    )?;
+
+    // 116. AND WHY THE HIT POINTS AND THE DICE DISAGREE.
+    //
+    // SAID RATHER THAN LEFT TO BE NOTICED. The damage roll reads 9 and
+    // the goblin lost 4, which without a word of explanation looks like
+    // a bug - and a DM who cannot see WHICH resistance did it cannot
+    // tell a correct halving from a stale effect nobody ended. The
+    // line names the degree, the damage type and every source of it.
+    if let Some(said) = resisted {
+        if let Some(map) = out.as_object_mut() {
+            map.insert("resisted".into(), json!(said));
+        }
+    }
+    Ok(out)
 }
 
 /// Where a death save tally is written.
@@ -1243,6 +1289,50 @@ fn roll_row(
 /// SIGNED TERMS, so Bane's "-1d4" appends as itself and Bless's "1d4"
 /// gets the plus it needs. A grant that already carries its sign is
 /// left alone, which is how a curse and a blessing use one shape.
+/// What this much damage actually costs the target, and why, when the
+/// answer is not simply "all of it".
+///
+/// 116. THE SAME ANSWER THE SHEET WOULD GIVE, which is why this loads
+/// the target's sheet rather than reading a resistance column. There is
+/// no such column: resistance is derived from a species, a loadout, the
+/// class features somebody holds and the spells running on them, and a
+/// second, cheaper loader here would be a second answer to one question
+/// - the fault `batch_character_stats` already carries a note about.
+///
+/// NONE WHEN NOTHING CHANGES, so the caller has one test for "was there
+/// anything to say". A weapon with no damage type recorded, a target
+/// with no opinion about the type it has, or a sheet that would not
+/// load all give None and the full damage lands - being ignorant is not
+/// a reason to halve somebody's sword.
+///
+/// THE FIRST TYPE THAT MATTERS WINS, for a weapon that deals two. 5e
+/// splits the damage between them and this engine rolls one pool, so
+/// applying one degree to the whole pool is the honest approximation -
+/// and taking the one the target actually resists favours the defender,
+/// which is the safer direction when the alternative is inventing a
+/// split the dice never made.
+fn damage_after_resistance(
+    token: &str,
+    target_character_id: &str,
+    total: i64,
+    damage_types: &[String],
+) -> Option<(i64, String)> {
+    if damage_types.is_empty() {
+        return None;
+    }
+    let sheet = character::load_sheet(token, target_character_id).ok()?;
+    if sheet.resistances.is_empty() {
+        return None;
+    }
+    for kind in damage_types {
+        let kind = kind.trim().to_lowercase();
+        if let Some(said) = resist::said(total, &sheet.resistances, &kind) {
+            return Some((resist::against(total, &sheet.resistances, &kind), said));
+        }
+    }
+    None
+}
+
 fn effect_grants(
     token: &str,
     sheet: &Sheet,

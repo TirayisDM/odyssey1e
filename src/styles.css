@@ -278,6 +278,27 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .skillrow .skill-from{font-size:11px;color:#9ecbff;text-align:right;
                       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .skillrow .bonus.total{color:#9ecbff}
+/* 116. WHAT HURTS SOMEBODY LESS, MORE, OR NOT AT ALL.
+   Laid out like a skill row on purpose: degree, the damage type, then
+   where it came from in the same right-hand column the skill
+   breakdown uses, so the two read down the page together. */
+.resist-row{display:grid;grid-template-columns:5.5rem 1fr minmax(0,14rem);
+            align-items:center;gap:.4rem;
+            padding:.22rem .45rem;border:1px solid var(--line);
+            border-radius:4px;margin-bottom:.2rem}
+.resist-row span{font:12px ui-monospace,Menlo,monospace}
+.resist-row .nm{font-weight:600}
+/* THE SAME GREEN AND RED THE ABILITY MODIFIERS USE, read from the
+   point of view of whoever's sheet it is: being immune or resistant is
+   good news and being vulnerable is not. Immunity gets the green on its
+   own because it is a different kind of fact from resistance - half of
+   a large number still kills somebody and none of it never does. */
+.resist-row .degree{font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.resist-row .degree.resistant{color:var(--accent)}
+.resist-row .degree.immune{color:var(--ok);font-weight:600}
+.resist-row .degree.vulnerable{color:var(--bad)}
+.resist-row .skill-from{font-size:11px;color:#9ecbff;text-align:right;
+                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .preview{font:12px ui-monospace,Menlo,monospace;padding:.3rem 0 .5rem}
 .preview.live{color:var(--accent)}
 #mode{width:6rem;background:#0f1114;color:var(--fg);border:1px solid var(--line);

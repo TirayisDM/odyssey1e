@@ -110,6 +110,17 @@ pub struct Attack {
     pub fumble_max: i64,
     /// The technique used, if the request named one.
     pub technique: Option<String>,
+    /// 116. WHAT KIND OF DAMAGE IT IS, straight off the weapon.
+    ///
+    /// CARRIED BECAUSE SOMEBODY ON THE OTHER END MAY RESIST IT. The
+    /// Mace deals bludgeoning and a raging barbarian takes half of it;
+    /// the formula alone could never say so. Usually one type, and more
+    /// than one for a weapon that deals two at once.
+    ///
+    /// EMPTY IS A REAL ANSWER - plenty of catalogue rows have never had
+    /// a type filled in - and resistance simply does not apply, which
+    /// is the safe way to be ignorant.
+    pub damage_types: Vec<String>,
 }
 
 /* ============================ RULES ============================ */
@@ -264,6 +275,7 @@ pub fn resolve(
             crit_min: t.crit_min,
             fumble_max: t.fumble_max,
             technique: Some(t.name.clone()),
+            damage_types: owned.item.damage_types.clone(),
         });
     }
 
@@ -304,6 +316,7 @@ pub fn resolve(
                 crit_min: 20,
                 fumble_max: 1,
                 technique: None,
+                damage_types: owned.item.damage_types.clone(),
             });
         }
     }

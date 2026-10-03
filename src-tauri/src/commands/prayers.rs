@@ -240,7 +240,7 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
         &token,
         "spells",
         &[
-            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,range,duration,concentration"),
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,range,duration,concentration,grants"),
             ("key", &format!("in.({})", keys.join(","))),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", sheet.game_id)),
         ],
@@ -290,6 +290,11 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
             "duration": r.get("duration"),
             "concentration": r.get("concentration"),
             "blocked": blocked,
+            // 116. THE QUESTION THIS SPELL ASKS, if it asks one.
+            // Protection from Energy is the only one so far: the panel
+            // shows these five and the cast refuses without an answer,
+            // rather than the engine picking an element for somebody.
+            "choices": choices_in(r.get("grants")),
         }));
     }
     // Cantrips last: they cost nothing and are what is left when the
@@ -332,6 +337,14 @@ pub fn cast_prayer(
     target_label: Option<String>,
     encounter_id: Option<String>,
     actor_id: Option<String>,
+    // 116. WHICH DAMAGE TYPE, for the one spell that asks. Protection
+    // from Energy is "choose one of acid, cold, fire, lightning, or
+    // thunder", and the choice belongs to the moment of casting rather
+    // than to the catalogue - the same spell protects against cold on
+    // Tuesday and fire on Wednesday.
+    //
+    // None FOR EVERY OTHER SPELL, which is all but one of them.
+    choice: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
@@ -432,6 +445,18 @@ pub fn cast_prayer(
                 crate::commands::effects::drop_concentration(&token, &sheet.game_id, &character_id, now)?;
             }
 
+            // 116. SETTLE WHAT THE SPELL ASKED. A grant naming several
+            // damage types is a question; the answer goes onto the
+            // effect row so the resistance that is RUNNING is one
+            // concrete thing, and a DM who retunes the spell next month
+            // does not retroactively change what is already on somebody
+            // - 001's snapshot rule, the same reason the grants are
+            // copied rather than looked up.
+            let grants = settle_choices(
+                spell.get("grants").unwrap_or(&json!([])),
+                choice.as_deref(),
+            )?;
+
             let (_, said) = crate::commands::effects::apply_inner(
                 &token,
                 &sheet.game_id,
@@ -445,7 +470,7 @@ pub fn cast_prayer(
                 if concentrates { Some("concentration") } else { Some("spell") },
                 None,
                 // WHAT IT DOES WHILE IT LASTS, copied off the spell.
-                spell.get("grants").unwrap_or(&json!([])),
+                &grants,
                 now,
             )?;
             landed = Some(said);
@@ -468,6 +493,51 @@ pub fn cast_prayer(
         "landed": landed,
         "concentration": concentrates,
     }))
+}
+
+/// The damage types a spell makes its caster choose between.
+///
+/// 116. ASKED OF THE GRANTS rather than listed per spell, so a DM who
+/// writes a new grant offering a choice gets the dropdown for free -
+/// and a spell whose grants stop offering one stops asking. Null for
+/// all but one spell in the catalogue.
+fn choices_in(grants: Option<&Value>) -> Option<Vec<String>> {
+    grants?
+        .as_array()?
+        .iter()
+        .filter_map(|g| g.get("target")?.as_str())
+        .find_map(crate::resist::choice_offered)
+}
+
+/// Replace any grant target that offers a choice with the one that was
+/// chosen.
+///
+/// 116. REFUSED RATHER THAN GUESSED. Casting Protection from Energy
+/// without naming a type fails with the five options in the message,
+/// because picking one for the caster would be the engine deciding
+/// which element they were afraid of. The refusal happens BEFORE the
+/// effect is written - the slot is already spent by then, which is
+/// 5e (a spell you botch the targeting of is still a spell you cast)
+/// but a half-written effect would not be.
+///
+/// EVERY OTHER GRANT PASSES THROUGH UNTOUCHED, including the ones that
+/// have nothing to do with resistance - Bless's die goes through this
+/// function without noticing it.
+fn settle_choices(grants: &Value, choice: Option<&str>) -> Result<Value, String> {
+    let Some(rows) = grants.as_array() else {
+        return Ok(json!([]));
+    };
+    let mut out = Vec::with_capacity(rows.len());
+    for g in rows {
+        let mut g = g.clone();
+        let target = g.get("target").and_then(|t| t.as_str()).unwrap_or("").to_string();
+        if crate::resist::choice_offered(&target).is_some() {
+            let (degree, kind) = crate::resist::pick(&target, choice)?;
+            g["target"] = json!(format!("{}.{}", degree.as_str_target(), kind));
+        }
+        out.push(g);
+    }
+    Ok(json!(out))
 }
 
 /// The die size out of a dice string, for an effect's magnitude.

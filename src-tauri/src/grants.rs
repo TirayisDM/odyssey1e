@@ -118,7 +118,13 @@ pub fn parse(list: &Value, source: &str) -> Vec<Grant> {
                 .map(str::trim)
                 .filter(|d| !d.is_empty())
                 .map(str::to_string);
-            if value == 0 && dice.is_none() {
+            // 116. A RESISTANCE IS A PRESENCE RATHER THAN A NUMBER.
+            // `resist.fire` has nothing to add and nothing to floor -
+            // being resistant is the whole of what it says - so it is
+            // admitted with no value, rather than carrying a `1` that
+            // means nothing and that somebody would eventually try to
+            // add to something.
+            if value == 0 && dice.is_none() && !crate::resist::is_resist_target(&target) {
                 return None;
             }
             let mode = Mode::parse(g.get("mode").and_then(|m| m.as_str()).unwrap_or("add"));
@@ -268,6 +274,13 @@ pub const ABILITIES: [&str; 6] = ["str", "dex", "con", "int", "wis", "cha"];
 /// read already is.
 pub fn known_target(target: &str) -> bool {
     if ["ac", "attack", "damage", "save"].contains(&target) {
+        return true;
+    }
+    // 116. `resist.fire`, `immune.poison`, `vulnerable.cold`, and the
+    // several-type form Protection from Energy needs. resist.rs owns
+    // the spelling and the list of damage types; this asks it rather
+    // than keeping a second copy of thirteen words.
+    if crate::resist::is_resist_target(target) {
         return true;
     }
     if ABILITIES.contains(&target) {

@@ -533,6 +533,26 @@
           </div>
           </div>
           <div id="abilities" class="abils"></div>
+
+          <!-- 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL.
+               `species.damage_resistances` has existed since 056 and
+               the only place it appeared was the Description pane,
+               printed as a list of words followed by "(DM applies)" -
+               an honest label for a thing that did nothing.
+
+               BESIDE THE ABILITY SCORES rather than on the Description
+               pane, because this is a combat number like AC and not a
+               fact about somebody's people. The Unt'garoth entry still
+               belongs on the species viewer; what a PARTICULAR
+               character resists belongs here, where the four sources
+               meet.
+
+               HIDDEN WHEN EMPTY, which is most characters. A heading
+               over nothing reads as a section that failed to load. -->
+          <div id="resist-block" hidden>
+            <div class="sub">Resistances</div>
+            <div id="resist-list" class="list"></div>
+          </div>
         </div>
 
         <div class="sheet-pane" data-sheet="description" hidden>

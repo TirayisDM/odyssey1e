@@ -88,6 +88,7 @@
         <button class="tab" data-tab="world">World</button>
         <button class="tab" data-tab="chars">Characters</button>
         <button class="tab" data-tab="objects">Objects</button>
+        <button class="tab" data-tab="prayers">Cleric Prayers</button>
         <button class="tab" data-tab="trade">Trade</button>
       </nav>
 
@@ -470,6 +471,10 @@
           <button class="tab" data-sheet="description">Description</button>
           <button class="tab" data-sheet="equipment">Equipment</button>
           <button class="tab" data-sheet="skills">Skills &amp; Talents</button>
+          <!-- 106. CLERICS ONLY. Hidden for everybody else rather than
+               shown empty - a fighter has no prepared list, and "0 of
+               0" would invite the question of how to raise it. -->
+          <button class="tab" data-sheet="prayers" id="tab-prayers" hidden>Prayers</button>
         </nav>
 
         <div class="sheet-pane" data-sheet="stats">
@@ -694,6 +699,30 @@
         <div class="sub">Talents</div>
         <div id="talents"></div>
       </div>
+
+      <!-- ===================== PRAYERS (106) ===================== -->
+      <div class="sheet-pane" data-sheet="prayers" hidden>
+        <div id="prayer-head" class="muted"></div>
+
+        <!-- SLOTS ARE SHOWN AND NOT YET SPENT. Casting wants a path
+             that does not exist; saying so on the tab is better than a
+             row of counters that never move. -->
+        <div class="sub">Spell slots</div>
+        <div id="prayer-slots" class="fxbar"></div>
+
+        <div class="sub">Cantrips <span id="cantrip-count" class="muted"></span></div>
+        <div id="my-cantrips" class="list"></div>
+
+        <div class="sub">Prepared <span id="prepared-count" class="muted"></span></div>
+        <div id="my-prayers" class="list"></div>
+
+        <div class="sub">Add a prayer</div>
+        <div class="row">
+          <input id="prep-find" placeholder="search the cleric list" />
+          <select id="prep-level"><option value="">every level</option></select>
+        </div>
+        <div id="prep-list" class="list"></div>
+      </div>
       </section>
       </div>
 
@@ -743,6 +772,29 @@
            is what buy, sell, barter and give all are with different
            columns filled in. The counterparty being a shop or a person
            is decided by whether they have a markup, not by a mode. -->
+      <!-- 106. THE CATALOGUE, read-only. Every cleric spell in the
+           game, filtered and searched - what a player browses before
+           they decide, and what a DM looks up mid-session.
+
+           PREPARING HAPPENS ON THE SHEET, not here. This tab knows
+           nothing about any particular character, which is why it is a
+           primary tab rather than a subtab: it is a reference book. -->
+      <div class="pane" data-pane="prayers" hidden>
+        <section>
+          <h2>Cleric Prayers <span id="prayer-count" class="muted"></span></h2>
+          <div class="row">
+            <input id="prayer-find" placeholder="search by name or text" />
+            <select id="prayer-level">
+              <option value="">every level</option>
+            </select>
+            <select id="prayer-school">
+              <option value="">every school</option>
+            </select>
+          </div>
+          <div id="prayer-list" class="list"></div>
+        </section>
+      </div>
+
       <div class="pane" data-pane="trade" hidden>
         <div class="row">
           <select id="trade-a"></select>

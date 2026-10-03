@@ -39,6 +39,10 @@ let state = {
   clock: null,
   // 094. What is running, already filtered and ordered by Rust.
   effects: [],
+  // 106. The cleric catalogue, read once per game, and one cleric's
+  // own numbers as list_prayers last reported them.
+  spells: [],
+  prayers: null,
   // 084. The slot ladder, straight from slots::LADDER. Read once -
   // where a thing can be worn is a rule, not campaign data, so unlike
   // the audiences nobody edits it.
@@ -388,6 +392,7 @@ async function selectGame(id) {
   await loadSlots();
   await loadClock();
   await loadEffects();
+  await loadSpellBook();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1019,6 +1024,225 @@ function sEl(tag, cls, text) {
   return n;
 }
 
+/* ===================== CLERIC PRAYERS (106) ===================== */
+//
+// Two surfaces off one catalogue. The TAB is a reference book - every
+// cleric spell, searched and filtered, knowing nothing about any
+// particular character. The SHEET SUBTAB is one cleric's own: what
+// they hold, what they may hold, and the list to add from.
+//
+// EVERY NUMBER COMES FROM RUST. How many may be prepared, how many
+// cantrips are known, what the save DC is - prayers.rs works all of it
+// out from the CLERIC's level, which is not the character's total. A
+// Fighter 4 / Cleric 1 prepares as a cleric 1.
+const SCHOOLS = ["abjuration","conjuration","divination","enchantment",
+                 "evocation","illusion","necromancy","transmutation"];
+
+async function loadSpellBook() {
+  if (!state.gameId) return;
+  const rows = await call("list_spells", { gameId: state.gameId, classKey: "cleric" });
+  if (!rows) return;
+  state.spells = rows;
+
+  fillOnce("#prayer-level", levelOptions(rows));
+  fillOnce("#prep-level", levelOptions(rows));
+  fillOnce("#prayer-school", SCHOOLS.map((x) => [x, x]));
+  paintSpellBook();
+}
+
+function levelOptions(rows) {
+  const seen = [...new Set(rows.map((r) => r.level))].sort((a, b) => a - b);
+  return seen.map((l) => [String(l), l === 0 ? "cantrips" : "level " + l]);
+}
+
+// The first option is the markup's own "every …", so this only ever
+// appends - refilling would drop whatever was chosen.
+function fillOnce(sel, pairs) {
+  const el = document.querySelector(sel);
+  if (!el || el.options.length > 1) return;
+  for (const [v, label] of pairs) el.append(new Option(label, v));
+}
+
+function paintSpellBook() {
+  const host = document.querySelector("#prayer-list");
+  if (!host) return;
+  const find = (val("#prayer-find") || "").toLowerCase();
+  const lvl = val("#prayer-level");
+  const school = val("#prayer-school");
+
+  const shown = (state.spells || []).filter((sp) =>
+    (!lvl || String(sp.level) === lvl) &&
+    (!school || sp.school === school) &&
+    (!find || (sp.name + " " + (sp.description || "")).toLowerCase().includes(find)));
+
+  host.innerHTML = "";
+  for (const sp of shown) host.append(spellRow(sp, null));
+  document.querySelector("#prayer-count").textContent =
+    shown.length + " of " + (state.spells || []).length;
+}
+
+// One spell, with everything a table needs. `action` is null on the
+// reference tab - it is a book there, not a form.
+function spellRow(sp, action) {
+  const li = sEl("li", "flat item spell");
+  const head = sEl("div", "spell-head");
+  head.append(sEl("span", "nm", sp.name));
+  head.append(chip(sp.level === 0 ? "cantrip" : "level " + sp.level, "mode"));
+  if (sp.school) head.append(chip(sp.school, "cls"));
+  if (sp.concentration) head.append(chip("concentration", "cls"));
+  if (sp.ritual) head.append(chip("ritual", "cls"));
+  if (action) head.append(action);
+  li.append(head);
+
+  const facts = sEl("div", "spell-facts");
+  for (const [k, v] of [
+    ["casting", sp.casting_time],
+    ["range", sp.range],
+    ["duration", sp.duration],
+    ["components", componentWords(sp)],
+    ["damage", sp.dice],
+    ["save", sp.save_ability ? sp.save_ability.toUpperCase() + " save" : null],
+  ]) {
+    if (!v) continue;
+    const row = sEl("span", "spell-fact");
+    row.append(sEl("span", "k", k), sEl("span", "v", v));
+    facts.append(row);
+  }
+  li.append(facts);
+  if (sp.material) li.append(sEl("div", "spell-mat", "material: " + sp.material));
+  if (sp.description) li.append(sEl("p", "spell-text", sp.description));
+  return li;
+}
+
+function componentWords(sp) {
+  const got = (sp.components || []).map((c) => c.toUpperCase());
+  return got.length ? got.join(", ") : null;
+}
+
+/* ---------------------- one cleric's own list ---------------------- */
+
+async function loadPrayers(sheet) {
+  const tab = document.querySelector("#tab-prayers");
+  const isCleric = (sheet.classes || []).some((c) => c.key === "cleric");
+  if (tab) tab.hidden = !isCleric;
+  if (!isCleric) {
+    // A sheet left on the Prayers tab and then switched to a fighter
+    // would be looking at a hidden pane. Send them somewhere real.
+    if (document.querySelector('#sheet-tabs .tab.on[data-sheet="prayers"]')) {
+      showSub("sheet-tabs", "sheet", "stats");
+    }
+    return;
+  }
+
+  const got = await call("list_prayers", { characterId: state.characterId });
+  if (!got) return;
+  state.prayers = got;
+
+  document.querySelector("#prayer-head").textContent =
+    "cleric " + got.cleric_level + " \u00b7 save DC " + got.save_dc +
+    " \u00b7 spell attack " + withSign(got.attack_bonus) +
+    " \u00b7 casts up to level " + got.top_slot;
+
+  // THE SLOTS, SHOWN AND NOT YET SPENT - 106 says why. Labelled so
+  // nobody reads them as a counter that is stuck.
+  const slots = document.querySelector("#prayer-slots");
+  slots.innerHTML = "";
+  (got.slots || []).forEach((n, i) => {
+    if (!n) return;
+    const chipEl = sEl("span", "fx");
+    chipEl.append(sEl("span", "nm", "level " + (i + 1)));
+    chipEl.append(sEl("span", "when", String(n)));
+    chipEl.title = "not spent yet - casting is not wired";
+    slots.append(chipEl);
+  });
+
+  paintMine(got);
+  paintPrepList(got);
+}
+
+function paintMine(got) {
+  const byKey = (k) => (state.spells || []).find((sp) => sp.key === k);
+
+  const cantrips = document.querySelector("#my-cantrips");
+  cantrips.innerHTML = "";
+  for (const k of got.cantrips) {
+    const sp = byKey(k);
+    if (sp) cantrips.append(spellRow(sp, forgetButton(k)));
+  }
+  document.querySelector("#cantrip-count").textContent =
+    got.cantrips.length + " of " + got.cantrips_known;
+
+  const mine = document.querySelector("#my-prayers");
+  mine.innerHTML = "";
+  for (const k of got.prepared) {
+    const sp = byKey(k);
+    if (sp) mine.append(spellRow(sp, forgetButton(k)));
+  }
+  const count = document.querySelector("#prepared-count");
+  count.textContent = got.prepared.length + " of " + got.prepared_max;
+  count.classList.toggle("warn", got.prepared.length >= got.prepared_max);
+}
+
+function forgetButton(key) {
+  const b = sEl("button", "ghost tiny", "put down");
+  b.addEventListener("click", async () => {
+    const r = await tryCall("forget_prayer", {
+      characterId: state.characterId,
+      spellKey: key,
+    });
+    if (!r.ok) return log("forget_prayer", r.error, true);
+    await loadPrayers(state.sheet);
+  });
+  return b;
+}
+
+// WHAT IS LEFT TO TAKE. Already-held spells are left off rather than
+// shown disabled - the list is 106 long and the ones you cannot pick
+// are noise.
+function paintPrepList(got) {
+  const host = document.querySelector("#prep-list");
+  if (!host) return;
+  const have = new Set([...(got.prepared || []), ...(got.cantrips || [])]);
+  const find = (val("#prep-find") || "").toLowerCase();
+  const lvl = val("#prep-level");
+
+  const shown = (state.spells || []).filter((sp) =>
+    !have.has(sp.key) &&
+    (!lvl || String(sp.level) === lvl) &&
+    (!find || (sp.name + " " + (sp.description || "")).toLowerCase().includes(find)));
+
+  host.innerHTML = "";
+  // THE WHOLE LIST IS 106 LONG. Unfiltered it would bury the tab, so
+  // it waits for a search or a level rather than opening on everything.
+  if (!find && !lvl) {
+    host.append(sEl("div", "muted", "search, or pick a level, to see what is on the list"));
+    return;
+  }
+  for (const sp of shown.slice(0, 40)) host.append(spellRow(sp, prepareButton(sp)));
+  if (shown.length > 40) {
+    host.append(sEl("div", "muted", (shown.length - 40) + " more - narrow it down"));
+  }
+}
+
+function prepareButton(sp) {
+  const b = sEl("button", "ghost tiny", sp.level === 0 ? "learn" : "prepare");
+  b.addEventListener("click", async () => {
+    const r = await tryCall("prepare_prayer", {
+      characterId: state.characterId,
+      spellKey: sp.key,
+    });
+    // THE REFUSAL IS THE RULE TALKING - "that is 4 prepared and they
+    // may hold 4" - so it goes where somebody will read it rather than
+    // only into the log.
+    if (!r.ok) {
+      document.querySelector("#prayer-head").textContent = r.error;
+      return log("prepare_prayer", r.error, true);
+    }
+    await loadPrayers(state.sheet);
+  });
+  return b;
+}
+
 /* ===================== THE CLOCK, AND RESTING (092) ===================== */
 //
 // What time it is, the jumps a DM can take, and the two rests. Painted
@@ -1554,6 +1778,7 @@ async function loadSheet() {
   await updatePreview();
   await loadInventory();
   await loadFeatures();
+  await loadPrayers(sheet);
 }
 
 // The equipment panel.
@@ -6779,6 +7004,17 @@ window.addEventListener("DOMContentLoaded", async () => {
   for (const b of document.querySelectorAll("[data-rest]")) {
     b.addEventListener("click", () =>
       doRest(b.dataset.clock, b.dataset.rest === "long"));
+  }
+
+  for (const sel of ["#prayer-find", "#prayer-level", "#prayer-school"]) {
+    const el = document.querySelector(sel);
+    if (el) el.addEventListener("input", paintSpellBook);
+  }
+  for (const sel of ["#prep-find", "#prep-level"]) {
+    const el = document.querySelector(sel);
+    if (el) el.addEventListener("input", () => {
+      if (state.prayers) paintPrepList(state.prayers);
+    });
   }
 
   document.querySelector("#perform-audience").addEventListener("change", paintOdds);

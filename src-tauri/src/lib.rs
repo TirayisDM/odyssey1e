@@ -45,6 +45,7 @@ mod naming;
 mod narrative;
 mod objects;
 mod pin;
+mod prayers;
 mod resolution;
 mod size;
 mod slots;
@@ -1289,6 +1290,10 @@ pub fn run() {
             commands::characters::rename_character,
             commands::characters::set_class_level,
             commands::characters::remove_class,
+            commands::prayers::list_spells,
+            commands::prayers::list_prayers,
+            commands::prayers::prepare_prayer,
+            commands::prayers::forget_prayer,
             commands::effects::list_effects,
             commands::effects::apply_effect,
             commands::effects::end_effect,

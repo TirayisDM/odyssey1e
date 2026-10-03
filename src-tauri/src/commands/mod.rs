@@ -87,6 +87,7 @@ pub mod inventory;
 pub mod log;
 pub mod locations;
 pub mod perform;
+pub mod prayers;
 pub mod session;
 pub mod store;
 pub mod time;

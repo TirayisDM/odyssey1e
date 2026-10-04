@@ -121,9 +121,14 @@ def main() -> int:
         # newline="" so Python does not translate \n to \r\n on Windows -
         # a CRLF file would not match the MD5 and would be a different
         # file from the one that ran.
-        path.write_text(sql, encoding="utf-8", newline="")
+        # PLAIN open() RATHER THAN Path.write_text/read_text, which
+        # only grew a `newline` argument in 3.10 and 3.13. This has
+        # to run on whatever Python somebody already has.
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(sql)
 
-        got = hashlib.md5(path.read_text(encoding="utf-8", newline="").encode("utf-8")).hexdigest()
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            got = hashlib.md5(fh.read().encode("utf-8")).hexdigest()
         if got == want:
             written.append(path.name)
             print(f"  {path.name:<60} {len(sql):>6} chars  md5 ok")
@@ -131,11 +136,21 @@ def main() -> int:
             failed.append(path.name)
             print(f"  {path.name:<60} MD5 MISMATCH - wrote {got}, wanted {want}")
 
-    # THE GAPS NOTHING CAN FILL. A migration applied through the SQL
-    # editor is not recorded here, so a number with no file and no row is
-    # schema that exists in the database and is written down nowhere.
+    # NUMBERS WITH NEITHER A FILE NOR A RECORD.
+    #
+    # IN THIS PROJECT THAT IS USUALLY NOTHING TO WORRY ABOUT. Every
+    # CHANGE gets a number and only a change that touches the schema
+    # gets a migration, so most gaps are a number that landed in Rust or
+    # JavaScript - 070 taught the sheet to show a description, 099 is an
+    # ability cap in species.rs, 111 and 112 gave casting a target.
+    #
+    # SO THIS REPORTS AND DOES NOT ACCUSE. A gap COULD also be a
+    # migration applied through the SQL editor, which records nothing -
+    # and this script cannot tell the two apart. Saying "missing" would
+    # send somebody hunting for schema that was never written, which is
+    # a worse failure than the one this tool exists for.
     highest = max([int(n) for n in set(on_disk) | set(in_db)] or [0])
-    unrecoverable = [
+    gaps = [
         f"{n:03d}" for n in range(1, highest + 1)
         if f"{n:03d}" not in on_disk and f"{n:03d}" not in in_db
     ]
@@ -145,14 +160,15 @@ def main() -> int:
         print(f"recovered {len(written)} migration(s), every one MD5-verified")
     if failed:
         print(f"FAILED on {len(failed)}: {', '.join(failed)}")
-    if unrecoverable:
-        print(
-            f"still missing and NOT in the database's record ({len(unrecoverable)}):\n"
-            f"  {', '.join(unrecoverable)}\n"
-            "  These were applied by a route that records nothing. They have to be\n"
-            "  reconstructed from the live schema by hand - `pg_dump --schema-only`\n"
-            "  is the place to start."
-        )
+    if gaps:
+        print(f"{len(gaps)} number(s) with no migration file and no database record:")
+        print(f"  {', '.join(gaps)}")
+        print("  Normally these are changes that touched no schema, which is most of")
+        print("  them - the number is cited in the Rust or the JavaScript instead.")
+        print("  Nothing here can confirm that. If you suspect one WAS a migration,")
+        print("  applied through the SQL editor and so recorded nowhere, compare the")
+        print("  live schema against a fresh build of this folder.")
+
     return 1 if failed else 0
 
 

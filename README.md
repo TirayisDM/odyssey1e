@@ -186,28 +186,36 @@ Run the security advisor after every DDL change. Three
 `is_game_member`, `is_game_dm` and `join_game` need `authenticated` to
 hold `EXECUTE` or every policy fails closed.
 
-### The migrations folder cannot rebuild the database
+### The numbering, and why it has gaps
 
-Read this before you trust it. There are **92 files numbered up to 118**,
-and the 26 gaps are migrations that were applied to the live project and
-whose `.sql` file was never committed:
+**EVERY CHANGE GETS A NUMBER, NOT EVERY CHANGE GETS A MIGRATION.** The
+number is the change, and it is cited from wherever the work landed —
+`-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
+on a Rust method. A change that touched no schema has a number and no
+file here, which is why 99 files run from 001 to 118.
+
+The 19 gaps are all of that kind, and the comments say so in as many
+words: 070 "taught the sheet to show it" where 071 filled the column;
+099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
+`species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust.
 
 ```
-066-070  072  079-083  090  091  099  101-112
+066-070  072  079-083  090  091  099  108-112
 ```
 
-They are real schema — the spell catalogue and the cleric list are in
-there — so the live database is ahead of this folder and `supabase db
-reset` would produce something that does not match it.
-
-Seven of the 26 (101–107) are recoverable from
-`supabase_migrations.schema_migrations`, which stores the statements.
-The rest were applied by a route that does not record them and would
-have to be reconstructed from the schema.
+**The chain is complete.** Every migration the database has a record of
+has a file here, MD5-verified against
+`supabase_migrations.schema_migrations`. It was not complete until
+2026-10-03: seven files (101–107 — the spell catalogue and the whole
+cleric list) had been applied to the live project and never committed,
+the same fault 0ed7491 fixed for four others. They were recovered from
+the database's own record, so they are the files AS APPLIED rather than
+a reconstruction of what they probably said.
 
 **The habit that caused it:** applying a migration and writing the file
-afterwards, which means never, rather than writing the file and applying
-it in the same breath. Do the second one.
+afterwards, which in practice means never. Write the file and apply it
+in the same breath. `tools/recover_migrations.py` is there so that if it
+happens again it is one command rather than an afternoon.
 
 ---
 

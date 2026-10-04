@@ -3307,6 +3307,43 @@ is a caller. The row shows every modifier with its name on it, and
 `state.scriptedSave` already short-circuits it, so a trap that knows its
 own difficulty is a line of wiring rather than a rewrite.
 
+## The migrations that were missing - RECOVERED (101-107)
+
+`supabase/migrations/` is the record of how this schema was built and
+for a while it was an incomplete one. Seven files had been applied to
+the live project and never committed - 101, the spell catalogue, and
+102 to 107, the whole cleric list with prepared prayers and slots.
+
+RECOVERED FROM THE DATABASE'S OWN RECORD, not retyped.
+`supabase_migrations.schema_migrations` keeps the statements it ran,
+headers and all, so these are the files AS APPLIED. Every one was
+MD5-verified against that record rather than read over:
+
+```
+101  3,331 chars   5b84f3c9205cb5d4a12598abd81e0b2b
+102 15,781 chars   0036c54778715165e9cc6fd2518d0eeb
+103 16,224 chars   ff6c9bfc1631396320c3787bf1dd0c2f
+104 11,027 chars   5a0f3b599134a4a6004daeee327518b4
+105  1,049 chars   f4607ce04066d471bd0aec7162957dd9
+106  4,066 chars   a969beedd8f5bfdf66d2866677eed8c5
+107  3,490 chars   6e335aada525e0314c8d42a23f53ea5b
+```
+
+AND THE OTHER NINETEEN GAPS TURNED OUT TO BE NOTHING. The first pass at
+this called all 26 of them missing migrations, which was wrong and got
+as far as the README before it was checked. Every change in this project
+gets a number; only a change that touches the schema gets a migration
+file. The comments say so where the numbers landed - 070 "taught the
+sheet to show it" and 071 filled the column; 099 is an ability cap in
+`species.rs`; 111 and 112 gave casting a target in JavaScript and Rust.
+Nineteen numbers, no schema, nothing missing.
+
+THE LESSON IS THE HABIT, not the recovery. Write the migration file in
+the same breath as applying it. `tools/recover_migrations.py` is the
+backstop: it writes any migration the database has a record of and the
+folder does not, MD5-checks each one, and names the numbers it cannot
+help with.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square
@@ -3343,13 +3380,25 @@ the session still lives in memory - a PIN saves you retyping a password,
 but a restart signs you out and persisting it wants the OS keychain
 rather than a file.
 
-**The migration folder cannot rebuild the database.** 92 files numbered
-to 118; the 26 gaps (066-070, 072, 079-083, 090, 091, 099, 101-112) were
-applied and never committed. 101-107 are recoverable from
-`supabase_migrations.schema_migrations`, which stores the statements;
-the rest would have to be reconstructed from the live schema. The habit
-that caused it is applying first and writing the file afterwards, which
-means never. Write the file and apply it in the same breath.
+**The migration chain is complete, and was not on 2026-10-03.** Seven
+files - 101 to 107, the spell catalogue and the whole cleric list - had
+been applied to the live project and never committed, the same fault
+0ed7491 fixed for four others. They were recovered from
+`supabase_migrations.schema_migrations`, which keeps the statements it
+ran with the comment headers intact, and every one was MD5-verified
+against that record, so they are the files AS APPLIED.
+
+**The 19 remaining gaps are not missing anything.** Every change gets a
+number; only a change that touches the schema gets a migration. 070
+taught the sheet to show a description and 071 filled the column; 099
+is an ability cap in `species.rs`; 111 and 112 gave casting a target in
+JavaScript and Rust. Checked against the database's own record: every
+numbered migration it has, this folder has.
+
+The habit that caused the gap was applying first and writing the file
+afterwards, which in practice means never. Write the file and apply it
+in the same breath. `tools/recover_migrations.py` makes the recovery one
+command if it happens again.
 
 006 is applied and every seeded table was checksum-verified against the
 spreadsheet. Read the 006 header: spells and techniques were ported

@@ -181,10 +181,21 @@ Full reasoning is in the migration files; the short version:
    triggers fire.** Any table whose visibility depends on a row an AFTER
    trigger creates will fail in a way that blames the insert. (004)
 
-Run the security advisor after every DDL change. Three
-`SECURITY DEFINER` warnings are expected and must not be "fixed" —
-`is_game_member`, `is_game_dm` and `join_game` need `authenticated` to
-hold `EXECUTE` or every policy fails closed.
+Run the security advisor after every DDL change. **Six
+`SECURITY DEFINER` warnings are expected and must not be "fixed":**
+
+| | why it has to be definer |
+|---|---|
+| `is_game_member`, `is_game_dm` | every policy calls them; invoker rights and they cannot see the rows they are deciding about, so everything fails closed |
+| `holder_character`, `holder_is_a_location` | the same, for the policies on objects |
+| `join_game`, `instantiate_npc` | RPCs that write rows the caller provably cannot write yet — that is the whole job |
+
+The first four are verifiably referenced by live policies; checking that
+is one query against `pg_policies` rather than a matter of opinion.
+
+Two other advisor notes are real and open: leaked-password protection
+(HaveIBeenPwned checking on signup) is off, and would be worth turning
+on before the project has users who are not you.
 
 ### The numbering, and why it has gaps
 

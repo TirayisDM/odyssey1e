@@ -390,7 +390,8 @@ pub fn cast_prayer(
         }
         let spent = load_slots(&token, &character_id)?;
         prayers::may_spend_slot(cleric.level, &spent, want)?;
-        write_slot(&token, &character_id, want, spent[(want - 1) as usize] + 1)?;
+        let i = (want - 1) as usize;
+        move_slot(&token, &character_id, want, spent[i], spent[i] + 1)?;
         used = Some(want);
     }
 
@@ -571,7 +572,7 @@ pub fn spend_spell_slot(
     prayers::may_spend_slot(level, &spent, slot_level)?;
 
     let i = (slot_level - 1) as usize;
-    write_slot(&token, &character_id, slot_level, spent[i] + 1)?;
+    move_slot(&token, &character_id, slot_level, spent[i], spent[i] + 1)?;
     Ok(json!({ "left": prayers::slots_left(level, &spent)[i] - 1 }))
 }
 
@@ -592,7 +593,7 @@ pub fn restore_spell_slot(
     if spent[i] <= 0 {
         return Err("nothing to give back".to_string());
     }
-    write_slot(&token, &character_id, slot_level, spent[i] - 1)?;
+    move_slot(&token, &character_id, slot_level, spent[i], spent[i] - 1)?;
     Ok(json!({ "left": prayers::slots_left(level, &spent)[i] + 1 }))
 }
 
@@ -620,19 +621,73 @@ pub(crate) fn load_slots(token: &str, character_id: &str) -> Result<[i64; 9], St
     Ok(out)
 }
 
-fn write_slot(token: &str, character_id: &str, level: i64, spent: i64) -> Result<(), String> {
-    supabase::rest_upsert(
+/// Move one level's spent count from `was` to `now`, and only if it is
+/// still `was`.
+///
+/// 120. COMPARE AND SET, NOT READ-MODIFY-WRITE. This used to take an
+/// absolute number and write it, which is correct exactly once:
+///
+/// ```text
+/// let spent = load_slots(..)?;            // both casts read 0
+/// may_spend_slot(level, &spent, want)?;   // both pass the check
+/// write_slot(.., want, spent[i] + 1)?;    // both write 1
+/// ```
+///
+/// Two castings, two effects on the target, two action rows - and one
+/// slot gone. A double-click on `cast` did exactly that, and 120 guards
+/// the button as well; this is the half that holds when the second
+/// press arrives from somewhere a button guard cannot see.
+///
+/// THE PREDICATE IS THE WHOLE POINT. `spent=eq.{was}` means the UPDATE
+/// matches nothing if anybody moved it first, and PostgREST hands back
+/// the rows it touched - so an empty array IS the collision, reported
+/// rather than silently lost.
+///
+/// NO ROW YET IS NOT A COLLISION. The first spend of a level has
+/// nothing to update, so a `was` of zero that matches no row falls
+/// through to an insert; a second one racing it loses on the primary
+/// key, which is the same refusal by another route.
+fn move_slot(
+    token: &str,
+    character_id: &str,
+    level: i64,
+    was: i64,
+    now: i64,
+) -> Result<(), String> {
+    let landed = supabase::rest_update_if(
         token,
         "character_slots",
-        &json!({
-            "character_id": character_id,
-            "slot_level": level,
-            "spent": spent.max(0),
-        }),
-        "character_id,slot_level",
+        &[
+            ("character_id", &format!("eq.{}", character_id)),
+            ("slot_level", &format!("eq.{}", level)),
+            ("spent", &format!("eq.{}", was)),
+        ],
+        &json!({ "spent": now.max(0) }),
     )?;
-    Ok(())
+    if landed {
+        return Ok(());
+    }
+
+    if was == 0 {
+        return supabase::rest_insert(
+            token,
+            "character_slots",
+            &json!({
+                "character_id": character_id,
+                "slot_level": level,
+                "spent": now.max(0),
+            }),
+        )
+        .map(|_| ())
+        .map_err(|_| STALE.to_string());
+    }
+
+    Err(STALE.to_string())
 }
+
+/// What a lost race is called, in one place so both callers say it.
+const STALE: &str =
+    "that slot moved while this was in flight - look at the sheet and try again";
 
 /// The cleric level, refusing anybody who is not one.
 fn cleric_level(token: &str, character_id: &str) -> Result<i64, String> {

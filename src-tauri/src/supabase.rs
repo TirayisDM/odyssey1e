@@ -402,6 +402,29 @@ pub fn rest_update(
     serde_json::from_str(&text).map_err(|e| format!("bad JSON from Supabase: {}", e))
 }
 
+/// PATCH that applies only if the row still looks the way the caller
+/// last read it, and says whether it matched.
+///
+/// 120. FOR A COUNTER THAT IS READ BEFORE IT IS WRITTEN. Spending a
+/// spell slot or a feature use is read-check-write, and writing an
+/// ABSOLUTE number means two presses that read the same value both
+/// write the same value: two things spent, one counted. Putting the
+/// value you read into the filter - `spent=eq.3` - makes the second
+/// write match no row at all.
+///
+/// FALSE IS NOT AN ERROR, it is the collision. The caller decides what
+/// to do about it, because "no row yet" and "somebody beat me" are the
+/// same empty answer and only the caller knows which is possible.
+pub fn rest_update_if(
+    token: &str,
+    path: &str,
+    filter: &[(&str, &str)],
+    body: &Value,
+) -> Result<bool, String> {
+    let rows = rest_update(token, path, filter, body)?;
+    Ok(rows.as_array().map(|a| !a.is_empty()).unwrap_or(false))
+}
+
 /// Call a Postgres function. join_game() is the one that matters.
 pub fn rpc(token: &str, func: &str, body: &Value) -> Result<Value, String> {
     let resp = http()

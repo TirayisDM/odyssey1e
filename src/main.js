@@ -108,20 +108,45 @@ function log(cmd, value, isError) {
 // Disabling for the duration makes it impossible from this side, and a
 // second dispatch that arrives while the first is in flight is dropped
 // rather than queued.
-function guarded(selector, fn) {
-  const el = document.querySelector(selector);
+//
+// 120. TAKES AN ELEMENT, because the buttons that needed it most could
+// not be named. `guarded` was selector-only, so it reached the ten
+// buttons that exist in index.html and none of the ones built per row -
+// cast, prepare, forget, spend a slot, give it back, roll a save, put a
+// thing in a container, hand over an item. Eight writes, every one of
+// them a second write on a double-click, and casting was the one that
+// cost a slot and left two effects on the target.
+//
+// THE SELECTOR FORM IS THIS ONE WITH A LOOKUP IN FRONT, so there is one
+// mechanism rather than two that can drift.
+function guard(el, fn) {
+  if (!el) return el;
   let busy = false;
-  el.addEventListener("click", async () => {
-    if (busy) return;
+  el.addEventListener("click", async (ev) => {
+    if (busy) {
+      // SWALLOWED, not queued. The click happened; the work did not.
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
     busy = true;
     el.disabled = true;
     try {
-      await fn();
+      await fn(ev);
     } finally {
       busy = false;
+      // A HANDLER MAY HAVE REPAINTED THE PANEL OUT FROM UNDER US, which
+      // is the common case here - loadPrayers() rebuilds every row. The
+      // element is then detached and re-enabling it is harmless; what
+      // must not happen is leaving a LIVE button disabled for ever.
       el.disabled = false;
     }
   });
+  return el;
+}
+
+function guarded(selector, fn) {
+  return guard(document.querySelector(selector), fn);
 }
 
 // Every command goes through here so nothing can fail silently.
@@ -1103,8 +1128,9 @@ function paintCastable() {
     const pickKind = (sp.choices || []).length ? kindPicker(sp.choices) : null;
     if (pickKind) row.append(pickKind);
 
-    go.addEventListener("click", () =>
-      doCast(sp, at.value, pickKind ? pickKind.value : null));
+    // 120. GUARDED. A double-click here spent one slot and cast twice -
+    // two effects on the target and two action rows, out of one slot.
+    guard(go, () => doCast(sp, at.value, pickKind ? pickKind.value : null));
 
     row.append(sEl("span", "castname", sp.name));
     row.append(sEl("span", "caststance", sp.stance));
@@ -1359,13 +1385,13 @@ async function loadPrayers(sheet) {
 
     const spend = sEl("button", "ghost tiny", "cast");
     spend.disabled = left <= 0;
-    spend.addEventListener("click", () => slotMove("spend_spell_slot", lvl));
+    guard(spend, () => slotMove("spend_spell_slot", lvl));
     chipEl.append(spend);
 
     if (left < have) {
       const back = sEl("button", "ghost tiny", "+1");
       back.title = "give one back";
-      back.addEventListener("click", () => slotMove("restore_spell_slot", lvl));
+      guard(back, () => slotMove("restore_spell_slot", lvl));
       chipEl.append(back);
     }
     slots.append(chipEl);
@@ -1473,7 +1499,7 @@ function ordinal(n) {
 
 function forgetButton(key) {
   const b = sEl("button", "ghost tiny", "put down");
-  b.addEventListener("click", async () => {
+  guard(b, async () => {
     const r = await tryCall("forget_prayer", {
       characterId: state.characterId,
       spellKey: key,
@@ -1533,7 +1559,7 @@ function paintPrepList(got) {
 
 function prepareButton(sp) {
   const b = sEl("button", "ghost tiny", sp.level === 0 ? "learn" : "prepare");
-  b.addEventListener("click", async () => {
+  guard(b, async () => {
     const r = await tryCall("prepare_prayer", {
       characterId: state.characterId,
       spellKey: sp.key,
@@ -1590,7 +1616,7 @@ function paintEffects(where) {
 
     const stop = sEl("button", "", "×");
     stop.title = "end it now";
-    stop.addEventListener("click", async () => {
+    guard(stop, async () => {
       const r = await tryCall("end_effect", { gameId: state.gameId, effectId: fx.id });
       if (!r.ok) return log("end_effect", r.error, true);
       await loadEffects();
@@ -1625,7 +1651,7 @@ function paintClock(where, got) {
   for (const step of got.steps || []) {
     const b = sEl("button", "ghost tiny", "+" + step.label);
     b.title = step.ticks + " ticks";
-    b.addEventListener("click", async () => {
+    guard(b, async () => {
       const r = await tryCall("advance_time", {
         gameId: state.gameId,
         ticks: step.ticks,
@@ -2224,7 +2250,7 @@ function askSaveDC(code, line) {
     host.hidden = true;
     rollSave(code, n, !!(vs && vs.checked), null);
   };
-  go.addEventListener("click", fire);
+  guard(go, fire);
   no.addEventListener("click", () => { host.hidden = true; });
   dc.addEventListener("keydown", (e) => {
     if (e.key === "Enter") fire();
@@ -2629,7 +2655,7 @@ function objectControls(it, onDone) {
     put.className = "tiny ghost";
     put.textContent = "put in";
     put.title = "a coin purse takes only coins";
-    put.addEventListener("click", async () => {
+    guard(put, async () => {
       // tryCall, not call: a refusal here is the rule working - the
       // purse saying no to a sword - and it is worth reading.
       const r = await tryCall("put_in_container", {
@@ -4019,7 +4045,7 @@ function featureRow(f, asking) {
 
     const use = sEl("button", "ghost tiny", "Use");
     use.disabled = f.left <= 0;
-    use.addEventListener("click", async () => {
+    guard(use, async () => {
       const r = await tryCall("spend_use", {
         characterId: state.characterId,
         classKey: f.class_key,
@@ -4035,7 +4061,7 @@ function featureRow(f, asking) {
     if (f.spent > 0) {
       const back = sEl("button", "ghost tiny", "+1");
       back.title = "give one back";
-      back.addEventListener("click", async () => {
+      guard(back, async () => {
         const r = await tryCall("restore_use", {
           characterId: state.characterId,
           classKey: f.class_key,
@@ -4923,8 +4949,11 @@ function paintHold(host, encounterId, actor, order) {
     const b = sEl("button", "slot" + (on ? " on" : ""));
     b.textContent = (on ? "\u2611 " : "\u2610 ") + label;
     b.title = why;
-    b.addEventListener("click", async () => {
-      b.disabled = true;
+    // 120. GUARDED, and that is a fix rather than a tidy-up: this
+    // disabled the button and never re-enabled it, leaning on loadDM()
+    // repainting to replace it. A repaint that did not happen left a
+    // dead control on screen.
+    guard(b, async () => {
       // A TOGGLE, like the slots: pressing the declaration you are
       // already under takes it off.
       const r = on
@@ -7011,22 +7040,19 @@ async function paintActorView(host, actor, encounterId) {
     const go = document.createElement("button");
     go.className = "tiny ghost";
     go.textContent = "give";
-    let giving = false;
-    go.addEventListener("click", async () => {
-      if (giving) return;
-      giving = true; go.disabled = true;
-      try {
-        dmSay("");
-        const r = await tryCall("give_item", {
-          characterId: sh.character_id,
-          itemKey: pick.value,
-        });
-        if (!r.ok) { dmSay(r.error, true); return; }
-        // Unequipped on arrival, so the attack list does not change
-        // until somebody says it should.
-        dmSay(actor.label + " now carries " + (pick.selectedOptions[0] || {}).textContent);
-        await paintActorView(host, actor, encounterId);
-      } finally { giving = false; go.disabled = false; }
+    // 120. WAS ITS OWN CORRECT COPY OF guard(), down to the finally.
+    // One mechanism, so there is one place to get it right.
+    guard(go, async () => {
+      dmSay("");
+      const r = await tryCall("give_item", {
+        characterId: sh.character_id,
+        itemKey: pick.value,
+      });
+      if (!r.ok) { dmSay(r.error, true); return; }
+      // Unequipped on arrival, so the attack list does not change
+      // until somebody says it should.
+      dmSay(actor.label + " now carries " + (pick.selectedOptions[0] || {}).textContent);
+      await paintActorView(host, actor, encounterId);
     });
     add.append(pick, go);
     host.append(add);

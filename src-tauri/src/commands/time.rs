@@ -188,17 +188,7 @@ pub fn spend_use(
     let (max, spent) = one_feature(&token, &character_id, &class_key, &feature_key)?;
     crate::uses::may_spend(max, spent)?;
 
-    supabase::rest_upsert(
-        &token,
-        "character_uses",
-        &json!({
-            "character_id": character_id,
-            "class_key": class_key,
-            "feature_key": feature_key,
-            "spent": spent + 1,
-        }),
-        "character_id,class_key,feature_key",
-    )?;
+    move_use(&token, &character_id, &class_key, &feature_key, spent, spent + 1)?;
     Ok(json!({ "left": crate::uses::left(max, spent + 1) }))
 }
 
@@ -215,21 +205,67 @@ pub fn restore_use(
     if spent <= 0 {
         return Err("nothing to give back".to_string());
     }
-    supabase::rest_upsert(
-        &token,
-        "character_uses",
-        &json!({
-            "character_id": character_id,
-            "class_key": class_key,
-            "feature_key": feature_key,
-            "spent": spent - 1,
-        }),
-        "character_id,class_key,feature_key",
-    )?;
+    move_use(&token, &character_id, &class_key, &feature_key, spent, spent - 1)?;
     Ok(json!({ "left": crate::uses::left(max, spent - 1) }))
 }
 
 /* ======================== THE WORKING PARTS ======================== */
+
+/// Move one feature's spent count from `was` to `now`, and only if it
+/// is still `was`.
+///
+/// 120. THE SAME FAULT THE SPELL SLOTS HAD, one function over. Reading
+/// a count, checking it and then writing an absolute number is correct
+/// exactly once: two presses that both read 2 both write 3, so Action
+/// Surge is used twice and counted once. The value that was read goes
+/// into the filter, so the second write matches no row.
+///
+/// NO ROW YET IS NOT A COLLISION - the first use of a feature has
+/// nothing to update and falls through to an insert, where a second one
+/// racing it loses on the primary key instead.
+fn move_use(
+    token: &str,
+    character_id: &str,
+    class_key: &str,
+    feature_key: &str,
+    was: i64,
+    now: i64,
+) -> Result<(), String> {
+    const STALE: &str =
+        "that count moved while this was in flight - look at the sheet and try again";
+
+    let landed = supabase::rest_update_if(
+        token,
+        "character_uses",
+        &[
+            ("character_id", &format!("eq.{}", character_id)),
+            ("class_key", &format!("eq.{}", class_key)),
+            ("feature_key", &format!("eq.{}", feature_key)),
+            ("spent", &format!("eq.{}", was)),
+        ],
+        &json!({ "spent": now.max(0) }),
+    )?;
+    if landed {
+        return Ok(());
+    }
+
+    if was == 0 {
+        return supabase::rest_insert(
+            token,
+            "character_uses",
+            &json!({
+                "character_id": character_id,
+                "class_key": class_key,
+                "feature_key": feature_key,
+                "spent": now.max(0),
+            }),
+        )
+        .map(|_| ())
+        .map_err(|_| STALE.to_string());
+    }
+
+    Err(STALE.to_string())
+}
 
 struct Rester {
     id: String,

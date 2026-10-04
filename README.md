@@ -131,6 +131,29 @@ a `commands/` file, that is the smell.
 A second rule with the same cause: **800 lines per file is the point to
 split, not the ceiling to reach,** and a new subsystem gets a new file.
 
+### Two rules about writing
+
+**A button that writes goes through `guard`.** Every roll is a fresh
+set of dice and a fresh row, so a second dispatch is not a harmless
+duplicate - it is a second swing nobody took. `guard(el, fn)` takes an
+element; `guarded(selector, fn)` is the same function with a lookup in
+front. A button built per row needs the first one, which is how eight
+writes went unguarded until 120.
+
+**A counter that is read before it is written moves by compare-and-set.**
+Read-check-write with an absolute number is correct exactly once:
+
+```rust
+let spent = load_slots(..)?;            // both presses read 0
+may_spend_slot(level, &spent, want)?;   // both pass the check
+write_slot(.., want, spent[i] + 1)?;    // both write 1
+```
+
+Two spells cast, one slot spent. `supabase::rest_update_if` puts the
+value you read into the filter - `spent=eq.3` - so a write that lost
+the race matches no row, and an empty result IS the collision. Spell
+slots and feature uses both go through it.
+
 ### Calling Rust from JS
 
 A `#[tauri::command]` becomes callable from the frontend. Arguments are

@@ -3344,6 +3344,69 @@ backstop: it writes any migration the database has a record of and the
 folder does not, MD5-checks each one, and names the numbers it cannot
 help with.
 
+## A double-click was a second cast - FIXED (120)
+
+Found by auditing the prayer subsystem rather than by anything going
+wrong at the table, which is the only reason it is in this file and not
+in a bug report.
+
+TWO HALVES, AND THE BUTTON WAS THE SMALLER ONE.
+
+**The button.** `guarded()` has existed since the death-save work and
+its own comment says why: "a second dispatch is not a harmless
+duplicate - it is a second swing nobody took". It took a SELECTOR, so
+it reached the ten buttons that exist in `index.html` and none of the
+ones built per row. Eight writes were unguarded - cast, prepare,
+forget, spend a slot, give one back, roll a save, put a thing in a
+container, give a feature use back. It takes an element now, and
+`guarded(selector, fn)` is that function with a lookup in front, so
+there is one mechanism rather than two that can drift.
+
+**The slot.** The half that actually corrupted state, and a button
+guard only hides it:
+
+```text
+let spent = load_slots(..)?;            // both casts read 0
+may_spend_slot(level, &spent, want)?;   // both pass the check
+write_slot(.., want, spent[i] + 1)?;    // both write 1
+```
+
+Two castings, two effects on the target, two action rows - and ONE
+slot spent. `move_slot` is compare-and-set instead: the PATCH carries
+`spent=eq.<what we read>`, so a write that lost the race matches no row
+at all, and PostgREST handing back an empty array IS the collision,
+reported rather than silently applied. No row yet is not a collision -
+the first spend of a level falls through to an insert, and a second one
+racing it loses on the primary key, which is the same refusal by
+another route.
+
+VERIFIED BOTH ENDS. A rolled-back probe on the live database:
+`winner=1 rows, loser=0 rows, final spent=4` - the stale write matched
+nothing rather than overwriting. And in the stub rig, three presses
+inside thirty milliseconds against a 400ms cast produced ONE
+`cast_prayer`, the button disabled for the flight and enabled after,
+and a handler that throws still leaves its button usable.
+
+AND THE SAME FAULT ONE FUNCTION OVER. `character_uses` had the identical
+shape - `spend_use` read a count, checked it, and upserted an absolute
+number - so a double-click on Action Surge granted two and counted one.
+Its button was unguarded too. Both halves fixed the same way, with the
+conditional PATCH extracted to `supabase::rest_update_if` so there is
+one copy rather than two.
+
+TWO THINGS FOUND ON THE WAY. The hold/release button in the DM panel
+disabled itself and never re-enabled, leaning on a repaint to replace
+it - a repaint that did not happen left a dead control on screen. And
+`give_item` carried its own correct copy of `guard`, finally and all.
+Both now go through the one mechanism; the first was a bug and the
+second was a second place to get it right.
+
+THE RULE THIS LEAVES: **a button that writes goes through `guard`, and
+a counter that is read before it is written moves by compare-and-set
+rather than by an absolute number.** Sixteen call sites now, and the
+audit that found this is a dozen lines of Python worth re-running after
+any panel grows a button.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

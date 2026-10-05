@@ -302,6 +302,8 @@ Working, roughly in the order it was built:
   everything an item does to whoever wears it
 * **Combat** — attacks and techniques, initiative, action economy, death
   saves and massive damage, damage resistance/immunity/vulnerability
+  from five sources - a species, a class feature, a spell, an item and a
+  monster's statblock - each named on the sheet
 * **Time** — one game clock in six-second ticks, short and long rests,
   hit dice, feature uses and recharges, effects that expire
 * **Casting** — the cleric spell list, prepared prayers, slots by level,

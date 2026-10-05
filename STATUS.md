@@ -3407,6 +3407,61 @@ rather than by an absolute number.** Sixteen call sites now, and the
 audit that found this is a dozen lines of Python worth re-running after
 any panel grows a button.
 
+## A monster can say what it resists - BUILT (121)
+
+116 gave resistance four sources - a species, a class feature, a spell,
+an item - and not the one that matters most at a table. The commonest
+resistance in 5e is not on a player at all: it is "bludgeoning, piercing
+and slashing from nonmagical attacks" on half the Monster Manual, and
+`npcs` had no column to say it with.
+
+TWO COLUMNS, AND THE SECOND ONE IS THE INTERESTING ONE.
+`npcs.grants` is what a statblock states, in 100's vocabulary like
+everything else. `characters.npc_key` is which statblock a creature was
+made from - information `instantiate_npc` had been throwing away since
+022. It read a statblock, copied six numbers out of it and forgot where
+they came from, so nothing downstream could ever ask the statblock
+another question.
+
+A KEY AND NOT A COPY, which is `species_key` since 056 doing exactly
+this. `load_npc_grants` reads the statblock when the sheet loads, so
+correcting a statblock corrects every goblin already on the board, with
+no backfill and nothing touched mid-fight.
+
+THE ALTERNATIVE WAS `characters.grants`, copied at instantiation, and it
+was rejected twice over. It is a snapshot, so fixing a typo leaves every
+creature already on the board wrong. And a general grants column on a
+character would be read by the resistance path and by nothing else -
+seven `worn_grants` call sites would have to be widened to make an `ac`
+target work there, and until they were, writing one would be a silent
+no-op. That is the defect this codebase is named for.
+
+VERIFIED, AND THE SECOND USER IS WHY IT MATTERED. The migration lands on
+a database jec is also using, so `instantiate_npc` was exercised after
+the change rather than assumed: a rolled-back probe built a creature
+with `npc_key=goblin` and two kit items, and the backfill linked the one
+NPC already on the board. 089's lesson was followed in the order of
+statements - columns before the function that names them, because
+plpgsql resolves field names at run time and a function naming a missing
+column compiles clean and fails on the button.
+
+NOT SEEDED, DELIBERATELY. The catalogue holds three statblocks and all
+three are goblins, which resist nothing in 5e. Inventing a monster to
+demonstrate a column would be putting game content in a schema
+migration. One statement gives a statblock a resistance:
+
+```sql
+update npcs set grants = '[{"target":"resist.poison","source":"Goblin"}]'
+ where key = 'goblin';
+```
+
+WHAT IS AND IS NOT EXERCISED. The schema, the backfill, the rebuilt
+`instantiate_npc` and the exact query shape the loader sends are all
+verified against the live database. `resist::from_grants` and
+`grants::parse` are tested in Rust on this shape of input. The thirty
+lines of glue between them mirror `load_species` and compile, and will
+not have run against real data until a statblock carries a grant.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

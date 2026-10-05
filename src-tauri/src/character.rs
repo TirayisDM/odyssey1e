@@ -817,6 +817,11 @@ pub struct Profile {
     pub tool_profs: Vec<String>,
     /// 056. None for every character made before it, and for monsters.
     pub species_key: Option<String>,
+    /// 121. Which statblock this creature came from, and None for every
+    /// player character. A KEY AND NOT A COPY, exactly as `species_key`
+    /// is - the statblock's traits are read when the sheet loads, so a
+    /// statblock corrected is every creature made from it corrected.
+    pub npc_key: Option<String>,
     /// 058.
     pub body: Body,
     pub vitals: Vitals,
@@ -882,7 +887,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
                 "id,entity_id,location_id,game_id,name,level,narrative_pack,\
                  weapon_profs,armor_profs,tool_profs,hp_max,hp_temp,hp_temp_max,\
                  ac_mode,ac_override,death_successes,death_failures,\
-                 exhaustion,inspiration,size,species_key,\
+                 exhaustion,inspiration,size,species_key,npc_key,\
                  height_ft,weight_lb,hair,skin,eyes,description,languages",
             ),
             ("id", &format!("eq.{}", character_id)),
@@ -915,6 +920,11 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         tool_profs: as_strings(c, "tool_profs"),
         species_key: c
             .get("species_key")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        npc_key: c
+            .get("npc_key")
             .and_then(|x| x.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_string),
@@ -975,6 +985,65 @@ fn as_opt_str_char(v: &Value, key: &str) -> Option<String> {
 /// this one already talks to the database - the same line commands/mod.rs
 /// draws, one level down. Callers outside the sheet need it too: an
 /// encumbrance read has to know a people carries one size larger.
+/// What a statblock says this creature IS.
+///
+/// 121. THE MONSTER HALF OF 116. Resistance had four sources and not
+/// one of them was a statblock, which is where 5e keeps most of its -
+/// half the Monster Manual resists something and `npcs` had nowhere to
+/// say it.
+///
+/// READ, NOT COPIED, which is `load_species` just below doing the same
+/// thing for the same reason: correcting a statblock corrects every
+/// goblin already on the board, with no backfill and nothing touched
+/// mid-fight.
+///
+/// A FAILURE IS NO TRAITS RATHER THAN NO SHEET. A statblock deleted out
+/// from under a creature leaves it resisting nothing, which is what it
+/// had before 121 - better than a character screen that will not open.
+pub(crate) fn load_npc_grants(
+    token: &str,
+    game_id: &str,
+    key: &str,
+) -> Vec<crate::grants::Grant> {
+    if key.is_empty() {
+        return Vec::new();
+    }
+    let Ok(rows) = crate::supabase::rest_get(
+        token,
+        "npcs",
+        &[
+            ("select", "key,name,grants,game_id"),
+            ("key", &format!("eq.{}", key)),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+        ],
+    ) else {
+        return Vec::new();
+    };
+    let empty = Vec::new();
+    let rows = rows.as_array().unwrap_or(&empty);
+
+    // THE GAME'S OWN ROW WINS over the global one, which is the
+    // precedence every other catalogue uses - and the same ordering
+    // `instantiate_npc` applies when it picks the statblock to build
+    // from, so the traits come off the row the creature was made from.
+    let row = rows
+        .iter()
+        .find(|r| r.get("game_id").map(|g| !g.is_null()).unwrap_or(false))
+        .or_else(|| rows.first());
+
+    let Some(r) = row else {
+        return Vec::new();
+    };
+    // THE STATBLOCK'S NAME AS THE FALLBACK SOURCE, so a grant that
+    // forgot to name itself reads as "Goblin" on the sheet rather than
+    // as a blank chip.
+    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("its kind");
+    match r.get("grants") {
+        Some(g) => crate::grants::parse(g, name),
+        None => Vec::new(),
+    }
+}
+
 pub(crate) fn load_species(
     token: &str,
     game_id: &str,
@@ -1702,6 +1771,14 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         resist_sources.extend(crate::resist::from_species(&sp.damage_resistances, &sp.name));
     }
     resist_sources.extend(crate::resist::from_grants(&worn_grants(&loadout)));
+    // 121. AND WHAT ITS KIND IS. A monster's traits live on the
+    // statblock, read through `npc_key` rather than copied onto the
+    // creature - None for every player character, which is most of them.
+    if let Some(key) = profile.npc_key.as_deref() {
+        resist_sources.extend(crate::resist::from_grants(
+            &load_npc_grants(token, &game_id, key),
+        ));
+    }
     resist_sources.extend(crate::resist::from_grants(
         &crate::features::load_passive_grants(token, &game_id, &classes)?,
     ));

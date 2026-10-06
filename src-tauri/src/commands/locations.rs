@@ -360,17 +360,40 @@ pub fn drop_here(
 #[tauri::command]
 pub fn who_is_where(state: State<AppState>, game_id: String) -> Result<Value, String> {
     let token = state.token()?;
-    supabase::rest_get(
+    let rows = supabase::rest_get(
         &token,
         "characters",
         &[
-            ("select", "id,name,token_name,is_npc,dead,is_active,location_id,entity_id,markup,disposition"),
+            // 140. `npc_key` AND `creature_type` TRAVEL WITH THE ROW, so
+            // the roster can tell a creature from a person. `is_npc` is
+            // the only thing it had and that answers a different
+            // question: a merchant somebody wrote and a goblin stamped
+            // from a statblock are both NPCs, and only one of them is a
+            // creature. Both are facts already on the row; neither is a
+            // rule, and nothing here decides anything with them.
+            ("select", "id,name,token_name,is_npc,npc_key,creature_type,dead,is_active,location_id,entity_id,markup,disposition"),
             // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
             ("is_template", "is.false"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "is_npc.asc,name.asc"),
         ],
-    )
+    )?;
+
+    // 140. AND WHETHER EACH ONE IS A CREATURE, decided here and not on
+    // the screen. It is one word compared against a constant, which is
+    // exactly the kind of rule that ends up written in two places and
+    // then disagrees - `skill_mods` is the scar. `creature::is_creature`
+    // owns it and is tested; this only carries the answer.
+    let mut out = rows.as_array().cloned().unwrap_or_default();
+    for row in &mut out {
+        let is_creature = crate::creature::is_creature(
+            row.get("creature_type").and_then(|v| v.as_str()),
+        );
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert("creature".to_string(), serde_json::json!(is_creature));
+        }
+    }
+    Ok(serde_json::json!(out))
 }
 
 /// What is happening in this place.

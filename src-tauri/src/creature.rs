@@ -163,6 +163,32 @@ pub fn of(own: Option<&str>, species: Option<&str>) -> Option<Kind> {
     own.and_then(Kind::parse).or_else(|| species.and_then(Kind::parse))
 }
 
+/// Is this a CREATURE rather than a person, for the roster's purposes?
+///
+/// 140. The Characters tab split on `is_npc`, which answers a different
+/// question: a merchant somebody wrote and a goblin stamped from a
+/// statblock are both NPCs, and the second kind arrives in tens. So the
+/// roster wanted a third list and needed a line to draw.
+///
+/// HUMANOID IS THE ONE THAT IS PEOPLE. Of 5e's fourteen that is the
+/// whole of it - a hill giant, a wolf and a skeleton are all things you
+/// fight, and an elf shopkeeper is not. Dave chose this over "did it
+/// come from a statblock", which would have made a merchant built on
+/// the commoner statblock into a creature.
+///
+/// UNSTATED IS NOT A CREATURE, and that follows 122 rather than being a
+/// new decision: a type nobody has filled in is unstated, not secretly
+/// anything, so a row with no type stays among the people where the DM
+/// can see it and say what it is. A monster that lands on the wrong tab
+/// for want of one word is a visible, fixable thing; a person quietly
+/// filed as a monster because the column was empty is not.
+pub fn is_creature(creature_type: Option<&str>) -> bool {
+    match creature_type.and_then(Kind::parse) {
+        Some(Kind::Humanoid) | None => false,
+        Some(_) => true,
+    }
+}
+
 /* ============================ TESTS ============================ */
 
 #[cfg(test)]
@@ -238,6 +264,30 @@ mod tests {
         // defaulting them would assert something about this world that
         // its designer had not said.
         assert_eq!(of(None, None), None);
+    }
+
+    /* ---------------- people and creatures (140) -------------------- */
+
+    #[test]
+    fn humanoid_is_the_one_that_is_people() {
+        assert!(!is_creature(Some("humanoid")));
+    }
+
+    #[test]
+    fn the_other_thirteen_are_creatures() {
+        for t in TYPES.iter().filter(|t| **t != "humanoid") {
+            assert!(is_creature(Some(t)), "{} read as people", t);
+        }
+    }
+
+    #[test]
+    fn unstated_stays_among_the_people() {
+        // 122's rule, applied: unstated is not secretly anything. A
+        // monster on the wrong tab for want of one word is visible and
+        // fixable; a person quietly filed as a monster is not.
+        assert!(!is_creature(None));
+        assert!(!is_creature(Some("")));
+        assert!(!is_creature(Some("undeadd")));
     }
 
     #[test]

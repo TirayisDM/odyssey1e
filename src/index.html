@@ -370,6 +370,16 @@
             <button class="tab" data-chars="npcs">
               NPCs <span class="count" id="n-npcs"></span>
             </button>
+            <!-- 140. A CREATURE IS A CHARACTER AND IS NOT A PERSON.
+                 `is_npc` was the only split and it answers a different
+                 question: a merchant somebody wrote and a goblin
+                 stamped from a statblock are both NPCs, and the second
+                 kind arrives in tens. The line is 5e's type - humanoid
+                 is the one that is people - and `creature::is_creature`
+                 draws it. -->
+            <button class="tab" data-chars="creatures">
+              Creatures <span class="count" id="n-creature-folk"></span>
+            </button>
           </nav>
 
           <div class="chars-pane" data-chars="pcs">
@@ -479,6 +489,25 @@
 
             <div class="sub">In play &mdash; individuals</div>
             <ul id="npc-list" class="list"></ul>
+          </div>
+
+          <!-- 140. THE CREATURES STANDING IN THIS GAME. Individuals,
+               not types: the bestiary of templates is the Creatures tab
+               along the top, and a statblock is written on the NPCs tab
+               beside this one. Everything here opens on the same
+               character sheet a player uses, because since 022 a
+               creature IS a character - which is also why a named one
+               belongs on this tab rather than somewhere of its own. -->
+          <div class="chars-pane" data-chars="creatures" hidden>
+            <div class="sub">In play &mdash; creatures</div>
+            <ul id="creature-folk-list" class="list"></ul>
+            <p class="muted small">
+              Anything that is not a humanoid &mdash; beasts, undead,
+              oozes, dragons. Edit one on its sheet; to change the TYPE
+              it was made from, use the Creatures tab. A creature whose
+              type nobody has stated yet is on the NPCs tab, because
+              unstated is not the same as unknown.
+            </p>
           </div>
         </section>
 

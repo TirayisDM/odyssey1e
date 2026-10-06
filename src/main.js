@@ -3843,8 +3843,28 @@ async function loadChars() {
   // Kept so the folded line can name whoever is being read without
   // asking again.
   state.folk = folk;
+  // 140. THREE LISTS OFF ONE ANSWER, still one round trip - the same
+  // argument the two were built on.
+  //
+  // `c.creature` COMES FROM THE ENGINE. The line is "is this a
+  // humanoid", which is one word compared against a constant and
+  // exactly the kind of rule that gets written twice and then
+  // disagrees - `skill_mods` is the scar. `creature::is_creature` owns
+  // it, with tests; this only reads the verdict.
+  //
+  // Dave chose it over "did it come from a statblock", which would have
+  // made a merchant built on the commoner statblock into a creature. An
+  // UNSTATED type stays among the people, per 122: a monster on the
+  // wrong tab for want of one word is visible and fixable, and a person
+  // quietly filed as a monster is not.
+  //
+  // A NAMED CREATURE STAYS A CREATURE. Naming Webbys does not make it a
+  // person - and all three lists are the Characters tab either way,
+  // because since 022 a creature IS a character.
   paintFolk("#pc-list", "#n-pcs", folk.filter((c) => !c.is_npc));
-  paintFolk("#npc-list", "#n-npcs", folk.filter((c) => c.is_npc));
+  paintFolk("#npc-list", "#n-npcs", folk.filter((c) => c.is_npc && !c.creature));
+  paintFolk("#creature-folk-list", "#n-creature-folk",
+            folk.filter((c) => c.is_npc && c.creature));
   paintChosen();
 
   // The TYPES, which are a different table and a different idea from
@@ -4439,6 +4459,22 @@ function paintFolk(listSel, countSel, folk) {
       d.className = "tag";
       d.textContent = "retired";
       li.append(d);
+    }
+    // 140. WHAT IT IS AND WHAT IT CAME FROM, on the row. Absent reads
+    // as absent rather than as humanoid - 122 - so a creature nobody
+    // has typed shows its statblock and no more.
+    if (c.creature_type) {
+      const t = document.createElement("span");
+      t.className = "tag";
+      t.textContent = c.creature_type;
+      li.append(t);
+    }
+    if (c.npc_key) {
+      const k = document.createElement("span");
+      k.className = "tag";
+      k.textContent = "from " + c.npc_key;
+      k.title = "stamped from that statblock - editing the type never reaches this one";
+      li.append(k);
     }
     // EDITING IS THE SHEET, which already exists and already writes
     // scores, level and skills. A second editor here would be a second

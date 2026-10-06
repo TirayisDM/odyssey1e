@@ -4003,6 +4003,39 @@ into a provenance column reads exactly like knowledge, which is the
 fault this codebase is named after; a null at least says "came in
 before 139".
 
+## A creature is a character and is not a person - BUILT (140)
+
+**A third sub-tab on Characters: PCs | NPCs | Creatures.** `is_npc` was
+the only split the roster had, and it answers a different question - a
+merchant somebody wrote and a goblin stamped from a statblock are both
+NPCs, and the second kind arrives in tens.
+
+**The line is 5e's type, and humanoid is the one that is people.** Of
+the fourteen, that is the whole of it: a hill giant, a wolf and a
+skeleton are all things you fight, and an elf shopkeeper is not. Dave
+chose this over "did it come from a statblock", which would have filed a
+merchant built on the commoner statblock as a creature.
+
+**Unstated stays among the people**, which follows 122 rather than being
+a new decision. A type nobody has filled in is unstated, not secretly
+anything. A monster on the wrong tab for want of one word is visible and
+fixable; a person quietly filed as a monster because a column was empty
+is not.
+
+**`creature::is_creature` owns the rule and `who_is_where` carries the
+verdict.** It is one word compared against a constant, which is exactly
+the kind of thing that gets written in two places and then disagrees -
+`skill_mods` is the scar, and the roster is a screen that has no
+business deciding what a thing is. The command now maps its rows and
+adds `creature`; the screen reads it.
+
+Each row carries what it IS and what it came FROM - the type and the
+statblock key - so a creature says why it is on this tab.
+
+**A named creature is still a creature**, which was Dave's own question:
+naming Webbys does not make it a person, and all three lists are the
+Characters tab either way, because since 022 a creature IS a character.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

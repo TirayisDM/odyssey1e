@@ -7497,25 +7497,56 @@ async function attackRow(actor, encounterId) {
 // a fresh individual with its own hit points - and somebody already in
 // the world walks in as themselves. Same distinction 123 drew, said on
 // screen instead of left for the DM to remember.
+// 141. ONE RUN OWNS THE LIST, and it builds off-screen.
+//
+// THE BUG WAS FOUR BESTIARIES IN ONE DROPDOWN. This cleared the select
+// and then awaited three calls before appending anything, so two
+// overlapping runs - which 138 made ordinary, by calling it from the
+// Creatures tab as well as from the DM pane - would both clear an empty
+// list and then both fill it. `innerHTML = ""` at the top looks like it
+// makes the function idempotent and does the opposite: it moves the
+// clearing to a moment that has nothing to do with the appending.
+//
+// So: a run counter, and the late run drops its work rather than adding
+// it. The list is built in a fragment and swapped in one go, which also
+// means the select is never momentarily empty - a DM mid-scroll keeps
+// what they were looking at.
+//
+// AND THE SELECTION SURVIVES. Rebuilding snapped it back to the top,
+// which is the fault the comment at the top of this file describes for
+// the target list: refreshing a list under somebody is how you make
+// them pick the goblin twice.
+let enrolPickerRun = 0;
 async function loadStatblockPicker() {
   const sel = document.querySelector("#enrol-what");
   // CALLED FROM THE CREATURES TAB TOO since 138, so the pane it lives
   // in may not be on screen.
   if (!sel || !state.gameId) return;
-  sel.innerHTML = "";
 
+  const run = ++enrolPickerRun;
+  // IN PARALLEL. Three independent questions, and asking them one after
+  // another was a third of a second of the select sitting empty.
+  const [mine, folk, npcs] = await Promise.all([
+    call("list_creatures", { gameId: state.gameId }),
+    call("list_individuals", { gameId: state.gameId }),
+    call("list_npcs", { gameId: state.gameId }),
+  ]);
+  // A NEWER RUN HAS STARTED AND OWNS THE LIST. Appending now is what
+  // put four copies of the bestiary in the dropdown.
+  if (run !== enrolPickerRun) return;
+
+  const frag = document.createDocumentFragment();
   const group = (label) => {
     const g = document.createElement("optgroup");
     g.label = label;
-    sel.append(g);
+    frag.append(g);
     return g;
   };
 
   // THIS GAME'S OWN CREATURES FIRST, because they are the ones somebody
   // went to the trouble of making. 132 reference statblocks below them
   // would otherwise bury seven templates.
-  const mine = (await call("list_creatures", { gameId: state.gameId })) || [];
-  if (mine.length) {
+  if ((mine || []).length) {
     const g = group("This game's creatures — a copy is placed");
     for (const c of mine) {
       const o = document.createElement("option");
@@ -7529,9 +7560,9 @@ async function loadStatblockPicker() {
 
   // ALREADY STANDING - players and creatures both, split by `is_npc`,
   // which is a label and not a structure.
-  const folk = (await call("list_individuals", { gameId: state.gameId })) || [];
-  const npcsHere = folk.filter((c) => c.is_npc);
-  const pcs = folk.filter((c) => !c.is_npc);
+  const here = folk || [];
+  const npcsHere = here.filter((c) => c.is_npc);
+  const pcs = here.filter((c) => !c.is_npc);
   if (npcsHere.length) {
     const g = group("In the world — enrolled as they stand");
     for (const c of npcsHere) {
@@ -7556,8 +7587,7 @@ async function loadStatblockPicker() {
 
   // THE SHARED BESTIARY LAST. Read-only, 132 of them, and the thing a
   // DM reaches for least often once they have templates of their own.
-  const npcs = (await call("list_npcs", { gameId: state.gameId })) || [];
-  if (npcs.length) {
+  if ((npcs || []).length) {
     const g = group("Reference statblocks — a copy is placed");
     for (const n of npcs) {
       const o = document.createElement("option");
@@ -7569,9 +7599,13 @@ async function loadStatblockPicker() {
     }
   }
 
-  if (!sel.children.length) {
-    sel.append(new Option("nothing to enrol", ""));
-  }
+  if (!frag.childElementCount) frag.append(new Option("nothing to enrol", ""));
+
+  const keep = sel.value;
+  sel.replaceChildren(frag);
+  // Only if it is still on offer - a creature that was just deleted
+  // must not leave a selection pointing at it.
+  if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
 }
 
 async function loadSkillPicker() {

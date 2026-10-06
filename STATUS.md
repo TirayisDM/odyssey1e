@@ -4036,6 +4036,56 @@ statblock key - so a creature says why it is on this tab.
 naming Webbys does not make it a person, and all three lists are the
 Characters tab either way, because since 022 a creature IS a character.
 
+## Four bestiaries in one dropdown - FIXED (141)
+
+**138's own bug, and it is a shape rather than a typo.**
+`loadStatblockPicker` cleared the select and then awaited three calls
+before appending anything. Two overlapping runs therefore both cleared
+an empty list and both filled it, and the enrol dropdown held the
+bestiary three or four times over.
+
+**`innerHTML = ""` at the top of an async builder looks like it makes
+the function idempotent and does the opposite.** It moves the clearing
+to a moment that has nothing to do with the appending, and everything
+in between is somebody else's turn.
+
+Nothing overlapped until 138, which made it ordinary: the picker is now
+called from the Creatures tab as well as from the DM pane, so a tab
+switch and a refresh can be in flight together.
+
+**The fix is a run counter and a fragment.** The late run drops its work
+instead of adding it; the list is built off-screen and swapped in one
+go, so the select is never momentarily empty; the three calls go in
+parallel rather than one after another; and the selection survives the
+rebuild when what was picked is still on offer. That last one is the
+fault the note at the top of `main.js` already describes for the target
+list - refreshing a list under somebody is how you make them pick the
+goblin twice.
+
+### The same shape is in eighteen other builders
+
+Found by sweeping for it rather than by guessing, and **not fixed**,
+because each one is a real change and none is currently broken. They are
+only safe because they are not called concurrently today, which is
+exactly what was true of the picker until 138. Ranked by how many places
+call them - the number is not a bug count, it is how much opportunity
+there is:
+
+| call sites | |
+|---|---|
+| 19 | `loadSheet` |
+| 16 | `selectEncounter` |
+| 15 | `loadDM` |
+| 9 | `loadRolls` |
+| 8 | `loadWorld` |
+| 6 | `loadObjects`, `loadCharacters` |
+| 4 | `loadCreatures` |
+
+**The cheap fix is one helper**, not nineteen edits: a `paintInto(sel,
+builder)` that owns the run counter and the fragment swap, applied as
+each is next touched. Worth doing before the next screen is built on
+the same shape.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

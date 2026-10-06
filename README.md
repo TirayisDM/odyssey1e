@@ -298,7 +298,10 @@ Working, roughly in the order it was built:
 * **Creatures** — a template IS a character (`is_template`), so a
   creature is edited with the same sheet a player uses and placing one
   on the board is a copy, contents of its containers and all. `npcs` is
-  the published reference you import from. 5e's fourteen creature types,
+  the published reference you import from, stocked with 36 creatures
+  across all fourteen types whose natural attacks are TECHNIQUES like
+  any weapon's - a wolf reaches Snap, an owlbear reaches Crush the
+  Throat, gated by level. 5e's fourteen creature types,
   which five seeded spells are written against. Export and import as
   a file for backup and sharing: keys travel, ids do not, and anything
   the receiving game has never heard of is skipped and listed rather

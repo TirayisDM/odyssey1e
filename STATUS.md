@@ -3614,6 +3614,69 @@ whole. In the rig the export downloads as `cave_goblin.creature.json`
 with no ids and the nesting intact, the import is double-click guarded,
 and both warnings appear in the log by name with what they cost.
 
+## A bestiary, and creatures that fight with techniques - BUILT (126, 127, 128)
+
+123 shipped the Creatures tab with three statblocks to import from and
+all three were goblins. The mechanism was finished and there was nothing
+to do it with.
+
+NATURAL ATTACKS ARE TECHNIQUES, which was Dave's call and is the better
+one. 050 gave weapons named moves with their own dice, crit and fumble
+ranges, a tier and a LEVEL GATE; 126 gives the same to eight limbs -
+Bite, Claws, Slam, Gore, Talons, Sting, Tendrils, Hooves - three moves
+each. The alternative was a flat "bite 1d6" per creature, or an item per
+damage step (`bite_1d6`, `bite_1d8`), which is a catalogue of
+near-duplicates with no scaling rule anywhere.
+
+THE LEVEL GATE DOES THE SCALING, which is the whole elegance of it.
+Verified on the live database: a **Wolf at level 2 reaches Snap (1d6)**
+and nothing else; an **Owlbear at level 7 reaches all six** across bite
+and claws - Snap, Worry the Limb, Crush the Throat, Rake, Both Paws,
+Open the Belly. Not one rule was written for monsters specifically; a
+creature's growing teeth and a fighter's growing repertoire are the same
+mechanism.
+
+A natural weapon weighs nothing and takes no slots, because 036's
+encumbrance walk reads both and would otherwise have a bear labouring
+under its own teeth. They are tagged `natural` - nothing reads that yet,
+and it is where a shop will filter from.
+
+36 CREATURES ACROSS ALL FOURTEEN TYPES, deliberately rather than tidily:
+122 put `creature_type` in because fifteen spells are written against
+it, and a reference where everything is a humanoid exercises none of
+them. Fourteen of the 36 carry resistances, so 116 and 121 finally have
+something to sit on - a Skeleton vulnerable to bludgeoning and immune to
+poison, an Ice Mephit vulnerable to BOTH fire and bludgeoning, a Specter
+resisting five energy types.
+
+NO "NONMAGICAL" RESISTANCES, which is a gap rather than a choice. The
+grant vocabulary cannot say "from nonmagical attacks", so the Wight and
+Specter carry only their unconditional ones. Overstating a monster is
+worse than understating it.
+
+### 128 is a bug the bestiary found
+
+`instantiate_npc` has mis-slotted kit since 022 and it never showed,
+because there was one goblin and every assumption happened to hold for
+it. With 36 creatures it showed immediately:
+
+* **Hobgoblin, Wight and Bugbear arrived with their weapon in NO SLOT.**
+  084 makes a null slot mean not equipped, so those three could not
+  attack at all - the weapon was not in the loadout for
+  `attack::resolve` to find.
+* **Bandit drew its crossbow and left the scimitar on its hip**, because
+  the rank was alphabetical over every kit row including carried ones.
+* **Skeleton put its sword on its hip and had both hands empty**,
+  because a slung bow took rank 1 from it.
+
+Two faults: the rank counted things that are not held, and a MEDIUM
+weapon that was not rank 1 fell past every branch into nothing. Now the
+rank covers only equipped weapons, and a second held weapon takes the
+off hand when no shield wants it. Verified by instantiating all 39
+statblocks: **36 of 39 arrive with a weapon in hand**, and the three
+that do not are the Shrieker, which has no attack by design, and the two
+pre-existing goblin variants that have no kit rows at all.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

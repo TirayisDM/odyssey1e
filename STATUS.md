@@ -3677,6 +3677,82 @@ statblocks: **36 of 39 arrive with a weapon in hand**, and the three
 that do not are the Shrieker, which has no attack by design, and the two
 pre-existing goblin variants that have no kit rows at all.
 
+## 134 creatures, and a retune that went too wide - BUILT (129, 130, 131, 132)
+
+**134 statblocks in the global catalogue, not ~320.** Dave asked to
+import all the SRD monsters. The SRD has something north of three
+hundred and I can write down perhaps a third of them with numbers worth
+trusting, so this is 95 more on top of 127's 39 rather than the whole
+book. The rest are MISSING, not wrong, and the honest way to finish is a
+machine-readable SRD file through `import_creature` - which is exactly
+what the `odyssey1e.creature` envelope in `creature_io.rs` was built for.
+
+**SPOT-CHECK BEFORE A SESSION RUNS ON THEM.** AC, HP and the six
+abilities are SRD-derived from memory, not transcribed from a file. They
+are right in shape and will be wrong in places. What IS verified is that
+they are the rows intended: every creature and every kit row was MD5
+digested locally and against the live database, and both matched - 95
+creatures, 31 carrying resistance grants, 158 kit rows, 95 of 95 armed.
+
+129 added eight more limbs - tail, beak, tusks, wing, pseudopod, fist,
+constrict, spines - and 24 more moves, so 16 limbs and 48 natural
+techniques. `fist` and `constrict` are not anatomy and are items anyway,
+because the attack path needs them to be.
+
+### 132 is 129's bug, and it had nothing to do with monsters
+
+129 lowered the technique gates from 1/3/5 to 1/2/4, because **a creature
+does not level up**. A wolf is a wolf; gating its repertoire on a
+progression it will never walk left every level-2 creature with exactly
+one move. That reasoning holds. The statement did not:
+
+    update techniques set min_level = 2 where game_id is null and min_level = 3;
+
+`where game_id is null` is not "where this is a natural weapon" - it is
+"where this belongs to the global catalogue", and 043's 159 PLAYER
+weapon techniques are global too. **So 129 retuned the whole game.**
+Every character got Split the Collar at 4 instead of 5 and Beard the
+Shield at 2 instead of 3: a balance change to player progression,
+arriving invisibly as a side effect of a bestiary migration.
+
+Caught by asking the database a question I did not need to ask - the
+distinct gate values across ALL techniques - and finding no 3s and no 5s
+left anywhere. 132 reverses it exactly, which is possible because
+**nothing was ever authored at gate 2 or 4**: all 183 technique rows in
+`supabase/migrations/` were written at 1, 3 or 5, so a weapon technique
+at 2 today can only have been a 3. Now 62/62/63 weapon techniques at
+1/3/5, natural ones at 1/2/4, scoped by `content_tags @> natural` - 126
+put that tag in as a hook and this is the hook being used.
+
+**The lesson is narrower than "be careful".** `game_id is null` reads
+like a scope and is not one. It is the tenancy predicate, and it appears
+in nearly every catalogue statement in this schema, so it is the obvious
+thing to reach for when you actually mean "the rows I just inserted".
+When a data migration UPDATES rather than INSERTS, say what kind of row
+you mean.
+
+### `level` on a creature is an encounter weight
+
+127 set this scale by hand - wolf 2, owlbear 7, hill giant 10 - and it is
+roughly "the party level this is a fair fight for". It is NOT a CR and
+will not match one. It is also load-bearing, because it gates techniques,
+so a level typed carelessly is a creature with fewer attacks than
+intended. Fifteen of the 95 were corrected against the 127 scale before
+the migration was written: a Giant Constrictor Snake had arrived at
+level 13 next to the Fire Giant. `prof_bonus` follows 127's rule and not
+the player table - 2 up to level 9, 3 above - so one catalogue has one
+scale.
+
+**39 of 134 creatures still have fewer than three live moves**, all at
+levels 1-3, straight from the 1/2/4 gate: a level-1 creature reaches one
+move per limb and a level-3 one reaches two. Dave asked for three
+minimum. The gate and that request are in tension and I have not
+resolved it, because the three ways to close it are all worse than
+asking: drop the third gate to 3 (a third change to the same number in
+one session), flatten the gates entirely (a giant centipede with Crush
+the Throat), or invent a second limb for a rat. 92 of 134 have three or
+more today. **This one is Dave's call.**
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

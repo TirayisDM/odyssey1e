@@ -953,6 +953,7 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
             cid,
             total,
             &a.damage_types,
+            a.magical,
         ) {
             damage_total = Some(after);
             resisted = Some(said);
@@ -1318,6 +1319,11 @@ fn damage_after_resistance(
     target_character_id: &str,
     total: i64,
     damage_types: &[String],
+    // 143. WHETHER THE WEAPON WAS ENCHANTED. Half the Monster Manual
+    // resists "from nonmagical attacks" and this is the word that
+    // decides it - see `attack::Attack::magical`, which reads the
+    // weapon's own grants and not the swing's.
+    magical: bool,
 ) -> Option<(i64, String)> {
     if damage_types.is_empty() {
         return None;
@@ -1328,8 +1334,8 @@ fn damage_after_resistance(
     }
     for kind in damage_types {
         let kind = kind.trim().to_lowercase();
-        if let Some(said) = resist::said(total, &sheet.resistances, &kind) {
-            return Some((resist::against(total, &sheet.resistances, &kind), said));
+        if let Some(said) = resist::said(total, &sheet.resistances, &kind, magical) {
+            return Some((resist::against(total, &sheet.resistances, &kind, magical), said));
         }
     }
     None

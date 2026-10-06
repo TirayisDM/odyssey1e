@@ -533,8 +533,14 @@ fn settle_choices(grants: &Value, choice: Option<&str>) -> Result<Value, String>
         let mut g = g.clone();
         let target = g.get("target").and_then(|t| t.as_str()).unwrap_or("").to_string();
         if crate::resist::choice_offered(&target).is_some() {
-            let (degree, kind) = crate::resist::pick(&target, choice)?;
-            g["target"] = json!(format!("{}.{}", degree.as_str_target(), kind));
+            // 143. AND THE QUALIFIER COMES BACK WITH IT. This used to
+            // format the target inline, which was correct while a
+            // target was two parts and would have silently dropped the
+            // third the moment one existed - a spell granting
+            // resistance only against ordinary weapons would have
+            // landed as resistance against everything.
+            let (degree, kind, nonmagical) = crate::resist::pick(&target, choice)?;
+            g["target"] = json!(crate::resist::target_for(degree, &kind, nonmagical));
         }
         out.push(g);
     }

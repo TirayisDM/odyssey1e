@@ -4150,6 +4150,83 @@ header replaced by one line pointing at the file. The SQL is identical;
 the reasoning is not. Every other migration here can be recovered
 byte-for-byte - this one has git as its only full record.
 
+## "From nonmagical attacks" - BUILT (143, resist.rs, attack::Attack::magical)
+
+**The qualifier is the rule, and it was the half we were dropping.** The
+commonest resistance in 5e is "bludgeoning, piercing and slashing FROM
+NONMAGICAL ATTACKS" - every lycanthrope, both vampires, all four golems,
+most fiends, the lich, the ghost. 116 gave this schema
+`resist.bludgeoning` and no way to say the second half, so 131 and 142
+recorded the resistance and lost the condition. A party that finally
+found a magic sword watched a werewolf halve it exactly like the stick
+they started with: the named defect arriving in the one place a player
+was supposed to feel rewarded.
+
+**A suffix, not a fourth degree.** `resist.slashing.nonmagical`, and the
+three-type form half the Monster Manual wants in one target:
+`resist.bludgeoning|piercing|slashing.nonmagical`. "Resistant" and
+"resistant to nonmagical" are the same degree under a condition, so
+`Degree` stays the three 5e has and everything reasoning about halving
+and doubling is untouched.
+
+**A misspelt qualifier is refused, not ignored** - `resist.fire.nonmagicl`
+would otherwise read as a working target and apply in every case its
+author meant to exclude, which is the same argument the unknown-damage-type
+refusal has been making since 116.
+
+**What counts as magical is the weapon's own grants.** 100 made an
+enchantment a list of grants, so a weapon carrying one is enchanted.
+`attack::Attack::magical` reads `owned.grants` and NOT everything
+`reaching` gathers - a ring granting +1 to attack does not make the
+sword magical, it makes the swing better, and that distinction is
+exactly the question the qualifier asks.
+
+**Gap left, stated rather than hidden**: a weapon that is magical and
+grants nothing has nowhere to say so. It wants a flag of its own on the
+item, and nothing in the catalogue needs one yet.
+
+### The standing is settled twice, and a test caught why
+
+`resist::standing` now resolves each damage type over two sets of
+sources - all of them for an ordinary attack, and only the unqualified
+ones for a magical attack. Filtering after resolving would get the mixed
+case wrong: a creature immune to fire from ordinary weapons and merely
+resistant to it in general is RESISTANT to a flaming sword, not immune
+and not untouched.
+
+**The first version dropped the whole standing when the ordinary case
+cancelled**, which lost the magical answer with it - a werewolf under a
+curse that doubles slashing resists an ordinary blade and should take
+DOUBLE from a magic one, and was taking neither. Found by a test written
+for the case rather than by the compiler.
+
+**Nothing is said about a resistance that did not fire.** "resistant
+slashing - 9 instead of 9" reads as a rule that worked; silence is the
+honest answer.
+
+### 21 creatures qualified, and three deliberately not
+
+Only the ones whose SRD text carries it: the five undead, six fiends,
+four golems, five lycanthropes, and 131's Intellect Devourer, which had
+carried the unqualified form longest. 63 targets rewritten, order and
+every other grant preserved.
+
+**Left flat on purpose** - the Treant and Awakened Tree (a magic axe is
+no better against wood), the Swarm of Insects (there is nothing to hit
+either way), the two oozes' slashing immunity, and the skeletons'
+bludgeoning VULNERABILITY, which the qualifier has nothing to do with.
+
+**Not fixed, and a different kind of job**: the Wraith, Specter and
+Shadow should have this resistance and do not have it recorded at all -
+131 wrote them with elemental resistances and no physical ones. Adding a
+resistance is a different act from qualifying one that is already there.
+
+**Also still not expressible**: "that aren't adamantine" on the golems
+and "that aren't silvered" on the devils and lycanthropes. Both are
+narrower than this one and both make the resistance apply MORE often, so
+what is recorded now is a move toward the printed rule rather than away
+from it.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

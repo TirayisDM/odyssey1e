@@ -2324,13 +2324,35 @@ function paintResistances(sheet) {
     // arithmetic. Immunity is not simply more resistance - half of a
     // large number still kills somebody and none of it never does - so
     // the three read differently rather than as shades of one thing.
-    const deg = sEl("span", "degree " + r.degree, r.degree);
+    //
+    // 143. AND IT MAY BE TWO DEGREES. A werewolf resists an ordinary
+    // blade and not an enchanted one, so `degree` is what an ordinary
+    // attack meets and `vs_magic` is what a magical one meets - null
+    // when the resistance simply does not apply.
+    const shown = r.degree || r.vs_magic;
+    const deg = sEl("span", "degree " + shown, shown);
     deg.title =
-      r.degree === "immune" ? "takes none of it"
-      : r.degree === "vulnerable" ? "takes double"
+      shown === "immune" ? "takes none of it"
+      : shown === "vulnerable" ? "takes double"
       : "takes half, rounded down";
 
     const kind = sEl("span", "nm", r.damage_type);
+
+    // WHEN THE TWO DIFFER, SAY SO ON THE ROW. This is the line that
+    // tells a player their magic sword is the answer, and it is the
+    // whole reason the qualifier was worth building - a resistance
+    // that silently stopped applying would be as invisible as the
+    // qualifier being missing was.
+    if (r.degree && !r.vs_magic) {
+      const only = sEl("span", "tag", "nonmagical only");
+      only.title = "an enchanted weapon is not resisted - it lands in full";
+      el.append(only);
+    } else if (r.degree !== r.vs_magic) {
+      const split = sEl("span", "tag",
+        (r.vs_magic || "no effect") + " vs magic");
+      split.title = "a magical attack meets a different answer";
+      el.append(split);
+    }
 
     // WHAT PUT IT THERE. The instruction was to lace these back to
     // whatever activates them, and this is that line.
@@ -2339,7 +2361,10 @@ function paintResistances(sheet) {
       ? "two reasons, which 5e counts as one - ending either leaves the other"
       : "where it comes from";
 
-    el.append(deg, kind, from);
+    // The degree and the type lead the row, whatever got appended
+    // above them while deciding what to say.
+    el.prepend(deg, kind);
+    el.append(from);
     list.append(el);
   }
 }

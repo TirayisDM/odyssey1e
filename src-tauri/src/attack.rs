@@ -104,6 +104,24 @@ pub struct Attack {
     /// "STR +1, prof +3" - and a +1 appearing in the total with no
     /// account of itself is the thing this app keeps refusing to do.
     pub magic: i64,
+    /// 143. WHETHER THE WEAPON ITSELF IS ENCHANTED, which half the
+    /// Monster Manual cares about: "resistant to bludgeoning, piercing
+    /// and slashing FROM NONMAGICAL ATTACKS" is the commonest
+    /// resistance in 5e, and until this existed a werewolf halved a +1
+    /// longsword exactly as hard as a stick.
+    ///
+    /// THE WEAPON'S OWN GRANTS AND NOTHING ELSE. A ring granting +1 to
+    /// attack does not make the sword magical - it makes the swing
+    /// better - so this reads `owned.grants` rather than everything
+    /// `reaching` gathers. The distinction is the whole question the
+    /// qualifier asks.
+    ///
+    /// A MAGICAL WEAPON THAT GRANTS NOTHING CANNOT BE SAID, and that
+    /// is a real gap rather than an oversight: 100 made an enchantment
+    /// a list of grants, so a +0 blade that is nonetheless magical has
+    /// nowhere to say so. It wants a flag of its own on the item, and
+    /// nothing in the catalogue needs one yet.
+    pub magical: bool,
     /// Ready for the dice engine: "1d6+1".
     pub damage: String,
     pub crit_min: i64,
@@ -344,6 +362,8 @@ pub fn resolve(
             proficiency_bonus: if owned.proficient { proficiency_bonus } else { 0 },
             to_hit: crate::grants::apply(plain, &gs, "attack"),
             magic: crate::grants::apply(plain, &gs, "attack") - plain,
+            // 143. THE WEAPON, not the swing. See the field.
+            magical: !owned.grants.is_empty(),
             // DAMAGE TAKES ITS OWN TARGET, not the attack one: a
             // weapon that is +1 to hit and +2 to damage is two grants
             // and says so, rather than one number doing both jobs.
@@ -387,6 +407,8 @@ pub fn resolve(
                 proficiency_bonus: if owned.proficient { proficiency_bonus } else { 0 },
                 to_hit: crate::grants::apply(plain, &gs, "attack"),
                 magic: crate::grants::apply(plain, &gs, "attack") - plain,
+            // 143. THE WEAPON, not the swing. See the field.
+            magical: !owned.grants.is_empty(),
                 damage: damage_formula(
                     &format!("{}d{}", n, d),
                     crate::grants::apply(ability_mod, &gs, "damage"),

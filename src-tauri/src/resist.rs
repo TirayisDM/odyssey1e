@@ -96,6 +96,12 @@ pub struct Source {
     /// What to call it on a sheet: the species' name, the spell's, the
     /// item's. The whole point of the instruction to lace these back.
     pub name: String,
+    /// 143. TRUE WHEN IT ONLY APPLIES TO A NONMAGICAL ATTACK, which is
+    /// the commonest resistance in 5e and the one 116 could not say.
+    /// Half the Monster Manual is "bludgeoning, piercing and slashing
+    /// from nonmagical attacks", and the qualifier IS the rule: it is
+    /// what makes the party's magic sword worth carrying.
+    pub nonmagical: bool,
 }
 
 /// Where a damage type stands once every source is counted, with the
@@ -103,7 +109,25 @@ pub struct Source {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Standing {
     pub damage_type: String,
-    pub degree: Degree,
+    /// Against an ORDINARY attack - which is most of them, and is why
+    /// this is the unqualified field.
+    ///
+    /// `None` MEANS NOTHING APPLIES, which happens when a resistance
+    /// and a vulnerability cancel. The standing is still here because
+    /// `vs_magic` may differ, and because the sources are worth showing
+    /// either way: a DM looking at a creature that resists AND is
+    /// vulnerable to slashing should see both and not an empty line.
+    pub degree: Option<Degree>,
+    /// 143. AND AGAINST A MAGICAL ONE. `None` means the standing does
+    /// not apply at all: a werewolf resists a sword and does not resist
+    /// a +1 sword, which is the whole point of the qualifier.
+    ///
+    /// RESOLVED SEPARATELY RATHER THAN FILTERED LATER, because a
+    /// creature may have reasons of both kinds for the same damage
+    /// type, and which sources survive changes the answer rather than
+    /// just removing one. An Unt'garoth werewolf resists fire either
+    /// way and slashing only from an ordinary blade.
+    pub vs_magic: Option<Degree>,
     /// Every source that contributed, including the ones 5e's
     /// no-stacking rule makes redundant - two reasons to resist fire is
     /// still half, and a sheet that hid the second would be hiding a
@@ -124,9 +148,31 @@ pub struct Standing {
 /// grant saying `resist.frie` would otherwise sit on a sheet looking
 /// correct and match nothing that was ever rolled; one saying
 /// `resist.fire|frie` would offer a choice half of which does nothing.
-pub fn parse_target(target: &str) -> Option<(Degree, Vec<String>)> {
+/// 143. AND A TRAILING `.nonmagical` NARROWS IT.
+///
+/// `resist.bludgeoning|piercing|slashing.nonmagical` is half the
+/// Monster Manual in one target, and until now this vocabulary could
+/// only say the part before the qualifier - so 23 of the creatures 142
+/// added resisted a magic sword exactly as hard as an ordinary one,
+/// which is backwards.
+///
+/// A SUFFIX RATHER THAN A FOURTH DEGREE. "Resistant" and "resistant to
+/// nonmagical" are the same degree under a condition, not two degrees -
+/// `Degree` stays the three 5e has, and everything that reasons about
+/// halving and doubling is untouched.
+///
+/// ANYTHING ELSE AFTER THE TYPES IS REFUSED, not ignored. A target
+/// reading `resist.fire.nonmagicl` would otherwise sit on a sheet
+/// looking exactly like a working one and apply in every case the
+/// author meant to exclude - the same argument the unknown-damage-type
+/// refusal above is making.
+pub fn parse_target(target: &str) -> Option<(Degree, Vec<String>, bool)> {
     let (prefix, rest) = target.split_once('.')?;
     let degree = Degree::from_prefix(prefix)?;
+    let (rest, nonmagical) = match rest.strip_suffix(NONMAGICAL_SUFFIX) {
+        Some(head) => (head, true),
+        None => (rest, false),
+    };
     let kinds: Vec<String> = rest
         .split('|')
         .map(|k| k.trim().to_lowercase())
@@ -135,8 +181,13 @@ pub fn parse_target(target: &str) -> Option<(Degree, Vec<String>)> {
     if kinds.is_empty() || !kinds.iter().all(|k| TYPES.contains(&k.as_str())) {
         return None;
     }
-    Some((degree, kinds))
+    Some((degree, kinds, nonmagical))
 }
+
+/// The one qualifier this vocabulary knows, spelled once. `target_for`
+/// writes it and `parse_target` reads it, and nothing else should be
+/// building these strings by hand.
+const NONMAGICAL_SUFFIX: &str = ".nonmagical";
 
 /// Whether a grant target names a resistance at all.
 pub fn is_resist_target(target: &str) -> bool {
@@ -150,7 +201,7 @@ pub fn is_resist_target(target: &str) -> bool {
 /// to know whether to ask a question gets a straight answer rather than
 /// a one-item list it has to recognise as "no question".
 pub fn choice_offered(target: &str) -> Option<Vec<String>> {
-    let (_, kinds) = parse_target(target)?;
+    let (_, kinds, _) = parse_target(target)?;
     (kinds.len() > 1).then_some(kinds)
 }
 
@@ -160,11 +211,11 @@ pub fn choice_offered(target: &str) -> Option<Vec<String>> {
 /// naming fire must not give fire resistance - the spell says poison,
 /// and honouring a pick the grant never offered would let the picker
 /// grant anything it liked.
-pub fn pick(target: &str, chosen: Option<&str>) -> Result<(Degree, String), String> {
-    let (degree, kinds) = parse_target(target)
+pub fn pick(target: &str, chosen: Option<&str>) -> Result<(Degree, String, bool), String> {
+    let (degree, kinds, nonmagical) = parse_target(target)
         .ok_or_else(|| format!("\"{}\" is not a resistance", target))?;
     if let [only] = &kinds[..] {
-        return Ok((degree, only.clone()));
+        return Ok((degree, only.clone(), nonmagical));
     }
     let want = chosen
         .map(str::trim)
@@ -174,7 +225,22 @@ pub fn pick(target: &str, chosen: Option<&str>) -> Result<(Degree, String), Stri
     if !kinds.contains(&want) {
         return Err(format!("{} is not one of {}", want, kinds.join(", ")));
     }
-    Ok((degree, want))
+    // THE QUALIFIER SURVIVES THE CHOICE. Protection from Energy does
+    // not carry one, but a grant that offered a choice AND narrowed it
+    // to ordinary weapons would lose half its meaning here otherwise.
+    Ok((degree, want, nonmagical))
+}
+
+/// Write a settled degree, type and qualifier back as a grant target.
+///
+/// THE ONLY PLACE THIS STRING IS BUILT. `settle_choices` used to format
+/// it inline, which was fine while a target was two parts and silently
+/// dropped the third the moment there was one.
+pub fn target_for(degree: Degree, kind: &str, nonmagical: bool) -> String {
+    match nonmagical {
+        true => format!("{}.{}{}", degree.as_str_target(), kind, NONMAGICAL_SUFFIX),
+        false => format!("{}.{}", degree.as_str_target(), kind),
+    }
 }
 
 /// Every resistance a pile of grants carries, named after whatever
@@ -189,8 +255,8 @@ pub fn from_grants(grants: &[crate::grants::Grant]) -> Vec<Source> {
     grants
         .iter()
         .filter_map(|g| {
-            let (degree, kind) = pick(&g.target, None).ok()?;
-            Some(Source { damage_type: kind, degree, name: g.source.clone() })
+            let (degree, kind, nonmagical) = pick(&g.target, None).ok()?;
+            Some(Source { damage_type: kind, degree, name: g.source.clone(), nonmagical })
         })
         .collect()
 }
@@ -210,6 +276,11 @@ pub fn from_species(kinds: &[String], species_name: &str) -> Vec<Source> {
             damage_type: k,
             degree: Degree::Resistant,
             name: species_name.to_string(),
+            // 143. A PEOPLE'S OWN RESISTANCE IS UNCONDITIONAL. The
+            // Unt'garoth do not stop resisting fire because the torch
+            // was enchanted, and `species.damage_resistances` is a bare
+            // list of type names with nowhere to say otherwise.
+            nonmagical: false,
         })
         .collect()
 }
@@ -230,31 +301,61 @@ pub fn standing(sources: &[Source]) -> Vec<Standing> {
         if mine.is_empty() {
             continue;
         }
-        let immune = mine.iter().any(|s| s.degree == Degree::Immune);
-        let resistant = mine.iter().any(|s| s.degree == Degree::Resistant);
-        let vulnerable = mine.iter().any(|s| s.degree == Degree::Vulnerable);
 
-        // IMMUNITY FIRST. Then resistance and vulnerability, which
-        // cancel - halving and doubling is where you started, and
-        // saying so here is the same answer 5e reaches by applying
-        // them in order.
-        let degree = if immune {
-            Degree::Immune
-        } else if resistant && vulnerable {
+        // 143. TWICE, OVER TWO SETS OF SOURCES. An ordinary attack
+        // meets all of them; a magical one meets only the ones that did
+        // not say "nonmagical". Resolving once and filtering afterwards
+        // would get the mixed case wrong - a creature immune to fire
+        // from ordinary weapons and merely resistant to it in general
+        // is resistant to a flaming sword, not immune and not nothing.
+        let degree = settle(&mine);
+        let unqualified: Vec<&Source> =
+            mine.iter().copied().filter(|s| !s.nonmagical).collect();
+        let vs_magic = settle(&unqualified);
+
+        // NOTHING EITHER WAY IS NOTHING TO SAY. Dropping it when only
+        // the ORDINARY case cancels was a bug this module's own test
+        // caught: a werewolf under a curse that makes slashing hurt
+        // double resists an ordinary blade and does not resist a magic
+        // one, so the magic one should land doubled - and the whole
+        // standing was being discarded before anything could ask.
+        if degree.is_none() && vs_magic.is_none() {
             continue;
-        } else if resistant {
-            Degree::Resistant
-        } else {
-            Degree::Vulnerable
-        };
+        }
 
         out.push(Standing {
             damage_type: kind.to_string(),
             degree,
+            vs_magic,
             from: mine.iter().map(|s| s.name.clone()).collect(),
         });
     }
     out
+}
+
+/// Which way a pile of reasons about one damage type comes out.
+///
+/// IMMUNITY FIRST. Then resistance and vulnerability, which cancel -
+/// halving and doubling is where you started, and saying so here is the
+/// same answer 5e reaches by applying them in order. `None` means
+/// nothing applies, either because they cancelled or because there was
+/// nothing to apply.
+fn settle(sources: &[&Source]) -> Option<Degree> {
+    if sources.is_empty() {
+        return None;
+    }
+    let immune = sources.iter().any(|s| s.degree == Degree::Immune);
+    let resistant = sources.iter().any(|s| s.degree == Degree::Resistant);
+    let vulnerable = sources.iter().any(|s| s.degree == Degree::Vulnerable);
+    if immune {
+        Some(Degree::Immune)
+    } else if resistant && vulnerable {
+        None
+    } else if resistant {
+        Some(Degree::Resistant)
+    } else {
+        Some(Degree::Vulnerable)
+    }
 }
 
 /// What this much damage of this type actually costs them.
@@ -262,26 +363,47 @@ pub fn standing(sources: &[Source]) -> Vec<Standing> {
 /// HALVED MEANS ROUNDED DOWN, which is 5e everywhere it halves. One
 /// point of fire against a resistant creature is nothing at all, and
 /// that is the rule rather than an edge case.
-pub fn against(damage: i64, standing: &[Standing], damage_type: &str) -> i64 {
+pub fn against(damage: i64, standing: &[Standing], damage_type: &str, magical: bool) -> i64 {
     let d = damage.max(0);
-    match standing.iter().find(|s| s.damage_type == damage_type) {
+    match applies(standing, damage_type, magical) {
         None => d,
-        Some(s) => match s.degree {
-            Degree::Immune => 0,
-            Degree::Resistant => d / 2,
-            Degree::Vulnerable => d * 2,
-        },
+        Some(Degree::Immune) => 0,
+        Some(Degree::Resistant) => d / 2,
+        Some(Degree::Vulnerable) => d * 2,
+    }
+}
+
+/// Which degree actually meets this attack, if any.
+///
+/// 143. WHERE THE QUALIFIER IS SPENT, and the only place it is read.
+/// `magical` is about the WEAPON that swung - see `attack::Attack` -
+/// and a werewolf meeting a +1 longsword finds nothing here.
+pub fn applies(standing: &[Standing], damage_type: &str, magical: bool) -> Option<Degree> {
+    let s = standing.iter().find(|s| s.damage_type == damage_type)?;
+    match magical {
+        true => s.vs_magic,
+        false => s.degree,
     }
 }
 
 /// How the number changed, in words, for a log that has to explain
 /// itself.
-pub fn said(damage: i64, standing: &[Standing], damage_type: &str) -> Option<String> {
+pub fn said(
+    damage: i64,
+    standing: &[Standing],
+    damage_type: &str,
+    magical: bool,
+) -> Option<String> {
     let s = standing.iter().find(|x| x.damage_type == damage_type)?;
-    let after = against(damage, standing, damage_type);
+    // 143. NOTHING HAPPENED, SO NOTHING IS SAID. A werewolf that did
+    // not resist the magic sword has no line to add to the log - and
+    // "resistant slashing - 9 instead of 9" would be worse than silence,
+    // because it reads as a rule that fired.
+    let degree = applies(standing, damage_type, magical)?;
+    let after = against(damage, standing, damage_type, magical);
     Some(format!(
         "{} {} ({}) - {} instead of {}",
-        s.degree.as_str(),
+        degree.as_str(),
         damage_type,
         s.from.join(", "),
         after,
@@ -296,13 +418,16 @@ mod tests {
     use super::*;
 
     fn src(kind: &str, degree: Degree, name: &str) -> Source {
-        Source { damage_type: kind.into(), degree, name: name.into() }
+        Source { damage_type: kind.into(), degree, name: name.into(), nonmagical: false }
     }
 
     /* ---------- reading a grant ---------- */
 
     fn one(t: &str) -> (Degree, String) {
-        pick(t, None).unwrap()
+        // The qualifier has its own tests below; these are about the
+        // degree and the type.
+        let (degree, kind, _) = pick(t, None).unwrap();
+        (degree, kind)
     }
 
     #[test]
@@ -354,9 +479,120 @@ mod tests {
     fn the_chosen_one_settles_it() {
         assert_eq!(
             pick("resist.acid|cold|fire", Some("Cold")).unwrap(),
-            (Degree::Resistant, "cold".into()),
+            (Degree::Resistant, "cold".into(), false),
             "case is not a different answer"
         );
+    }
+
+    /* ------------- the nonmagical qualifier (143) ------------------ */
+
+    fn qualified(kind: &str, degree: Degree, name: &str) -> Source {
+        Source { damage_type: kind.into(), degree, name: name.into(), nonmagical: true }
+    }
+
+    #[test]
+    fn the_qualifier_is_read_off_the_target() {
+        let (degree, kinds, nonmagical) = parse_target("resist.slashing.nonmagical").unwrap();
+        assert_eq!(degree, Degree::Resistant);
+        assert_eq!(kinds, vec!["slashing".to_string()]);
+        assert!(nonmagical);
+    }
+
+    #[test]
+    fn half_the_monster_manual_in_one_target() {
+        let (degree, kinds, nonmagical) =
+            parse_target("resist.bludgeoning|piercing|slashing.nonmagical").unwrap();
+        assert_eq!(degree, Degree::Resistant);
+        assert_eq!(kinds.len(), 3);
+        assert!(nonmagical);
+    }
+
+    #[test]
+    fn an_unqualified_target_is_unchanged() {
+        let (_, _, nonmagical) = parse_target("resist.fire").unwrap();
+        assert!(!nonmagical);
+    }
+
+    #[test]
+    fn a_misspelt_qualifier_is_refused_rather_than_ignored() {
+        // The whole argument for refusing: `resist.fire.nonmagicl`
+        // would read as a working target on a sheet and then apply in
+        // every case its author meant to exclude.
+        assert_eq!(parse_target("resist.fire.nonmagicl"), None);
+        assert_eq!(parse_target("resist.fire.magical"), None);
+        assert_eq!(parse_target("resist.nonmagical"), None);
+    }
+
+    #[test]
+    fn a_werewolf_halves_a_sword_and_not_a_magic_sword() {
+        let s = standing(&[qualified("slashing", Degree::Resistant, "Werewolf")]);
+        assert_eq!(against(9, &s, "slashing", false), 4, "an ordinary blade");
+        assert_eq!(against(9, &s, "slashing", true), 9, "a +1 blade lands in full");
+    }
+
+    #[test]
+    fn nothing_is_said_about_a_resistance_that_did_not_fire() {
+        // "resistant slashing - 9 instead of 9" reads as a rule that
+        // fired. Silence is the honest answer.
+        let s = standing(&[qualified("slashing", Degree::Resistant, "Werewolf")]);
+        assert!(said(9, &s, "slashing", false).is_some());
+        assert_eq!(said(9, &s, "slashing", true), None);
+    }
+
+    #[test]
+    fn an_unconditional_resistance_still_meets_a_magic_weapon() {
+        // The Unt'garoth do not stop resisting fire because the torch
+        // was enchanted.
+        let s = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
+        assert_eq!(against(10, &s, "fire", true), 5);
+        assert_eq!(against(10, &s, "fire", false), 5);
+    }
+
+    #[test]
+    fn a_creature_may_have_reasons_of_both_kinds() {
+        // Immune to fire from ordinary weapons, merely resistant to it
+        // in general. A flaming sword meets the resistance and not the
+        // immunity - which is why the two are settled over two sets of
+        // sources rather than resolved once and filtered.
+        let s = standing(&[
+            qualified("fire", Degree::Immune, "Hide"),
+            src("fire", Degree::Resistant, "Unt'garoth"),
+        ]);
+        assert_eq!(against(10, &s, "fire", false), 0, "immune to an ordinary flame");
+        assert_eq!(against(10, &s, "fire", true), 5, "resistant to an enchanted one");
+    }
+
+    #[test]
+    fn both_sources_are_named_whichever_one_applied() {
+        // A sheet saying "resistant to fire" invites the question "why",
+        // and the answer does not change because this particular sword
+        // was enchanted.
+        let s = standing(&[
+            qualified("slashing", Degree::Resistant, "Werewolf"),
+            src("slashing", Degree::Resistant, "Barkskin"),
+        ]);
+        assert_eq!(s[0].from, vec!["Werewolf".to_string(), "Barkskin".to_string()]);
+        assert_eq!(s[0].vs_magic, Some(Degree::Resistant), "Barkskin still applies");
+    }
+
+    #[test]
+    fn a_qualified_resistance_and_an_ordinary_vulnerability_still_cancel() {
+        let s = standing(&[
+            qualified("slashing", Degree::Resistant, "Werewolf"),
+            src("slashing", Degree::Vulnerable, "Curse"),
+        ]);
+        assert_eq!(against(10, &s, "slashing", false), 10, "half then double");
+        // Against a magic sword only the vulnerability is left.
+        assert_eq!(against(10, &s, "slashing", true), 20);
+    }
+
+    #[test]
+    fn the_target_round_trips_through_a_choice() {
+        let (degree, kind, nonmagical) =
+            pick("resist.acid|cold|fire.nonmagical", Some("cold")).unwrap();
+        assert!(nonmagical, "a choice must not lose the qualifier");
+        assert_eq!(target_for(degree, &kind, nonmagical), "resist.cold.nonmagical");
+        assert_eq!(parse_target(&target_for(degree, &kind, nonmagical)).unwrap().2, true);
     }
 
     #[test]
@@ -372,7 +608,7 @@ mod tests {
         // anything it liked.
         assert_eq!(
             pick("resist.poison", Some("fire")).unwrap(),
-            (Degree::Resistant, "poison".into())
+            (Degree::Resistant, "poison".into(), false)
         );
     }
 
@@ -444,7 +680,7 @@ mod tests {
     fn one_source_is_one_standing() {
         let got = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].degree, Degree::Resistant);
+        assert_eq!(got[0].degree, Some(Degree::Resistant));
         assert_eq!(got[0].from, vec!["Unt'garoth"]);
     }
 
@@ -458,7 +694,7 @@ mod tests {
             src("fire", Degree::Resistant, "Ring of Fire Resistance"),
         ]);
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].degree, Degree::Resistant);
+        assert_eq!(got[0].degree, Some(Degree::Resistant));
         assert_eq!(got[0].from.len(), 2);
     }
 
@@ -468,7 +704,7 @@ mod tests {
             src("poison", Degree::Resistant, "Dwarf"),
             src("poison", Degree::Immune, "Purity of Body"),
         ]);
-        assert_eq!(got[0].degree, Degree::Immune);
+        assert_eq!(got[0].degree, Some(Degree::Immune));
     }
 
     #[test]
@@ -478,7 +714,7 @@ mod tests {
             src("fire", Degree::Vulnerable, "a curse"),
             src("fire", Degree::Immune, "Holy Aura"),
         ]);
-        assert_eq!(got[0].degree, Degree::Immune);
+        assert_eq!(got[0].degree, Some(Degree::Immune));
     }
 
     #[test]
@@ -522,39 +758,39 @@ mod tests {
     #[test]
     fn resistance_halves_and_rounds_down() {
         let s = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
-        assert_eq!(against(10, &s, "fire"), 5);
-        assert_eq!(against(7, &s, "fire"), 3, "rounded down, which is 5e");
+        assert_eq!(against(10, &s, "fire", false), 5);
+        assert_eq!(against(7, &s, "fire", false), 3, "rounded down, which is 5e");
     }
 
     #[test]
     fn one_point_against_resistance_is_nothing() {
         // The rule rather than an edge case.
         let s = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
-        assert_eq!(against(1, &s, "fire"), 0);
+        assert_eq!(against(1, &s, "fire", false), 0);
     }
 
     #[test]
     fn immunity_is_none_of_it() {
         let s = standing(&[src("poison", Degree::Immune, "Purity of Body")]);
-        assert_eq!(against(40, &s, "poison"), 0);
+        assert_eq!(against(40, &s, "poison", false), 0);
     }
 
     #[test]
     fn vulnerability_doubles() {
         let s = standing(&[src("cold", Degree::Vulnerable, "a curse")]);
-        assert_eq!(against(7, &s, "cold"), 14);
+        assert_eq!(against(7, &s, "cold", false), 14);
     }
 
     #[test]
     fn a_type_nobody_has_an_opinion_about_passes_through() {
         let s = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
-        assert_eq!(against(10, &s, "slashing"), 10);
+        assert_eq!(against(10, &s, "slashing", false), 10);
     }
 
     #[test]
     fn negative_damage_is_not_healing_by_the_back_door() {
         let s = standing(&[src("fire", Degree::Vulnerable, "x")]);
-        assert_eq!(against(-5, &s, "fire"), 0);
+        assert_eq!(against(-5, &s, "fire", false), 0);
     }
 
     /* ---------- explaining itself ---------- */
@@ -563,7 +799,7 @@ mod tests {
     fn the_line_says_why_and_by_how_much() {
         let s = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
         assert_eq!(
-            said(10, &s, "fire").as_deref(),
+            said(10, &s, "fire", false).as_deref(),
             Some("resistant fire (Unt'garoth) - 5 instead of 10")
         );
     }
@@ -571,7 +807,7 @@ mod tests {
     #[test]
     fn nothing_to_say_about_a_type_nobody_resists() {
         let s = standing(&[src("fire", Degree::Resistant, "Unt'garoth")]);
-        assert_eq!(said(10, &s, "cold"), None);
+        assert_eq!(said(10, &s, "cold", false), None);
     }
 
     #[test]

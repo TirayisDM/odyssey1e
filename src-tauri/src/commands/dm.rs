@@ -461,6 +461,14 @@ pub fn enrol_actor(
             // PROVENANCE since 022. Nothing is read through it; it
             // records which type this individual came from.
             "npc_key": npc,
+            // 139. AND WHICH TEMPLATE, when it came from one. This one
+            // IS read: `name_actor` numbers a copied creature off its
+            // template's name, so three copies of Webbys are Webbys
+            // 0001 to 0003 rather than three actors called Webbys -
+            // which is what 138 shipped, because the statblock key is
+            // on the character row and not on the actor and 018's
+            // naming could not see a template at all.
+            "template_id": tpl,
             // NULL, deliberately. See 018.
             "label": name_or_null(label),
         }),

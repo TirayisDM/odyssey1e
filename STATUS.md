@@ -3937,6 +3937,72 @@ original bug felt even before it was one.
 caught up only when the DM pane was next built would be the same bug
 with a shorter fuse.
 
+## What the enrolment and the fight actually did - EXAMINED, one FIX (139)
+
+**Read off the live rows after Dave tested 133 to 138.** The Tavern, Test
+Game 1, round 3: Falon (init 6), Luci (4) and Webbys the giant spider
+(18, and it is Webbys' turn).
+
+**Everything built today is confirmed working, from the data rather than
+from the screen:**
+
+| | |
+|---|---|
+| 138 | Webbys the TEMPLATE was enrolled at 19:59 and a copy was made - scores, HP 26, AC 14, size lg, beast, bite in the right hand, all identical to the template, and `location_id` set to the Tavern |
+| 138 | the copy rolled its own initiative on the way in: 18 |
+| **133** | at 20:03 it used **Crush the Throat**, which is `min_level = 5`, and **Webbys is level 4**. Before 133 that technique did not exist for any creature in the bestiary |
+| 137 | to hit +4 = STR 14 (+2) + prof 2, so it was proficient with its own bite |
+| 054/060 | the action is stamped round 3, `turn_actor_id` = Webbys, so it was ON its turn and not out of turn, `cost = attack` |
+
+The roll itself: natural 19, crit (the technique's own `crit_min` is 19,
+`fumble_max` 2), 23 against Falon's AC 14, then 4d6+2 for 17 - the crit
+doubling 2d6 into 4d6.
+
+**`reason: "auto_hit"` on a natural 19 is intended, not a fault.** A
+widened crit auto-hits the same way a 20 does, and
+`resolution.rs::a_widened_crit_auto_hits_the_same_way` is the test that
+says so. Checked because it looked wrong.
+
+### 139 is 138's bug, and it is about names
+
+**138 gave the actor no provenance, and 018's naming turns out to depend
+on it.** `name_actor()` had two branches: `npc_key` set means "Goblin
+0001", numbered across the game; `npc_key` null means take the
+character's name verbatim. A player enrolled as themselves wants the
+second - Falon is Falon. 138's copies landed there too, because the
+statblock key is on the CHARACTER row and not on the actor.
+
+So the first Webbys is "Webbys" and **so is the second, and so is the
+third** - three actors with one name, indistinguishable in the roster,
+in the turn order, and in `rolls.character_name`, which snapshots the
+name at the moment of the roll and cannot be untangled afterwards. The
+many-goblins problem 018 exists to solve, reached by a path 018 could
+not see.
+
+**Stamping the statblock key on the actor would have been the wrong
+fix** and is worth saying: Webbys' template carries `npc_key =
+giant_spider`, so the existing branch would have numbered it off the
+SPECIES and renamed the character to "Giant Spider 0001", deleting a
+name the DM chose on purpose. The point of a template is that it is
+yours and it is named.
+
+So `encounter_actors.template_id` records which template a copy came
+from, and `name_actor` gains a third branch that numbers off the
+TEMPLATE'S name: Webbys 0001, Webbys 0002. The ordinal block is shared
+with the statblock branch rather than written twice.
+
+**Webbys as it stands was left alone, both its name and its
+provenance.** Renaming mid-fight is obviously wrong - two resolved roll
+rows already carry `character_name = 'Webbys'`, and 018's argument is
+that a name already rolled under is a fact. Backfilling the id was
+subtler: a character names the STATBLOCK it descends from, not the
+template, so the only route back is matching `npc_key` against this
+game's templates - and **there are two Goblin templates**. The match is
+not unique, so the join would have let Postgres choose. A guess written
+into a provenance column reads exactly like knowledge, which is the
+fault this codebase is named after; a null at least says "came in
+before 139".
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

@@ -4417,6 +4417,87 @@ Hook Horror, Helmed Horror, Intellect Devourer, Scarecrow, Twig Blight,
 Yuan-ti Pureblood and the Gas Spore. They were written from memory of a
 book they are not in, and nothing has verified them.
 
+## A dragon that can breathe - BUILT (148, attack::damage_mod)
+
+147's header listed what the bestiary still could not say and breath
+weapons were first: "a dragon here bites, claws, lashes and buffets; it
+does not breathe." 43 dragons, and the thing everybody at the table is
+actually afraid of was a sentence nobody had written down.
+
+**Dave's read was right: it fits the existing vocabulary.** A breath
+weapon is a natural weapon - an ITEM with its own dice and damage type,
+equipped like a bite, rolled through the same `attack::resolve` as
+everything else. No new mechanism, no new table.
+
+**41 breath items, one per dragon,** which looks wasteful and is not.
+The dice differ by colour AND age: a red wyrmling breathes 7d6 and an
+ancient red 26d6. A shared `breath_fire` carrying four techniques at
+four gates is the obvious shape, and **133 is exactly why it cannot
+be** - a creature clears every gate, so a wyrmling equipped with it
+would reach the ancient's breath. The gate stopped being available as a
+discriminator, so the item has to be one. That is 133 working as
+intended rather than getting in the way.
+
+**Aimed, with the real rule in the prose** - 136's choice for the
+Shrieker, for the same reason: this engine rolls to hit against an AC
+and has no save-DC path. Each item's description carries the shape, the
+DC and which save, and points at `encounter_challenges`, where 011's own
+comment says "the roll path cannot tell them apart" from an actor's AC.
+The DM adds the DC as a challenge, the table rolls saves against it, and
+the item supplies the damage. Two clicks rather than one button, said
+out loud rather than left to be discovered.
+
+### `nomod`, and why a dragon's breath was wrong by +9
+
+`properties` carries `con` - 134, the Shrieker's lesson - and `nomod`,
+new here.
+
+**5e puts an ability modifier on the damage of a weapon you SWING**,
+because the arm is doing the work, and puts none on a dragon's breath.
+The engine had no way to say so, so an ancient red's breath came back as
+**26d6+9**: a plausible number, correctly derived from the right rule
+applied to the wrong kind of thing. `attack::damage_mod` reads the
+property and nothing else does; nothing a person carries has it.
+
+Verified: 41 items, 41 dragons armed, ancient red at 26d6 fire. The only
+dragons without a breath are the Pseudodragon and the Wyvern, which
+correctly have none.
+
+### The other four, and where each one would go
+
+Dave's wider point - that these should be expressible as attacks or
+techniques inside what already exists - holds for two of the four and
+not for the others. Written down rather than guessed at next time:
+
+**Legendary actions FIT, and most of the work is done.** A dragon's
+legendary actions are a tail attack and a wing attack, and `tail` and
+`wing` are already items in its kit. They want techniques with
+`special_text` saying what they cost, and 054/060 already stamp an
+action with the round and whose turn it was - `spent.rs` has
+`out_of_turn` for exactly this. The gap is that nothing yet says a
+creature HAS legendary actions or how many, which is a column on `npcs`
+and a line on the statblock screen.
+
+**Lair actions do NOT fit a creature at all.** They belong to the LAIR,
+fire on initiative 20, and happen whether or not the creature acts. The
+nearest existing home is `encounter_challenges`, which is already how a
+DM authors a difficulty with a DC - a lair action is a challenge the
+encounter owns rather than a technique the dragon owns.
+
+**Regeneration is not an attack and has no hook.** It is "at the start
+of its turn, regain N hit points", and nothing in this engine runs at
+the start of a turn. The clock (092) and effects (094) tick on game
+time, not on turn order. It wants a turn-start event, which does not
+exist, and the Troll has carried it as prose since 127.
+
+**Spellcasting has a whole subsystem already** - 101-107, `prayers.rs`,
+`spellcast.rs` - and it is cleric-shaped: `character_prayers` keyed to a
+character, slots from `prayers::slots_at` and a class level.
+`instantiate_npc` copies kit and scores and no spells. A spellcasting
+creature wants its prayers copied in the same breath as its weapons,
+which is a change to one function and a new kit-shaped table rather than
+a new mechanism.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

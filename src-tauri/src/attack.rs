@@ -255,6 +255,32 @@ pub fn gate_level(level: i64, from_statblock: bool) -> i64 {
     }
 }
 
+/// What the ability adds to DAMAGE, which is not always the modifier.
+///
+/// 148. A BREATH WEAPON ADDS NOTHING. 5e puts an ability modifier on
+/// the damage of a weapon you SWING - the arm is doing the work - and
+/// puts none on a dragon's breath, a shriek or anything else that is
+/// resolved by a saving throw. The engine had no way to say so, and an
+/// ancient red dragon's breath came back as 26d6+9: a plausible number,
+/// correctly derived, and not the one in the book.
+///
+/// A PROPERTY, like the ability codes beside it. `nomod` on the item,
+/// read here and nowhere else. Nothing a person carries has one, so
+/// every weapon in the armoury is untouched.
+///
+/// THE GRANTS STILL APPLY, which is deliberate: a +2 flaming breath is
+/// not a thing today, but if one is ever written the enchantment is a
+/// different fact from the body's own strength and should survive.
+pub fn damage_mod(properties: &[String], ability_mod: i64) -> i64 {
+    match properties.iter().any(|p| p == NO_DAMAGE_MOD) {
+        true => 0,
+        false => ability_mod,
+    }
+}
+
+/// The property that says so, spelled once.
+pub const NO_DAMAGE_MOD: &str = "nomod";
+
 /// Ability modifier plus the proficiency bonus, when it applies.
 pub fn to_hit(ability_mod: i64, proficient: bool, proficiency_bonus: i64) -> i64 {
     ability_mod + if proficient { proficiency_bonus } else { 0 }
@@ -369,7 +395,8 @@ pub fn resolve(
             // and says so, rather than one number doing both jobs.
             damage: damage_formula(
                 &t.dice,
-                crate::grants::apply(ability_mod, &gs, "damage"),
+                crate::grants::apply(
+                    damage_mod(&owned.item.properties, ability_mod), &gs, "damage"),
             ),
             crit_min: t.crit_min,
             fumble_max: t.fumble_max,
@@ -407,11 +434,12 @@ pub fn resolve(
                 proficiency_bonus: if owned.proficient { proficiency_bonus } else { 0 },
                 to_hit: crate::grants::apply(plain, &gs, "attack"),
                 magic: crate::grants::apply(plain, &gs, "attack") - plain,
-            // 143. THE WEAPON, not the swing. See the field.
-            magical: !owned.grants.is_empty(),
+                // 143. THE WEAPON, not the swing. See the field.
+                magical: !owned.grants.is_empty(),
                 damage: damage_formula(
                     &format!("{}d{}", n, d),
-                    crate::grants::apply(ability_mod, &gs, "damage"),
+                    crate::grants::apply(
+                        damage_mod(&owned.item.properties, ability_mod), &gs, "damage"),
                 ),
                 // Standard thresholds. Only a technique widens them.
                 crit_min: 20,
@@ -1046,6 +1074,31 @@ mod tests {
     }
 
     /* ---------------- a weapon may name its ability (134) ----------- */
+
+    /* ---------------- damage with no modifier (148) ----------------- */
+
+    #[test]
+    fn an_ordinary_weapon_still_adds_the_modifier() {
+        assert_eq!(damage_mod(&[], 4), 4);
+        assert_eq!(damage_mod(&["fin".to_string()], 4), 4);
+        assert_eq!(damage_mod(&["con".to_string()], -2), -2);
+    }
+
+    #[test]
+    fn a_breath_weapon_adds_nothing() {
+        // 26d6, not 26d6+9. The arm is not doing the work.
+        assert_eq!(damage_mod(&[NO_DAMAGE_MOD.to_string()], 9), 0);
+        assert_eq!(damage_mod(&["con".to_string(), "nomod".to_string()], 9), 0);
+    }
+
+    #[test]
+    fn nothing_in_the_armoury_carries_it() {
+        // The guard against this becoming a silent change to weapons
+        // people hold: the property is opt-in and spelled one way.
+        for p in ["no_mod", "NOMOD", "nomods", ""] {
+            assert_eq!(damage_mod(&[p.to_string()], 3), 3, "{} read as nomod", p);
+        }
+    }
 
     #[test]
     fn a_weapon_with_no_stated_ability_is_unchanged() {

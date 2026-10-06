@@ -3838,6 +3838,57 @@ rather than implying the engine has it. `effects` with a `skill.prc`
 grant is the shape that wants, and `apply_effect` has no UI and no
 `grants` parameter - two reasons it is not built today.
 
+## A creature is proficient with its own kit - BUILT (137)
+
+**Dave: every creature weapon and natural attack is proficient by
+default, and anything added in customization is set at that time.** The
+data was nearly there - 223 of 224 global kit rows already said so,
+including all 125 natural weapons - so most of this is making the
+DEFAULT true rather than trusting every future seed to remember.
+`npc_items.proficient_override` now defaults to true.
+
+**The fault underneath was that NULL meant two different things.** It is
+a tri-state and the nullability is the point: true or false came from
+somebody, NULL means nobody has said. Two things read a NULL on a
+creature's kit and they disagreed -
+
+| | NULL reads as |
+|---|---|
+| `equipment::load_npc_kit` | proficient (`unwrap_or(true)`) |
+| `equipment::is_proficient` | derive it from `weapon_profs` |
+
+- so the DM's statblock preview and the instantiated creature could
+answer differently about the same row. The named defect with a to-hit
+attached rather than an error.
+
+**And the derived answer is the wrong one for a monster.** Several
+statblocks carry `weapon_profs = {sim}` while holding something martial
+- the Goblin holds a scimitar - so deriving says NOT proficient and
+takes the proficiency bonus off the creature's own weapon. It never bit
+anybody because 131 set the flag on every row it wrote; the single row
+it did not write is 022's goblin handaxe, the oldest kit row in the
+schema, which survived only because a handaxe is simple and the
+derivation happened to come out true.
+
+**Widening `weapon_profs` would have been the wrong fix** and is worth
+saying out loud: giving the Goblin `mar` makes the next martial weapon
+anybody hands it proficient too, which is the opposite of what was
+asked. Proficiency with what a statblock SHIPS is a different fact from
+proficiency with a CLASS of weapon. So it is stated per row, the default
+states it, and `instantiate_npc` resolves a NULL to true on the way to
+the object rather than passing it on to be derived.
+
+Live after: 224 of 224 kit rows proficient, no creature object left
+deriving, and still exactly one `instantiate_npc` - 095's overload trap
+avoided by keeping 124's signature byte-for-byte.
+
+**One thing deliberately left**: `load_npc_kit`'s `unwrap_or(true)` and
+`is_proficient`'s derivation still differ in the source. No data reaches
+them as NULL any more, so nothing can see it, but the two answers are
+still written in two places and the comment saying why they now agree
+was not added - the app was mid-test and touching `src-tauri` restarts
+it, which signs the session out. Worth a line when next in there.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

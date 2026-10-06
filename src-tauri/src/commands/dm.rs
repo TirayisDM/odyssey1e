@@ -69,6 +69,42 @@ pub fn list_npcs(state: State<AppState>, game_id: String) -> Result<Value, Strin
     )
 }
 
+/// Everybody already standing in this game, players and creatures both.
+///
+/// 138. THE GAP THE ENROL PICKER FELL THROUGH. It offered reference
+/// statblocks and `list_characters`, and `list_characters` is PLAYERS
+/// ONLY - deliberately, since 022, because a player's list filling with
+/// goblins is its own bug. So an NPC who already existed could not be
+/// enrolled at all: not a creature placed from the Creatures tab, not
+/// one left over from a previous fight, not Pete. A DM could make a
+/// creature and then never find it again.
+///
+/// TEMPLATES EXCLUDED, because 123 means it: a template is not a
+/// creature in the world. `list_creatures` is where those live, and
+/// `enrol_actor` copies one rather than enrolling it.
+///
+/// `is_npc` TRAVELS WITH THE ROW rather than being split into two
+/// lists. It is a label and not a structure - it changes no rule - so
+/// the screen groups on it and nothing else has to care.
+#[tauri::command]
+pub fn list_individuals(state: State<AppState>, game_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+    supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            (
+                "select",
+                "id,name,token_name,is_npc,is_active,level,class_key,npc_key,creature_type",
+            ),
+            ("game_id", &format!("eq.{}", game_id)),
+            // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
+            ("is_template", "is.false"),
+            ("order", "is_npc.asc,name.asc"),
+        ],
+    )
+}
+
 /// Write a statblock for this campaign.
 ///
 /// game_id is always set and never null: 011's policy admits only
@@ -279,26 +315,42 @@ pub fn set_encounter_status(
 /// calls a function rather than writing a row: a half-built goblin with
 /// scores but no weapons must not be able to exist.
 ///
+/// 138. AND A TEMPLATE IS COPIED, for the same reason and by the same
+/// shape. `instantiate_character` is what the Creatures tab's "place in
+/// world" already calls; enrolling one is placing it and then putting it
+/// in the fight, so saying so here keeps the rule - a template is never
+/// in the world, 123 - in one place instead of leaving the screen to
+/// make two calls and get the order right.
+///
+/// THREE KINDS IN, ONE KIND OUT. Exactly one of the three, and whatever
+/// arrives, what gets enrolled is a character: a reference statblock
+/// becomes an individual, a template becomes an individual, and somebody
+/// already standing is already one.
+///
 /// A BLANK NAME IS STILL THE POINT. Leave it empty and 018 names the
-/// actor, and `instantiate_npc` gives the character the same name.
+/// actor, and the instantiation gives the character the same name.
 #[tauri::command]
 pub fn enrol_actor(
     state: State<AppState>,
     encounter_id: String,
     npc_key: Option<String>,
     character_id: Option<String>,
+    template_id: Option<String>,
     label: Option<String>,
 ) -> Result<Value, String> {
     let token = state.token()?;
 
     let npc = npc_key.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let chr = character_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    match (npc, chr) {
-        (Some(_), Some(_)) => {
-            return Err("an actor is a statblock or a character, never both".to_string())
+    let tpl = template_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    match [npc, chr, tpl].iter().filter(|x| x.is_some()).count() {
+        0 => return Err("choose a statblock, a creature or a character to enrol".to_string()),
+        1 => {}
+        _ => {
+            return Err(
+                "an actor is a statblock, a creature or a character - exactly one".to_string(),
+            )
         }
-        (None, None) => return Err("choose a statblock or a character to enrol".to_string()),
-        _ => {}
     }
 
     // The encounter names the game, and instantiation needs it. It also
@@ -366,7 +418,38 @@ pub fn enrol_actor(
             }
             cid
         }
-        None => chr.unwrap_or_default().to_string(),
+        // 138. A TEMPLATE, COPIED. `place_creature`'s own RPC, so the
+        // creature that walks in is the same shape as one placed from
+        // the Creatures tab and then enrolled by hand.
+        None => match tpl {
+            Some(t) => {
+                let made = supabase::rpc(
+                    &token,
+                    "instantiate_character",
+                    &json!({
+                        "p_source": t,
+                        "p_game_id": game_id,
+                        "p_label": name_or_null(label.clone()),
+                    }),
+                )
+                .map_err(|e| denied(e, "enrol an actor"))?;
+                let cid = match made.as_str() {
+                    Some(id) => id.to_string(),
+                    None => return Err("that creature could not be copied".to_string()),
+                };
+                // Where the fight is, for the reason stated above.
+                if let Some(place) = where_it_happens.as_deref() {
+                    let _ = supabase::rest_update(
+                        &token,
+                        "characters",
+                        &[("id", &format!("eq.{}", cid))],
+                        &json!({ "location_id": place }),
+                    );
+                }
+                cid
+            }
+            None => chr.unwrap_or_default().to_string(),
+        },
     };
 
     let made = supabase::rest_insert(
@@ -394,7 +477,9 @@ pub fn enrol_actor(
     // Best effort. A goblin with no initiative is a goblin the DM can
     // roll for by hand, so a failure here must not undo an enrolment
     // that otherwise worked.
-    if npc.is_some() {
+    // 138. OR A TEMPLATE, which is a monster by every other measure and
+    // was being left at the bottom of the order with a button beside it.
+    if npc.is_some() || tpl.is_some() {
         if let Some(id) = made
             .as_array()
             .and_then(|a| a.first())

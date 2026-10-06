@@ -1552,6 +1552,7 @@ pub fn run() {
             commands::dm::create_npc,
             commands::dm::create_encounter,
             commands::dm::set_encounter_status,
+            commands::dm::list_individuals,
             commands::dm::enrol_actor,
             commands::dm::remove_actor,
             commands::dm::set_actor_active,

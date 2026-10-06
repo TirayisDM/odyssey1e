@@ -2385,6 +2385,12 @@ async function loadCreatures() {
   if (empty) empty.hidden = mine.length > 0;
 
   for (const c of mine) host.append(creatureRow(c));
+
+  // 138. AND THE ENROL PICKER LEARNS ABOUT IT NOW. The whole bug was a
+  // creature you could make and then not find; a list that catches up
+  // only when the DM pane is next built would be the same bug with a
+  // shorter fuse.
+  await loadStatblockPicker();
 }
 
 // One template. Says what it IS before what it can do, because the type
@@ -2435,6 +2441,8 @@ function creatureRow(c) {
     log("place_creature", (name.value || c.name) + " is in the world");
     name.value = "";
     await loadWorld();
+    // It is an individual now, so it moves groups in the enrol picker.
+    await loadStatblockPicker();
   });
 
   const gone = sEl("button", "ghost tiny", "delete");
@@ -7436,26 +7444,97 @@ async function attackRow(actor, encounterId) {
   return wrap;
 }
 
-// What can be enrolled: every statblock, then every character in the
-// game. One picker, because enrolment is one question.
+// What can be enrolled. One picker, because enrolment is one question -
+// but FOUR KINDS OF ANSWER, grouped, because they are not the same kind
+// of thing and the old list quietly held only two of them.
+//
+// 138. A CREATURE YOU MADE COULD NOT BE FOUND. This offered reference
+// statblocks and `list_characters`, and `list_characters` is players
+// only - by design since 022, because a player's list filling with
+// goblins is its own bug. So every NPC who already existed was missing:
+// a creature placed from the Creatures tab, a template imported there,
+// Pete left over from the last fight. A DM could make a creature and
+// then have nowhere to put it.
+//
+// THE GROUPS SAY WHAT WILL HAPPEN, which is the part worth being
+// explicit about. A statblock and a template are COPIED on the way in -
+// a fresh individual with its own hit points - and somebody already in
+// the world walks in as themselves. Same distinction 123 drew, said on
+// screen instead of left for the DM to remember.
 async function loadStatblockPicker() {
   const sel = document.querySelector("#enrol-what");
+  // CALLED FROM THE CREATURES TAB TOO since 138, so the pane it lives
+  // in may not be on screen.
+  if (!sel || !state.gameId) return;
   sel.innerHTML = "";
-  const npcs = await call("list_npcs", { gameId: state.gameId });
-  for (const n of npcs || []) {
-    const o = document.createElement("option");
-    o.value = "npc:" + n.key;
-    const bits = [n.species, n.class].filter(Boolean).join(" ");
-    o.textContent = n.name + " · AC " + n.ac + " · " + n.hp_max + "hp" +
-      (bits && bits !== n.name ? " · " + bits : "");
-    sel.append(o);
+
+  const group = (label) => {
+    const g = document.createElement("optgroup");
+    g.label = label;
+    sel.append(g);
+    return g;
+  };
+
+  // THIS GAME'S OWN CREATURES FIRST, because they are the ones somebody
+  // went to the trouble of making. 132 reference statblocks below them
+  // would otherwise bury seven templates.
+  const mine = (await call("list_creatures", { gameId: state.gameId })) || [];
+  if (mine.length) {
+    const g = group("This game's creatures — a copy is placed");
+    for (const c of mine) {
+      const o = document.createElement("option");
+      o.value = "tpl:" + c.id;
+      const bits = [c.creature_type, c.size].filter(Boolean).join(" ");
+      o.textContent = c.name + " · level " + (c.level ?? 1) +
+        (c.hp_max ? " · " + c.hp_max + "hp" : "") + (bits ? " · " + bits : "");
+      g.append(o);
+    }
   }
-  const chars = await call("list_characters", { gameId: state.gameId });
-  for (const c of chars || []) {
-    const o = document.createElement("option");
-    o.value = "chr:" + c.id;
-    o.textContent = c.name + " · character";
-    sel.append(o);
+
+  // ALREADY STANDING - players and creatures both, split by `is_npc`,
+  // which is a label and not a structure.
+  const folk = (await call("list_individuals", { gameId: state.gameId })) || [];
+  const npcsHere = folk.filter((c) => c.is_npc);
+  const pcs = folk.filter((c) => !c.is_npc);
+  if (npcsHere.length) {
+    const g = group("In the world — enrolled as they stand");
+    for (const c of npcsHere) {
+      const o = document.createElement("option");
+      o.value = "chr:" + c.id;
+      o.textContent = (c.token_name || c.name) +
+        (c.npc_key ? " · " + c.npc_key : "") +
+        (c.is_active === false ? " · not active" : "");
+      g.append(o);
+    }
+  }
+  if (pcs.length) {
+    const g = group("Player characters");
+    for (const c of pcs) {
+      const o = document.createElement("option");
+      o.value = "chr:" + c.id;
+      o.textContent = c.name + " · level " + (c.level ?? 1) +
+        (c.class_key ? " · " + c.class_key : "");
+      g.append(o);
+    }
+  }
+
+  // THE SHARED BESTIARY LAST. Read-only, 132 of them, and the thing a
+  // DM reaches for least often once they have templates of their own.
+  const npcs = (await call("list_npcs", { gameId: state.gameId })) || [];
+  if (npcs.length) {
+    const g = group("Reference statblocks — a copy is placed");
+    for (const n of npcs) {
+      const o = document.createElement("option");
+      o.value = "npc:" + n.key;
+      const bits = [n.species, n.class].filter(Boolean).join(" ");
+      o.textContent = n.name + " · AC " + n.ac + " · " + n.hp_max + "hp" +
+        (bits && bits !== n.name ? " · " + bits : "");
+      g.append(o);
+    }
+  }
+
+  if (!sel.children.length) {
+    sel.append(new Option("nothing to enrol", ""));
   }
 }
 
@@ -8086,12 +8165,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   guarded("#enrol", async () => {
     if (!state.dmEncounterId) return log("enrol_actor", "select an encounter first", true);
     const pick = document.querySelector("#enrol-what").value;
-    const isNpc = pick.startsWith("npc:");
+    if (!pick) return log("enrol_actor", "nothing selected to enrol", true);
+    // 138. THREE PREFIXES, AND THE ENGINE DECIDES WHAT EACH MEANS. The
+    // screen only says WHICH kind was picked; whether that is copied or
+    // enrolled where it stands is `enrol_actor`'s rule.
+    const kind = pick.slice(0, 4);
+    const id = pick.slice(4);
     dmSay("");
     const r = await tryCall("enrol_actor", {
       encounterId: state.dmEncounterId,
-      npcKey: isNpc ? pick.slice(4) : null,
-      characterId: isNpc ? null : pick.slice(4),
+      npcKey: kind === "npc:" ? id : null,
+      templateId: kind === "tpl:" ? id : null,
+      characterId: kind === "chr:" ? id : null,
       // Blank on purpose is the normal case: 018 names it.
       label: val("#enrol-name") || null,
     });

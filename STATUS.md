@@ -3889,6 +3889,54 @@ still written in two places and the comment saying why they now agree
 was not added - the app was mid-test and touching `src-tauri` restarts
 it, which signs the session out. Worth a line when next in there.
 
+## A creature you made could not be found - FIXED (138)
+
+**Dave made seven creatures on the Creatures tab and could not enrol
+one.** They were all there - seven templates in Test Game 1, written
+correctly by `import_statblock` - and nothing in the encounter panel
+could see them.
+
+The enrol picker offered two lists: `list_npcs`, the shared bestiary,
+and `list_characters`. **`list_characters` is players only**, and
+correctly so - since 022 a monster is a character too, and without that
+filter a player's list fills with goblins. But it is the only list the
+picker had for "somebody who already exists", so **every NPC in the game
+was unreachable**: a template from the Creatures tab, a creature placed
+into the world, Pete left standing after the last fight. A DM could make
+a creature and then have nowhere to put it.
+
+**`list_individuals` is the missing list** - every non-template character
+in the game, players and creatures both, with `is_npc` travelling on the
+row rather than split into two queries. It is a label and not a
+structure, so the screen groups on it and nothing else has to care.
+
+**And `enrol_actor` now takes a template.** Three kinds in, one kind out:
+a reference statblock becomes an individual, a template becomes an
+individual through `instantiate_character` - the same RPC "place in
+world" already calls - and somebody already standing is enrolled where
+they stand. Saying it here keeps 123's rule, that a template is never
+itself in the world, in one place rather than leaving the screen to make
+two calls in the right order. A copied template rolls its own initiative
+on the way in, like any other monster; it had been dropping to the
+bottom of the order with a button beside it.
+
+**Four groups in the picker, and they say what will happen:**
+
+| group | on enrolment |
+|---|---|
+| This game's creatures | a copy is placed |
+| In the world | enrolled as they stand |
+| Player characters | enrolled as they stand |
+| Reference statblocks | a copy is placed |
+
+This game's own creatures sort first, because 132 reference statblocks
+above them would bury seven templates - which is most of how the
+original bug felt even before it was one.
+
+**The picker refreshes when the Creatures tab changes.** A list that
+caught up only when the DM pane was next built would be the same bug
+with a shorter fuse.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

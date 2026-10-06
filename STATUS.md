@@ -1,8 +1,11 @@
 # odyssey1e - session handoff
 
-**Written 2026-09-17. Updated 2026-10-03 after the casting stack:
-the spell catalogue, cleric prayers, effects that reach the dice,
-damage resistance, and saves you can roll from the ability row.**
+**Written 2026-09-17. Updated 2026-10-06 after the creature stack:
+what a thing is, a monster that says what it resists, a statblock you
+can instantiate as a character, a creature as a file, and a bestiary of
+134. 2026-10-03 brought the casting stack before it: the spell
+catalogue, cleric prayers, effects that reach the dice, damage
+resistance, and saves you can roll from the ability row.**
 Read `README.md` first for how to run it; this
 file is only where things stand and what comes next.
 
@@ -3772,6 +3775,18 @@ vocabulary that reaches the dice, damage resistance with its provenance,
 and saves you can roll from the ability row. The UI is no longer a test
 rig: seven tabs and five sheet subtabs, and nothing on screen computes a
 game number.
+
+**As of 2026-10-06** a creature also knows WHAT IT IS - 5e's fourteen
+types, on species, statblocks and characters, so the fifteen spells that
+name a type can be checked. A monster says what it resists in the same
+grant vocabulary everything else uses. A statblock can be instantiated
+as a template character and copied into an encounter with its kit, which
+is how two goblins off one statblock get their own hit points. A
+creature can be written to a file and read back. And the global
+catalogue holds 134 statblocks carrying 223 kit rows, 45 of them with
+resistance grants. **Spot-check a creature before a session runs on
+it:** those numbers are SRD-derived from memory and were verified as the
+rows intended, not as the numbers printed.
 
 Since the last handoff: an object edit now reaches the sheet and not
 just the Objects tab (five other object writes had the same staleness);

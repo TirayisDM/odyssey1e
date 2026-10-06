@@ -283,13 +283,23 @@ plumbing across 15 command files - with 884 tests, 36 tables, and a
 frontend of 8.2k lines of plain JS.
 `STATUS.md` is the detailed handoff; this is the shape of it.
 
-**The app has seven top-level tabs** — Play, Run, World, Characters,
-Objects, Cleric Prayers, Trade — and the character sheet has five
-subtabs: Stats, Description, Equipment, Skills & Talents, Prayers.
+**The app has eight top-level tabs** — Play, Run, World, Characters,
+Creatures, Objects, Cleric Prayers, Trade — and the character sheet has
+five subtabs: Stats, Description, Equipment, Skills & Talents, Prayers.
+Creatures is DM-only and is offered on `amDM()`; the access rule itself
+is Postgres's.
 
 Working, roughly in the order it was built:
 
-* **Access** — auth, games, join-by-code, RLS verified with four accounts
+* **Access** — auth, games, join-by-code, RLS verified with four
+  accounts. There is no DM *account*: "dm" is a per-game role in
+  `game_members.role`, so the same person is DM of one game and a player
+  in another, and `is_game_dm()` backs 95 of the 143 policies
+* **Creatures** — a template IS a character (`is_template`), so a
+  creature is edited with the same sheet a player uses and placing one
+  on the board is a copy, contents of its containers and all. `npcs` is
+  the published reference you import from. 5e's fourteen creature types,
+  which five seeded spells are written against
 * **Dice** — the engine, with parity tests against the original
   `diceroller.js`, plus crit/fumble thresholds and formula doubling
 * **Characters** — abilities, skills, saves, species (bonuses, maxima,

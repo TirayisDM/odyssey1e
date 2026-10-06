@@ -42,6 +42,8 @@ pub fn list_characters(state: State<AppState>, game_id: String) -> Result<Value,
             // a label rather than a structure - it changes no rule, it
             // decides which list you are looking at.
             ("is_npc", "is.false"),
+            // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
+            ("is_template", "is.false"),
             ("order", "name.asc"),
         ],
     )

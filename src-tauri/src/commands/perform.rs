@@ -202,6 +202,8 @@ fn party(token: &str, game_id: &str) -> Result<Vec<(String, String)>, String> {
             ("select", "id,name"),
             ("game_id", &format!("eq.{}", game_id)),
             ("is_npc", "is.false"),
+            // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
+            ("is_template", "is.false"),
             ("is_active", "is.true"),
         ],
     )?;

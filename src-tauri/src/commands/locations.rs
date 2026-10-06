@@ -365,6 +365,8 @@ pub fn who_is_where(state: State<AppState>, game_id: String) -> Result<Value, St
         "characters",
         &[
             ("select", "id,name,token_name,is_npc,dead,is_active,location_id,entity_id,markup,disposition"),
+            // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
+            ("is_template", "is.false"),
             ("game_id", &format!("eq.{}", game_id)),
             ("order", "is_npc.asc,name.asc"),
         ],

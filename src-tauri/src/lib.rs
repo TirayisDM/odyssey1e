@@ -1468,6 +1468,11 @@ pub fn run() {
             commands::prayers::list_prayers,
             commands::prayers::prepare_prayer,
             commands::prayers::forget_prayer,
+            // 123. The bestiary.
+            commands::creatures::list_creatures,
+            commands::creatures::import_statblock,
+            commands::creatures::place_creature,
+            commands::creatures::delete_creature,
             commands::prayers::castable,
             commands::prayers::cast_prayer,
             commands::prayers::spend_spell_slot,

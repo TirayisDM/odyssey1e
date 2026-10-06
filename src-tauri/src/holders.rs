@@ -682,6 +682,8 @@ pub fn load_world(
         "characters",
         &[
             ("select", "name,token_name,entity_id"),
+            // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
+            ("is_template", "is.false"),
             ("game_id", &format!("eq.{}", game_id)),
         ],
     )?;

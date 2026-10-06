@@ -291,6 +291,8 @@ fn load_resters(token: &str, game_id: &str) -> Result<Vec<Rester>, String> {
             ("select", "id,name,hp_max,last_long_rest"),
             ("game_id", &format!("eq.{}", game_id)),
             ("is_npc", "is.false"),
+            // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
+            ("is_template", "is.false"),
             ("is_active", "is.true"),
         ],
     )?;

@@ -3504,6 +3504,69 @@ that will call them named in the reason - the six "evil and good" types
 and the two that cannot be healed. They are tested 5e facts waiting on
 the spell wiring, and the alternative was deriving them again later.
 
+## A creature template is a character - BUILT (123, 124, commands/creatures.rs)
+
+Stage 1 of the Creatures work. 022 settled the INSTANCE - every actor in
+an encounter is a `characters` row - and left the TEMPLATE as a second,
+thinner schema: `npcs` is 23 flat columns against `characters` 44 and
+eight satellite tables, sharing only ten column names with the thing it
+makes. Abilities are columns there and rows here. There was nowhere on a
+statblock to put a skill proficiency, a prepared spell, a feature with
+uses or a multiclass level, so a creature gained the capacity for all of
+them the instant it was instantiated and arrived with none.
+
+`characters.is_template` CLOSES THAT. Placing a creature is a
+character-to-character copy, so everything built for a player character
+works on a creature the day this lands - the ability rows, the save
+buttons, the resistance block, the equipment ladder, prayers and slots.
+"Edit" in the Creatures tab opens the character sheet. That is the whole
+payoff and it cost no new UI.
+
+`npcs` BECOMES A PUBLISHED REFERENCE and is otherwise untouched - the
+Monster Manual, which you copy out of. A global statblock is writable by
+nobody through the app, so importing is the only way to change a goblin
+and the shared one stays as it was.
+
+WHAT A COPY CARRIES: scores, skill proficiencies, class levels, choices,
+prepared spells, and the whole kit INCLUDING what is inside its
+containers. WHAT IT DOES NOT: spent slots, spent uses, hit point events,
+death saves. A creature arrives rested and whole, and a template poked
+at in the tab does not bleed onto creatures already made from it.
+
+124 IS 123'S BUG, FIXED FORWARD. 123 copied the kit in one statement,
+inventing a uuid for each container's `entity_id` so it could re-point
+children before any row existed - and it fails on the first creature
+carrying a container, because `entity_id` is a foreign key into
+`entities` and 030 hands it out from a BEFORE INSERT trigger that only
+fires for a container. The copy goes a level at a time now, taking the
+id the trigger returns and carrying it down. Corrected in a new
+migration rather than by editing an applied one, which is 115's rule.
+
+A TEMPLATE IS NOT A CREATURE IN THE WORLD, and this is enforced in six
+places. Five game-wide reads exclude templates - the player list,
+creatures at a location, the perform audience, who rests, and holder
+names - and a TRIGGER refuses to put one in an encounter. The trigger is
+in the database rather than in Rust because a template in a fight is not
+a display mistake: it would roll initiative, take damage and die, and
+`encounter_actors` can be written by anything holding the publishable
+key.
+
+VERIFIED AGAINST THE LIVE DATABASE, all rolled back: a template copied
+with 6 abilities, 1 skill, 1 prepared spell, 3 top-level items and a
+torch nested inside a backpack, with slots and uses at 0 and the
+template's own kit untouched; the enrolment trigger refusing with its
+own message; and all five sweeps returning 0 for a template sitting in a
+location. In the stub rig the panel paints, "edit" hands the creature to
+the character sheet with its id, and "place" is double-click guarded.
+
+NEW FILE BECAUSE dm.rs IS 1037 LINES, past the ceiling the architecture
+note sets. `commands/creatures.rs` is 199.
+
+STILL TO COME: Stage 3, export and import for backup and sharing. The
+one decision outstanding is what an import does when a creature
+references an `item_key` or `spell_key` the receiving game does not have
+- skip with a warning, or refuse the file.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

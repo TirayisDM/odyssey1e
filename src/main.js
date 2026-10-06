@@ -2344,6 +2344,113 @@ function paintResistances(sheet) {
   }
 }
 
+// 123. THE BESTIARY.
+//
+// A TEMPLATE IS A CHARACTER, so everything already built for a player
+// character works on a creature - the ability rows, the saves, the
+// resistance block, the equipment ladder, prayers. This panel does not
+// re-implement any of it; "edit" hands the creature to the character
+// sheet, which is the whole payoff of making a template a character
+// rather than a second schema.
+//
+// DM-ONLY, AS A COURTESY. `amDM` decides whether to OFFER this; the
+// access rule is 011's policies and Postgres enforces it, so the worst
+// case here is a tab whose buttons come back "only the DM of this game
+// can ...".
+async function loadCreatures() {
+  const tab = [...document.querySelectorAll("#tabs .tab")]
+    .find((b) => b.dataset.tab === "creatures");
+  if (tab) tab.hidden = !amDM();
+  if (!state.gameId || !amDM()) return;
+
+  // The reference statblocks to import FROM - shared and read-only.
+  const refs = (await call("list_npcs", { gameId: state.gameId })) || [];
+  const pick = document.querySelector("#creature-import-pick");
+  if (pick) {
+    pick.innerHTML = "";
+    for (const n of refs) {
+      const where = n.game_id ? " (this game)" : "";
+      pick.append(new Option(n.name + where, n.key));
+    }
+    if (!refs.length) pick.append(new Option("no statblocks", ""));
+  }
+
+  const mine = (await call("list_creatures", { gameId: state.gameId })) || [];
+  state.creatures = mine;
+
+  const host = document.querySelector("#creature-list");
+  const empty = document.querySelector("#creature-empty");
+  if (!host) return;
+  host.innerHTML = "";
+  if (empty) empty.hidden = mine.length > 0;
+
+  for (const c of mine) host.append(creatureRow(c));
+}
+
+// One template. Says what it IS before what it can do, because the type
+// is the thing five spells are written against.
+function creatureRow(c) {
+  const el = sEl("div", "flat item creature-row");
+
+  const head = sEl("div", "head");
+  head.append(sEl("span", "nm", c.name));
+  // 122. What it is, in 5e's fourteen. Absent reads as absent rather
+  // than as humanoid, because nobody has said.
+  if (c.creature_type) head.append(sEl("span", "tag", c.creature_type));
+  if (c.size) head.append(sEl("span", "tag", c.size));
+  head.append(sEl("span", "tag", "level " + (c.level ?? 1)));
+  if (c.hp_max) head.append(sEl("span", "tag hp", "HP " + c.hp_max));
+  if (c.npc_key) {
+    const from = sEl("span", "tag", "from " + c.npc_key);
+    from.title = "imported from a reference statblock - editing this copy never touches the shared one";
+    head.append(from);
+  }
+  el.append(head);
+
+  const row = sEl("div", "row");
+
+  // EDIT IS THE CHARACTER SHEET. The payoff of 123 in one button.
+  const edit = sEl("button", "ghost tiny", "edit");
+  edit.title = "open it on the character sheet - the same one a player uses";
+  guard(edit, async () => {
+    state.characterId = c.id;
+    showTab("chars");
+    await loadSheet();
+  });
+
+  const name = document.createElement("input");
+  name.className = "tiny";
+  name.placeholder = "name the one you place";
+  name.title = "leave blank and it takes the template's name";
+
+  const place = sEl("button", "ghost tiny", "place in world");
+  place.title = "copy it onto the board - the copy is its own creature from then on";
+  guard(place, async () => {
+    const r = await tryCall("place_creature", {
+      templateId: c.id,
+      gameId: state.gameId,
+      label: name.value || null,
+    });
+    if (!r.ok) return log("place_creature", r.error, true);
+    log("place_creature", (name.value || c.name) + " is in the world");
+    name.value = "";
+    await loadWorld();
+  });
+
+  const gone = sEl("button", "ghost tiny", "delete");
+  gone.title = "removes the template only - creatures already made from it are untouched";
+  guard(gone, async () => {
+    if (!confirm("Delete the template " + c.name + "? Creatures already made from it are not affected.")) return;
+    const r = await tryCall("delete_creature", { templateId: c.id });
+    if (!r.ok) return log("delete_creature", r.error, true);
+    await loadCreatures();
+  });
+
+  row.append(edit, name, place, gone);
+  el.append(row);
+  return el;
+}
+
 // The equipment panel.
 //
 // Every derived answer on a row comes from the engine. Nothing here
@@ -3332,6 +3439,8 @@ async function refreshTab(name) {
       await loadTargets();
     } else if (name === "world") {
       await loadWorld();
+    } else if (name === "creatures") {
+      await loadCreatures();
     } else if (name === "objects") {
       await loadObjects();
     } else if (name === "trade") {
@@ -7834,6 +7943,23 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Guarded, because a double-click is a second longsword. It merges
   // into the same stack rather than making a second row, which makes it
   // quieter than a duplicate enrolment and no more wanted.
+  // 123. Import a reference statblock as a template you own.
+  guarded("#creature-import", async () => {
+    if (!state.gameId) return log("import_statblock", "select a game first", true);
+    const key = val("#creature-import-pick");
+    if (!key) return log("import_statblock", "no statblock selected", true);
+    const r = await tryCall("import_statblock", {
+      gameId: state.gameId,
+      npcKey: key,
+      label: val("#creature-import-name") || null,
+    });
+    if (!r.ok) return log("import_statblock", r.error, true);
+    const box = document.querySelector("#creature-import-name");
+    if (box) box.value = "";
+    log("import_statblock", "imported - edit it on the character sheet");
+    await loadCreatures();
+  });
+
   guarded("#add-item", async () => {
     if (!state.characterId) return log("give_item", "select a character first", true);
     const key = val("#add-what");

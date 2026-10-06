@@ -79,6 +79,7 @@ use tauri::State;
 
 pub mod characters;
 pub mod containers;
+pub mod creatures;
 pub mod dm;
 pub mod effects;
 pub mod features;

@@ -88,6 +88,7 @@
         <button class="tab" data-tab="world">World</button>
         <button class="tab" data-tab="chars">Characters</button>
         <button class="tab" data-tab="objects">Objects</button>
+        <button class="tab" data-tab="creatures">Creatures</button>
         <button class="tab" data-tab="prayers">Cleric Prayers</button>
         <button class="tab" data-tab="trade">Trade</button>
       </nav>
@@ -804,6 +805,40 @@
         </div>
       </div>
       </section>
+      </div>
+
+      <!-- 123. THE BESTIARY. A template is a character now, so a
+           creature is edited with the same sheet a player uses and
+           placing one on the board is a copy. The pane says so, because
+           "copy" is the whole mental model and getting it wrong means
+           expecting an edit here to reach a goblin already in a fight. -->
+      <div class="pane" data-pane="creatures" hidden>
+        <section>
+          <h2>Creatures</h2>
+          <p class="muted hint">
+            A creature here is a <strong>template</strong> &mdash; a thing you
+            copy from. It has no place in the world, never takes a turn and
+            never appears in a target list. Placing one makes an individual:
+            editing the template afterwards never reaches it, which is why two
+            goblins off one template can die separately.
+          </p>
+
+          <div class="row">
+            <select id="creature-import-pick"></select>
+            <input id="creature-import-name" placeholder="name it, or leave blank" />
+            <button id="creature-import">Import from reference</button>
+          </div>
+          <p class="muted hint">
+            The reference statblocks are shared and read-only &mdash; importing
+            takes a copy you own and can edit. The shared goblin stays as it is.
+          </p>
+
+          <div id="creature-list" class="list"></div>
+          <p class="muted" id="creature-empty" hidden>
+            No creatures yet. Import one from the reference above, and it will
+            appear here with the full character sheet behind it.
+          </p>
+        </section>
       </div>
 
       <div class="pane" data-pane="objects" hidden>

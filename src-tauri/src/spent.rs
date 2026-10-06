@@ -57,6 +57,13 @@ pub struct Act {
     /// building an Act by hand should not have to know that, and a
     /// silent None would quietly stop counting somebody's swings.
     pub cost: Option<String>,
+    /// 149. WHOSE TURN IT WAS WHEN THIS HAPPENED - 060's stamp, read
+    /// here so the count can tell a creature's own turn from everything
+    /// it did outside one. `out_of_turn` is the comparison and it has
+    /// been in this module since 054; what is new is that something
+    /// now reads it while counting rather than only while painting.
+    #[serde(default)]
+    pub turn_actor_id: Option<String>,
 }
 
 impl Act {
@@ -116,18 +123,33 @@ pub struct Budget {
     /// DM is most likely to wave through - it is here to be SEEN
     /// rather than to be policed.
     pub free: i64,
+    /// 149. HOW MANY LEGENDARY ACTIONS A ROUND, which is zero for
+    /// almost everything. Thirty creatures in the bestiary have them
+    /// and all thirty have three; the number is on the statblock rather
+    /// than derived, because there is no rule behind it to derive from.
+    ///
+    /// ZERO IS THE INTERESTING VALUE, not three. A creature with none
+    /// that acts out of turn is doing something a DM should look at,
+    /// and that warning is what 054's `beyond_one_turn` was reaching
+    /// for before it could tell the two cases apart.
+    pub legendary: i64,
 }
 
 impl Default for Budget {
     /// What somebody with no class gets: one swing, one action.
     fn default() -> Self {
-        Self { attacks: 1, actions: 1, bonus: 1, reactions: 1, free: 1 }
+        Self { attacks: 1, actions: 1, bonus: 1, reactions: 1, free: 1, legendary: 0 }
     }
 }
 
 impl Budget {
     pub fn with_attacks(attacks: i64) -> Self {
         Self { attacks: attacks.max(1), ..Self::default() }
+    }
+
+    /// 149. And what the statblock says it may do out of turn.
+    pub fn with_legendary(self, legendary: i64) -> Self {
+        Self { legendary: legendary.max(0), ..self }
     }
 }
 
@@ -154,6 +176,15 @@ pub struct Spent {
     pub bonus: i64,
     pub reactions: i64,
     pub free: i64,
+    /// 149. WHAT IT DID OUTSIDE ITS OWN TURN, which for the thirty
+    /// creatures that have them is legendary actions and for everybody
+    /// else is a question.
+    ///
+    /// A REACTION IS ALSO OUT OF TURN and is not counted here - it has
+    /// its own slot and its own allowance, and the cost column is the
+    /// only thing that can tell the two apart. Anything else taken on
+    /// somebody else's turn lands here.
+    pub legendary: i64,
     /// What this creature was owed, so a screen can print "2 of 2"
     /// rather than counting to two and worrying.
     pub budget: Budget,
@@ -236,6 +267,7 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
                     bonus: 0,
                     reactions: 0,
                     free: 0,
+                    legendary: 0,
                     budget,
                     over_budget: false,
                 });
@@ -243,20 +275,45 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
             }
         };
         slot.actions += 1;
-        // COUNTED BY COST, NOT BY KEY, so the day a technique costs a
-        // bonus action the count follows the column rather than
-        // needing this line edited. `Act::cost` falls back to the key,
-        // which is the same rule 061's trigger applies.
-        // EACH SLOT ON ITS OWN TALLY. Before 062 everything that was
-        // not a swing landed in `other`, which was right while nothing
-        // could write the other three and would have made one bonus
-        // action read as a spent turn the moment something could.
-        match a.cost() {
-            "attack" => slot.attacks += 1,
-            "bonus" => slot.bonus += 1,
-            "reaction" => slot.reactions += 1,
-            "free" => slot.free += 1,
-            _ => slot.other += 1,
+
+        // 149. OUTSIDE ITS OWN TURN IS ITS OWN TALLY, and this is the
+        // part worth reading twice.
+        //
+        // An action taken on somebody ELSE'S turn does not spend this
+        // creature's turn. Counting it against the ordinary budget is
+        // what made a dragon taking three legendary actions and then
+        // its own turn read as four actions and light up as over
+        // budget - a warning firing on correct play, which 061 already
+        // had to fix once for Extra Attack.
+        //
+        // A REACTION IS ALSO OUT OF TURN and keeps its own slot: it is
+        // the one out-of-turn thing the cost column can name, so it is
+        // the one that can be told apart. Everything else lands in
+        // `legendary`, including for a creature that has none - a goblin
+        // acting on the wizard's turn is exactly the thing a DM wants
+        // flagged, and `budget.legendary` of zero flags it.
+        if out_of_turn(Some(id), a.turn_actor_id.as_deref()) {
+            match a.cost() {
+                "reaction" => slot.reactions += 1,
+                _ => slot.legendary += 1,
+            }
+        } else {
+            // COUNTED BY COST, NOT BY KEY, so the day a technique costs
+            // a bonus action the count follows the column rather than
+            // needing this line edited. `Act::cost` falls back to the
+            // key, which is the same rule 061's trigger applies.
+            // EACH SLOT ON ITS OWN TALLY. Before 062 everything that
+            // was not a swing landed in `other`, which was right while
+            // nothing could write the other three and would have made
+            // one bonus action read as a spent turn the moment
+            // something could.
+            match a.cost() {
+                "attack" => slot.attacks += 1,
+                "bonus" => slot.bonus += 1,
+                "reaction" => slot.reactions += 1,
+                "free" => slot.free += 1,
+                _ => slot.other += 1,
+            }
         }
         // THE ATTACK ACTION IS AN ACTION. That is the part worth
         // stating: swinging N times costs ONE action however large N
@@ -274,7 +331,10 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
             || slots > slot.budget.actions
             || slot.bonus > slot.budget.bonus
             || slot.reactions > slot.budget.reactions
-            || slot.free > slot.budget.free;
+            || slot.free > slot.budget.free
+            // 149. And spending more out of turn than the statblock
+            // allows - which for almost everything is any at all.
+            || slot.legendary > slot.budget.legendary;
     }
 
     out.sort_by(|a, b| a.actor_id.cmp(&b.actor_id));
@@ -307,9 +367,101 @@ mod tests {
                 bonus: 0,
                 reactions: 0,
                 free: 0,
+                legendary: 0,
                 budget: Budget::default(),
                 over_budget: false,
             })
+    }
+
+    /// The same act, taken while somebody else held the turn.
+    fn out(actor: &str, key: &str, round: i64, whose_turn: &str) -> Act {
+        Act { turn_actor_id: Some(whose_turn.to_string()), ..act(Some(actor), key, Some(round)) }
+    }
+
+    /* ------------- legendary actions (149) -------------------------- */
+
+    #[test]
+    fn a_dragons_three_legendary_actions_are_three_of_three() {
+        let b = vec![("drag".to_string(), Budget::default().with_legendary(3))];
+        let acts = vec![
+            out("drag", "attack", 1, "falon"),
+            out("drag", "attack", 1, "luci"),
+            out("drag", "attack", 1, "webbys"),
+        ];
+        let s = one_with(&acts, 1, "drag", &b);
+        assert_eq!(s.legendary, 3);
+        assert_eq!(s.attacks, 0, "none of them spent its own turn");
+        assert!(!s.over_budget, "three of three is correct play");
+    }
+
+    #[test]
+    fn its_own_turn_is_still_its_own_turn() {
+        // The whole reason out-of-turn gets its own tally: a dragon
+        // that spends three legendary actions AND takes its turn is
+        // doing exactly what the book says, and used to read as four
+        // actions and light up.
+        let b = vec![("drag".to_string(), Budget::default().with_legendary(3))];
+        let acts = vec![
+            out("drag", "attack", 1, "falon"),
+            out("drag", "attack", 1, "luci"),
+            out("drag", "attack", 1, "webbys"),
+            act(Some("drag"), "attack", Some(1)),
+        ];
+        let s = one_with(&acts, 1, "drag", &b);
+        assert_eq!(s.legendary, 3);
+        assert_eq!(s.attacks, 1, "the swing on its own turn");
+        assert_eq!(s.actions, 4, "four things happened and the log says so");
+        assert!(!s.over_budget);
+    }
+
+    #[test]
+    fn a_fourth_legendary_action_is_over_budget() {
+        let b = vec![("drag".to_string(), Budget::default().with_legendary(3))];
+        let acts: Vec<Act> = (0..4).map(|i| out("drag", "attack", 1, &format!("pc{}", i))).collect();
+        let s = one_with(&acts, 1, "drag", &b);
+        assert_eq!(s.legendary, 4);
+        assert!(s.over_budget);
+    }
+
+    #[test]
+    fn a_goblin_acting_on_somebody_elses_turn_is_flagged() {
+        // Zero is the interesting value. Almost nothing has legendary
+        // actions, so any out-of-turn action by almost anything is the
+        // thing a DM wants to see.
+        let s = one(&[out("gob", "attack", 1, "falon")], 1, "gob");
+        assert_eq!(s.legendary, 1);
+        assert_eq!(s.budget.legendary, 0);
+        assert!(s.over_budget);
+    }
+
+    #[test]
+    fn a_reaction_out_of_turn_is_a_reaction_and_not_legendary() {
+        // The one out-of-turn thing the cost column can name. An
+        // opportunity attack must not read as a legendary action.
+        let mut a = out("gob", "attack", 1, "falon");
+        a.cost = Some("reaction".to_string());
+        let s = one(&[a], 1, "gob");
+        assert_eq!(s.reactions, 1);
+        assert_eq!(s.legendary, 0);
+        assert!(!s.over_budget, "one reaction is what everybody is owed");
+    }
+
+    #[test]
+    fn an_unstamped_turn_is_not_out_of_turn() {
+        // 060's three ways to have no stamp - outside an encounter,
+        // before the order started, written before the column existed.
+        // None of them is a creature jumping the queue.
+        let mut a = act(Some("gob"), "attack", Some(1));
+        a.turn_actor_id = None;
+        let s = one(&[a], 1, "gob");
+        assert_eq!(s.legendary, 0);
+        assert_eq!(s.attacks, 1);
+        assert!(!s.over_budget);
+    }
+
+    #[test]
+    fn the_allowance_cannot_be_negative() {
+        assert_eq!(Budget::default().with_legendary(-3).legendary, 0);
     }
 
     fn act(actor: Option<&str>, key: &str, round: Option<i64>) -> Act {
@@ -322,6 +474,10 @@ mod tests {
             // these fixtures exercise that fallback rather than
             // restating the column.
             cost: None,
+            // IN TURN BY DEFAULT. Every fixture written before 149 was
+            // about a creature on its own turn, and saying so keeps
+            // them testing what they were written to test.
+            turn_actor_id: actor.map(String::from),
         }
     }
 

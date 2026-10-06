@@ -4498,6 +4498,81 @@ creature wants its prayers copied in the same breath as its weapons,
 which is a change to one function and a new kit-shaped table rather than
 a new mechanism.
 
+## What a creature may do out of turn - BUILT (149, spent.rs)
+
+148's header said legendary actions were the one of the four that FITS
+and that most of the work was already done. It was:
+
+| | |
+|---|---|
+| 054 | stamps the round onto every action |
+| 060 | stamps whose turn it was |
+| `spent::out_of_turn` | has compared the two since 054 |
+| `spent.rs` | counts what a creature spent in a round |
+
+Everything needed to say "the dragon has used two of its three" was
+there except the three.
+
+**A column, because there is no rule to derive it from.** Every other
+budget in `spent::Budget` is worked out - attacks from Extra Attack, and
+the action, bonus, reaction and free interaction are one each because 5e
+says so. A legendary allowance is a number printed on a statblock.
+`npcs.legendary_actions`, read through `npc_key` the way 121 reads a
+monster's resistances: a fact about the TYPE, not copied onto every
+individual.
+
+**Thirty creatures, read off the published SRD, all with three** - the
+twenty adult and ancient dragons, both sphinxes, the Aboleth, Kraken,
+Lich, Mummy Lord, Solar, Tarrasque, Vampire and the Unicorn. Young
+dragons and wyrmlings have none, which is why it is seeded by name and
+not by creature type. The Dragon Turtle has none either, which surprised
+me enough to check twice.
+
+### It changed the counting, which is more than it sounds
+
+**An out-of-turn action now has its own tally instead of spending the
+creature's ordinary budget.** That is a correctness fix arriving with
+the feature: an action taken on somebody ELSE'S turn does not spend this
+creature's turn, and counting it there made a dragon doing exactly what
+the book says - three legendary actions, then its own turn - read as
+four actions and light up as over budget.
+
+061 already had to fix a warning that fired on correct play once, for
+Extra Attack, and wrote down why: a warning that fires on correct play
+is worse than no warning, because a DM learns to ignore it and then
+misses the one that mattered.
+
+**Zero is the interesting value.** Almost nothing has legendary actions,
+so almost any out-of-turn action is now flagged - a goblin swinging on
+the wizard's turn is precisely what a DM wants to see, and it is what
+054's `beyond_one_turn` was reaching for before it could tell that case
+apart from Extra Attack.
+
+**A reaction keeps its own slot.** It is the only out-of-turn thing
+`cost` can name, and an opportunity attack reading as a legendary action
+would be the usual costume on the usual fault.
+
+The screen says it on hover, through `spendTitle`, which both tally
+sites already call - and it says two different sentences, because "2 of
+3 legendary" and "1 action out of turn, and it has none to spend" are
+not the same fact.
+
+### What it is still not
+
+**It refuses nothing**, which is 051's decision about turn order and
+061's about budgets, held to.
+
+**It does not know a wing attack costs two.** 5e prices some legendary
+options at two of the three, and no technique in this catalogue says
+what it costs - 054 refused to guess that for 193 rows and the refusal
+still holds. Every legendary action counts as one, and the day
+`techniques` carries a cost this reads it instead.
+
+**The reset is per round**, where 5e resets at the start of the
+creature's own turn. The two differ only for an action taken between the
+top of the round and that creature's initiative, and the round is the
+only window `actions.round` can express.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

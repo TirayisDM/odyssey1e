@@ -5101,8 +5101,29 @@ function spendTitle(sp) {
     sp.attacks + (sp.attacks === 1 ? " attack" : " attacks") + " of " + owed,
   ];
   if (sp.other) bits.push(sp.other + (sp.other === 1 ? " other action" : " other actions"));
+  const leg = legendaryText(sp);
+  if (leg) bits.push(leg);
   if (sp.over_budget) bits.push("MORE THAN THIS TURN OWES - haste, an action surge, or a call you made");
   return bits.join(" \u00b7 ");
+}
+
+// 149. WHAT IT DID ON SOMEBODY ELSE'S TURN.
+//
+// Silent when nothing happened out of turn, which is almost every
+// creature almost every round - a line reading "0 of 0" on every goblin
+// would be chrome on the one screen that has to stay readable mid-fight.
+//
+// TWO DIFFERENT SENTENCES, because the two cases are not the same
+// thing. A dragon spending two of three is correct play and reads as a
+// count; a goblin that acted on the wizard's turn has no allowance at
+// all, and "1 of 0" would be arithmetic rather than an answer.
+function legendaryText(sp) {
+  const used = (sp && sp.legendary) || 0;
+  if (!used) return "";
+  const owed = (sp.budget && sp.budget.legendary) || 0;
+  return owed
+    ? used + " of " + owed + " legendary"
+    : used + (used === 1 ? " action" : " actions") + " out of turn, and it has none to spend";
 }
 
 // THE THREE SLOTS A TICK CAN SPEND. 062.

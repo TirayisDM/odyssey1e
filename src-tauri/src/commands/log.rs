@@ -102,6 +102,12 @@ pub fn encounter_log(
                 .to_string(),
             round: a.get("round").and_then(|v| v.as_i64()),
             cost: a.get("cost").and_then(|v| v.as_str()).map(String::from),
+            // 149. 060's stamp, which the log has painted since it
+            // existed and the count can now read.
+            turn_actor_id: a
+                .get("turn_actor_id")
+                .and_then(|v| v.as_str())
+                .map(String::from),
         })
         .collect();
 
@@ -139,7 +145,7 @@ fn budgets_for(
             // encounters a second path back to this table and PostgREST
             // refuses an ambiguous embed outright - see the trap in
             // STATUS. This hop is the unambiguous one.
-            ("select", "id,character_id,characters(game_id)"),
+            ("select", "id,character_id,characters(game_id,npc_key)"),
             ("encounter_id", &format!("eq.{}", encounter_id)),
         ],
     )?;
@@ -163,15 +169,90 @@ fn budgets_for(
 
     let eff = crate::character::load_effective(token, &game_id, &ids)?;
 
+    // 149. AND WHAT EACH ONE MAY DO OUT OF TURN, which lives on the
+    // statblock and is read through `npc_key` - the same hop 121 makes
+    // for a monster's resistances, for the same reason: it is a fact
+    // about the TYPE and copying it onto every individual would be a
+    // second place for it to be wrong.
+    //
+    // ONE QUERY FOR THE WHOLE ROSTER rather than one per actor, and
+    // skipped entirely when nothing in the fight came off a statblock,
+    // which is most fights.
+    let keys: Vec<String> = rows
+        .iter()
+        .filter_map(|r| {
+            r.get("characters")
+                .and_then(|c| c.get("npc_key"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect();
+    let legendary = legendary_by_key(token, &keys)?;
+
     Ok(rows
         .iter()
         .filter_map(|r| {
             let actor = r.get("id").and_then(|v| v.as_str())?;
             let cid = r.get("character_id").and_then(|v| v.as_str())?;
+            let allowed = r
+                .get("characters")
+                .and_then(|c| c.get("npc_key"))
+                .and_then(|v| v.as_str())
+                .and_then(|k| legendary.iter().find(|(key, _)| key == k))
+                .map(|(_, n)| *n)
+                .unwrap_or(0);
             Some((
                 actor.to_string(),
-                crate::spent::Budget::with_attacks(eff.attacks(cid)),
+                crate::spent::Budget::with_attacks(eff.attacks(cid)).with_legendary(allowed),
             ))
         })
         .collect())
+}
+
+/// The legendary allowance of each statblock named, by key.
+///
+/// 149. A GAME'S OWN ROW WINS over the shared one, the way every
+/// tenanted read in this schema resolves - a DM who writes their own
+/// goblin and gives it legendary actions gets them.
+///
+/// AN EMPTY LIST IS NOT A QUERY. Most fights have no monsters off a
+/// statblock at all, and asking PostgREST for `key=in.()` is both a
+/// wasted round trip and a request shaped like a mistake.
+fn legendary_by_key(token: &str, keys: &[String]) -> Result<Vec<(String, i64)>, String> {
+    let mut want: Vec<&String> = keys.iter().collect();
+    want.sort();
+    want.dedup();
+    if want.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list = want
+        .iter()
+        .map(|k| k.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let rows = supabase::rest_get(
+        token,
+        "npcs",
+        &[
+            ("select", "key,game_id,legendary_actions"),
+            ("key", &format!("in.({})", list)),
+            // The game's own row sorts first - NULLs last - so the
+            // first hit for a key is the one that should win.
+            ("order", "game_id.asc.nullslast"),
+        ],
+    )?;
+    let mut out: Vec<(String, i64)> = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(key) = r.get("key").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if out.iter().any(|(k, _)| k == key) {
+            continue;
+        }
+        out.push((
+            key.to_string(),
+            r.get("legendary_actions").and_then(|v| v.as_i64()).unwrap_or(0),
+        ));
+    }
+    Ok(out)
 }

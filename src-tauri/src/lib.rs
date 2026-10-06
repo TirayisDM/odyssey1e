@@ -27,6 +27,7 @@ mod class;
 mod clock;
 mod containers;
 mod commands;
+mod creature;
 mod currency;
 mod death;
 mod dice;

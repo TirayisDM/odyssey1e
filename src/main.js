@@ -1897,9 +1897,13 @@ async function loadSheet() {
   // because the list that used to say who you were reading now folds
   // away the moment you pick somebody.
   document.querySelector("#sheet-name").textContent = sheet.name;
+  // 122. WHAT IT IS, where the sheet already says what it is worth.
+  // Absent for everybody until a DM says - and absent reads as absent
+  // rather than as "humanoid", because nobody has stated it.
+  const kind = sheet.creature_type ? " · " + sheet.creature_type : "";
   document.querySelector("#sheet-who").textContent =
     "level " + sheet.level + " · PB +" + pb +
-    " · AC " + sheet.armor_class + hp;
+    " · AC " + sheet.armor_class + hp + kind;
   document.querySelector("#level").value = sheet.level;
   // 072. FILLED ON EVERY PAINT, like the level beside it. An empty box
   // under a heading that says "Test PC 1" would read as a field to type

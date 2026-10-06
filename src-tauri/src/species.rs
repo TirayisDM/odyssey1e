@@ -122,6 +122,11 @@ pub struct Species {
     pub space_ft: Option<f64>,
 
     // --- written down only ---
+    /// 122. 5e's fourteen-way classification. NORMALLY WHAT ANSWERS
+    /// FOR EVERY CHARACTER OF THIS PEOPLE, since every Ny'ook is the
+    /// same thing - a character states its own only to contradict
+    /// this. None means nobody has said yet, which is not humanoid.
+    pub creature_type: Option<String>,
     pub speed: Option<i64>,
     pub damage_resistances: Vec<String>,
     /// 058. Replaces a bare list of names, which could not say that a
@@ -309,7 +314,7 @@ pub fn bump_size(size: &str, steps: i64) -> String {
 
 pub const SPECIES_COLUMNS: &str = "key,game_id,name,ability_bonuses,ability_maxima,size,\
 carry_size_steps,skill_profs,unarmored_ac_base,unarmored_ac_ability,speed,\
-spell_save_bonus,damage_resistances,tongues,height_min_ft,height_max_ft,playable,\
+spell_save_bonus,damage_resistances,tongues,height_min_ft,height_max_ft,playable,creature_type,\
 summary,appearance,culture,history,roleplaying,\
 age_note,alignment_note,traits";
 
@@ -423,6 +428,7 @@ pub fn from_row(r: &Value) -> Species {
         // and they do not exist yet.
         playable: r.get("playable").and_then(|x| x.as_bool()).unwrap_or(true),
         speed: r.get("speed").and_then(|x| x.as_i64()),
+        creature_type: opt_text(r, "creature_type"),
         damage_resistances: strs(r, "damage_resistances"),
         tongues: tongues_of(r, "tongues"),
         summary: opt_text(r, "summary"),

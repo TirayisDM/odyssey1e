@@ -3462,6 +3462,48 @@ verified against the live database. `resist::from_grants` and
 lines of glue between them mirror `load_species` and compile, and will
 not have run against real data until a statblock carries a grant.
 
+## What a thing is - BUILT (122, creature.rs)
+
+Step one of the Creatures tab, and useful on its own.
+
+FIFTEEN SPELLS ALREADY NAME A CREATURE TYPE and not one of them could be
+checked, because nothing in this schema recorded what anything IS. Hold
+Person works only on a humanoid; Cure Wounds and Spare the Dying do
+nothing for a construct or the undead; Protection from Evil and Good,
+Detect Evil and Good and Dispel Evil and Good all name the same six
+types; Gentle Repose stops a corpse becoming undead.
+
+THE SPECIES NORMALLY ANSWERS. Every Ny'ook is the same thing, so the
+type belongs to the PEOPLE and is set once rather than on every
+character made from them. `characters.creature_type` is the exception
+rather than the rule - the one cursed Unt'garoth who is now undead - and
+a statblock states its own because a monster has no species row to ask.
+`creature::of` owns that order, which is the arrangement `carry_size`
+already uses.
+
+NOTHING WAS BACKFILLED TO humanoid. Every creature in the game had no
+type at all, and defaulting them would assert something about this world
+that its designer has not said - whether an Unt'garoth at seven to ten
+feet is `humanoid` or `giant` is a design decision, not a migration's.
+NULL reads as "nobody has said", which is true. The three goblin
+statblocks ARE set, because a goblin is a humanoid in the book and that
+is not an opinion.
+
+**The four species are waiting on Dave:** Unt'garoth, Unt'gar, Ny'ook
+and Fjell'gar all have `creature_type` NULL, and until they are set the
+sheet says nothing and the spell rules that need a type will say they
+cannot tell.
+
+THE FOURTEEN ARE IN TWO PLACES ON PURPOSE - `creature.rs` for the code
+and a CHECK constraint for everything that never went through it, which
+is the arrangement `character_slots` has had since 107. A rolled-back
+probe confirmed the constraint refuses a fifteenth type.
+
+SIX THINGS IN creature.rs CARRY `#[allow(dead_code)]` with the spells
+that will call them named in the reason - the six "evil and good" types
+and the two that cannot be healed. They are tested 5e facts waiting on
+the spell wiring, and the alternative was deriving them again later.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

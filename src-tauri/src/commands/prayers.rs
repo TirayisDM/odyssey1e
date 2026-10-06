@@ -1,4 +1,4 @@
-//! The spell catalogue, and what a cleric has chosen from it.
+//! The spell catalogue, and what a caster has chosen from it.
 //!
 //! 106. Plumbing. Every number - how many may be prepared, how many
 //! cantrips are known, what slots exist, the save DC - is prayers.rs.
@@ -73,36 +73,45 @@ pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Valu
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
 
-    let Some(cleric) = sheet.classes.iter().find(|t| t.key == "cleric") else {
-        return Err(format!("{} is not a cleric", sheet.name));
+    // 150. WHOEVER IS CASTING, which is a class row and not a creature
+    // question - see prayers::caster, and 022 for why there is no
+    // second path for a monster.
+    let Some(caster) = sheet.caster.clone() else {
+        return Err(format!("{} does not cast spells", sheet.name));
     };
-    let level = cleric.level;
-    let wis = sheet.ability_mod("wis");
+    let level = caster.level;
+    let abil = sheet.ability_mod(&caster.ability);
     let pb = sheet.proficiency_bonus();
 
     let chosen = load_chosen(&token, &character_id)?;
-    let prepared: Vec<String> = chosen
-        .iter()
-        .filter(|(_, p)| *p)
-        .map(|(k, _)| k.clone())
-        .collect();
-    let cantrips: Vec<String> = chosen
-        .iter()
-        .filter(|(_, p)| !*p)
-        .map(|(k, _)| k.clone())
-        .collect();
+    let of = |want: &str| -> Vec<String> {
+        chosen
+            .iter()
+            .filter(|(_, st)| st == want)
+            .map(|(k, _)| k.clone())
+            .collect()
+    };
+    let prepared = of("prepared");
+    let cantrips = of("cantrip");
+    // 150. THE THIRD LIST, and empty for a cleric: known, written down,
+    // and not prepared today. A wizard's book.
+    let book = of("book");
 
     let slots = prayers::slots_at(level);
     let spent = load_slots(&token, &character_id)?;
     let left = prayers::slots_left(level, &spent);
     Ok(json!({
-        "cleric_level": level,
-        "wis_mod": wis,
-        "save_dc": prayers::save_dc(pb, wis),
-        "attack_bonus": prayers::attack_bonus(pb, wis),
+        "caster_level": level,
+        "casting_ability": caster.ability,
+        "ability_mod": abil,
+        "class_key": caster.class_key,
+        "source": caster.source,
+        "save_dc": prayers::save_dc(pb, abil),
+        "attack_bonus": prayers::attack_bonus(pb, abil),
         "prepared": prepared,
-        "prepared_max": prayers::prepared_max(level, wis),
+        "prepared_max": prayers::prepared_max(level, abil),
         "cantrips": cantrips,
+        "book": book,
         "cantrips_known": prayers::cantrips_known(level),
         "top_slot": prayers::top_slot(level),
         // 1st-level slots first. 107 made the spending real, so these
@@ -127,27 +136,37 @@ pub fn prepare_prayer(
 ) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
-    let Some(cleric) = sheet.classes.iter().find(|t| t.key == "cleric") else {
-        return Err(format!("{} is not a cleric", sheet.name));
+    // 150. WHOEVER IS CASTING, which is a class row and not a creature
+    // question - see prayers::caster, and 022 for why there is no
+    // second path for a monster.
+    let Some(caster) = sheet.caster.clone() else {
+        return Err(format!("{} does not cast spells", sheet.name));
     };
-    let level = cleric.level;
-    let wis = sheet.ability_mod("wis");
+    let level = caster.level;
+    let abil = sheet.ability_mod(&caster.ability);
 
     let spell = one_spell(&token, &sheet.game_id, &spell_key)?;
-    if !spell
+    let on_lists: Vec<String> = spell
         .get("classes")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().any(|c| c.as_str() == Some("cleric")))
-        .unwrap_or(false)
-    {
-        return Err("that is not a cleric spell".to_string());
-    }
+        .map(|a| a.iter().filter_map(|c| c.as_str()).map(String::from).collect())
+        .unwrap_or_default();
     let spell_level = spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0);
 
     let chosen = load_chosen(&token, &character_id)?;
+    // 150. WHAT THEY MAY REACH FOR - the cleric list, or this wizard's
+    // own book. See prayers::may_reach.
+    prayers::may_reach(
+        &caster,
+        &on_lists,
+        chosen
+            .iter()
+            .find(|(k, _)| *k == spell_key)
+            .map(|(_, st)| st.as_str()),
+    )?;
     let held: Vec<String> = chosen
         .iter()
-        .filter(|(_, p)| *p)
+        .filter(|(_, st)| st == "prepared")
         .map(|(k, _)| k.clone())
         .collect();
 
@@ -158,7 +177,7 @@ pub fn prepare_prayer(
     if spell_level == 0 {
         let known: Vec<&String> = chosen
             .iter()
-            .filter(|(_, p)| !*p)
+            .filter(|(_, st)| st == "cantrip")
             .map(|(k, _)| k)
             .collect();
         if known.iter().any(|k| **k == spell_key) {
@@ -173,7 +192,7 @@ pub fn prepare_prayer(
             ));
         }
     } else {
-        prayers::may_prepare(spell_level, level, wis, &held, &spell_key)?;
+        prayers::may_prepare(spell_level, level, abil, &held, &spell_key)?;
     }
 
     supabase::rest_upsert(
@@ -182,7 +201,7 @@ pub fn prepare_prayer(
         &json!({
             "character_id": character_id,
             "spell_key": spell_key,
-            "prepared": spell_level > 0,
+            "state": if spell_level > 0 { "prepared" } else { "cantrip" },
         }),
         "character_id,spell_key",
     )
@@ -225,10 +244,13 @@ pub fn forget_prayer(
 pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
-    let Some(cleric) = sheet.classes.iter().find(|t| t.key == "cleric") else {
-        return Err(format!("{} is not a cleric", sheet.name));
+    // 150. WHOEVER IS CASTING, which is a class row and not a creature
+    // question - see prayers::caster, and 022 for why there is no
+    // second path for a monster.
+    let Some(caster) = sheet.caster.clone() else {
+        return Err(format!("{} does not cast spells", sheet.name));
     };
-    let wis = sheet.ability_mod("wis");
+    let abil = sheet.ability_mod(&caster.ability);
     let pb = sheet.proficiency_bonus();
 
     let chosen = load_chosen(&token, &character_id)?;
@@ -247,7 +269,7 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
     )?;
 
     let spent = load_slots(&token, &character_id)?;
-    let left = prayers::slots_left(cleric.level, &spent);
+    let left = prayers::slots_left(caster.level, &spent);
 
     let mut out: Vec<Value> = Vec::new();
     for r in rows.as_array().unwrap_or(&Vec::new()) {
@@ -260,7 +282,7 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
             r.get("save_ability").and_then(|v| v.as_str()),
             r.get("dice").and_then(|v| v.as_str()),
             pb,
-            wis,
+            abil,
         );
         // WHY IT CANNOT BE CAST, where it cannot. Two different
         // problems and they want different words: it takes too long,
@@ -348,8 +370,11 @@ pub fn cast_prayer(
 ) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
-    let Some(cleric) = sheet.classes.iter().find(|t| t.key == "cleric") else {
-        return Err(format!("{} is not a cleric", sheet.name));
+    // 150. WHOEVER IS CASTING, which is a class row and not a creature
+    // question - see prayers::caster, and 022 for why there is no
+    // second path for a monster.
+    let Some(caster) = sheet.caster.clone() else {
+        return Err(format!("{} does not cast spells", sheet.name));
     };
 
     let held = load_chosen(&token, &character_id)?;
@@ -367,7 +392,7 @@ pub fn cast_prayer(
         spell.get("save_ability").and_then(|v| v.as_str()),
         spell.get("dice").and_then(|v| v.as_str()),
         sheet.proficiency_bonus(),
-        sheet.ability_mod("wis"),
+        sheet.ability_mod(&caster.ability),
     );
 
     if !c.cost.in_a_fight() {
@@ -389,7 +414,7 @@ pub fn cast_prayer(
             ));
         }
         let spent = load_slots(&token, &character_id)?;
-        prayers::may_spend_slot(cleric.level, &spent, want)?;
+        prayers::may_spend_slot(caster.level, &spent, want)?;
         let i = (want - 1) as usize;
         move_slot(&token, &character_id, want, spent[i], spent[i] + 1)?;
         used = Some(want);
@@ -573,7 +598,7 @@ pub fn spend_spell_slot(
     slot_level: i64,
 ) -> Result<Value, String> {
     let token = state.token()?;
-    let level = cleric_level(&token, &character_id)?;
+    let level = caster_level(&token, &character_id)?;
     let spent = load_slots(&token, &character_id)?;
     prayers::may_spend_slot(level, &spent, slot_level)?;
 
@@ -590,7 +615,7 @@ pub fn restore_spell_slot(
     slot_level: i64,
 ) -> Result<Value, String> {
     let token = state.token()?;
-    let level = cleric_level(&token, &character_id)?;
+    let level = caster_level(&token, &character_id)?;
     let spent = load_slots(&token, &character_id)?;
     if !(1..=9).contains(&slot_level) {
         return Err("a spell slot is level 1 to 9".to_string());
@@ -695,15 +720,17 @@ fn move_slot(
 const STALE: &str =
     "that slot moved while this was in flight - look at the sheet and try again";
 
-/// The cleric level, refusing anybody who is not one.
-fn cleric_level(token: &str, character_id: &str) -> Result<i64, String> {
+/// The caster level, refusing anybody who does not cast.
+///
+/// 150. Was `cleric_level` and found a cleric class by name, which is
+/// the lookup that kept a Lich out of its own spell list.
+fn caster_level(token: &str, character_id: &str) -> Result<i64, String> {
     let sheet = crate::character::load_sheet(token, character_id)?;
     sheet
-        .classes
-        .iter()
-        .find(|t| t.key == "cleric")
-        .map(|t| t.level)
-        .ok_or_else(|| format!("{} is not a cleric", sheet.name))
+        .caster
+        .as_ref()
+        .map(|c| c.level)
+        .ok_or_else(|| format!("{} does not cast spells", sheet.name))
 }
 
 /// Hand every slot back. Called by the rest path.
@@ -720,12 +747,12 @@ pub(crate) fn clear_slots(token: &str, character_id: &str) -> Result<(), String>
 }
 
 /// (spell key, prepared) for this character.
-fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, bool)>, String> {
+fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, String)>, String> {
     let rows = supabase::rest_get(
         token,
         "character_prayers",
         &[
-            ("select", "spell_key,prepared"),
+            ("select", "spell_key,state"),
             ("character_id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -736,7 +763,10 @@ fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, bool)>, S
         .filter_map(|r| {
             Some((
                 r.get("spell_key")?.as_str()?.to_string(),
-                r.get("prepared").and_then(|v| v.as_bool()).unwrap_or(true),
+                r.get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("prepared")
+                    .to_string(),
             ))
         })
         .collect())

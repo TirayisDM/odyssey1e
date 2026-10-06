@@ -1359,8 +1359,12 @@ async function loadPrayers(sheet) {
   if (!got) return;
   state.prayers = got;
 
+  // 150. THE CLASS SAYS WHAT TO CALL THEM. This read "cleric N" off a
+  // field named `cleric_level`, true while a cleric was the only thing
+  // that could cast - a wizard reading "cleric 18" would be the screen
+  // asserting something the engine never said.
   document.querySelector("#prayer-head").textContent =
-    "cleric " + got.cleric_level + " \u00b7 save DC " + got.save_dc +
+    got.class_key + " " + got.caster_level + " (" + got.casting_ability.toUpperCase() + ")" + " \u00b7 save DC " + got.save_dc +
     " \u00b7 spell attack " + withSign(got.attack_bonus) +
     " \u00b7 casts up to level " + got.top_slot;
 

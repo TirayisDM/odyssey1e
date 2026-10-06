@@ -379,6 +379,14 @@ pub struct Sheet {
     /// every player character says no. See `gate_level`, which is the
     /// only thing that reads it.
     pub from_statblock: bool,
+    /// 150. WHO IS CASTING, AND OFF WHAT - None for almost everybody.
+    ///
+    /// RESOLVED ONCE, HERE. Six commands used to find a cleric class on
+    /// the sheet and refuse anybody else, which is why a Lich could not
+    /// cast a spell: a monster has no classes at all. A class says so or
+    /// a statblock does, and `prayers::caster` owns which wins.
+    #[serde(skip_deserializing)]
+    pub caster: Option<crate::prayers::Caster>,
     /// 133. THE LEVEL A TECHNIQUE GATE READS, which is not always this
     /// character's level - `attack::gate_level` owns the rule and this
     /// is its answer, carried so that the three things which gate a
@@ -1872,6 +1880,10 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     let from_statblock_row = profile.npc_key.is_some();
 
     let mut sheet = Sheet {
+        // 150. OFF THE CLASS ROWS, the same ones a player character
+        // has. A creature that casts has class levels - see
+        // prayers::caster, and 022 for why there is no second path.
+        caster: crate::prayers::caster(&classes),
         from_statblock: from_statblock_row,
         gate_level: crate::attack::gate_level(profile.level, from_statblock_row),
         location_id: profile.location_id,
@@ -1993,6 +2005,8 @@ mod tests {
             // A PLAYER CHARACTER, so the gate is his own level.
             from_statblock: false,
             gate_level: 5,
+            // A barbarian. Nothing in this fixture casts anything.
+            caster: None,
             abilities,
             skills,
             profs,

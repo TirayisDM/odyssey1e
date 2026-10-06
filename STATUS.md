@@ -4573,6 +4573,97 @@ creature's own turn. The two differ only for an action taken between the
 top of the round and that creature's initiative, and the round is the
 only window `actions.round` can express.
 
+## A creature casts the way a character does - BUILT (150, 151)
+
+Spellcasting was the last of 147's four and the only one with a whole
+subsystem already built - 101 to 107, `prayers.rs`, `spellcast.rs`, a
+108-spell catalogue, slots that can be spent. **None of it could be
+reached by a monster.** Six commands found a cleric class on the sheet
+and refused anybody else, and a monster has no classes at all, so a
+Lich - an 18th-level spellcaster in its own statblock - could not cast a
+cantrip.
+
+### The answer was not a second mechanism, and Dave stopped me building one
+
+I was two queries from adding `npcs.caster_level` and
+`npcs.casting_ability` and a creature-shaped path beside the
+character-shaped one. Dave's question - shouldn't creatures work the way
+PCs do - is the one this codebase has had to learn twice: 022 deleted
+ninety lines of monster sheet-building and left `load_actor_sheet` at
+fifteen, because a monster's sheet is loaded by the function that loads
+anyone's.
+
+**So a creature that casts has CLASS LEVELS.** `character_classes` is
+what a player character has, `sheet.classes` reads it, and
+`prayers::caster` finds a casting class there without caring what kind
+of thing it belongs to. `npcs.class_key` has existed since 064 and was
+set on exactly one statblock; what was missing was a level to go with
+it, and `instantiate_npc` writing the class row rather than only copying
+the key onto the character.
+
+**One column instead of two, and it buys the player path rather than a
+parallel one.** `class_level` is not `level` - 147 set `level` to the
+challenge rating and the book prints both: a Priest is CR 2 and a
+5th-level caster. Reusing it would have taken Spirit Guardians off a
+priest.
+
+### And the correction Dave's question forced
+
+I had said a monster is "known, not prepared from a book" and proposed a
+third shape for it. **That was wrong** - a Lich's statblock describes
+*prepared wizard spells*. It is the wizard shape, and I had invented a
+mechanism to describe something an existing one already covered.
+
+### Cleric and wizard differ in the SOURCE, and everything follows
+
+101-107 built one shape and called it prayers, and the name hid the
+question. A cleric draws from the WHOLE list every day and prepares a
+subset; a wizard may only prepare what is written in a book.
+`prayers::Source` is the vocabulary - `whole_list` or `book` - and
+`prayers::casts` is the table of which class casts on which ability from
+which source. A rule rather than a column: `classes` has never said
+anything about spellcasting, and this is 5e's own table.
+
+**So `prepared` could not stay a boolean.** It was carrying two meanings
+- true for prepared, false for cantrip, with every false row in the
+database a level-0 spell - and a wizard needs a third value for a spell
+in the book and not prepared today. One column, three states, which is
+what it was always describing.
+
+`prayers::may_reach` is where the difference lives: a cleric is checked
+against `spells.classes`, and a wizard against **what they have already
+written down**, because being a wizard spell is not enough.
+
+### 151: three clerics and two wizards
+
+Priest (cleric 5), Cult Fanatic (4), Acolyte (1), Mage (wizard 9), Lich
+(wizard 18). Every list checked against `prepared_max` before seeding,
+because seeding past it would fire a warning from the seed rather than
+from play - Priest 8 of 8, Lich 23 of 23.
+
+**The wizards came out better than expected.** 101-105 seeded the cleric
+list, so the Mage and Lich should have been threadbare; 34 of those
+spells are on the wizard list too, at every level from cantrip to 9th.
+The Lich casts up to Gate and Astral Projection.
+
+### What is deliberately absent
+
+**The known casters** - bard, sorcerer, warlock have a fixed list and
+never prepare, a third shape absent from `prayers::casts` rather than
+listed and quietly treated as clerics. **The half-casters** - paladin
+and ranger prepare on a half slot table, and `slots_at` is the full one.
+**The wizard's acquisition path** - a player wizard's book grows two
+spells a level and by copying scrolls and books they FIND, which is the
+objects system rather than this one. **The wizard-only spells** - no
+Magic Missile, no Counterspell, no Wall of Force; a Mage casting
+Fireball and Banishment is a real Mage and not the whole one, and that
+is the same job 102-104 did for the cleric.
+
+**Multiclass casting is simplified and the test says so**: 5e adds the
+levels on one shared table and this takes the highest casting class,
+because deciding which ability the shared slots cast on is not one
+answer.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

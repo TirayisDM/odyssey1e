@@ -33,6 +33,8 @@
 //! That is a real rule and it needs more than one class to be worth
 //! writing - `slots_at` takes a single level and says so.
 
+use serde::{Deserialize, Serialize};
+
 /// How many spells a cleric may have prepared.
 ///
 /// MINIMUM ONE, which is 5e's own floor: a cleric with Wisdom 10 at
@@ -93,6 +95,122 @@ pub fn top_slot(cleric_level: i64) -> i64 {
         .rposition(|n| *n > 0)
         .map(|i| i as i64 + 1)
         .unwrap_or(0)
+}
+
+/* ======================== WHO IS CASTING ======================== */
+
+/// Where a caster's list comes from, which is the real difference
+/// between a cleric and a wizard.
+///
+/// 150. 101 to 107 built one shape and called it prayers, and the
+/// naming hid a question: a cleric draws from the WHOLE cleric list
+/// every day and prepares a subset of it, while a wizard may only
+/// prepare what is written in a book they have been filling since
+/// level one. Same slots, same preparing, different source - and the
+/// source is where every other difference comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    /// The whole class list, every day. Cleric, druid, paladin.
+    WholeList,
+    /// Only what is in the book. The wizard, and only the wizard.
+    Book,
+}
+
+/// A caster: which class, at what level, on what ability, off what.
+///
+/// RESOLVED FROM CLASS ROWS AND NOTHING ELSE, which is the whole of
+/// 150's design. Six commands used to find a cleric class on the sheet
+/// and refuse everybody else, so a Lich could not cast - a monster had
+/// no classes at all. The answer was not a second mechanism for
+/// creatures: it was giving a creature the class rows a player
+/// character has, which is 022's rule that there is no monster branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Caster {
+    pub class_key: String,
+    /// What drives the slot table and the prepared count.
+    pub level: i64,
+    /// The ability code the DC and attack bonus are built on.
+    pub ability: String,
+    pub source: Source,
+}
+
+/// Which classes cast, on what, and from where.
+///
+/// A RULE RATHER THAN A COLUMN. `classes` carries hit dice, proficiency
+/// and skill choices and has never said anything about spellcasting;
+/// this is 5e's own table and it belongs where the rules live.
+///
+/// THE THREE THAT PREPARE, AND NOT THE ONES THAT KNOW. Bard, sorcerer
+/// and warlock have a fixed KNOWN list and never prepare anything,
+/// which is a third shape this module does not implement - so they are
+/// absent rather than listed and quietly treated as clerics. Ranger is
+/// absent for the same reason.
+///
+/// PALADIN IS ABSENT TOO, for a different one: it prepares from the
+/// whole list like a cleric, but on a HALF-CASTER slot table, and
+/// `slots_at` is the full table and says so in its own header.
+pub fn casts(class_key: &str) -> Option<(&'static str, Source)> {
+    match class_key {
+        "cleric" => Some(("wis", Source::WholeList)),
+        "druid" => Some(("wis", Source::WholeList)),
+        "wizard" => Some(("int", Source::Book)),
+        _ => None,
+    }
+}
+
+/// The caster a sheet's class rows describe, if any.
+///
+/// THE HIGHEST CASTING CLASS WINS where there is more than one, which
+/// is a simplification and worth naming: 5e multiclass spellcasting
+/// adds the levels together on one shared slot table, and a Cleric 3 /
+/// Wizard 3 has the slots of a 6th-level caster rather than of a 3rd.
+/// 073 built multiclassing and this is the first rule that needs that
+/// sum; computing it would mean deciding which ability the shared
+/// slots cast on, which is not one answer. One class at a time is the
+/// honest subset, and the day somebody plays that pair this is where
+/// it gets fixed.
+pub fn caster(classes: &[crate::multiclass::Taken]) -> Option<Caster> {
+    classes
+        .iter()
+        .filter_map(|t| casts(&t.key).map(|(ability, source)| Caster {
+            class_key: t.key.clone(),
+            level: t.level,
+            ability: ability.to_string(),
+            source,
+        }))
+        .max_by_key(|c| c.level)
+}
+
+/// Whether this caster may reach for this spell at all, before any
+/// question of how many they can hold.
+///
+/// 150. THE DIFFERENCE BETWEEN A CLERIC AND A WIZARD, in one function.
+/// A cleric reaches for anything on the cleric list, every day, and
+/// `spells.classes` is the list. A WIZARD REACHES ONLY INTO THE BOOK -
+/// being a wizard spell is not enough, somebody has to have written it
+/// down - so the test is what this caster already holds, not what the
+/// catalogue says.
+///
+/// `held` IS THE STATE THIS CASTER HAS THE SPELL IN, or None for one
+/// they have never held. For a book caster that is the whole question:
+/// `book` means written down and not prepared today, which is exactly
+/// the state a wizard prepares FROM.
+pub fn may_reach(
+    caster: &Caster,
+    spell_classes: &[String],
+    held: Option<&str>,
+) -> Result<(), String> {
+    match caster.source {
+        Source::WholeList => match spell_classes.iter().any(|c| *c == caster.class_key) {
+            true => Ok(()),
+            false => Err(format!("that is not a {} spell", caster.class_key)),
+        },
+        Source::Book => match held {
+            Some("book") | Some("prepared") => Ok(()),
+            _ => Err("that is not in their book - a wizard prepares from what they have written down".to_string()),
+        },
+    }
 }
 
 /// The save DC for this cleric's spells: 8 + proficiency + Wisdom.
@@ -195,6 +313,110 @@ pub fn may_prepare(
 
 #[cfg(test)]
 mod tests {
+
+    /* ---------------- who is casting (150) -------------------------- */
+
+    fn taken(key: &str, level: i64) -> crate::multiclass::Taken {
+        // The hit die is carried on the row and is nothing to do with
+        // casting; d8 keeps the fixture honest without pretending it
+        // matters here.
+        crate::multiclass::Taken { key: key.to_string(), level, hit_die: 8 }
+    }
+
+    #[test]
+    fn a_cleric_casts_on_wisdom_from_the_whole_list() {
+        let c = caster(&[taken("cleric", 5)]).unwrap();
+        assert_eq!(c.ability, "wis");
+        assert_eq!(c.level, 5);
+        assert_eq!(c.source, Source::WholeList);
+    }
+
+    #[test]
+    fn a_wizard_casts_on_intelligence_from_a_book() {
+        let c = caster(&[taken("wizard", 18)]).unwrap();
+        assert_eq!(c.ability, "int");
+        assert_eq!(c.source, Source::Book);
+    }
+
+    #[test]
+    fn a_fighter_is_not_a_caster() {
+        assert!(caster(&[taken("fighter", 20)]).is_none());
+        assert!(caster(&[]).is_none(), "and neither is a creature with no classes");
+    }
+
+    #[test]
+    fn the_classes_that_know_rather_than_prepare_are_absent() {
+        // Bard, sorcerer and warlock have a fixed known list and never
+        // prepare. Treating them as clerics would hand them the whole
+        // cleric list to prepare from, which is a worse answer than
+        // "not built yet".
+        for k in ["bard", "sorcerer", "warlock", "ranger", "paladin"] {
+            assert!(casts(k).is_none(), "{} should not be built yet", k);
+        }
+    }
+
+    #[test]
+    fn the_highest_casting_class_wins() {
+        // A simplification, and the test says so: 5e adds multiclass
+        // caster levels on one shared table, and this takes the larger.
+        let c = caster(&[taken("cleric", 3), taken("wizard", 5)]).unwrap();
+        assert_eq!(c.class_key, "wizard");
+        assert_eq!(c.level, 5);
+    }
+
+    #[test]
+    fn a_non_casting_class_beside_a_casting_one_is_ignored() {
+        let c = caster(&[taken("fighter", 11), taken("cleric", 2)]).unwrap();
+        assert_eq!(c.class_key, "cleric");
+        assert_eq!(c.level, 2);
+    }
+
+    /* ---------------- what a caster may reach for ------------------- */
+
+    fn cleric5() -> Caster {
+        Caster { class_key: "cleric".into(), level: 5, ability: "wis".into(), source: Source::WholeList }
+    }
+    fn wizard9() -> Caster {
+        Caster { class_key: "wizard".into(), level: 9, ability: "int".into(), source: Source::Book }
+    }
+
+    #[test]
+    fn a_cleric_reaches_for_anything_on_the_cleric_list() {
+        let on = vec!["cleric".to_string(), "paladin".to_string()];
+        assert!(may_reach(&cleric5(), &on, None).is_ok(), "never held it, and that is fine");
+    }
+
+    #[test]
+    fn a_cleric_is_refused_a_spell_off_their_list() {
+        let on = vec!["wizard".to_string()];
+        let e = may_reach(&cleric5(), &on, None).unwrap_err();
+        assert!(e.contains("not a cleric spell"), "{}", e);
+    }
+
+    #[test]
+    fn a_wizard_is_refused_a_wizard_spell_that_is_not_in_the_book() {
+        // THE WHOLE DIFFERENCE. Being a wizard spell is not enough -
+        // somebody has to have written it down.
+        let on = vec!["wizard".to_string()];
+        let e = may_reach(&wizard9(), &on, None).unwrap_err();
+        assert!(e.contains("not in their book"), "{}", e);
+    }
+
+    #[test]
+    fn a_wizard_prepares_from_the_book() {
+        let on = vec!["wizard".to_string()];
+        assert!(may_reach(&wizard9(), &on, Some("book")).is_ok());
+        assert!(may_reach(&wizard9(), &on, Some("prepared")).is_ok(), "already up is not a refusal here");
+    }
+
+    #[test]
+    fn a_wizards_book_beats_the_catalogue_either_way() {
+        // A spell written into the book is castable whatever the
+        // catalogue says it is - a wizard who copied something odd has
+        // it, and the book is the authority for a book caster.
+        assert!(may_reach(&wizard9(), &[], Some("book")).is_ok());
+    }
+
     use super::*;
 
     /* ---------- how many they hold ---------- */

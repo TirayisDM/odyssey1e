@@ -4332,6 +4332,91 @@ worth spot-checking.
 my memory of its line, and a guess there would be indistinguishable from
 the eleven above.
 
+## The bestiary is the book now - BUILT (146, 147)
+
+**145's header asked for a second reader. Dave found one: the SRD is
+published online.** The whole bestiary was read against it - every
+armour class, hit point total, ability score and resistance, with the
+resistances parsed into 116's vocabulary mechanically rather than
+compared by eye.
+
+### 146: fifteen wrong out of 184 matched
+
+**Immune, not resistant - ten of them.** All five lycanthropes, all four
+golems and the Lich are IMMUNE to bludgeoning, piercing and slashing
+from nonmagical attacks. 143 built the qualifier and 144 spread it, both
+reading "resistance" off a memory that had the condition right and the
+degree wrong. **A werewolf was taking half from an ordinary sword and
+should have been taking none** - a bigger error than the one 143 existed
+to fix, sitting underneath it the whole time and invisible to three
+passes that were all checking WHETHER the line was there.
+
+**And one 144 got backwards.** The Dretch has no physical resistance at
+all. 144 gave it one on the reasoning that "every demon in the SRD also
+resists b/p/s from nonmagical attacks" - true of the vrock, hezrou,
+glabrezu and nalfeshnee, false of the dretch. **The error was not a bad
+memory, it was confidence in a pattern**, which is the shape worth
+remembering.
+
+The rest: Horned Devil 148 to 178 hit points, Werewolf AC 12 to 11,
+Wereboar 12 to 10, Giant Scorpion DEX 13 to 11, Wight immune to poison,
+Assassin resistant to poison. **169 of 184 matched exactly on every
+field** - the numbers written from memory were, on the whole, right, and
+the failures cluster in degrees and in families rather than in digits.
+
+### 147: the 77 the SRD has and we did not
+
+**280 creatures.** The dragons are finally complete - we had five
+chromatic colours at three ages, the SRD has ten colours at four, so the
+metallics and every ancient dragon were missing. **43 dragons now.** The
+top end did not exist at all: the bestiary stopped at the Pit Fiend and
+now runs to the Tarrasque by way of the Kraken, the Solar, both sphinxes
+and the Purple Worm. Plus the dinosaurs, hags, nagas, genies, four more
+devils, and the ordinary-looking things a dungeon needs.
+
+**These numbers are READ, not recalled**, which is new. 142's warning -
+"SRD-derived from memory, right in shape and wrong in places" - does not
+apply to this batch. The prose is ours: every `notes` line is written
+for this bestiary.
+
+**One deliberate deviation, and it is a balance decision.** 127 set
+`prof_bonus` by its own two-step rule, 2 up to level 9 and 3 above, "so
+one catalogue has one scale". That was written when the catalogue topped
+out near CR 10, and following it to CR 30 would give the Tarrasque +3 -
+it would hit less often than a guard captain. So these 77 use 5e's own
+proficiency by CR, which the column has always allowed.
+
+**The existing 203 are NOT retuned, and that restraint is 129's lesson
+paid forward**: a balance change arriving as a side effect of a data
+migration is exactly what 132 had to reverse. The catalogue now has two
+proficiency scales and this is where that is written down. Deriving the
+old ones from CR is a one-line change whenever Dave wants it, and it is
+a change to how 203 existing creatures hit.
+
+### Verified after
+
+280 statblocks, 554 kit rows, every one proficient (137), **all 280
+reach three or more moves and none is unable to act** (133, 135), no
+grant target the engine cannot read, no kit row naming an item that is
+not there, top level 30.
+
+### What is still missing, and it is not numbers
+
+**Breath weapons, legendary actions, lair actions, regeneration and
+spellcasting.** A dragon here bites, claws, lashes and buffets; it does
+not breathe. That is a whole mechanism rather than a column, and
+inventing half of one for 43 dragons would be worse than the honest
+absence - the statblock screen shows the prose and the breath stays a DM
+call, as it has since 127.
+
+**Nineteen creatures are ours now, by discovery rather than design.** Six
+we invented - Goblin Boss, Guard Captain, Orc War Chief, Harpy Matriarch,
+Dire Boar, Kobold Dragonshield. The other thirteen have no page on that
+SRD either: Archer, Banshee, Pixie, Acolyte, Druid, Carrion Crawler,
+Hook Horror, Helmed Horror, Intellect Devourer, Scarecrow, Twig Blight,
+Yuan-ti Pureblood and the Gas Spore. They were written from memory of a
+book they are not in, and nothing has verified them.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

@@ -4269,6 +4269,69 @@ whose name stops describing what it did. Worth a sweep of its own: the
 bestiary was written in batches from memory and this is the second
 omission of the same shape found by looking.
 
+## All 203, against the book - SWEPT (145)
+
+**Twice in two days a hole turned up by looking rather than by playing**
+- 144 found seventeen where Dave had asked about three - which is the
+signal to stop patching and read the whole thing. Every creature in the
+shared bestiary, its recorded resistances against what the SRD prints.
+**203 checked, eleven wrong.**
+
+**Four of the five elementals** resist bludgeoning, piercing and slashing
+from nonmagical attacks and **not one of them said so**. The Earth
+Elemental is also vulnerable to thunder, which it did not say either.
+The Gargoyle - an elemental too - was given its line in 144, and that is
+how the family came to be looked at.
+
+| missing | |
+|---|---|
+| Air, Fire, Water Elemental | b/p/s from nonmagical |
+| Earth Elemental | the same, **and** vulnerable to thunder |
+| Swarm of Rats | resists b/p/s **flatly** - a swarm is not hard to hit, there is simply too much of it. Swarm of Insects has had it since 131 and the rats were written beside them without it |
+| Shield Guardian | immune to poison |
+| Dust Mephit | vulnerable to fire - the other three mephits all carry theirs |
+| Ghast | resistant to necrotic |
+| Specter | immune to necrotic - the gap 144 found and deliberately left |
+
+| wrong degree | |
+|---|---|
+| Wraith, Shadow | necrotic is **immunity**, not resistance |
+
+That last pair is the subtler kind and not a rounding difference: half
+of a large necrotic hit still kills somebody and none of it never does.
+It is the difference between a Wraith the party's necromancer can wear
+down and one they cannot touch at all.
+
+**What was checked and is right** - because "I looked and it was fine"
+is a result: every dragon's element, all four golems, the three
+remaining mephits, both other oozes, the plants (the Treant and Awakened
+Tree resist bludgeoning and piercing FLATLY, since a magic axe is no
+better against wood), the Banshee and the Ghost, whose long lines are
+exactly right, the Lich, both vampires, the Wight, the Mummy, every
+lycanthrope, all eleven fiends, and the forty-odd beasts and humanoids
+that correctly have nothing.
+
+**After: 329 grant targets across 90 creatures, 126 of them qualified.**
+Every target checked against the grammar `resist.rs` accepts, so none is
+silently inert; no duplicates; none without a source to name on a sheet.
+
+### What a sweep like this is worth, and what it is not
+
+**It compares the database against my recollection of the SRD - the same
+source that wrote the rows.** It catches what 131 and 142 FORGOT, and the
+evidence says that is the common failure: every one of the eleven is an
+omission or a degree, not an invention. It cannot catch what I have
+remembered wrongly the same way twice.
+
+**A second reader is worth more than a third pass by me.** The honest
+version is an SRD file through `import_creature` - the argument 142's
+header already made. Until then these numbers are right in shape and
+worth spot-checking.
+
+**One left alone for want of confidence**: the Gas Spore. I do not trust
+my memory of its line, and a guess there would be indistinguishable from
+the eleven above.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

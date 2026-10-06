@@ -644,10 +644,14 @@ pub fn list_npc_attacks(state: State<AppState>, actor_id: String) -> Result<Valu
         }
     }
 
-    // Techniques the statblock's weapons offer, gated by the level 019
-    // gave it. Same list a character would get, same gate.
+    // Techniques the statblock's weapons offer. Same list a character
+    // would get, same gate - and 133 is the point at which that gate
+    // stopped meaning anything for a creature, because `npcs.level` is
+    // an encounter weight and not a rung on a ladder. A monster reaches
+    // everything its kit offers; `attack::gate_level` says so once and
+    // the sheet carries the answer.
     for t in &sheet.techniques {
-        if t.min_level > sheet.level {
+        if t.min_level > sheet.gate_level {
             continue;
         }
         // WHICH WEAPON THIS BELONGS TO. `weapon` used to carry the

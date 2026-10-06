@@ -2948,7 +2948,14 @@ function itemActions(it) {
     });
   }
 
-  const level = (state.sheet && state.sheet.level) || 1;
+  // 133. THE GATE LEVEL, NOT THE CHARACTER LEVEL. These are the same
+  // number for everybody who levels up and they are not the same for a
+  // creature, which clears every gate because `npcs.level` is an
+  // encounter weight rather than a rung. The engine decides that -
+  // `attack::gate_level` - and the sheet carries the answer, for the
+  // reason `skill_mods` exists: a screen that works out a game number
+  // itself is a second opinion that eventually disagrees.
+  const level = (state.sheet && state.sheet.gate_level) || 1;
   for (const t of (state.sheet && state.sheet.techniques) || []) {
     if (t.item_key !== it.item.key) continue;
     if (!it.modes.includes(t.mode)) continue;

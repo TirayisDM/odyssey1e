@@ -26,7 +26,7 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 884 tests, about a second
+cargo test           # 917 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
@@ -279,7 +279,7 @@ could not do.
 ## State
 
 About 32k lines of Rust - 24k of rules across 37 modules, 7.5k of
-plumbing across 15 command files - with 884 tests, 36 tables, and a
+plumbing across 15 command files - with 917 tests, 36 tables, and a
 frontend of 8.2k lines of plain JS.
 `STATUS.md` is the detailed handoff; this is the shape of it.
 

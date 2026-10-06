@@ -3756,6 +3756,88 @@ one session), flatten the gates entirely (a giant centipede with Crush
 the Throat), or invent a second limb for a rat. 92 of 134 have three or
 more today. **This one is Dave's call.**
 
+> **The count was 44, not 39, and the cause was not one thing** - found
+> on 2026-10-06 by recomputing it from the database rather than
+> re-reading this paragraph. Counting techniques whose `item_key`
+> matches an EQUIPPED kit row with `min_level <= npcs.level`: 90 at
+> three or more, 27 at exactly two, 14 at exactly one, 3 at none. Of
+> the 41 that had kit, **24 were natural-weapon creatures** on the
+> 1/2/4 gate as described above and **17 carried manufactured weapons
+> only** - Guard, Bandit, Cultist, Orc, Skeleton - which 132 correctly
+> put BACK to 1/3/5, so for those the gate above was never the reason.
+> The three with nothing were two 006 orphans and the Shrieker, which
+> has no attack in the SRD at all. 133 and 136 answer all of it; the
+> paragraph above is left as it was written, per 115.
+
+## A creature is not gated by a ladder it cannot climb - BUILT (133, 134, 135, 136)
+
+**Dave's call, taken: an NPC that uses a weapon reaches that weapon's
+techniques.** The fix is not where 129 looked for it. `min_level` is a
+PROGRESSION gate - it says when a fighter has earned Split the Collar,
+and the whole of its meaning is that the character will one day be
+higher than it. A creature does not level up. `npcs.level` is an
+encounter weight (127's scale), so reading one against the other
+measured every monster against a ladder it will never climb, and took
+its own equipment away: a level-2 guard holding a spear reached the move
+authored at gate 1 and neither of the other two.
+
+**129 moved the gates; 133 stopped reading them.** The numbers were
+always fine and the comparison was not - and retuning the catalogue
+retuned every player character in the game by accident, which is what
+132 had to reverse. `attack::gate_level(level, from_statblock)` is the
+whole rule: a character's own level, or every level there is. The three
+things that gate a move - `attack::resolve`, the DM's statblock buttons
+and the picker on the sheet - now read one number the sheet carries,
+which is the fault `skill_mods` exists to have already fixed once. The
+picker was computing it in JavaScript.
+
+**Every creature in the bestiary now reaches three or more moves.** 132
+of 132, checked live, against 90 of 134 before. No gate moved and no
+player progression changed.
+
+### 134. A weapon may name its own ability
+
+Every attack in this engine was STR or DEX, which is true of everything
+you hold and false of a Shrieker's scream: STR 1 and DEX 1 gave the
+fungus -5 to be heard. An item whose `properties` carry one of the six
+ability codes uses that instead - specific statement beats finesse and
+beats the mode - and `ability_for` takes one modifier lookup rather than
+six arguments that are unused on every weapon anybody holds. Nothing in
+the armoury carries one, so every existing weapon behaves exactly as it
+did.
+
+### 135. Two statblocks that were never creatures
+
+`Goblin Fighter` (0000A1) and `Litmor` (100003) came off the 006
+spreadsheet port, had no kit at all - equipped or carried - and would
+have given a DM a creature that cannot act. Deleted rather than armed,
+because the bestiary already has a goblin that somebody designed, and
+`Litmor` was one character's name rather than a kind of thing. Nothing
+referenced either: checked by query, since `characters.npc_key` is a
+loose text reference and no foreign key in this schema points at `npcs`
+at all.
+
+### 136. And the Shrieker has something to do
+
+Three shrieks off one organ, by Dave's licence to invent them: Piercing
+(1d6 thunder, and a day of -5 Perception on a failed CON save),
+Confusion (1d4, loses its next action on a failed WIS save) and Stunning
+(1d8, stunned to the end of its next turn). It rolls on CON at +2.
+
+**It is AIMED, and that is a choice worth knowing about.** A scream
+wants to be an area with a save and this engine has no save-DC attack
+path. Modelling the area anyway would mean a to-hit roll the table is
+supposed to ignore, which is this codebase's named defect wearing its
+usual costume, so the fungus screams AT whatever disturbed it instead -
+the precedent `spines` already set.
+
+**The riders are prose, like every rider in the game.** A grapple is
+prose, a knockdown is prose, and so is the ringing in somebody's ears.
+Nothing lets a technique land an effect, and the text says so outright
+rather than implying the engine has it. `effects` with a `skill.prc`
+grant is the shape that wants, and `apply_effect` has no UI and no
+`grants` parameter - two reasons it is not built today.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

@@ -153,7 +153,30 @@ fn reaching(loadout: &[Owned], weapon: &Owned) -> Vec<crate::grants::Grant> {
 /// otherwise the weapon's mode decides, and THROWN KEEPS STR - a thrown
 /// hammer is a strength attack that happens to travel. Getting that
 /// wrong is invisible on a character whose scores are close.
-pub fn ability_for(properties: &[String], mode: Mode, str_mod: i64, dex_mod: i64) -> (&'static str, i64) {
+///
+/// 134. A WEAPON MAY NAME ITS OWN ABILITY, and some have to. Every
+/// attack in this engine was STR or DEX, which is true of everything
+/// you hold and false of everything that is not held: a Shrieker's
+/// scream is not a strength attack, and reading its STR of 1 gave a
+/// fungus -5 to be heard. An item whose `properties` carry an ability
+/// code use that instead, which is the same vocabulary the ability rows
+/// and the grant targets already speak.
+///
+/// IT WINS OVER FINESSE AND OVER THE MODE, because it is the more
+/// specific statement. Nothing in the armoury carries one, so every
+/// weapon a person can hold behaves exactly as it did.
+pub fn ability_for(
+    properties: &[String],
+    mode: Mode,
+    // ONE WAY TO ASK, because there are now six possible answers and
+    // threading six modifiers through every caller would be five of
+    // them unused on every weapon anybody holds.
+    abil: &dyn Fn(&str) -> i64,
+) -> (&'static str, i64) {
+    if let Some(code) = stated_ability(properties) {
+        return (code, abil(code));
+    }
+    let (str_mod, dex_mod) = (abil("str"), abil("dex"));
     if properties.iter().any(|p| p == "fin") {
         return if dex_mod > str_mod {
             ("dex", dex_mod)
@@ -164,6 +187,53 @@ pub fn ability_for(properties: &[String], mode: Mode, str_mod: i64, dex_mod: i64
     match mode {
         Mode::Ranged => ("dex", dex_mod),
         Mode::Melee | Mode::Thrown => ("str", str_mod),
+    }
+}
+
+/// The ability an item's properties name, if they name one.
+///
+/// THE SIX CODES, spelled as they are everywhere else in this schema -
+/// `characters_abilities.code`, a grant target, a save request. A
+/// property list is free text and always has been, so this is a lookup
+/// and not a parse: a property that is not one of the six is some other
+/// property and is left alone.
+pub fn stated_ability(properties: &[String]) -> Option<&'static str> {
+    const SIX: [&str; 6] = ["str", "dex", "con", "int", "wis", "cha"];
+    properties
+        .iter()
+        .find_map(|p| SIX.iter().find(|c| *c == &p.as_str()).copied())
+}
+
+/// The level a technique gate should be read against.
+///
+/// 133. `techniques.min_level` IS A PROGRESSION GATE. It says when a
+/// fighter has earned Split the Collar, and the whole of its meaning is
+/// that the character will one day be higher than it.
+///
+/// A CREATURE DOES NOT LEVEL UP. A wolf is a wolf, and `npcs.level` is
+/// an encounter weight - 127's scale, roughly "the party level this is
+/// a fair fight for" - rather than a rung on a ladder it will ever
+/// climb. Reading one against the other denied a creature its own
+/// equipment: a level-2 guard holding a spear reached the move authored
+/// at gate 1 and neither of the other two, and a wolf reached two of
+/// its three bites and stopped there. 44 of the bestiary's 134
+/// creatures had fewer than three moves for this reason alone.
+///
+/// 129 TRIED TO FIX THIS BY MOVING THE GATES, which is the wrong end of
+/// it. The numbers were fine and the comparison was not - and retuning
+/// the catalogue retuned every player character in the game by accident
+/// (132). A gate that cannot be earned is not a gate.
+///
+/// `i64::MAX` RATHER THAN A FLAG THREADED THROUGH EVERY CALLER. The
+/// three things that gate a move all compare this against a `min_level`
+/// and none of them does arithmetic on it, so "higher than any gate
+/// that can be authored" is the honest answer: 001 caps `min_level` at
+/// 20.
+pub fn gate_level(level: i64, from_statblock: bool) -> i64 {
+    if from_statblock {
+        i64::MAX
+    } else {
+        level
     }
 }
 
@@ -222,10 +292,16 @@ pub fn resolve(
     request: &str,
     loadout: &[Owned],
     techniques: &[Technique],
-    level: i64,
+    // NOT A CHARACTER LEVEL. What a technique gate is read against,
+    // which `gate_level` decides and the sheet carries - a creature
+    // clears every gate. Passing `sheet.level` here is the bug 133
+    // fixed.
+    gate_level: i64,
     proficiency_bonus: i64,
-    str_mod: i64,
-    dex_mod: i64,
+    // A modifier by ability code - `sheet.ability_mod` in practice.
+    // See `ability_for`: a weapon may name an ability that is neither
+    // STR nor DEX, and then the sheet has to be asked.
+    abil: &dyn Fn(&str) -> i64,
 ) -> Option<Attack> {
     let want = normalize(request);
 
@@ -234,7 +310,10 @@ pub fn resolve(
         // Gated by level. A technique that has not been earned is not
         // an error and not a fallback - it simply is not available, and
         // saying so beats silently rolling the plain weapon instead.
-        if t.min_level > level {
+        //
+        // 133. AND A CREATURE HAS EARNED EVERYTHING ITS KIT OFFERS,
+        // which is what `gate_level` answers for.
+        if t.min_level > gate_level {
             return None;
         }
         // BOUND TO ONE OBJECT WHEN IT SAYS SO. A move the sheet
@@ -251,7 +330,7 @@ pub fn resolve(
         })?;
 
         let (ability, ability_mod) =
-            ability_for(&owned.item.properties, t.mode, str_mod, dex_mod);
+            ability_for(&owned.item.properties, t.mode, abil);
 
         let gs = reaching(loadout, owned);
         let plain = to_hit(ability_mod, owned.proficient, proficiency_bonus);
@@ -289,7 +368,7 @@ pub fn resolve(
                 continue;
             }
             let (ability, ability_mod) =
-                ability_for(&owned.item.properties, *mode, str_mod, dex_mod);
+                ability_for(&owned.item.properties, *mode, abil);
 
             // A weapon with no dice is a data fault. Offering no attack
             // beats offering one that rolls nothing.
@@ -624,6 +703,16 @@ mod tests {
     /// trained in `sim` only. Those four numbers produce the four rows
     /// the old seeder wrote, which is what makes this a parity fixture
     /// rather than a fixture I chose.
+    /// A modifier lookup for the tests, which care about STR and DEX
+    /// and nothing else unless they say so.
+    fn abil(str_mod: i64, dex_mod: i64) -> impl Fn(&str) -> i64 {
+        move |code| match code {
+            "str" => str_mod,
+            "dex" => dex_mod,
+            _ => 0,
+        }
+    }
+
     const STR: i64 = 2;
     const DEX: i64 = 1;
     const PB: i64 = 3;
@@ -716,7 +805,7 @@ mod tests {
         let mut kit = party();
         kit[0].grants = vec![gr("attack", 1), gr("damage", 1)];
 
-        let a = resolve("mace of the deep song", &kit, &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("mace of the deep song", &kit, &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.to_hit, 6, "STR +2, prof +3, magic +1");
         assert_eq!(a.magic, 1);
         assert_eq!(a.damage, "1d6+3", "STR +2 and the weapon's +1");
@@ -731,7 +820,7 @@ mod tests {
         let mut kit = party();
         kit[0].grants = vec![gr("attack", 1), gr("damage", 1)];
 
-        let a = resolve("light hammer", &kit, &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("light hammer", &kit, &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.to_hit, 5, "STR +2, prof +3, and nothing from the mace");
         assert_eq!(a.magic, 0);
         assert_eq!(a.damage, "1d4+2");
@@ -747,8 +836,8 @@ mod tests {
         ring.grants = vec![gr("attack", 1)];
         kit.push(ring);
 
-        assert_eq!(resolve("mace of the deep song", &kit, &[], 5, PB, STR, DEX).unwrap().to_hit, 6);
-        assert_eq!(resolve("light hammer", &kit, &[], 5, PB, STR, DEX).unwrap().to_hit, 6);
+        assert_eq!(resolve("mace of the deep song", &kit, &[], 5, PB, &abil(STR, DEX)).unwrap().to_hit, 6);
+        assert_eq!(resolve("light hammer", &kit, &[], 5, PB, &abil(STR, DEX)).unwrap().to_hit, 6);
     }
 
     /// A technique rolls the weapon's dice, so it carries the weapon's
@@ -759,7 +848,7 @@ mod tests {
         let mut kit = party();
         kit[0].grants = vec![gr("attack", 1), gr("damage", 1)];
 
-        let a = resolve("heavy smash", &kit, &[heavy_smash()], 5, PB, STR, DEX).unwrap();
+        let a = resolve("heavy smash", &kit, &[heavy_smash()], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.magic, 1);
         assert_eq!(a.to_hit, 6);
     }
@@ -769,7 +858,7 @@ mod tests {
     /// loadout was read - so there is nothing here to add.
     #[test]
     fn nothing_granted_is_nothing_added() {
-        let a = resolve("mace of the deep song", &party(), &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("mace of the deep song", &party(), &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.magic, 0);
         assert_eq!(a.to_hit, 5, "unchanged from before 100");
         assert_eq!(a.damage, "1d6+2");
@@ -814,7 +903,7 @@ mod tests {
 
     #[test]
     fn the_mace_matches_the_seeded_row() {
-        let a = resolve("mace of the deep song", &party(), &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("mace of the deep song", &party(), &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.to_hit, 5); // the tab's "+5"
         assert_eq!(a.damage, "1d6+2"); // the tab's "1d6+2"
         assert_eq!(a.ability, "str");
@@ -823,7 +912,7 @@ mod tests {
 
     #[test]
     fn the_light_hammer_matches_and_is_proficient_by_derivation() {
-        let a = resolve("light hammer", &party(), &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("light hammer", &party(), &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.to_hit, 5);
         assert_eq!(a.damage, "1d4+2");
     }
@@ -831,7 +920,7 @@ mod tests {
     #[test]
     fn the_crossbow_is_dex_and_unproficient() {
         // The row that proves training moves the number: +1, not +4.
-        let a = resolve("heavy crossbow", &party(), &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("heavy crossbow", &party(), &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.ability, "dex");
         assert_eq!(a.to_hit, 1);
         assert_eq!(a.proficiency_bonus, 0);
@@ -843,7 +932,7 @@ mod tests {
     fn thrown_is_a_separate_request_and_keeps_strength() {
         // The tab's fourth row. A thrown hammer is a STR attack that
         // happens to travel, which is the easy thing to get wrong.
-        let a = resolve("light hammer (thrown)", &party(), &[], 5, PB, STR, DEX).unwrap();
+        let a = resolve("light hammer (thrown)", &party(), &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.mode, Mode::Thrown);
         assert_eq!(a.ability, "str");
         assert_eq!(a.to_hit, 5);
@@ -855,8 +944,8 @@ mod tests {
     #[test]
     fn finesse_takes_the_better_of_the_two() {
         let props = vec!["fin".to_string()];
-        assert_eq!(ability_for(&props, Mode::Melee, 2, 5), ("dex", 5));
-        assert_eq!(ability_for(&props, Mode::Melee, 5, 2), ("str", 5));
+        assert_eq!(ability_for(&props, Mode::Melee, &abil(2, 5)), ("dex", 5));
+        assert_eq!(ability_for(&props, Mode::Melee, &abil(5, 2)), ("str", 5));
     }
 
     #[test]
@@ -864,19 +953,19 @@ mod tests {
         // Not arbitrary: the original tests dex > str, so equal scores
         // fall through to str. Same tie, same winner.
         let props = vec!["fin".to_string()];
-        assert_eq!(ability_for(&props, Mode::Melee, 3, 3), ("str", 3));
+        assert_eq!(ability_for(&props, Mode::Melee, &abil(3, 3)), ("str", 3));
     }
 
     #[test]
     fn a_negative_modifier_still_applies() {
-        let a = resolve("mace of the deep song", &party(), &[], 5, PB, -1, DEX).unwrap();
+        let a = resolve("mace of the deep song", &party(), &[], 5, PB, &abil(-1, DEX)).unwrap();
         assert_eq!(a.to_hit, 2);
         assert_eq!(a.damage, "1d6-1");
     }
 
     #[test]
     fn a_zero_modifier_leaves_the_formula_bare() {
-        let a = resolve("mace of the deep song", &party(), &[], 5, PB, 0, DEX).unwrap();
+        let a = resolve("mace of the deep song", &party(), &[], 5, PB, &abil(0, DEX)).unwrap();
         assert_eq!(a.damage, "1d6");
     }
 
@@ -885,7 +974,7 @@ mod tests {
     #[test]
     fn a_technique_replaces_the_dice_and_the_thresholds() {
         let t = vec![heavy_smash()];
-        let a = resolve("heavy smash", &party(), &t, 5, PB, STR, DEX).unwrap();
+        let a = resolve("heavy smash", &party(), &t, 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.damage, "1d8+2"); // the technique's dice, the character's modifier
         assert_eq!(a.fumble_max, 2);
         assert_eq!(a.to_hit, 5); // to-hit is unchanged by a technique
@@ -895,22 +984,103 @@ mod tests {
     #[test]
     fn a_technique_below_its_level_is_not_available() {
         let t = vec![deepsong_echo()]; // min_level 6
-        assert!(resolve("deepsong echo", &party(), &t, 5, PB, STR, DEX).is_none());
-        let a = resolve("deepsong echo", &party(), &t, 6, PB, STR, DEX).unwrap();
+        assert!(resolve("deepsong echo", &party(), &t, 5, PB, &abil(STR, DEX)).is_none());
+        let a = resolve("deepsong echo", &party(), &t, 6, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.crit_min, 18);
         assert_eq!(a.damage, "1d14+2");
+    }
+
+    /* ---------------- a creature is not gated (133) ----------------- */
+
+    #[test]
+    fn a_character_is_gated_by_their_level() {
+        assert_eq!(gate_level(5, false), 5);
+        assert_eq!(gate_level(1, false), 1);
+    }
+
+    #[test]
+    fn a_creature_clears_every_gate_that_can_be_authored() {
+        // 001 caps min_level at 20, so this is every gate there is.
+        for min_level in 1..=20 {
+            assert!(min_level <= gate_level(2, true), "gate {} denied", min_level);
+        }
+    }
+
+    #[test]
+    fn the_same_level_two_reaches_a_move_as_a_creature_and_not_as_a_person() {
+        let t = vec![deepsong_echo()]; // min_level 6
+        let kit = party();
+
+        // A LEVEL 2 CHARACTER HAS NOT EARNED IT.
+        let as_person = gate_level(2, false);
+        assert!(resolve("deepsong echo", &kit, &t, as_person, PB, &abil(STR, DEX)).is_none());
+
+        // THE SAME NUMBERS ON A STATBLOCK DO. This is the whole of 133:
+        // the wolf, the guard and the goblin were being measured against
+        // a ladder they will never climb.
+        let as_creature = gate_level(2, true);
+        let a = resolve("deepsong echo", &kit, &t, as_creature, PB, &abil(STR, DEX)).unwrap();
+        assert_eq!(a.technique.as_deref(), Some("Deepsong Echo"));
+    }
+
+    /* ---------------- a weapon may name its ability (134) ----------- */
+
+    #[test]
+    fn a_weapon_with_no_stated_ability_is_unchanged() {
+        assert_eq!(stated_ability(&[]), None);
+        assert_eq!(stated_ability(&["fin".to_string(), "lgt".to_string()]), None);
+    }
+
+    #[test]
+    fn a_shriek_is_rolled_on_the_ability_it_names() {
+        let props = vec!["con".to_string()];
+        let look = |code: &str| match code {
+            "str" => -5, // a Shrieker's 1
+            "dex" => -5,
+            "con" => 0, // and its 10
+            _ => 0,
+        };
+        assert_eq!(ability_for(&props, Mode::Melee, &look), ("con", 0));
+    }
+
+    #[test]
+    fn a_stated_ability_wins_over_finesse_and_over_the_mode() {
+        let props = vec!["fin".to_string(), "cha".to_string()];
+        let look = |code: &str| match code {
+            "str" => 1,
+            "dex" => 4,
+            "cha" => 3,
+            _ => 0,
+        };
+        // Finesse would have taken DEX at 4 and the mode would have
+        // taken STR; the weapon says Charisma, so Charisma it is.
+        assert_eq!(ability_for(&props, Mode::Melee, &look), ("cha", 3));
+        assert_eq!(ability_for(&props, Mode::Ranged, &look), ("cha", 3));
+    }
+
+    #[test]
+    fn only_the_six_codes_are_an_ability() {
+        // A property list is free text. Anything that is not one of the
+        // six is some other property and is left alone, rather than
+        // being half-read as an ability nobody has.
+        for p in ["str", "dex", "con", "int", "wis", "cha"] {
+            assert_eq!(stated_ability(&[p.to_string()]), Some(p));
+        }
+        for p in ["strength", "con2", "", "ldn", "2h", "STR"] {
+            assert_eq!(stated_ability(&[p.to_string()]), None, "{} read as an ability", p);
+        }
     }
 
     #[test]
     fn a_technique_whose_weapon_is_not_equipped_is_not_available() {
         let t = vec![heavy_smash()];
         let no_mace: Vec<Owned> = party().into_iter().filter(|o| o.item.key != "mace_of_the_deep_song").collect();
-        assert!(resolve("heavy smash", &no_mace, &t, 5, PB, STR, DEX).is_none());
+        assert!(resolve("heavy smash", &no_mace, &t, 5, PB, &abil(STR, DEX)).is_none());
     }
 
     #[test]
     fn a_plain_weapon_uses_standard_thresholds() {
-        let a = resolve("mace of the deep song", &party(), &[heavy_smash()], 5, PB, STR, DEX).unwrap();
+        let a = resolve("mace of the deep song", &party(), &[heavy_smash()], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(a.crit_min, 20);
         assert_eq!(a.fumble_max, 1);
         assert!(a.technique.is_none());
@@ -940,7 +1110,7 @@ mod tests {
             "  mace   of the deep song ",
             "MACE OF THE DEEP SONG",
         ] {
-            assert!(resolve(typed, &party(), &[], 5, PB, STR, DEX).is_some(), "failed on {:?}", typed);
+            assert!(resolve(typed, &party(), &[], 5, PB, &abil(STR, DEX)).is_some(), "failed on {:?}", typed);
         }
     }
 
@@ -955,16 +1125,16 @@ mod tests {
     fn a_skill_request_is_not_an_attack() {
         // The branch has to decline cleanly so resolve_request carries
         // on to the skills.
-        assert!(resolve("insight", &party(), &[], 5, PB, STR, DEX).is_none());
-        assert!(resolve("wis save", &party(), &[], 5, PB, STR, DEX).is_none());
-        assert!(resolve("", &party(), &[], 5, PB, STR, DEX).is_none());
+        assert!(resolve("insight", &party(), &[], 5, PB, &abil(STR, DEX)).is_none());
+        assert!(resolve("wis save", &party(), &[], 5, PB, &abil(STR, DEX)).is_none());
+        assert!(resolve("", &party(), &[], 5, PB, &abil(STR, DEX)).is_none());
     }
 
     #[test]
     fn the_label_names_the_mode_and_the_technique() {
-        let plain = resolve("light hammer (thrown)", &party(), &[], 5, PB, STR, DEX).unwrap();
+        let plain = resolve("light hammer (thrown)", &party(), &[], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(label(&plain), "Light Hammer (Thrown)");
-        let tech = resolve("heavy smash", &party(), &[heavy_smash()], 5, PB, STR, DEX).unwrap();
+        let tech = resolve("heavy smash", &party(), &[heavy_smash()], 5, PB, &abil(STR, DEX)).unwrap();
         assert_eq!(label(&tech), "Heavy Smash · Mace of the Deep Song (Melee)");
     }
     /* ---------- three scopes, 050 ---------- */

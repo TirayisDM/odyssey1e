@@ -371,6 +371,25 @@ pub struct Sheet {
     /// it one equipment change away from being wrong, which is the
     /// mistake the Attacks tab made with to-hit.
     pub armor_class: i64,
+    /// WHETHER THIS IS A CREATURE OFF A STATBLOCK, which is the one
+    /// fact a technique gate needs and the sheet did not carry.
+    ///
+    /// True exactly when `characters.npc_key` names an `npcs` row - so
+    /// an instantiated goblin and 123's template both say yes, and
+    /// every player character says no. See `gate_level`, which is the
+    /// only thing that reads it.
+    pub from_statblock: bool,
+    /// 133. THE LEVEL A TECHNIQUE GATE READS, which is not always this
+    /// character's level - `attack::gate_level` owns the rule and this
+    /// is its answer, carried so that the three things which gate a
+    /// move cannot disagree about it.
+    ///
+    /// SENT TO THE SCREEN for the reason `skill_mods` is: the picker
+    /// compared `min_level` against `level` itself, so a creature
+    /// would have had its own moves greyed out while the engine rolled
+    /// them perfectly well.
+    #[serde(skip_deserializing)]
+    pub gate_level: i64,
 }
 
 impl Sheet {
@@ -661,10 +680,14 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
         request,
         &sheet.loadout,
         &sheet.techniques,
-        sheet.level,
+        // NOT `sheet.level` - a creature is not gated by a ladder it
+        // cannot climb. See attack::gate_level.
+        sheet.gate_level,
         sheet.proficiency_bonus(),
-        sheet.ability_mod("str"),
-        sheet.ability_mod("dex"),
+        // 134. ANY of the six, because a weapon may name its own - the
+        // sheet is the thing that knows all six and the attack path
+        // never did.
+        &|code| sheet.ability_mod(code),
     ) {
         return Resolved {
             label: crate::attack::label(&a),
@@ -1843,7 +1866,14 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     })
     .map(|k| k.as_str().to_string());
 
+    // 133. WHETHER THIS IS A CREATURE, which decides whether a
+    // technique gate means anything - read off the statblock link that
+    // 121 already follows for traits.
+    let from_statblock_row = profile.npc_key.is_some();
+
     let mut sheet = Sheet {
+        from_statblock: from_statblock_row,
+        gate_level: crate::attack::gate_level(profile.level, from_statblock_row),
         location_id: profile.location_id,
         character_id: Some(profile.character_id),
         game_id,
@@ -1960,6 +1990,9 @@ mod tests {
             prof_bonus: None,
             name: "Rodnar Shieldcrest".into(),
             level: 5,
+            // A PLAYER CHARACTER, so the gate is his own level.
+            from_statblock: false,
+            gate_level: 5,
             abilities,
             skills,
             profs,

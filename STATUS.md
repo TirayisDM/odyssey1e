@@ -4086,6 +4086,70 @@ builder)` that owns the run counter and the fragment swap, applied as
 each is next touched. Worth doing before the next screen is built on
 the same shape.
 
+## Seventy-one more of the SRD - BUILT (142)
+
+**203 statblocks in the shared bestiary, up from 132.** Dave asked for
+more creatures, and the holes were specific rather than alphabetical: no
+dragon older than a wyrmling, no lich, no vampire, no golem, no
+lycanthrope, and none of the beasts a table actually asks for - a
+mastiff, a riding horse, an elephant.
+
+| | |
+|---|---|
+| Dragons | young and adult of all five chromatics |
+| The classics | lich, vampire, vampire spawn, ghost, banshee, medusa, manticore, chimera, hydra, treant, unicorn, roc, mimic, oni |
+| Fiends | balor, marilith, vrock, hezrou, glabrezu, nalfeshnee, lemure, bone devil, erinyes, horned devil, pit fiend |
+| Constructs, giants | the four golems, shield guardian, cloud and storm giant |
+| People | commoner, noble, bandit captain, assassin, gladiator, drow, duergar, sahuagin, yuan-ti pureblood |
+| Lycanthropes | all five |
+| Beasts | fifteen, from a mastiff to a giant ape |
+
+**Verified, and the verification found nothing - which is the point of
+doing it.** Every item key checked to exist BEFORE applying (131's
+failure was a kit row naming an item that did not); `prof_bonus` checked
+against 127's rule on all 71; every grant parsed as JSON; and after
+applying, all 71 rows diffed field by field against the file. **All 203
+creatures reach three or more moves and none is unable to act.**
+
+The first digest comparison came back MISMATCHED and that was the
+checker, not the data - Postgres `order by` and Python `sorted()`
+disagree about a hyphen. Worth remembering before trusting a digest: a
+sorted join compares the sort as well as the content.
+
+**Still SRD-from-memory, and the famous ones are better than the obscure
+ones.** A pit fiend and a werewolf are numbers that get read often; a
+nalfeshnee is not. Spot-check anything before a session runs on it. This
+is the last batch worth writing by hand - `creature_io.rs` reads an
+`odyssey1e.creature` envelope and a machine-readable SRD dump through it
+beats more recollection.
+
+### "From nonmagical attacks" is not expressible, and 23 of these want it
+
+The commonest resistance in 5e is "bludgeoning, piercing and slashing
+FROM NONMAGICAL ATTACKS" - every lycanthrope, both vampires, all four
+golems, most fiends. 116's vocabulary has `resist.bludgeoning` and no
+way to say the qualifier.
+
+**Recorded as plain resistance, following 131** - the Intellect Devourer
+has carried it that way for a month, and a bestiary where one rule is
+written two ways is worse than one where it is written imprecisely. But
+the cost is real and the direction is backwards: **a party's magic sword
+is halved against a werewolf**, which is the opposite of what the rule
+exists to do. The qualifier IS the rule and we are dropping it.
+
+The fix is a target that carries it - `resist.slashing.nonmagical` -
+read by `resist.rs` and checked against the weapon's own grants, since
+100 already knows whether a weapon is enchanted. Not built with 142
+because it changes how 131's creatures resolve too, which is its own
+change with its own verification.
+
+### 142 cannot be recovered from the database
+
+Its `schema_migrations.statements` carries the applied SQL with the
+header replaced by one line pointing at the file. The SQL is identical;
+the reasoning is not. Every other migration here can be recovered
+byte-for-byte - this one has git as its only full record.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

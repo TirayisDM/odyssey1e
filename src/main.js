@@ -2446,9 +2446,56 @@ function creatureRow(c) {
     await loadCreatures();
   });
 
-  row.append(edit, name, place, gone);
+  // 125. A BACKUP, OR A CREATURE TO SEND SOMEBODY. The file carries no
+  // ids, so it reads into any game.
+  const out = sEl("button", "ghost tiny", "export");
+  out.title = "download it as a file - no ids in it, so it reads into any game";
+  guard(out, async () => {
+    const r = await tryCall("export_creature", { templateId: c.id });
+    if (!r.ok) return log("export_creature", r.error, true);
+    downloadJson(r.value, c.name);
+    log("export_creature", c.name + " saved");
+  });
+
+  row.append(edit, name, place, out, gone);
   el.append(row);
   return el;
+}
+
+// Hand the browser a file.
+//
+// A BLOB AND AN ANCHOR, because that works in the webview with no
+// plugin and no permission. The alternative was a Tauri file dialog,
+// which is a dependency and a capability entry for something the
+// platform already does.
+function downloadJson(data, name) {
+  const text = JSON.stringify(data, null, 2);
+  const safe = String(name || "creature").replace(/[^a-z0-9._-]+/gi, "_").toLowerCase();
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = safe + ".creature.json";
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Let the click start before the url stops meaning anything.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// What an import skipped, said out loud.
+//
+// NOT A SILENT SUCCESS. The creature arrived, which is the point of
+// skipping rather than refusing - but a DM who is not told loses a
+// spell in a fight instead of at the import.
+function reportImport(res) {
+  const warns = (res && res.warnings) || [];
+  log("import_creature",
+      (res.name || "a creature") + " imported" +
+      (res.kit ? " with " + res.kit + " thing(s)" : "") +
+      (warns.length ? " · " + warns.length + " thing(s) skipped" : ""));
+  for (const w of warns) {
+    log("import_creature", "skipped " + w.what + " “" + w.key + "” - " + w.note, true);
+  }
 }
 
 // The equipment panel.
@@ -7943,6 +7990,25 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Guarded, because a double-click is a second longsword. It merges
   // into the same stack rather than making a second row, which makes it
   // quieter than a duplicate enrolment and no more wanted.
+  // 125. Read a creature file into this game.
+  guarded("#creature-import-file", async () => {
+    if (!state.gameId) return log("import_creature", "select a game first", true);
+    const input = document.querySelector("#creature-file");
+    const f = input && input.files && input.files[0];
+    if (!f) return log("import_creature", "choose a file first", true);
+    let text;
+    try {
+      text = await f.text();
+    } catch (e) {
+      return log("import_creature", "could not read that file: " + e.message, true);
+    }
+    const r = await tryCall("import_creature", { gameId: state.gameId, file: text });
+    if (!r.ok) return log("import_creature", r.error, true);
+    reportImport(r.value);
+    input.value = "";
+    await loadCreatures();
+  });
+
   // 123. Import a reference statblock as a template you own.
   guarded("#creature-import", async () => {
     if (!state.gameId) return log("import_statblock", "select a game first", true);

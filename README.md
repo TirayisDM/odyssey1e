@@ -299,7 +299,10 @@ Working, roughly in the order it was built:
   creature is edited with the same sheet a player uses and placing one
   on the board is a copy, contents of its containers and all. `npcs` is
   the published reference you import from. 5e's fourteen creature types,
-  which five seeded spells are written against
+  which five seeded spells are written against. Export and import as
+  a file for backup and sharing: keys travel, ids do not, and anything
+  the receiving game has never heard of is skipped and listed rather
+  than refusing the file
 * **Dice** — the engine, with parity tests against the original
   `diceroller.js`, plus crit/fumble thresholds and formula doubling
 * **Characters** — abilities, skills, saves, species (bonuses, maxima,

@@ -26,6 +26,9 @@
 use serde_json::{json, Value};
 use tauri::State;
 
+use std::collections::HashSet;
+
+use crate::creature_io::{self, Creature, Envelope, KitItem, Known};
 use crate::supabase;
 use crate::AppState;
 
@@ -196,4 +199,392 @@ pub fn delete_creature(state: State<AppState>, template_id: String) -> Result<Va
     )
     .map_err(|e| denied(e, "delete a creature"))?;
     Ok(json!({ "deleted": template_id }))
+}
+
+/* ========================= EXPORT AND IMPORT =========================
+
+   125. A template belongs to a game - 123 took that decision - so the
+   way one gets to another game, or into a backup, is a file.
+
+   KEYS TRAVEL, IDS DO NOT. Nothing written here carries a uuid; a
+   creature is a name, some numbers and a pile of keys into catalogues.
+   That is what makes it portable and it is also the whole problem,
+   which `creature_io::vet` is the answer to.
+   ===================================================================== */
+
+fn as_str(v: &Value, k: &str) -> Option<String> {
+    v.get(k).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_string)
+}
+fn as_i64(v: &Value, k: &str) -> Option<i64> {
+    v.get(k).and_then(|x| x.as_i64())
+}
+fn as_strs(v: &Value, k: &str) -> Vec<String> {
+    v.get(k)
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// Everything one entity holds, and what is inside it.
+fn read_kit(token: &str, holder: &str, depth: usize) -> Result<Vec<KitItem>, String> {
+    if depth >= 16 || holder.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = supabase::rest_get(
+        token,
+        "objects",
+        &[
+            (
+                "select",
+                "entity_id,item_key,quantity,name,slot,attuned,proficient_override,uses_spent,uses_max,grants",
+            ),
+            ("holder_id", &format!("eq.{}", holder)),
+        ],
+    )?;
+    let empty = Vec::new();
+    let mut out = Vec::new();
+    for r in rows.as_array().unwrap_or(&empty) {
+        let Some(item_key) = as_str(r, "item_key") else {
+            continue;
+        };
+        let contents = match as_str(r, "entity_id") {
+            Some(ent) => read_kit(token, &ent, depth + 1)?,
+            None => Vec::new(),
+        };
+        out.push(KitItem {
+            item_key,
+            quantity: as_i64(r, "quantity").unwrap_or(1),
+            name: as_str(r, "name"),
+            slot: as_str(r, "slot"),
+            attuned: r.get("attuned").and_then(|v| v.as_bool()).unwrap_or(false),
+            proficient_override: r.get("proficient_override").and_then(|v| v.as_bool()),
+            uses_spent: as_i64(r, "uses_spent"),
+            uses_max: as_i64(r, "uses_max"),
+            grants: r.get("grants").filter(|g| !g.is_null()).cloned(),
+            contents,
+        });
+    }
+    Ok(out)
+}
+
+/// A creature as a file.
+///
+/// THE WHOLE THING, so a backup is a backup: scores, skills, class
+/// levels, the choices made for them, prepared spells, and the kit
+/// including the contents of its containers.
+///
+/// NOT WHAT IS SPENT. Slots, uses, damage and death saves are the state
+/// of one afternoon rather than of the creature, and 123 already
+/// refuses to copy them when placing one.
+#[tauri::command]
+pub fn export_creature(state: State<AppState>, template_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            (
+                "select",
+                "id,entity_id,name,level,size,creature_type,hp_max,ac_mode,ac_override,prof_bonus,species_key,class_key,npc_key,description,weapon_profs,armor_profs,tool_profs",
+            ),
+            ("id", &format!("eq.{}", template_id)),
+        ],
+    )?;
+    let c = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| "no such creature".to_string())?;
+
+    let entity = as_str(c, "entity_id").unwrap_or_default();
+    let sat = |t: &str, sel: &str| -> Result<Value, String> {
+        supabase::rest_get(
+            &token,
+            t,
+            &[("select", sel), ("character_id", &format!("eq.{}", template_id))],
+        )
+    };
+
+    let creature = Creature {
+        name: as_str(c, "name").unwrap_or_else(|| "a creature".into()),
+        level: as_i64(c, "level").unwrap_or(1),
+        size: as_str(c, "size"),
+        creature_type: as_str(c, "creature_type"),
+        hp_max: as_i64(c, "hp_max"),
+        ac_mode: as_str(c, "ac_mode"),
+        ac_override: as_i64(c, "ac_override"),
+        prof_bonus: as_i64(c, "prof_bonus"),
+        species_key: as_str(c, "species_key"),
+        class_key: as_str(c, "class_key"),
+        npc_key: as_str(c, "npc_key"),
+        description: as_str(c, "description"),
+        weapon_profs: as_strs(c, "weapon_profs"),
+        armor_profs: as_strs(c, "armor_profs"),
+        tool_profs: as_strs(c, "tool_profs"),
+        abilities: serde_json::from_value(sat("character_abilities", "ability,score,save_prof")?)
+            .unwrap_or_default(),
+        skills: serde_json::from_value(sat("character_skills", "skill_key,prof")?)
+            .unwrap_or_default(),
+        classes: serde_json::from_value(sat("character_classes", "class_key,level")?)
+            .unwrap_or_default(),
+        choices: serde_json::from_value(sat(
+            "character_choices",
+            "class_key,feature_key,pick,choice",
+        )?)
+        .unwrap_or_default(),
+        prayers: serde_json::from_value(sat("character_prayers", "spell_key,prepared")?)
+            .unwrap_or_default(),
+        kit: read_kit(&token, &entity, 0)?,
+    };
+
+    serde_json::to_value(Envelope::wrap(creature, Some(stamp())))
+        .map_err(|e| format!("could not write that creature out: {}", e))
+}
+
+/// Seconds since the epoch, as text.
+///
+/// A COURTESY, NOT A KEY. Nothing reads it back; it is there so a person
+/// looking at three backups can tell which is which, and it avoids
+/// taking a date dependency for one string.
+fn stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .to_string()
+}
+
+/// What this game has, for `vet` to check a file against.
+///
+/// GLOBAL AND THIS GAME'S, which is the precedence every catalogue uses.
+/// A creature referring to a campaign item of somebody else's game is
+/// exactly the case the warnings exist for.
+fn known_in(token: &str, game_id: &str) -> Result<Known, String> {
+    let both = format!("(game_id.is.null,game_id.eq.{})", game_id);
+    let keys = |t: &str| -> Result<HashSet<String>, String> {
+        let rows = supabase::rest_get(token, t, &[("select", "key"), ("or", &both)])?;
+        let empty = Vec::new();
+        Ok(rows
+            .as_array()
+            .unwrap_or(&empty)
+            .iter()
+            .filter_map(|r| r.get("key").and_then(|v| v.as_str()).map(str::to_string))
+            .collect())
+    };
+    Ok(Known {
+        items: keys("items")?,
+        spells: keys("spells")?,
+        skills: keys("skills")?,
+        classes: keys("classes")?,
+        species: keys("species")?,
+        npcs: keys("npcs")?,
+    })
+}
+
+/// Write a kit back, a level at a time.
+///
+/// THE SAME REASON `copy_kit` DOES IT THIS WAY (124): only a container
+/// has an `entity_id` and the trigger that mints one runs on insert, so
+/// a child's holder cannot be known before the parent row exists.
+fn write_kit(
+    token: &str,
+    game_id: &str,
+    holder: &str,
+    kit: &[KitItem],
+    depth: usize,
+) -> Result<(), String> {
+    if depth >= 16 {
+        return Ok(());
+    }
+    for it in kit {
+        let mut row = json!({
+            "game_id": game_id,
+            "holder_id": holder,
+            "item_key": it.item_key,
+            "quantity": it.quantity,
+            "attuned": it.attuned,
+        });
+        if let Some(v) = &it.name {
+            row["name"] = json!(v);
+        }
+        if let Some(v) = &it.slot {
+            row["slot"] = json!(v);
+        }
+        if let Some(v) = it.proficient_override {
+            row["proficient_override"] = json!(v);
+        }
+        if let Some(v) = it.uses_spent {
+            row["uses_spent"] = json!(v);
+        }
+        if let Some(v) = it.uses_max {
+            row["uses_max"] = json!(v);
+        }
+        if let Some(v) = &it.grants {
+            row["grants"] = v.clone();
+        }
+
+        let made = supabase::rest_insert(token, "objects", &row)?;
+        let ent = made
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|r| r.get("entity_id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        if !it.contents.is_empty() {
+            if let Some(e) = ent {
+                write_kit(token, game_id, &e, &it.contents, depth + 1)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read a creature file into this game, as a template.
+///
+/// SKIP WITH A WARNING, NOT REFUSE - which is `creature_io::vet`'s whole
+/// job. A creature carrying one unknown trinket is still worth having,
+/// and a file that will not open because of a torch is a worse answer
+/// than a goblin with no torch. Every skip comes back by name.
+///
+/// IT ARRIVES AS A TEMPLATE, never as a creature in the world. Placing
+/// it stays the separate, deliberate act it already was.
+#[tauri::command]
+pub fn import_creature(
+    state: State<AppState>,
+    game_id: String,
+    file: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let env: Envelope = serde_json::from_str(&file)
+        .map_err(|e| format!("that does not read as a creature file: {}", e))?;
+    creature_io::admits(&env.format, env.version)?;
+
+    let known = known_in(&token, &game_id)?;
+    let (c, warnings) = creature_io::vet(env.creature, &known);
+
+    let mut row = json!({
+        "game_id": game_id,
+        "name": c.name,
+        "is_npc": true,
+        "is_template": true,
+        "level": c.level,
+    });
+    if let Some(v) = &c.size {
+        row["size"] = json!(v);
+    }
+    if let Some(v) = &c.creature_type {
+        row["creature_type"] = json!(v);
+    }
+    if let Some(v) = c.hp_max {
+        row["hp_max"] = json!(v);
+    }
+    if let Some(v) = &c.ac_mode {
+        row["ac_mode"] = json!(v);
+    }
+    if let Some(v) = c.ac_override {
+        row["ac_override"] = json!(v);
+    }
+    if let Some(v) = c.prof_bonus {
+        row["prof_bonus"] = json!(v);
+    }
+    if let Some(v) = &c.species_key {
+        row["species_key"] = json!(v);
+    }
+    if let Some(v) = &c.class_key {
+        row["class_key"] = json!(v);
+    }
+    if let Some(v) = &c.npc_key {
+        row["npc_key"] = json!(v);
+    }
+    if let Some(v) = &c.description {
+        row["description"] = json!(v);
+    }
+    if !c.weapon_profs.is_empty() {
+        row["weapon_profs"] = json!(c.weapon_profs);
+    }
+    if !c.armor_profs.is_empty() {
+        row["armor_profs"] = json!(c.armor_profs);
+    }
+    if !c.tool_profs.is_empty() {
+        row["tool_profs"] = json!(c.tool_profs);
+    }
+
+    let made = supabase::rest_insert(&token, "characters", &row)
+        .map_err(|e| denied(e, "import a creature"))?;
+    let first = made
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| "the creature did not come back".to_string())?;
+    let cid = first
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "the creature came back without an id".to_string())?
+        .to_string();
+    let entity = first
+        .get("entity_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // ABILITIES ARE UPDATED, NOT INSERTED: a trigger seeds six rows on
+    // every new character, the same reason instantiate_character does.
+    for a in &c.abilities {
+        supabase::rest_update(
+            &token,
+            "character_abilities",
+            &[
+                ("character_id", &format!("eq.{}", cid)),
+                ("ability", &format!("eq.{}", a.ability)),
+            ],
+            &json!({ "score": a.score, "save_prof": a.save_prof }),
+        )?;
+    }
+    for s in &c.skills {
+        supabase::rest_upsert(
+            &token,
+            "character_skills",
+            &json!({ "character_id": cid, "skill_key": s.skill_key, "prof": s.prof }),
+            "character_id,skill_key",
+        )?;
+    }
+    for k in &c.classes {
+        supabase::rest_upsert(
+            &token,
+            "character_classes",
+            &json!({ "character_id": cid, "class_key": k.class_key, "level": k.level }),
+            "character_id,class_key",
+        )?;
+    }
+    for ch in &c.choices {
+        supabase::rest_insert(
+            &token,
+            "character_choices",
+            &json!({
+                "character_id": cid,
+                "class_key": ch.class_key,
+                "feature_key": ch.feature_key,
+                "pick": ch.pick,
+                "choice": ch.choice
+            }),
+        )?;
+    }
+    for p in &c.prayers {
+        supabase::rest_upsert(
+            &token,
+            "character_prayers",
+            &json!({ "character_id": cid, "spell_key": p.spell_key, "prepared": p.prepared }),
+            "character_id,spell_key",
+        )?;
+    }
+    write_kit(&token, &game_id, &entity, &c.kit, 0)?;
+
+    Ok(json!({
+        "id": cid,
+        "name": c.name,
+        "warnings": warnings,
+        "kit": creature_io::count_kit(&c.kit),
+    }))
 }

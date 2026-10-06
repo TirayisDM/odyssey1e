@@ -3567,6 +3567,53 @@ one decision outstanding is what an import does when a creature
 references an `item_key` or `spell_key` the receiving game does not have
 - skip with a warning, or refuse the file.
 
+## A creature as a file - BUILT (125, creature_io.rs)
+
+Stage 3, and the reason 123 could decide templates belong to a game: a
+file is how one travels, to a backup or to somebody else's table.
+
+KEYS TRAVEL, IDS DO NOT. Nothing in the file is a uuid - a creature is a
+name, some numbers and a pile of keys into catalogues. That is what
+makes it portable and it is also the whole problem, because the game
+receiving it may not have them. A test asserts no `id`, `game_id`,
+`owner_uid` or `entity_id` ever reaches the text.
+
+SKIP WITH A WARNING, NOT REFUSE, which was Dave's call and is the right
+one: a creature carrying one unknown trinket is still worth having, and
+a file that will not open because of a torch is a worse answer than a
+goblin with no torch. Every skip comes back by name and says what it
+COSTS - losing a torch is a torch, losing a SPECIES costs ability
+bonuses, a size and maybe a resistance, and the text says so.
+
+A CONTAINER THAT GOES TAKES ITS CONTENTS. Keeping the torch when the
+backpack was skipped would put a loose torch in somebody's hands, which
+is not what the file said; the warning says how many went with it.
+
+THE ENVELOPE IS THE ONE THING THAT IS REFUSED. A file that is not this
+format, or is a version this build does not know, has nothing worth
+salvaging and guessing would import nonsense silently. An OLDER file
+stays readable - every field added since version 1 is optional, which
+is what the `serde(default)`s are for.
+
+WHAT TRAVELS: scores, skill proficiencies, class levels, the choices
+made for them, prepared spells, and the kit including container
+contents. WHAT DOES NOT: spent slots, spent uses, damage, death saves -
+the state of one afternoon rather than of the creature, which is the
+same line `instantiate_character` draws.
+
+A BLOB AND AN ANCHOR for the download, rather than a Tauri file dialog -
+that would have been a dependency and a capability entry for something
+the webview already does. Import takes a file through an ordinary file
+input.
+
+VERIFIED: 17 tests on the rules, including a container taking its
+contents, a choice not outliving its class, and a creature still
+arriving when every single key is unknown. Against the live database, a
+template with 6 abilities, 1 skill, 1 prayer and a nested kit reads out
+whole. In the rig the export downloads as `cave_goblin.creature.json`
+with no ids and the nesting intact, the import is double-click guarded,
+and both warnings appear in the log by name with what they cost.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

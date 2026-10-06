@@ -28,6 +28,7 @@ mod clock;
 mod containers;
 mod commands;
 mod creature;
+mod creature_io;
 mod currency;
 mod death;
 mod dice;
@@ -1473,6 +1474,8 @@ pub fn run() {
             commands::creatures::import_statblock,
             commands::creatures::place_creature,
             commands::creatures::delete_creature,
+            commands::creatures::export_creature,
+            commands::creatures::import_creature,
             commands::prayers::castable,
             commands::prayers::cast_prayer,
             commands::prayers::spend_spell_slot,

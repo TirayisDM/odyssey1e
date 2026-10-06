@@ -833,6 +833,22 @@
             takes a copy you own and can edit. The shared goblin stays as it is.
           </p>
 
+          <!-- 125. A TEMPLATE BELONGS TO A GAME, so a file is how one
+               travels - to a backup, or to somebody else's game. An
+               import that cannot resolve a key SKIPS IT AND SAYS SO,
+               because a file that will not open because of a torch is a
+               worse answer than a goblin with no torch. -->
+          <div class="row">
+            <input type="file" id="creature-file" accept=".json,application/json" />
+            <button id="creature-import-file">Import from file</button>
+          </div>
+          <p class="muted hint">
+            A creature file carries names, numbers, scores, skills, prepared
+            spells and the whole kit &mdash; but no ids, so it reads into any
+            game. Anything this game has never heard of is <strong>skipped and
+            listed</strong> rather than refusing the file.
+          </p>
+
           <div id="creature-list" class="list"></div>
           <p class="muted" id="creature-empty" hidden>
             No creatures yet. Import one from the reference above, and it will

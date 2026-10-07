@@ -4707,6 +4707,64 @@ mean the ordinary case. Four tests, because that part is a rule.
 Verified on the live database with a rolled-back probe: **14 prayers
 copied, states `cantrip,prepared` both intact**, nothing created.
 
+### Correction, 2026-10-07: 150 did not write that copy
+
+**Checked after the fact, because the lesson depends on it.** The
+account above says 150 "taught `instantiate_character` to carry a
+creature's prayers across - right, and missing until then". It did not.
+The copy has been there since **123**, carried forward verbatim by 124:
+
+    123, line 165:  insert into public.character_prayers
+                      (character_id, spell_key, prepared)
+    124, line 160:  the same three lines again
+
+`150_a_creature_casts_the_way_a_character_does.sql` does not contain
+the string `instantiate_character` at all - it rewrote
+`instantiate_npc` and nothing else. What it did was **drop the column
+those older functions had been reading for a month**.
+
+**That changes what to watch for**, which is the only reason to correct
+a record rather than leave it:
+
+| the account above | what happened |
+|---|---|
+| a new write path had a wrong column name | a schema change was checked against the Rust that reads it and not the SQL that does |
+| the guard is "test the write paths" | the guard is "ask who else reads this column" |
+
+Both are true and only the second one would have caught it. 150's
+author - me - did grep for `prepared`, in `src-tauri/src`, and changed
+every Rust reader. The functions that broke are stored in Postgres and
+live in `supabase/migrations/`, which that grep never touched.
+
+**The migration itself is left exactly as applied**, per 115: an applied
+migration is a record and not a draft. This is the correction beside
+it.
+
+### The guard, which is one command
+
+Before dropping or renaming a column, ask who else reads it - and the
+SQL functions are readers:
+
+    grep -rn "<column>" src-tauri/src supabase/migrations
+
+`supabase/migrations` is the half that gets forgotten, because a
+function body in an old migration file does not look like running code
+and is exactly that. **plpgsql will not warn you**: it resolves a
+statement's columns on first execution, so the migration applies
+cleanly, the tests pass, the commit looks fine, and the failure waits
+for whoever next presses the button.
+
+**Run against the commit before 150, that one line returns every
+reader that broke:**
+
+    123 and 124   the two `instantiate_character` bodies
+    creatures.rs  `export_creature`, selecting spell_key,prepared
+    creatures.rs  `import_creature`, writing it back
+    106           the column comment, harmless and a signpost
+
+Four live readers and a signpost, in one command, before any of it
+reached a user. 152 had to find and fix all four the hard way.
+
 ## A spell attack is an attack - BUILT (154, spellcast.rs, character.rs)
 
 Dave cast Spiritual Weapon to end a round and asked whether it had done
@@ -5003,6 +5061,14 @@ The habit that caused the gap was applying first and writing the file
 afterwards, which in practice means never. Write the file and apply it
 in the same breath. `tools/recover_migrations.py` makes the recovery one
 command if it happens again.
+
+**And the second migration habit, added 2026-10-07 after 150 broke every
+enrol: a column has readers in two places.** Before dropping or renaming
+one, `grep -rn "<column>" src-tauri/src supabase/migrations` - both
+halves. A function body stored in Postgres is running code that does not
+look like running code, and plpgsql resolves its columns on first
+execution rather than at creation, so nothing fails until a user presses
+the button. See the correction under 152.
 
 006 is applied and every seeded table was checksum-verified against the
 spreadsheet. Read the 006 header: spells and techniques were ported

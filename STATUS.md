@@ -4664,6 +4664,49 @@ levels on one shared table and this takes the highest casting class,
 because deciding which ability the shared slots cast on is not one
 answer.
 
+## 150 broke every enrol, and the column was never called that - FIXED (152)
+
+Found by Dave in about a minute of using the thing:
+
+    column "prepared" of relation "character_prayers" does not exist (400)
+
+**It was not a prayer bug. It was an ENROL bug.** 150 taught
+`instantiate_character` to carry a creature's prayers across when it is
+placed - right, and missing until then - but wrote them through a
+`prepared` column. `character_prayers` has never had one. It has
+`state`: text, NOT NULL, default `'prepared'`, and **three** values,
+not two - `cantrip`, `prepared`, `book`. A cantrip is KNOWN rather than
+prepared, which is why `prayers::may_reach` accepts `book` and
+`prepared` and refuses to prepare a cantrip at all.
+
+`instantiate_character` IS 123's "placing one is a copy", so this took
+out every enrol, including creatures with no prayers whatsoever -
+plpgsql parses the statement whether or not it has rows to copy.
+
+**It passed migration because plpgsql resolves columns on first
+execution, not at creation.** The migration applied cleanly, the commit
+looked fine, and the failure waited for a user. Nothing between the
+wrong word and the table: `src/*.rs` is tested, `src/commands/*` and the
+SQL functions are not. The counter-pressure that exists is to run the
+thing once against the live database.
+
+**The same mistake was in the Rust, in both directions** -
+`export_creature` selected `spell_key,prepared` and `import_creature`
+wrote `prepared` - so a caster could be neither written to a file nor
+read back from one. Nobody had hit it because nobody had exported a
+caster yet; 151 had just created the first five.
+
+**`creature_io::Prayer` now carries the word, not a flag.** A boolean
+holds two of three states and silently turns the third into something
+the rules have no word for - and there are live cantrip rows, so that
+was a real loss and not a theoretical one. `STATES` is the list, `vet`
+corrects an unrecognised word to `prepared` and warns rather than
+dropping a spell the game does have, and a file may omit the field and
+mean the ordinary case. Four tests, because that part is a rule.
+
+Verified on the live database with a rolled-back probe: **14 prayers
+copied, states `cantrip,prepared` both intact**, nothing created.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

@@ -45,6 +45,11 @@ pub const FORMAT: &str = "odyssey1e.creature";
 /// wrong. An older FILE stays readable - see `admits`.
 pub const VERSION: i64 = 1;
 
+/// 152. The three states `character_prayers.state` allows. The column is
+/// NOT NULL and defaults to 'prepared'; 'cantrip' is known rather than
+/// prepared, and 'book' is held but not up today.
+pub const STATES: [&str; 3] = ["cantrip", "prepared", "book"];
+
 /// One thing that did not survive the journey.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Warning {
@@ -124,11 +129,22 @@ pub struct Choice {
     pub choice: String,
 }
 
+/// 152. A PRAYER CARRIES ITS STATE, which is one of three words and not
+/// a yes or no. `character_prayers.state` is 'cantrip', 'prepared' or
+/// 'book': a cantrip is KNOWN rather than prepared, and a spell in the
+/// book is neither. A boolean can hold two of those and silently turns
+/// the third into something the rules have no word for.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Prayer {
     pub spell_key: String,
-    #[serde(default)]
-    pub prepared: bool,
+    /// Defaults to the column's own default, so a hand-written file may
+    /// leave it out and mean the ordinary case.
+    #[serde(default = "prepared")]
+    pub state: String,
+}
+
+fn prepared() -> String {
+    "prepared".into()
 }
 
 /// A creature, with nothing local in it.
@@ -303,10 +319,20 @@ pub fn vet(mut c: Creature, known: &Known) -> (Creature, Vec<Warning>) {
         ok
     });
 
-    c.prayers.retain(|x| {
+    c.prayers.retain_mut(|x| {
         let ok = known.spells.contains(&x.spell_key);
         if !ok {
             warn.push(Warning::new("spell", &x.spell_key, "not in this game - not prepared"));
+        } else if !STATES.contains(&x.state.as_str()) {
+            // 152. A STATE THE COLUMN WOULD REFUSE. Keeping the spell and
+            // correcting the word beats dropping a spell the game does
+            // have over one bad field, and the warning says what happened.
+            warn.push(Warning::new(
+                "spell",
+                &x.spell_key,
+                "not a prayer state - taken as prepared",
+            ));
+            x.state = prepared();
         }
         ok
     });
@@ -429,7 +455,7 @@ mod tests {
             name: "Cave Goblin".into(),
             species_key: Some("goblin".into()),
             skills: vec![SkillProf { skill_key: "ste".into(), prof: 1.0 }],
-            prayers: vec![Prayer { spell_key: "sp_bless".into(), prepared: true }],
+            prayers: vec![Prayer { spell_key: "sp_bless".into(), state: "prepared".into() }],
             kit: vec![item("torch", vec![])],
             ..Default::default()
         };
@@ -512,8 +538,8 @@ mod tests {
         let c = Creature {
             name: "x".into(),
             prayers: vec![
-                Prayer { spell_key: "sp_bless".into(), prepared: true },
-                Prayer { spell_key: "sp_invented".into(), prepared: true },
+                Prayer { spell_key: "sp_bless".into(), state: "cantrip".into() },
+                Prayer { spell_key: "sp_invented".into(), state: "prepared".into() },
             ],
             ..Default::default()
         };
@@ -521,6 +547,47 @@ mod tests {
         assert_eq!(out.prayers.len(), 1);
         assert_eq!(warn.len(), 1);
         assert_eq!(warn[0].key, "sp_invented");
+    }
+
+    /// 152. A cantrip is not a prepared spell and must not arrive as one.
+    /// This is the round trip a boolean could not make.
+    #[test]
+    fn a_cantrip_survives_the_journey_as_a_cantrip() {
+        let c = Creature {
+            name: "x".into(),
+            prayers: vec![
+                Prayer { spell_key: "sp_light".into(), state: "cantrip".into() },
+                Prayer { spell_key: "sp_bless".into(), state: "book".into() },
+            ],
+            ..Default::default()
+        };
+        let (out, warn) = vet(c, &known_of(&[], &["sp_light", "sp_bless"], &[], &[], &[]));
+        assert!(warn.is_empty(), "{:?}", warn);
+        assert_eq!(out.prayers[0].state, "cantrip");
+        assert_eq!(out.prayers[1].state, "book");
+    }
+
+    /// A word the column would refuse costs the state, not the spell.
+    #[test]
+    fn a_state_the_column_would_refuse_is_taken_as_prepared() {
+        let c = Creature {
+            name: "x".into(),
+            prayers: vec![Prayer { spell_key: "sp_bless".into(), state: "memorised".into() }],
+            ..Default::default()
+        };
+        let (out, warn) = vet(c, &known_of(&[], &["sp_bless"], &[], &[], &[]));
+        assert_eq!(out.prayers.len(), 1, "the spell is kept");
+        assert_eq!(out.prayers[0].state, "prepared");
+        assert_eq!(warn.len(), 1);
+        assert!(warn[0].note.contains("prepared"), "{}", warn[0].note);
+    }
+
+    /// A file that leaves the field out means the ordinary case, which is
+    /// the column's own default.
+    #[test]
+    fn a_prayer_with_no_state_is_prepared() {
+        let p: Prayer = serde_json::from_str(r#"{"spell_key":"sp_bless"}"#).unwrap();
+        assert_eq!(p.state, "prepared");
     }
 
     #[test]

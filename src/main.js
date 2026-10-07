@@ -1243,10 +1243,64 @@ async function doCast(sp, targetId, choice) {
     updatePreview();
   }
   // The slots moved, the effect chips moved, and so did the log.
+  // 158. AND THE SAVE IT IS WAITING ON. A save spell names a DC and
+  // stops, because the d20 is the TARGET's. This offers the roll rather
+  // than taking it: the DM presses it, which is the whole difference
+  // between a DM rolling a monster's save at the table and an engine
+  // rolling somebody's character for them.
+  showPendingSave(
+    r.value.save_dc && at && at.character_id
+      ? { spellKey: sp.key, name: r.value.name, dc: r.value.save_dc,
+          ability: r.value.save_ability, target: at }
+      : null,
+  );
+
   await loadCastable();
   await loadEffects();
   await loadRolls();
   if (state.prayers) await loadPrayers(state.sheet);
+}
+
+// The one waiting save, or nothing. Cleared by resolving it, by casting
+// anything that forces no save, and by changing character.
+function showPendingSave(pending) {
+  const box = document.querySelector("#pending-save");
+  if (!box) return;
+  box.textContent = "";
+  if (!pending) return;
+
+  const row = document.createElement("div");
+  row.className = "row";
+
+  const what = document.createElement("span");
+  what.className = "muted";
+  what.textContent =
+    pending.target.label + " — " + String(pending.ability || "").toUpperCase() +
+    " save vs DC " + pending.dc;
+  row.append(what);
+
+  const go = document.createElement("button");
+  go.textContent = "Roll the save";
+  guard(go, async () => {
+    const r = await tryCall("resolve_spell_save", {
+      casterCharacterId: state.characterId,
+      spellKey: pending.spellKey,
+      targetCharacterId: pending.target.character_id,
+      targetActorId: pending.target.row === "actor" ? pending.target.id : null,
+      encounterId: state.encounterId || null,
+      mode: val("#mode") || "normal",
+    });
+    if (!r.ok) return log("resolve_spell_save", r.error, true);
+    log("resolve_spell_save", r.value.said);
+    // Spent, so it goes. A second press would roll a second save
+    // against a spell that has already landed.
+    showPendingSave(null);
+    await loadRolls();
+    await loadEffects();
+  });
+  row.append(go);
+
+  box.append(row);
 }
 
 /* ===================== CLERIC PRAYERS (106) ===================== */

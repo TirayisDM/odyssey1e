@@ -370,6 +370,37 @@ pub fn attack_for(
     })
 }
 
+/// How much of a save spell's dice actually land.
+///
+/// 158. THREE ANSWERS AND NOT TWO. `spells.on_save` says what a creature
+/// that MAKES the save takes - half the dice or none of them - and NULL
+/// says the dice are not save damage at all. Bane's 1d4 is the penalty
+/// it hangs on somebody, Geas's 5d10 is a daily toll for disobeying, and
+/// Bestow Curse's 1d8 belongs to one of four options chosen later. A
+/// rule that damaged on every failed save would hit people with all
+/// three.
+///
+/// `None` MEANS NOTHING HAPPENS TO HIT POINTS, which is different from
+/// `Some(0)` - the caller writes no event at all rather than a row
+/// saying a spell did nothing. 013's log records what changed.
+///
+/// HALVING ROUNDS DOWN, which is 5e everywhere it halves.
+pub fn save_damage(rolled: i64, saved: bool, on_save: Option<&str>) -> Option<i64> {
+    let rule = on_save.map(str::trim).filter(|s| !s.is_empty())?;
+    if !saved {
+        // A failure takes the lot, whichever rule it is.
+        return Some(rolled.max(0));
+    }
+    match rule {
+        "half" => Some((rolled / 2).max(0)),
+        "none" => Some(0),
+        // A word nobody has taught this function. Nothing rather than a
+        // guess, for the reason 158 gives: invented damage is invisible
+        // and absent damage is not.
+        _ => None,
+    }
+}
+
 /// What the card says: "Sacred Flame — DEX save DC 14, 1d8".
 pub fn label(c: &Cast) -> String {
     let mut bits: Vec<String> = Vec::new();
@@ -394,6 +425,44 @@ pub fn label(c: &Cast) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ------------- 158. what a successful save is worth ------------- */
+
+    #[test]
+    fn a_failed_save_takes_the_lot_whichever_rule_it_is() {
+        assert_eq!(save_damage(8, false, Some("half")), Some(8));
+        assert_eq!(save_damage(8, false, Some("none")), Some(8));
+    }
+
+    #[test]
+    fn half_rounds_down() {
+        assert_eq!(save_damage(9, true, Some("half")), Some(4));
+        assert_eq!(save_damage(8, true, Some("half")), Some(4));
+        assert_eq!(save_damage(1, true, Some("half")), Some(0));
+    }
+
+    /// Sacred Flame is the cantrip that gives no mercy for a success.
+    #[test]
+    fn none_means_none() {
+        assert_eq!(save_damage(8, true, Some("none")), Some(0));
+    }
+
+    /// The trap 158 exists for. Bane's 1d4 is a penalty, Geas's 5d10 is
+    /// a daily toll, Bestow Curse's 1d8 is conditional and later - none
+    /// of them is damage for failing the save.
+    #[test]
+    fn dice_that_are_not_save_damage_do_nothing() {
+        assert_eq!(save_damage(4, false, None), None);
+        assert_eq!(save_damage(50, false, None), None);
+        assert_eq!(save_damage(4, false, Some("")), None);
+        assert_eq!(save_damage(4, false, Some("   ")), None);
+    }
+
+    /// A word nobody taught it is nothing, not a guess.
+    #[test]
+    fn an_unknown_rule_deals_nothing() {
+        assert_eq!(save_damage(8, true, Some("quarter")), None);
+    }
 
     fn sacred_flame() -> Cast {
         cast("sp_sacredflame", "Sacred Flame", 0, "Save", Some("1 action"),

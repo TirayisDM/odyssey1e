@@ -864,6 +864,214 @@ pub(crate) fn clear_slots(token: &str, character_id: &str) -> Result<(), String>
 }
 
 /// (spell key, prepared) for this character.
+/// The target's save against a spell already cast, and what it costs
+/// them.
+///
+/// 158. THE SECOND HALF OF A SAVE SPELL. Casting one spends the slot,
+/// logs the DC and stops, because a save is the TARGET'S roll and the
+/// engine does not roll for somebody else's character on its own
+/// initiative. So Sacred Flame reported "DEX save DC 14, 1d8" and
+/// nobody ever rolled the d8 - eleven spells with dice and no path to a
+/// hit point between them.
+///
+/// THE DM ASKS FOR IT, which is what makes this allowable. The roll
+/// happens because somebody pressed the button next to this target's
+/// name, not because a spell decided to roll it for them - the same
+/// distinction that lets a DM roll a monster's save at the table.
+///
+/// THE SAME CHAIN AN ATTACK ALREADY HAS: one d20, judged against a
+/// number, and the dice that follow from the verdict, landing as an
+/// action, its rolls and one hit point event through `write_action` -
+/// together or not at all.
+///
+/// IT COSTS THE SAVER NOTHING. A save is not an action and
+/// `stamp_action_cost` would have stamped one, quietly eating the
+/// target's turn; 156 added `cost` to `write_action` and this is the
+/// first caller that needs it.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_spell_save(
+    state: State<AppState>,
+    caster_character_id: String,
+    spell_key: String,
+    target_character_id: String,
+    target_actor_id: Option<String>,
+    encounter_id: Option<String>,
+    mode: Option<String>,
+) -> Result<Value, String> {
+    let session = state.current()?.ok_or_else(|| "not signed in".to_string())?;
+    let token = session.access_token.clone();
+    let mode = mode.unwrap_or_else(|| "normal".to_string());
+
+    // --- the DC, which belongs to the CASTER and not to this roll ---
+    let caster_sheet = crate::character::load_sheet(&token, &caster_character_id)?;
+    let Some(caster) = caster_sheet.caster.clone() else {
+        return Err(format!("{} does not cast spells", caster_sheet.name));
+    };
+    let spell = one_spell_full(&token, &caster_sheet.game_id, &spell_key)?;
+    let Some(ability) = spell
+        .get("save_ability")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Err(format!(
+            "{} forces no saving throw",
+            spell.get("name").and_then(|v| v.as_str()).unwrap_or(&spell_key)
+        ));
+    };
+    let name = spell
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&spell_key)
+        .to_string();
+    let dc = prayers::save_dc(
+        caster_sheet.proficiency_bonus(),
+        caster_sheet.ability_mod(&caster.ability),
+    );
+
+    // --- the roll, which belongs to the TARGET ---
+    let target = crate::character::load_sheet(&token, &target_character_id)?;
+    // " vs spell" IS NOT DECORATION. 098 gave the Ny'ook a bonus that
+    // applies only against a spell and `resolve_request` has always read
+    // it off those two words. This save IS against a spell, so it is the
+    // one caller that can say so without being asked.
+    let resolved =
+        crate::character::resolve_request(&target, &format!("{} save vs spell", ability), &mode);
+    // AND WHAT IS RUNNING ON THEM. A Bless on the saver is a d4 on this
+    // d20; appended to the formula rather than folded into the modifier
+    // so the roll shows what it rolled.
+    let formula = match crate::effect_grants(&token, &target, &resolved) {
+        Ok(terms) if !terms.is_empty() => format!("{}{}", resolved.formula, terms.join("")),
+        _ => resolved.formula.clone(),
+    };
+    let rolled = crate::dice::roll_formula(&formula)?;
+    let saved = rolled.total >= dc;
+
+    // --- and what it costs them ---
+    let mut rolls: Vec<Value> = vec![json!({
+        "game_id": target.game_id,
+        "character_id": target.character_id,
+        "character_name": target.character_id.as_ref().map_or_else(
+            || Some(target.name.clone()), |_| None),
+        "owner_uid": session.user_id,
+        "request": format!("{} save vs {}", ability, name),
+        "label": format!("{} Save vs {}", ability.to_uppercase(), name),
+        "mode": mode,
+        "formula": formula,
+        "detail": rolled.detail,
+        "total": rolled.total,
+        "natural_roll": rolled.natural,
+        "status": "resolved",
+        "role": "check",
+        // JUDGED AGAINST THE DC, so the row says what it was trying to
+        // beat - 009's whole point, and what lets the log read
+        // "16 vs DC 14, made it" instead of a bare number.
+        "target_value": dc,
+        "target_kind": "dc",
+        "target_label": name,
+        "success": saved,
+    })];
+
+    let mut hp = Value::Null;
+    let mut took: Option<i64> = None;
+    if let Some(dice) = spell
+        .get("dice")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        let dmg = crate::dice::roll_formula(dice)?;
+        // 158 OWNS WHAT LANDS. None means these dice were never save
+        // damage - Bane's penalty, Geas's daily toll - and nothing is
+        // rolled at anybody.
+        if let Some(amount) = crate::spellcast::save_damage(
+            dmg.total,
+            saved,
+            spell.get("on_save").and_then(|v| v.as_str()),
+        ) {
+            took = Some(amount);
+            rolls.push(json!({
+                "game_id": target.game_id,
+                "character_id": target.character_id,
+                "owner_uid": session.user_id,
+                "request": name,
+                "label": if saved {
+                    format!("{} damage (saved, half)", name)
+                } else {
+                    format!("{} damage", name)
+                },
+                "mode": "normal",
+                "formula": dice,
+                "detail": dmg.detail,
+                "total": dmg.total,
+                "natural_roll": dmg.natural,
+                "status": "resolved",
+                "role": "damage",
+            }));
+            if amount > 0 {
+                hp = json!({
+                    "game_id": target.game_id,
+                    "character_id": target_character_id,
+                    // SIGNED, and negative: 013's log again.
+                    "delta": -amount,
+                    "note": format!("{} ({})", name, if saved { "saved" } else { "failed" }),
+                });
+            }
+        }
+    }
+
+    if let Some(enc) = encounter_id.as_deref().filter(|s| !s.is_empty()) {
+        let mut act = json!({
+            "game_id": target.game_id,
+            // THE SAVER'S ACTION, because it is their roll and their
+            // hit points - 155's trigger names the log line off this.
+            "character_id": target_character_id,
+            "encounter_id": enc,
+            "request": format!("{} save vs {}", ability, name),
+            "label": format!("{} Save vs {} — DC {}", ability.to_uppercase(), name, dc),
+            "key": resolved.key,
+            // NOTHING. A save is not a thing you spend a turn on.
+            "cost": "free",
+        });
+        if let Some(t) = target_actor_id.as_deref().filter(|s| !s.is_empty()) {
+            act["actor_id"] = json!(t);
+        }
+        supabase::rpc(
+            &token,
+            "write_action",
+            &json!({
+                "p_action": act,
+                "p_rolls": rolls,
+                "p_hp": hp,
+                "p_vitals": Value::Null,
+            }),
+        )?;
+    }
+
+    Ok(json!({
+        "spell": name,
+        "ability": ability,
+        "dc": dc,
+        "rolled": rolled.total,
+        "detail": rolled.detail,
+        "saved": saved,
+        "damage": took,
+        "said": format!(
+            "{} rolled {} vs DC {} - {}{}",
+            target.name,
+            rolled.total,
+            dc,
+            if saved { "made it" } else { "failed" },
+            match took {
+                Some(n) if n > 0 => format!(", took {}", n),
+                Some(_) => ", no damage".to_string(),
+                None => String::new(),
+            }
+        ),
+    }))
+}
+
 /// One creature's hit point maximum and the raw sum of its events.
 ///
 /// 156. RAW, AND DELIBERATELY NOT FLOORED. `death::healed` needs to know
@@ -942,7 +1150,7 @@ fn one_spell_full(token: &str, game_id: &str, key: &str) -> Result<Value, String
         token,
         "spells",
         &[
-            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants"),
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants,on_save"),
             ("key", &format!("eq.{}", key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("order", "game_id.asc.nullslast"),

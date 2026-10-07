@@ -1341,7 +1341,7 @@ fn damage_after_resistance(
     None
 }
 
-fn effect_grants(
+pub(crate) fn effect_grants(
     token: &str,
     sheet: &Sheet,
     resolved: &character::Resolved,
@@ -1484,6 +1484,8 @@ pub fn run() {
             commands::creatures::import_creature,
             commands::prayers::castable,
             commands::prayers::cast_prayer,
+            // 158. The second half of a save spell.
+            commands::prayers::resolve_spell_save,
             commands::prayers::spend_spell_slot,
             commands::prayers::restore_spell_slot,
             commands::effects::list_effects,

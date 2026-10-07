@@ -4867,18 +4867,74 @@ action next. `write_action` was deliberately not touched by 155.
 trap one layer up. A column the database fills and the query never asks
 for does not exist as far as the screen is concerned.
 
+## A save spell lands - BUILT (158, resolve_spell_save)
+
+The last of the three shapes. An **Attack** spell rolls a d20 (154), a
+**Heal** rolls at cast time (156), and a **Save** spell is the one where
+the caster names a number and somebody else rolls against it.
+
+**The DM asks for the roll, which is what makes it allowable.** The
+engine's stated position is that it does not roll for somebody else's
+character, and that still holds: casting Sacred Flame reports "DEX save
+DC 14, 1d8" and stops. A button appears beside the target's name and the
+roll happens because the DM pressed it - the same distinction as a DM
+rolling a monster's save at the table.
+
+Then it is the chain an attack already has: one d20 judged against a
+number, the dice that follow from the verdict, and an action, its rolls
+and one hit point event through `write_action`, together or not at all.
+
+**It costs the saver nothing.** `stamp_action_cost` would have derived
+"action" from the key and quietly eaten the target's turn. 156 added
+`cost` to `write_action` an hour earlier for the heal path, and this is
+the first caller that actually needed it - `cost: 'free'`.
+
+**The Ny'ook bonus reaches it for free.** The request is built as
+`"<ab> save vs spell"`, and 098's against-a-spell bonus has always been
+read off those two words. This is the one caller that can say so without
+a human remembering to type it.
+
+### Three of the eleven were never damage, which is the trap 158 exists for
+
+`spells.dice` cannot tell Fireball from these:
+
+| spell | dice | what they actually are |
+|---|---|---|
+| Bane | 1d4 | the penalty on attacks and saves - a GRANT, which 114 already runs |
+| Bestow Curse | 1d8 | extra necrotic on one of four curse options, conditional and later |
+| Geas | 5d10 | psychic each DAY the target disobeys, not on the save |
+
+A rule that damaged on every failed save would have Bane hurting someone
+as well as cursing them, and Geas killing a creature for failing a save
+it was always going to fail.
+
+**`on_save` says what a success is worth, and NULL says "not damage".**
+`'half'` (5e's usual), `'none'` (Sacred Flame), NULL for everything
+unmarked. **NULL is the default on purpose**: an unmarked spell does
+nothing rather than guessing, because a DM can see a spell that did
+nothing and cannot see one that quietly did the wrong thing to a player.
+The eight that do damage were read off their own prose, which states it
+in every case.
+
+### Verified, rolled back, against live data
+
+    cost=free  name=Webbys  rolls=2  delta=-6
+    linked to the damage roll   Webbys 18/26 -> 12
+
+And the constraint check that the last round taught: `rolls.target_kind`
+already allows `'dc'`, so the save row records what it was trying to beat
+(009) rather than a bare number.
+
 ### Still open
 
-**Save-spell damage.** Eleven spells with dice, Sacred Flame among them,
-and no path to hit points. A save is the TARGET's roll and the engine
-does not roll for somebody else's character, so the caster's 1d8 is
-rolled by nobody. The shape that fits: when the DM rolls the target's
-save against the DC, the engine knows the spell and resolves the damage -
-the same roll/verdict/damage/event chain an attack already has. **Dave's
-call.**
-
 **Spell damage has no type.** `spells` has no `damage_types` column, so
-resistance cannot apply to any of it.
+none of it - attack, save or otherwise - can be resisted. Everything
+else about resistance has been built since 116; this is the one column
+standing between it and spells.
+
+**Flame Strike is understated.** The book is 4d6 fire AND 4d6 radiant;
+`dice` holds 4d6 and there is nowhere to put the second half. Same
+missing column.
 
 ## Pick up here
 

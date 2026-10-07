@@ -215,6 +215,41 @@ pub fn overflow(hp_current: i64, damage: i64) -> i64 {
     damage - hp_floor(hp_current)
 }
 
+/// The hit point event a heal should write, in the same signed units
+/// everything else uses.
+///
+/// 156. NOT THE SAME NUMBER AS THE DICE, and the gap between them is the
+/// whole reason this is a function rather than a `+`.
+///
+/// HIT POINTS ARE A LOG, NOT A FIGURE. 013 made current HP the maximum
+/// plus the sum of every delta, and `hp_floor` clamps what is SHOWN at
+/// zero while the sum underneath keeps going. Falon is at a raw -1 of
+/// 43 and reads 0. Writing a flat +8 would put him on 7, because the
+/// heal would spend its first point climbing out of a hole the rules say
+/// is not there: 5e has no negative hit points, and a creature healed
+/// from zero is on exactly what the die said.
+///
+/// AND IT CANNOT OVERFILL. Healing above the maximum is wasted in every
+/// edition, so the delta is whatever closes the gap and no more - a
+/// creature at full health takes a zero, and the caller writes no event
+/// at all rather than a row that says nothing happened.
+///
+/// `summed` IS THE RAW SUM, not the floored reading, because that is
+/// what the new event is added to. Handing this the floored number would
+/// hide the very hole it exists to account for.
+pub fn healed(hp_max: i64, summed: i64, amount: i64) -> i64 {
+    if amount <= 0 {
+        return 0;
+    }
+    let raw = hp_max + summed;
+    let shown = hp_floor(raw);
+    let after = (shown + amount).min(hp_max);
+    // The delta that moves the LOG from where it is to where the rules
+    // say the creature now stands. Never negative: a heal does not take
+    // hit points off somebody who is somehow above their maximum.
+    (after - raw).max(0)
+}
+
 /// Did that kill outright?
 ///
 /// 5e: damage that drops a creature to zero AND has enough left over to
@@ -232,6 +267,45 @@ pub fn massive_damage_kills(overflow: i64, hp_max: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------------- 156. healing ------------------------------------ */
+
+    /// The case that made this a function. Falon is at a raw -1 of 43 and
+    /// reads 0; a flat +8 would put him on 7, which is the heal paying
+    /// for a hole 5e says does not exist.
+    #[test]
+    fn healing_from_below_zero_starts_from_zero() {
+        assert_eq!(healed(43, -44, 8), 9);
+        // and the reading that produces
+        assert_eq!(hp_floor(43 + (-44) + 9), 8);
+    }
+
+    #[test]
+    fn healing_does_not_go_past_the_maximum() {
+        // 18 of 26, healed 8: exactly full, no waste to account for.
+        assert_eq!(healed(26, -8, 8), 8);
+        // 18 of 26, healed 20: only the eight that fit.
+        assert_eq!(healed(26, -8, 20), 8);
+    }
+
+    #[test]
+    fn healing_somebody_at_full_health_is_nothing() {
+        assert_eq!(healed(52, 0, 9), 0);
+    }
+
+    #[test]
+    fn healing_nothing_is_nothing() {
+        assert_eq!(healed(43, -44, 0), 0);
+        assert_eq!(healed(43, -44, -3), 0);
+    }
+
+    /// A long way down is still only brought to what the die said.
+    #[test]
+    fn a_big_hole_does_not_swallow_the_dice() {
+        // raw -30 of 20, reads 0. Healing 5 puts them on 5, not under.
+        assert_eq!(healed(20, -50, 5), 35);
+        assert_eq!(hp_floor(20 + (-50) + 35), 5);
+    }
 
     /* ---------------- who may roll ----------------------------------- */
 

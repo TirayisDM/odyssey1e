@@ -368,7 +368,10 @@ pub fn cast_prayer(
     // None FOR EVERY OTHER SPELL, which is all but one of them.
     choice: Option<String>,
 ) -> Result<Value, String> {
-    let token = state.token()?;
+    // 156. THE WHOLE SESSION, not just the token: a heal writes a roll
+    // row and `rolls.owner_uid` is who threw the dice.
+    let session = state.current()?.ok_or_else(|| "not signed in".to_string())?;
+    let token = session.access_token.clone();
     let sheet = crate::character::load_sheet(&token, &character_id)?;
     // 150. WHOEVER IS CASTING, which is a class row and not a creature
     // question - see prayers::caster, and 022 for why there is no
@@ -429,24 +432,104 @@ pub fn cast_prayer(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // 156. AND A HEAL IS ROLLED HERE, which it never was. Cure Wounds
+    // spent a slot, logged a line and changed nobody's hit points -
+    // seven healing spells in the catalogue carry dice and not one of
+    // them reached a hit point, because every route to `hp_events` ran
+    // through `resolved.attack` and a heal is not an attack.
+    //
+    // THE DICE ALREADY HAVE THE MODIFIER IN THEM. `spellcast::cast`
+    // folds it in for a Heal and only for a Heal - Cure Wounds is 1d8
+    // plus your modifier and Sacred Flame is 1d8 flat - so this rolls
+    // what it is handed and adds nothing.
+    //
+    // `death::healed` OWNS HOW MUCH LANDS, because the dice and the
+    // delta are not the same number: hit points are a signed log that
+    // runs below zero while the reading is floored at zero, so healing
+    // Falon at a raw -1 has to write +9 to put him on 8. That is a rule
+    // and it is tested; this is the plumbing that calls it.
+    let mut healed_said: Option<String> = None;
+    let mut heal_rolls: Vec<Value> = Vec::new();
+    let mut heal_hp: Value = Value::Null;
+
+    if spell.get("cast_type").and_then(|v| v.as_str()) == Some("Heal") {
+        if let (Some(on), Some(dice)) = (
+            target_character_id.as_deref().filter(|s| !s.is_empty()),
+            c.dice.as_deref().filter(|d| !d.trim().is_empty()),
+        ) {
+            let rolled = crate::dice::roll_formula(dice)?;
+            let (hp_max, summed) = hp_state(&token, on)?;
+            let delta = crate::death::healed(hp_max, summed, rolled.total);
+
+            heal_rolls.push(json!({
+                "game_id": sheet.game_id,
+                "character_id": character_id,
+                "owner_uid": session.user_id,
+                "request": c.name,
+                "label": format!("{} healing", c.name),
+                "mode": "normal",
+                "formula": dice,
+                "detail": rolled.detail,
+                "total": rolled.total,
+                "natural_roll": rolled.natural,
+                "status": "resolved",
+                // 156. A ROLE OF ITS OWN, so the log can tell a heal from
+                // the damage it is the mirror of, and so `write_action`
+                // hangs the hit point event off the right dice.
+                "role": "heal",
+            }));
+
+            // NO EVENT FOR NOTHING. Healing somebody already full is a
+            // wasted spell and not a zero-delta row - 013's log is a
+            // record of what CHANGED.
+            if delta > 0 {
+                heal_hp = json!({
+                    "game_id": sheet.game_id,
+                    "character_id": on,
+                    "delta": delta,
+                    "note": format!("{} healing", c.name),
+                });
+            }
+            healed_said = Some(if delta > 0 {
+                format!("healed {} ({} rolled {})", delta, dice, rolled.total)
+            } else {
+                format!("{} rolled {} - already at full health", dice, rolled.total)
+            });
+        }
+    }
+
     if let Some(enc) = encounter_id.as_deref().filter(|s| !s.is_empty()) {
-        let mut row = json!({
+        // 156. THROUGH `write_action`, so the action, the heal roll and
+        // the hit point event land together or not at all - 012's rule,
+        // which a plain insert here could not keep. It took `cost` being
+        // added to that function's column list to become possible: a
+        // bonus-action spell written through it would otherwise have
+        // been stamped "action" and taken the cleric's whole turn.
+        let mut act = json!({
             "game_id": sheet.game_id,
             "character_id": character_id,
             "encounter_id": enc,
             "request": c.name,
             "label": crate::spellcast::label(&c),
             "key": "spell",
-            "status": "resolved",
             "cost": c.cost.as_str(),
         });
         if let Some(a) = actor_id.as_deref().filter(|s| !s.is_empty()) {
-            row["actor_id"] = json!(a);
+            act["actor_id"] = json!(a);
         }
         if let Some(t) = target_actor_id.as_deref().filter(|s| !s.is_empty()) {
-            row["target_actor_id"] = json!(t);
+            act["target_actor_id"] = json!(t);
         }
-        supabase::rest_insert(&token, "actions", &row)?;
+        supabase::rpc(
+            &token,
+            "write_action",
+            &json!({
+                "p_action": act,
+                "p_rolls": heal_rolls,
+                "p_hp": heal_hp,
+                "p_vitals": Value::Null,
+            }),
+        )?;
     }
 
     // ---- AND WHAT IT LEAVES BEHIND. Bless is a minute of +1d4 on
@@ -544,6 +627,13 @@ pub fn cast_prayer(
         // What is now true of the target, where anything is. None for
         // an instantaneous spell, which is most of the damage ones.
         "landed": landed,
+        // 156. WHAT THE HEAL ACTUALLY DID, which is not always what the
+        // dice said - capped at the maximum, and larger than the roll
+        // when it has a hole to climb out of first. Said out loud for
+        // the same reason 116 says why damage and hit points disagree:
+        // a number that moves differently from the dice beside it looks
+        // like a bug until something explains it.
+        "healed": healed_said,
         "concentration": concentrates,
     }))
 }
@@ -774,6 +864,53 @@ pub(crate) fn clear_slots(token: &str, character_id: &str) -> Result<(), String>
 }
 
 /// (spell key, prepared) for this character.
+/// One creature's hit point maximum and the raw sum of its events.
+///
+/// 156. RAW, AND DELIBERATELY NOT FLOORED. `death::healed` needs to know
+/// how far below zero the log actually runs, because that is the
+/// difference between healing Falon to 8 and healing him to 7. Handing
+/// it the floored reading would hide the hole it exists to account for -
+/// see the rule's own comment.
+///
+/// BY CHARACTER AND NOT BY ACTOR. 023 moved damage onto the character
+/// for everyone, monsters included, so there is no second place to look
+/// and no question of which id a heal should land under.
+fn hp_state(token: &str, character_id: &str) -> Result<(i64, i64), String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "hp_max"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let hp_max = rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("hp_max"))
+        .and_then(|v| v.as_i64())
+        // REFUSED RATHER THAN GUESSED. A creature with no maximum has no
+        // ceiling to heal toward, and inventing one would be the engine
+        // deciding how tough somebody is.
+        .ok_or_else(|| "that creature has no hit point maximum to heal toward".to_string())?;
+
+    let events = supabase::rest_get(
+        token,
+        "hp_events",
+        &[
+            ("select", "delta"),
+            ("character_id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let summed = events
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|r| r.get("delta").and_then(|v| v.as_i64()))
+        .sum();
+    Ok((hp_max, summed))
+}
+
 fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, String)>, String> {
     let rows = supabase::rest_get(
         token,

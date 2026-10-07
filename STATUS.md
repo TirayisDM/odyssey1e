@@ -4801,6 +4801,85 @@ around the caster, and they still land on the target. `spellcast.rs`
 already records that the four-word vocabulary cannot tell Zone of Truth
 from Bane. Same gap, same answer: it wants a column.
 
+## A cleric can heal somebody - BUILT (155, 156, 157, death::healed)
+
+**Seven healing spells carry dice and not one of them reached a hit
+point.** Cure Wounds spent a slot, logged a line and changed nothing. It
+never showed because resting heals (`time.rs`) and nobody had tried it
+mid-fight.
+
+**The cause was structural, not a missing case.** There is exactly ONE
+write to `hp_events` in the whole roll path - `"delta": -total`, inside
+`if let Some(a) = &resolved.attack`. Every route to hit points ran
+through a weapon-shaped Attack, so 154 making spell ATTACKS work was the
+same fix arriving from the other side, and a heal is not an attack.
+
+### `death::healed` - the dice and the delta are not the same number
+
+013 made current HP the maximum plus the sum of signed deltas, and
+`hp_floor` clamps what is SHOWN at zero while the sum underneath keeps
+going. **Falon sat at a raw -1 of 43 and read 0.** A flat +8 would have
+put him on 7, the heal spending its first point climbing out of a hole
+5e says is not there.
+
+    healed(hp_max, summed, amount) -> the delta to write
+
+Verified live, rolled back: `falon -1/43 -> 8`. Five tests, including
+healing from a -30 hole and healing somebody already full (zero, and the
+caller writes no event at all - 013's log records what CHANGED).
+
+### Two faults in `write_action`, and one of them was mine
+
+**It dropped `cost`.** The INSERT names its columns and `cost` was not
+among them, so a caller could not say what an action costs.
+`stamp_action_cost` fills a null from the key, and every caller so far
+wanted what it derives - but a spell is where that breaks: Healing Word
+and Spiritual Weapon are BONUS actions with key 'spell', so the trigger
+would say "action" and quietly take a cleric's whole turn. That is why
+`cast_prayer` wrote its own action row and so could never write a heal
+atomically with it. **This is 021's lesson word for word** - "an explicit
+column list in a writer function is a SECOND schema" - same function,
+different column.
+
+**157 is 156's bug.** 156's header stated that nothing constrained
+`rolls.role`. `rolls_role_check` allowed only `to_hit`, `damage` and
+`check`, so the first heal would have failed the insert and taken the
+whole cast with it. **A rolled-back probe found it, not Dave** - calling
+`write_action` with a heal row inside a transaction that raises at the
+end. Checking a claim about the schema by ASKING THE SCHEMA costs one
+query; believing it costs a session. 156's sentence is annotated in place
+rather than rewritten, per 115.
+
+### 155 - "Someone" was the log asking the wrong row
+
+Every cast read `Someone`, because the log takes the name off the to-hit
+roll and **a cast writes an action and no rolls** - that is 110's
+two-step design. The action has known `character_id` all along.
+
+**A trigger, not a column in `write_action`.** 021 had to add
+`character_name` to the writer as well as the table, because that
+function drops what it does not list. A BEFORE INSERT trigger needs
+nothing from the writer, so the name cannot be lost in transit by
+`write_action`, by `cast_prayer`'s REST insert, or by whatever writes an
+action next. `write_action` was deliberately not touched by 155.
+
+**And `character_name` had to be added to the log's SELECT** - the same
+trap one layer up. A column the database fills and the query never asks
+for does not exist as far as the screen is concerned.
+
+### Still open
+
+**Save-spell damage.** Eleven spells with dice, Sacred Flame among them,
+and no path to hit points. A save is the TARGET's roll and the engine
+does not roll for somebody else's character, so the caster's 1d8 is
+rolled by nobody. The shape that fits: when the DM rolls the target's
+save against the DC, the engine knows the spell and resolves the damage -
+the same roll/verdict/damage/event chain an attack already has. **Dave's
+call.**
+
+**Spell damage has no type.** `spells` has no `damage_types` column, so
+resistance cannot apply to any of it.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

@@ -1225,6 +1225,10 @@ async function doCast(sp, targetId, choice) {
   if (r.value.dice) said.push(r.value.dice);
   // WHAT IS NOW TRUE OF THEM, where the spell left anything behind.
   if (r.value.landed) said.push(r.value.landed);
+  // 156. AND WHAT A HEAL ACTUALLY MOVED, which is not always the dice:
+  // capped at the maximum, and bigger than the roll when the target was
+  // below zero and had a hole to climb out of first.
+  if (r.value.healed) said.push(r.value.healed);
   log("cast_prayer", said.join(" \u00b7 "));
 
   // THE TO-HIT GOES IN THE ROLL BOX rather than being rolled here. An
@@ -5577,10 +5581,14 @@ function paintEncLog(done, turns) {
 
 // One action: who, what, at whom, and how it went.
 //
-// READ OFF THE ROLLS, not off the action. `character_name` and
+// READ OFF THE ROLLS WHERE THERE ARE ANY. `character_name` and
 // `target_label` are snapshots taken when the dice landed - see 001 and
 // 013 - so a creature renamed or removed since still reads correctly in
 // the account of what it did.
+//
+// 155. AND OFF THE ACTION WHERE THERE ARE NOT, which is every cast.
+// The action carries its own snapshot now, taken by a trigger so no
+// writer can forget it.
 function logLine(a) {
   const rolls = a.rolls || [];
   const hit = rolls.find((r) => r.role === "to_hit") || rolls.find((r) => r.role === "check");
@@ -5593,7 +5601,13 @@ function logLine(a) {
 
   const who = document.createElement("span");
   who.className = "nm";
-  who.textContent = (hit && hit.character_name) || "Someone";
+  // 155. THE ROLL'S SNAPSHOT FIRST, THEN THE ACTION'S. Both are
+  // snapshots and the roll's is the older and more specific one, so it
+  // keeps winning. The action's is what a CAST has: 110 made casting
+  // and rolling two steps, so a cast writes an action and no rolls at
+  // all, and this line had nothing to read. Every spell Luci cast
+  // logged as "Someone" while the row beneath it knew perfectly well.
+  who.textContent = (hit && hit.character_name) || a.character_name || "Someone";
   head.append(who);
 
   const what = document.createElement("span");

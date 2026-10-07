@@ -66,7 +66,14 @@ pub fn encounter_log(
             // that the schema will not grow.
             (
                 "select",
-                "id,round,turn_actor_id,key,cost,request,label,created_at,\
+                // 155. `character_name` IS LISTED HERE ON PURPOSE. It is
+                // snapshotted onto the action by a trigger, but a select
+                // is an explicit column list and so a second schema -
+                // 021's lesson, and the reason every cast logged as
+                // "Someone" for as long as it did. A column the database
+                // fills and the query never asks for is a column that
+                // does not exist as far as the screen is concerned.
+                "id,round,turn_actor_id,key,cost,request,label,created_at,character_name,\
                  actor_id,character_id,target_actor_id,target_challenge_id,\
                  rolls!rolls_action_id_fkey(id,role,label,request,formula,detail,total,natural_roll,\
                  character_name,target_value,target_kind,target_label,\

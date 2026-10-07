@@ -144,8 +144,15 @@ fn budgets_for(
             // THROUGH `characters`, not through `encounters`. 051 gave
             // encounters a second path back to this table and PostgREST
             // refuses an ambiguous embed outright - see the trap in
-            // STATUS. This hop is the unambiguous one.
-            ("select", "id,character_id,characters(game_id,npc_key)"),
+            // STATUS.
+            //
+            // 153. NAMED, because 139 then did the same thing to this
+            // pair: `encounter_actors.template_id` is a second reference
+            // to `characters`, so a bare `characters(...)` stopped being
+            // the unambiguous hop this comment used to claim it was.
+            // The constraint name is the one spelling that stays right
+            // however many more references get added.
+            ("select", "id,character_id,characters!encounter_actors_character_id_fkey(game_id,npc_key)"),
             ("encounter_id", &format!("eq.{}", encounter_id)),
         ],
     )?;

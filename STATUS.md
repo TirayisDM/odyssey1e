@@ -5073,9 +5073,34 @@ a turn rather than writing a second loader.
   to name the constraint - a constraint name in a query is a schema
   detail no migration is obliged to keep.
 
+  **AND THAT FIX LASTED UNTIL 139.** `encounter_actors.template_id` is
+  a second reference to `characters`, so the "one unambiguous hop" went
+  ambiguous too, and `roll_initiative` started returning the same 300 -
+  found by Dave on 2026-10-06, one click after the 152 enrol fix let him
+  get that far. The reasoning above was wrong, and worth keeping
+  because of HOW it was wrong: it treated "this pair has one
+  relationship today" as a property worth building on, when the thing
+  that actually moves is the schema. Choosing a hop is choosing a fact
+  that any later migration can falsify without knowing it has.
+
+  **153 NAMES THE CONSTRAINT INSTEAD**, in both places that embed
+  `characters` from `encounter_actors` -
+  `characters!encounter_actors_character_id_fkey(...)` in
+  `commands/initiative.rs` and `commands/log.rs`. The original
+  objection stands - a constraint name IS a schema detail - but it is
+  the better risk of the two. A name only breaks if somebody renames or
+  recreates that FK; a hop breaks whenever anybody adds any FK at all,
+  which is a thing that happens on a normal Tuesday. Both failures are
+  loud, so the question is only which one happens less.
+
+  PostgREST hands you the fix in the error: the `hint` lists the exact
+  spellings, and the `details` name both relationships. Read it rather
+  than guessing which hop is clean.
+
   WORTH CHECKING BEFORE ADDING AN EMBED: whether the other table
-  points back. `actions -> rolls` in `commands/log.rs` is still a
-  single path.
+  points back - and prefer the named constraint from the start.
+  `actions -> rolls` in `commands/log.rs` is still a single path, which
+  is a fact about today and not a guarantee.
 - **Versatile weapons store their second die and nothing reads it.**
   027 added `items.versatile_number` / `versatile_denomination` so a
   longsword row is not a lie, but the engine still offers the 1d8. The

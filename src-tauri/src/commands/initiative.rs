@@ -362,8 +362,19 @@ fn dex_of_actor(token: &str, actor_id: &str) -> Result<i64, String> {
             //
             // A character belongs to exactly one game and an actor to
             // exactly one character, so this answers the same question
-            // through the one unambiguous path.
-            ("select", "id,character_id,characters(game_id)"),
+            // through the character.
+            //
+            // 153. AND THE FK IS NAMED, because the same thing then
+            // happened to THIS pair: 139 added `template_id`, a second
+            // reference from this table to `characters`, and a bare
+            // `characters(...)` became as ambiguous as `encounters(...)`
+            // had been. Naming the constraint says which of the two is
+            // meant and cannot go ambiguous again - a third FK would
+            // leave this one still pointing where it always did.
+            // `character_id` is the actor; `template_id` is what it was
+            // stamped from, and a template has no business answering
+            // which game this roll is in.
+            ("select", "id,character_id,characters!encounter_actors_character_id_fkey(game_id)"),
             ("id", &format!("eq.{}", actor_id)),
         ],
     )?;

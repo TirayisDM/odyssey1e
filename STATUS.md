@@ -4994,6 +4994,93 @@ standing between it and spells.
 `dice` holds 4d6 and there is nowhere to put the second half. Same
 missing column.
 
+## The Lich's DC was 19 and should have been 16 - FIXED (159, 160, load_profile)
+
+Dave cast Hold Person with a Lich, Fireball came back greyed out, and
+the log turned up two faults that had nothing to do with each other and
+nothing to do with spells.
+
+### `prof_bonus` had never been read, by anything, since 022
+
+`load_profile`'s select did not include the column. `c.get("prof_bonus")`
+returned None every time, so `Sheet.prof_bonus` was always None and
+`proficiency_bonus()` fell to the level formula - for the Lich,
+`((18-1)/4)+2 = 6`, so **8 + 6 + 5 = 19**.
+
+The field's own doc comment says "STATED rather than derived, for a
+monster... a statblock simply has one". It has never once been used. The
+column exists, `instantiate_npc` copies it faithfully, and nothing
+selected it. **130 of 280 statblocks** had a stated value that differed
+from the derived one, and every one of them had been hitting and saving
+better than its statblock said.
+
+**It stayed invisible because the two scales agree at the bottom.** A
+Giant Spider is 2 either way. It only diverges above level 9, and until
+150 no creature with a level that high could cast anything - so the
+first number big enough to notice was a spell save DC.
+
+### 159: two spells with no casting time
+
+`spellcast::cost` maps anything that is not an action, a bonus action or
+a reaction to `TooLong`, and NULL is not any of those. Exactly two
+spells had no casting time - Fireball and Aura of Life - and both come
+from 105, the pair rescued off ONE CHARACTER'S SHEET rather than written
+from a list. Everything 102-104 seeded has one.
+
+**Fireball had never been castable in a fight, by anybody, since 105.**
+
+A default would have hidden it: making `cost` treat NULL as an action
+is right almost always, and a spell seeded without a casting time would
+then look correct forever instead of being visibly wrong the first time
+somebody reached for it. `TooLong` is a bad answer that announces
+itself.
+
+### 160: one proficiency scale, at last
+
+147 left the old 203 on 127's two-step rule and wrote that deriving them
+from CR was "a one-line change whenever Dave wants it". This is that
+change, **taken on purpose rather than as a side effect**, which is the
+whole difference from 129.
+
+**It could not be derived from `level`** - the same trap 151 nearly fell
+into with caster level. `npcs.level` is 127's hand-set encounter weight
+for 130's creatures and the CR only for 147's, and **the two differ on
+179 of 261**. Deriving from it would give the Lich a 6 where the book
+says 7. So the CR was read off the published SRD, one page at a time,
+and **`cr` is now a column** - a derivation nobody can check is not much
+better than a guess.
+
+| | |
+|---|---|
+| +4 | Lich 3 → 7 |
+| +3 | Pit Fiend, Balor, Adult Red Dragon |
+| +2 | eleven, including four adult dragons, Iron Golem, Vampire, Storm Giant |
+| +1 | thirty-two |
+| −1 | Black Pudding, Chuul, Red Dragon Wyrmling, where 127's rule was too generous |
+
+**The top end was worst affected**, which follows: 127's rule stopped at
+3 and the book goes to 9, so everything legendary had been swinging like
+a mid-level monster. **211 do not move**, which is the quiet evidence
+that 147's 77 were right to begin with.
+
+**Nineteen are left alone with `cr` NULL** - the six we invented and the
+thirteen written from memory of a book they are not in. Inventing a CR
+to derive a proficiency from would be two guesses stacked, and NULL says
+"nobody has rated this" where a number would not.
+
+### What these left behind
+
+**`npcs.level` is still two scales.** 130's creatures carry 127's weight,
+147's carry CR, and they disagree on 179 rows. Not touched here: level
+gates techniques and 132 had to put those back once already. Now that
+`cr` is stored the two can be compared instead of confused.
+
+**Proficiency is still stored rather than derived.** The honest shape is
+`cr` stored and `prof_bonus` computed in Rust where it can be tested -
+001's "derive what can be derived". That is a change to
+`Sheet::proficiency_bonus` and its callers, and belongs in its own
+commit.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

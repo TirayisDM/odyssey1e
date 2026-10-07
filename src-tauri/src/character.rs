@@ -993,7 +993,7 @@ pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> 
         &[
             (
                 "select",
-                "id,entity_id,location_id,game_id,name,level,narrative_pack,\
+                "id,entity_id,location_id,game_id,name,level,prof_bonus,narrative_pack,\
                  weapon_profs,armor_profs,tool_profs,hp_max,hp_temp,hp_temp_max,\
                  ac_mode,ac_override,death_successes,death_failures,\
                  exhaustion,inspiration,size,species_key,npc_key,creature_type,\

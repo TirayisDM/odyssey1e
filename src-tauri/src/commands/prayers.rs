@@ -452,8 +452,35 @@ pub fn cast_prayer(
     // ---- AND WHAT IT LEAVES BEHIND. Bless is a minute of +1d4 on
     // somebody; Cure Wounds is over the moment it lands. `lasts` tells
     // them apart, and an instantaneous spell makes no effect at all.
+    //
+    // 154. WHOSE EFFECT IT IS, which was the target's unconditionally
+    // and is wrong for an attack. Luci cast Spiritual Weapon and a
+    // ten-tick chip appeared on WEBBYS - the thing she was hitting -
+    // saying a spectral mace was in play, with an empty grants list so
+    // it did nothing at all. A floating weapon belongs to the caster
+    // who maintains it, not to whoever it is swung at.
+    //
+    // `cast_type = 'Attack'` AND NOT THE STANCE, which is the narrower
+    // test and the correct one. Stance lumps Attack together with Save,
+    // and the lasting Save spells are mostly debuffs that genuinely DO
+    // sit on their victim - Hold Person, Bane, Blindness, Bestow Curse.
+    // Routing by stance would have moved all nineteen of them onto the
+    // caster to fix two.
+    //
+    // THE ROUGH EDGE THAT REMAINS, named rather than quietly fudged:
+    // Spirit Guardians, Blade Barrier and Guardian of Faith are Save
+    // spells that hang around the CASTER, and they stay on the target
+    // here. `spellcast`'s own header already says the four-word
+    // vocabulary cannot tell Zone of Truth from Bane; this is the same
+    // gap and it wants a column, not a cleverer guess.
+    let holds_it = if spell.get("cast_type").and_then(|v| v.as_str()) == Some("Attack") {
+        Some(character_id.as_str())
+    } else {
+        target_character_id.as_deref().filter(|s| !s.is_empty())
+    };
+
     let mut landed: Option<String> = None;
-    if let Some(on) = target_character_id.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(on) = holds_it {
         let ticks = match crate::spellcast::lasts(full) {
             crate::spellcast::Lasts::Instant => None,
             crate::spellcast::Lasts::Ticks(n) => Some(Some(n)),

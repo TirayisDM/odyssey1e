@@ -4707,6 +4707,100 @@ mean the ordinary case. Four tests, because that part is a rule.
 Verified on the live database with a rolled-back probe: **14 prayers
 copied, states `cantrip,prepared` both intact**, nothing created.
 
+## A spell attack is an attack - BUILT (154, spellcast.rs, character.rs)
+
+Dave cast Spiritual Weapon to end a round and asked whether it had done
+anything. It had not. The slot went, the bonus action went, the log said
+**"Spiritual Weapon — +6 to hit, 1d8"**, and `rolls = 0`, `hp_events = 0`.
+
+**Casting was always meant to be two steps and the second one did not
+exist.** `cast_prayer` deliberately does not roll - `main.js` says why,
+and it is right: "an attack spell is a d20 like any other and belongs in
+the one place that makes them". So casting spends the slot, writes the
+action and puts the spell's name in the roll box. But `resolve_request`
+had no spell branch. It tries weapon/technique, then `<ability> save`,
+then skill, then ability check, then **"anything else is a raw
+formula"** - so the dice engine was handed the literal text `spiritual
+weapon` and would have refused it. Pressing roll was never going to
+work; this was not a missed button.
+
+**The fix is a branch that returns an `attack::Attack`,** which is the
+whole reason it is cheap. Everything downstream already reads that
+struct: `resolution::admits` lets the roll be aimed at an AC, the crit
+range decides the verdict, `a.damage` is rolled and doubled on a crit,
+`a.damage_types` and `a.magical` are what the target resists, and the
+hit point event falls out at the end. A spell attack that fills it in
+gets all of that for free. The alternative - having `cast_prayer` roll
+and write the damage itself - is less code and builds a second damage
+pipeline beside `attack.rs`, which is the thing `spellcast.rs`'s header
+says the module exists to avoid.
+
+**The label and the roll cannot disagree.** Both go through
+`spellcast::cast` with `sheet.proficiency_bonus()` and
+`sheet.ability_mod(&caster.ability)` - the same two methods on the same
+sheet - so the "+6 to hit" the cast logs is the +6 the d20 gets. One
+arithmetic, two callers.
+
+**`magical: true`, and it matters.** 143 made "resistant to bludgeoning,
+piercing and slashing from nonmagical attacks" expressible and that is
+the commonest resistance in 5e. A spectral mace is magical by
+definition, so a werewolf does not halve it.
+
+**`damage_types` is empty and that is a real gap.** `spells` has no
+damage type column - Inflict Wounds is necrotic, Guiding Bolt is radiant,
+and neither can say so - so a target's resistance does not apply at all.
+The `Attack` struct's own comment calls an empty list "the safe way to be
+ignorant": understated rather than wrong. **It wants a column, not a
+rule.**
+
+**Only Attack spells resolve here.** A Save spell is the TARGET's roll
+and the engine does not roll for somebody else's character, which is why
+casting one reports the DC and stops; a Utility spell rolls no d20 at
+all. Three spells in the catalogue are `cast_type = 'Attack'`: Guiding
+Bolt, Inflict Wounds, Spiritual Weapon.
+
+**The key is `attack`, not `spell_attack`** - the same decision the save
+branch records a few lines below. The key is the vocabulary
+`narrative_lines` and `skill_prompts` are written in, and a key nobody
+has seeded silently loses a character their prose.
+
+### Two queries, paid by clerics and nobody else
+
+`load_sheet`'s own note says seven queries "is the count to watch" and
+that a hover preview pays all of it. The prepared list makes it nine -
+but only when `prayers::caster` says this character casts, which is
+computed from class rows already read. **A fighter, a monster and every
+creature in the bestiary still pay seven.**
+
+Two and not one because `character_prayers.spell_key` references
+`spells` BY VALUE - the nullable-tenancy pattern, where a partial unique
+index cannot back a foreign key - so there is no relationship to embed
+across and the keys must be known before the catalogue can be asked.
+
+### The effect belonged to the wrong creature
+
+Dave's call, and he talked himself out of the alternative on the way:
+putting it on the encounter would break for a long spell that outlives
+the fight.
+
+The chip went on **Webbys** - the thing Luci was hitting - because
+`cast_prayer` applied the effect to `target_character_id`
+unconditionally. That is right for Bless and wrong for a floating weapon
+the caster maintains. Worse, its `grants` was `[]`, so it sat there for
+ten ticks doing nothing: the silent-no-op shape again.
+
+**Routed on `cast_type = 'Attack'`, not on stance.** Stance lumps Attack
+in with Save, and the lasting Save spells are mostly debuffs that
+genuinely DO sit on their victim - Hold Person, Bane, Blindness, Bestow
+Curse. Routing by stance would have moved all nineteen onto the caster
+to fix two.
+
+**The rough edge that remains, named rather than fudged:** Spirit
+Guardians, Blade Barrier and Guardian of Faith are Save spells that hang
+around the caster, and they still land on the target. `spellcast.rs`
+already records that the four-word vocabulary cannot tell Zone of Truth
+from Bane. Same gap, same answer: it wants a column.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

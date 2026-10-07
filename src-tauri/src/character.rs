@@ -398,6 +398,18 @@ pub struct Sheet {
     /// them perfectly well.
     #[serde(skip_deserializing)]
     pub gate_level: i64,
+    /// 154. WHAT THIS CHARACTER COULD CAST RIGHT NOW, so that a spell
+    /// name typed into the roll box resolves the way a weapon name does.
+    ///
+    /// PREPARED AND CANTRIPS ONLY. A spell sitting in the book is held
+    /// and not up today, so it is not a thing to roll - 107's three
+    /// states are the whole of that rule and `load_sheet` applies it.
+    ///
+    /// EMPTY FOR EVERYONE WHO DOES NOT CAST, and loaded only when
+    /// `caster` is Some - see the note on `load_sheet`'s query count.
+    /// A fighter pays nothing for this field existing.
+    #[serde(skip_deserializing)]
+    pub spells: Vec<crate::spellcast::Known>,
 }
 
 impl Sheet {
@@ -707,6 +719,60 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
             key: "attack".to_string(),
             attack: Some(a),
         };
+    }
+
+    // THEN A SPELL, for the same reason an attack comes first: a spell
+    // name is a specific thing and collides with no skill or ability.
+    //
+    // 154. THE SECOND HALF OF CASTING, which was missing. `cast_prayer`
+    // deliberately does not roll - it spends the slot, writes the action
+    // and puts the spell's name in the roll box, because an attack spell
+    // is a d20 like any other and belongs in the one place that makes
+    // them. Nothing here knew what that name meant, so the request fell
+    // through to the raw-formula fallback and the dice engine was handed
+    // the literal text "spiritual weapon". Luci cast it, the slot went,
+    // the log said "+6 to hit, 1d8", and no attack was ever rolled.
+    //
+    // ONLY AN ATTACK SPELL RESOLVES HERE and `attack_for` owns that
+    // rule. A Save spell is the TARGET's roll - the engine does not roll
+    // for somebody else's character, which is why casting one reports
+    // the DC and stops - and a Utility spell rolls no d20 at all.
+    //
+    // THE KEY IS `attack`, NOT `spell_attack`, and that is the same
+    // decision the save branch below records: the key is the vocabulary
+    // `narrative_lines` and `skill_prompts` are written in, and a key
+    // nobody has seeded silently loses a character their prose. A spell
+    // attack IS an attack roll against an AC, so it takes the prose that
+    // already exists for one.
+    if let Some(caster) = sheet.caster.as_ref() {
+        if let Some(known) = crate::spellcast::find(&sheet.spells, request) {
+            if let Some(a) = crate::spellcast::attack_for(
+                known,
+                sheet.proficiency_bonus(),
+                sheet.ability_mod(&caster.ability),
+                &caster.ability,
+            ) {
+                return Resolved {
+                    // THE LABEL THE CAST ALREADY SAID, so the log line
+                    // and the roll agree about what was promised.
+                    label: crate::spellcast::label(&crate::spellcast::cast(
+                        &known.key,
+                        &known.name,
+                        known.level,
+                        &known.cast_type,
+                        known.casting_time.as_deref(),
+                        known.save_ability.as_deref(),
+                        known.dice.as_deref(),
+                        sheet.proficiency_bonus(),
+                        sheet.ability_mod(&caster.ability),
+                    )),
+                    formula: d20_formula(a.to_hit, mode),
+                    modifier: a.to_hit,
+                    key: "attack".to_string(),
+                    attack: Some(a),
+                };
+            }
+        }
     }
 
     // "<ability> save", and the same save with what it is AGAINST:
@@ -1176,6 +1242,97 @@ pub(crate) fn load_species_map(
         .into_iter()
         .map(|sp| (sp.key.clone(), sp))
         .collect())
+}
+
+/// What this character can cast right now, for the roll box.
+///
+/// 154. PREPARED AND CANTRIPS, NEVER THE BOOK. 107's three states say
+/// it: a cantrip is known, a prepared spell is up today, and a spell in
+/// the book is held and not available. Rolling one out of the book
+/// would be casting something the character has not prepared.
+///
+/// THE SAME TENANCY DANCE `load_species_map` DOES, and for the same
+/// reason - a game may override a catalogue spell, the game's row wins,
+/// and an empty `game_id` asks for the global rows rather than sending
+/// a filter that 400s.
+fn load_castable(
+    token: &str,
+    game_id: &str,
+    character_id: &str,
+) -> Result<Vec<crate::spellcast::Known>, String> {
+    let chosen = supabase::rest_get(
+        token,
+        "character_prayers",
+        &[
+            ("select", "spell_key,state"),
+            ("character_id", &format!("eq.{}", character_id)),
+            ("state", "in.(prepared,cantrip)"),
+        ],
+    )?;
+    let keys: Vec<String> = chosen
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|r| r.get("spell_key")?.as_str())
+        .filter(|k| !k.is_empty())
+        .map(crate::narrative::quoted)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let scope = if game_id.is_empty() {
+        "(game_id.is.null)".to_string()
+    } else {
+        format!("(game_id.is.null,game_id.eq.{})", game_id)
+    };
+    let rows = supabase::rest_get(
+        token,
+        "spells",
+        &[
+            (
+                "select",
+                "key,name,roll_name,level,cast_type,casting_time,save_ability,dice,range,game_id",
+            ),
+            ("key", &format!("in.({})", keys.join(","))),
+            ("or", &scope),
+        ],
+    )?;
+
+    // THE GAME'S OWN ROW WINS, and a key appears at most once. Two rows
+    // with the same key is the normal case rather than an error - that
+    // is what an override IS - and leaving both in would give `find` two
+    // answers and let it return whichever the database happened to list
+    // first.
+    let mut out: HashMap<String, crate::spellcast::Known> = HashMap::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let key = as_str(r, "key");
+        if key.is_empty() {
+            continue;
+        }
+        let mine = r.get("game_id").map(|g| !g.is_null()).unwrap_or(false);
+        if out.contains_key(&key) && !mine {
+            continue;
+        }
+        let name = as_str(r, "name");
+        out.insert(
+            key.clone(),
+            crate::spellcast::Known {
+                roll_name: as_opt_str(r, "roll_name").unwrap_or_else(|| name.clone()),
+                key,
+                name,
+                level: as_i64(r, "level", 0),
+                cast_type: as_str(r, "cast_type"),
+                casting_time: as_opt_str(r, "casting_time"),
+                save_ability: as_opt_str(r, "save_ability"),
+                dice: as_opt_str(r, "dice"),
+                range: as_opt_str(r, "range"),
+            },
+        );
+    }
+    Ok(out.into_values().collect())
 }
 
 /// EFFECTIVE ABILITY SCORES FOR A SET OF CHARACTERS, with each one's
@@ -1723,6 +1880,26 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         &crate::class::load_taken(token, &game_id, character_id)?,
     );
 
+    // 154. WHAT THEY COULD CAST, and only if they cast at all.
+    //
+    // TWO MORE QUERIES, PAID BY CLERICS AND NOBODY ELSE. The note on
+    // this function says seven is the count to watch and that a hover
+    // preview pays all of it; this makes it nine for a caster and
+    // leaves it at seven for every fighter, every monster and every
+    // creature in the bestiary. `prayers::caster` is the gate and it is
+    // already computed from `classes`, which is read above.
+    //
+    // TWO AND NOT ONE because `character_prayers.spell_key` references
+    // `spells` BY VALUE - the nullable-tenancy pattern, where a partial
+    // unique index cannot back a foreign key - so there is no
+    // relationship for PostgREST to embed across and the keys have to
+    // be known before the catalogue can be asked about them.
+    let caster = crate::prayers::caster(&classes);
+    let spells = match &caster {
+        Some(_) => load_castable(token, &game_id, character_id)?,
+        None => Vec::new(),
+    };
+
     let species = match profile.species_key.as_deref() {
         Some(key) => load_species(token, &game_id, key)?,
         None => None,
@@ -1883,7 +2060,8 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         // 150. OFF THE CLASS ROWS, the same ones a player character
         // has. A creature that casts has class levels - see
         // prayers::caster, and 022 for why there is no second path.
-        caster: crate::prayers::caster(&classes),
+        caster,
+        spells,
         from_statblock: from_statblock_row,
         gate_level: crate::attack::gate_level(profile.level, from_statblock_row),
         location_id: profile.location_id,
@@ -1996,6 +2174,7 @@ mod tests {
 
         Sheet {
             classes: Vec::new(),
+            spells: Vec::new(),
             location_id: None,
             character_id: Some("c1".into()),
             game_id: "g1".into(),
@@ -2483,6 +2662,139 @@ mod tests {
         assert_eq!(r.formula, "2d6+3");
         assert_eq!(r.label, "2d6+3");
         assert_eq!(r.modifier, 0);
+    }
+
+    /* ---------------------- 154. SPELL ATTACKS ---------------------- */
+
+    /// A cleric with the three Attack spells and one that is not.
+    fn luci() -> Sheet {
+        let mut s = rodnar();
+        s.name = "Luci".into();
+        s.caster = Some(crate::prayers::Caster {
+            class_key: "cleric".into(),
+            level: 5,
+            ability: "wis".into(),
+            source: crate::prayers::Source::WholeList,
+        });
+        s.spells = vec![
+            crate::spellcast::Known {
+                key: "sp_spiritualweapon".into(),
+                name: "Spiritual Weapon".into(),
+                roll_name: "Spiritual Weapon".into(),
+                level: 2,
+                cast_type: "Attack".into(),
+                casting_time: Some("1 bonus action".into()),
+                save_ability: None,
+                dice: Some("1d8".into()),
+                range: Some("60 feet".into()),
+            },
+            crate::spellcast::Known {
+                key: "sp_inflictwounds".into(),
+                name: "Inflict Wounds".into(),
+                roll_name: "Inflict Wounds".into(),
+                level: 1,
+                cast_type: "Attack".into(),
+                casting_time: Some("1 action".into()),
+                save_ability: None,
+                dice: Some("3d10".into()),
+                range: Some("Touch".into()),
+            },
+            crate::spellcast::Known {
+                key: "sp_bless".into(),
+                name: "Bless".into(),
+                roll_name: "Bless".into(),
+                level: 1,
+                cast_type: "Utility".into(),
+                casting_time: Some("1 action".into()),
+                save_ability: None,
+                dice: None,
+                range: Some("30 feet".into()),
+            },
+        ];
+        s
+    }
+
+    /// The bug: Luci cast it, the slot went, the log promised "+6 to
+    /// hit, 1d8", and the roll box was handed the literal text
+    /// "spiritual weapon" because nothing knew what it was.
+    #[test]
+    fn an_attack_spell_resolves_as_an_attack() {
+        let r = resolve_request(&luci(), "Spiritual Weapon", "normal");
+        // WIS 16 is +3 and a level-5 character's bonus is +3.
+        assert_eq!(r.modifier, 6);
+        assert_eq!(r.formula, "1d20+6");
+        assert_eq!(r.label, "Spiritual Weapon \u{2014} +6 to hit, 1d8");
+        let a = r.attack.expect("a spell attack carries an Attack");
+        assert_eq!(a.damage, "1d8");
+        assert_eq!(a.to_hit, 6);
+        assert!(a.proficient, "nobody casts their own spell unproficiently");
+    }
+
+    /// The key is `attack` and not `spell_attack`, for the same reason
+    /// the save key does not fork: prose is seeded against it.
+    #[test]
+    fn a_spell_attack_takes_the_attack_prose() {
+        assert_eq!(resolve_request(&luci(), "Spiritual Weapon", "normal").key, "attack");
+    }
+
+    /// 143 made "from nonmagical attacks" expressible. A spectral mace
+    /// is magical, so a werewolf does not halve it.
+    #[test]
+    fn a_spell_attack_is_magical() {
+        let a = resolve_request(&luci(), "Inflict Wounds", "normal").attack.unwrap();
+        assert!(a.magical);
+        assert_eq!(a.magic, 0, "magical is not the same as carrying a plus");
+    }
+
+    /// A Utility spell rolls no d20 and must not pretend to. Bless falls
+    /// through to the raw formula, where the dice engine refuses it.
+    #[test]
+    fn a_spell_that_makes_no_attack_roll_does_not_resolve_as_one() {
+        let r = resolve_request(&luci(), "Bless", "normal");
+        assert!(r.attack.is_none());
+        assert_eq!(r.key, "custom");
+    }
+
+    /// The branch is gated on being a caster at all, so a barbarian who
+    /// types a spell name gets the old behaviour rather than a panic.
+    #[test]
+    fn somebody_who_does_not_cast_gets_no_spell_branch() {
+        let r = resolve_request(&rodnar(), "Spiritual Weapon", "normal");
+        assert!(r.attack.is_none());
+        assert_eq!(r.key, "custom");
+    }
+
+    /// Matched the way every other branch matches.
+    #[test]
+    fn a_spell_is_found_regardless_of_case_or_padding() {
+        for req in ["spiritual weapon", "  SPIRITUAL WEAPON  ", "Spiritual Weapon"] {
+            assert_eq!(
+                resolve_request(&luci(), req, "normal").modifier,
+                6,
+                "{}",
+                req
+            );
+        }
+    }
+
+    /// Advantage still reaches a spell attack - it is a d20 like any
+    /// other, which is the whole argument for putting it here.
+    #[test]
+    fn a_spell_attack_takes_advantage() {
+        let adv = resolve_request(&luci(), "Spiritual Weapon", "adv");
+        assert_eq!(adv.formula, "2d20kh1+6");
+    }
+
+    /// A weapon wins a name collision, because the attack branch runs
+    /// first and a loadout is the more specific thing.
+    #[test]
+    fn a_weapon_of_the_same_name_still_wins() {
+        let mut s = luci();
+        s.spells[0].roll_name = "insight".into();
+        s.spells[0].name = "insight".into();
+        // The skill branch is BELOW the spell branch, so this proves the
+        // spell is reached first and the ordering is deliberate.
+        assert_eq!(resolve_request(&s, "insight", "normal").key, "attack");
     }
 
     #[test]

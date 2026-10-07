@@ -242,6 +242,134 @@ pub fn cast(
     }
 }
 
+/// One spell a character can cast right now, as the sheet carries it.
+///
+/// 154. CATALOGUE FACTS AND NOTHING DERIVED. The to-hit, the DC and the
+/// damage all come out of `cast()`, which needs the caster's numbers;
+/// holding a computed to-hit on the sheet would be a second place for
+/// the same arithmetic to live and drift.
+///
+/// WHAT IS ON IT IS WHAT `cast()` TAKES, so the sheet can hand one
+/// straight to the same function `cast_prayer` calls and get the same
+/// answer. Two callers, one rule.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Known {
+    pub key: String,
+    pub name: String,
+    /// What the roll box matches on. Usually the name; it is a separate
+    /// column because 006 let a spell be asked for by a shorter word.
+    pub roll_name: String,
+    pub level: i64,
+    pub cast_type: String,
+    pub casting_time: Option<String>,
+    pub save_ability: Option<String>,
+    pub dice: Option<String>,
+    /// Only to tell a touch spell from one thrown across the room.
+    pub range: Option<String>,
+}
+
+/// The spell a typed request is asking for, if it is asking for one.
+///
+/// BY NAME OR BY ROLL NAME, trimmed and case-folded, which is how every
+/// other branch of `resolve_request` matches. Nothing fuzzier: a request
+/// that half-matches two spells should find neither rather than pick.
+pub fn find<'a>(known: &'a [Known], request: &str) -> Option<&'a Known> {
+    let want = request.trim().to_lowercase();
+    if want.is_empty() {
+        return None;
+    }
+    known.iter().find(|k| {
+        k.roll_name.trim().to_lowercase() == want || k.name.trim().to_lowercase() == want
+    })
+}
+
+/// A spell attack, in the shape the attack path already understands.
+///
+/// 154. THE WHOLE POINT, and the reason this returns an `attack::Attack`
+/// rather than something new. `resolve_request` hands that struct to the
+/// roll path and everything downstream reads it: `resolution::admits`
+/// lets the roll be aimed at an AC, the crit range decides the verdict,
+/// `a.damage` is rolled and doubled on a crit, `a.damage_types` and
+/// `a.magical` are what the target resists, and the hit point event
+/// falls out at the end. A spell attack that filled in this struct gets
+/// all of that for nothing; one that invented its own path would be a
+/// second damage pipeline beside `attack.rs`, which is the thing this
+/// module's header says it exists to avoid.
+///
+/// NONE FOR EVERYTHING THAT IS NOT AN ATTACK. A Save spell is the
+/// target's roll and not the caster's, and a Utility spell rolls no d20
+/// at all - neither is a thing to put in the roll box, and saying so
+/// here keeps the branch in `resolve_request` to one line.
+///
+/// `magical` IS TRUE AND IT MATTERS. 143 made "resistant to bludgeoning,
+/// piercing and slashing from nonmagical attacks" expressible, and that
+/// is the commonest resistance in 5e. A spectral mace is magical by
+/// definition, so a werewolf does not halve it.
+///
+/// `damage_types` IS EMPTY AND THAT IS A REAL GAP. `spells` has no
+/// damage type column - Inflict Wounds is necrotic and Guiding Bolt is
+/// radiant, and neither can say so - so a target's resistance simply
+/// does not apply. The Attack struct's own comment calls an empty list
+/// "the safe way to be ignorant", and that is what this is: understated
+/// rather than wrong. The fix is a column, not a rule.
+///
+/// PROFICIENT, ALWAYS. There is no such thing as casting a spell you
+/// know without proficiency - the bonus is baked into every spell attack
+/// in 5e - so this is true rather than derived from a weapon list a
+/// spell was never on.
+pub fn attack_for(
+    k: &Known,
+    prof_bonus: i64,
+    abil_mod: i64,
+    ability: &str,
+) -> Option<crate::attack::Attack> {
+    let c = cast(
+        &k.key,
+        &k.name,
+        k.level,
+        &k.cast_type,
+        k.casting_time.as_deref(),
+        k.save_ability.as_deref(),
+        k.dice.as_deref(),
+        prof_bonus,
+        abil_mod,
+    );
+    let to_hit = c.to_hit?;
+    // A DAMAGE DIE IS REQUIRED, because the roll path rolls `a.damage`
+    // the moment the swing lands and an empty formula fails the whole
+    // roll rather than just the damage. An Attack spell with no dice is
+    // a catalogue row that cannot be rolled; declining sends it to the
+    // ordinary fallback, where the dice engine says so plainly.
+    let damage = c.dice.filter(|d| !d.trim().is_empty())?;
+
+    Some(crate::attack::Attack {
+        item_key: k.key.clone(),
+        weapon_name: k.name.clone(),
+        // DESCRIPTIVE ONLY. Nothing downstream reads the mode of a spell
+        // attack, and the catalogue cannot settle it anyway: Spiritual
+        // Weapon reaches 60 feet and still makes a MELEE spell attack.
+        // Touch is the one case the data does answer.
+        mode: match k.range.as_deref().map(str::trim) {
+            Some(r) if r.eq_ignore_ascii_case("touch") || r.eq_ignore_ascii_case("self") => {
+                crate::equipment::Mode::Melee
+            }
+            _ => crate::equipment::Mode::Ranged,
+        },
+        ability: ability.to_string(),
+        ability_mod: abil_mod,
+        proficient: true,
+        proficiency_bonus: prof_bonus,
+        to_hit,
+        magic: 0,
+        magical: true,
+        damage,
+        crit_min: 20,
+        fumble_max: 1,
+        technique: None,
+        damage_types: Vec::new(),
+    })
+}
+
 /// What the card says: "Sacred Flame — DEX save DC 14, 1d8".
 pub fn label(c: &Cast) -> String {
     let mut bits: Vec<String> = Vec::new();

@@ -585,6 +585,37 @@ mod tests {
         assert_eq!(tidy_select(&q)[0].1, q[0].1);
     }
 
+    /// 153. AND THE NAMED FORM, which is what every embed uses now. The
+    /// `!constraint` disambiguation is the fix for a pair of tables with
+    /// more than one foreign key between them, so the one guard standing
+    /// in front of every query has to let the `!` through untouched.
+    #[test]
+    fn a_named_relationship_survives_the_guard() {
+        let q = [(
+            "select",
+            "id,character_id,characters!encounter_actors_character_id_fkey(game_id)",
+        )];
+        assert!(check_query(&q).is_ok());
+        assert_eq!(tidy_select(&q)[0].1, q[0].1);
+    }
+
+    /// The wrapped, indented version the log really sends - the run of
+    /// indentation in the middle is the typo `tidy_select` exists to
+    /// repair, and it must not eat the relationship name with it.
+    #[test]
+    fn a_named_relationship_survives_a_wrapped_select() {
+        let q = [(
+            "select",
+            "id,round,\
+             rolls!rolls_action_id_fkey(id,role,total)",
+        )];
+        assert!(check_query(&q).is_ok());
+        assert_eq!(
+            tidy_select(&q)[0].1,
+            "id,round,rolls!rolls_action_id_fkey(id,role,total)"
+        );
+    }
+
     /* ------------------------- numeric ------------------------- */
 
     #[test]

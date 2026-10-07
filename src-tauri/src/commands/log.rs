@@ -58,11 +58,17 @@ pub fn encounter_log(
         &token,
         "actions",
         &[
+            // 153. THE FK IS NAMED, and `rolls` has only ever had one
+            // path back to `actions`. That is the point: naming it costs
+            // nothing today and means a later migration adding a second
+            // reference cannot turn this into a 300 the way 139 did to
+            // `encounter_actors -> characters`. A bare embed is a bet
+            // that the schema will not grow.
             (
                 "select",
                 "id,round,turn_actor_id,key,cost,request,label,created_at,\
                  actor_id,character_id,target_actor_id,target_challenge_id,\
-                 rolls(id,role,label,request,formula,detail,total,natural_roll,\
+                 rolls!rolls_action_id_fkey(id,role,label,request,formula,detail,total,natural_roll,\
                  character_name,target_value,target_kind,target_label,\
                  success,reason,margin,face_outcome)",
             ),

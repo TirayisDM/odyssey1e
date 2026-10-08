@@ -53,6 +53,11 @@ let state = {
   // 173. Which spellbooks are open, by object id, so a repaint does
   // not close one somebody is reading.
   openBooks: {},
+  // 187. The fifteen conditions, read once per session. A closed list
+  // off the engine - see `list_conditions`.
+  conditions: [],
+  // 190. The subset that stops a creature acting, off the engine.
+  halting: [],
   // 181. THE SAVE A CAST IS STILL OWED, on the DM's side of the fight.
   // In state rather than in the DOM because every cast ends with
   // `selectEncounter`, which repaints the whole card - the first
@@ -437,6 +442,7 @@ async function selectGame(id) {
   await loadSlots();
   await loadClock();
   await loadEffects();
+  await loadConditions();
   await loadCatalogue();
   await loadSpecies();
   await loadRolls();
@@ -1343,7 +1349,9 @@ function showPendingSave(pending) {
       atLevel: pending.atLevel || null,
     });
     if (!r.ok) return log("resolve_spell_save", r.error, true);
-    log("resolve_spell_save", r.value.said);
+    log("resolve_spell_save", r.value.said + (r.value.condition
+      ? " · " + pending.target.label + " is " + r.value.condition.toLowerCase()
+      : ""));
     // Spent, so it goes. A second press would roll a second save
     // against a spell that has already landed.
     showPendingSave(null);
@@ -1829,11 +1837,95 @@ async function loadEffects() {
   for (const where of CLOCK_PANES) paintEffects(where);
 }
 
+// 187. WHAT IS TRUE OF ONE CREATURE, out of everything running.
+//
+// `list_effects` marks each row with the condition it names, or null -
+// the ENGINE decides which pile a row is in, because telling a
+// condition from a spell is `conditions::of_key` and not a prefix test
+// written twice.
+function conditionsOn(characterId) {
+  if (!characterId) return [];
+  return (state.effects || []).filter(
+    (e) => e.condition && e.character_id === characterId
+  );
+}
+
+// The fifteen, as a control that sets one.
+//
+// OFF THE ENGINE. `list_conditions` is the closed list; a copy typed
+// into this file would be a second vocabulary, and the day somebody
+// adds one the two would disagree about what exists.
+//
+// NO DURATION HERE, deliberately. Most conditions end when something
+// ends them - a save, a spell dropping, a DM saying so - and 094 says
+// a NULL expiry is "a condition a DM is tracking by hand". Offering a
+// minutes box would invite a number nobody has.
+function conditionPicker(focus, encounterId) {
+  const sel = document.createElement("select");
+  sel.className = "condpick";
+  const head = document.createElement("option");
+  head.value = "";
+  head.textContent = "+ condition";
+  sel.append(head);
+
+  const on = new Set(conditionsOn(focus.character_id).map((e) => e.condition.key));
+  for (const c of state.conditions || []) {
+    // ALREADY ON IS NOT OFFERED. `effects::admit` would replace it,
+    // which is harmless, but a list offering what is already true
+    // reads as though it did nothing.
+    if (on.has(c.key.replace(/^cond\./, ""))) continue;
+    const o = document.createElement("option");
+    o.value = c.key;
+    o.textContent = c.glyph + "  " + c.name;
+    o.title = c.does;
+    sel.append(o);
+  }
+
+  sel.addEventListener("change", async () => {
+    const key = sel.value;
+    sel.value = "";
+    if (!key || !focus.character_id) return;
+    const c = (state.conditions || []).find((x) => x.key === key);
+    const r = await tryCall("apply_effect", {
+      gameId: state.gameId,
+      characterId: focus.character_id,
+      key,
+      name: c ? c.name : key,
+      ticks: null,
+      magnitude: null,
+      stacks: "replace",
+      sourceCharacterId: null,
+      sourceFeature: "condition",
+      note: null,
+    });
+    if (!r.ok) return dmSay(r.error, true);
+    dmSay(focus.label + " is " + (c ? c.name.toLowerCase() : key));
+    await loadEffects();
+    await selectEncounter(encounterId);
+  });
+  return sel;
+}
+
+async function loadConditions() {
+  const rows = await call("list_conditions", {});
+  if (rows) state.conditions = rows;
+  // 190. AND WHICH OF THEM STOP A TURN, asked rather than known. Five
+  // of the fifteen do, and four say so only by including the fifth -
+  // a list typed here would be five words that have to stay in step
+  // with `conditions::cannot_act`.
+  const halting = await call("halting_conditions", {});
+  if (halting) state.halting = halting;
+}
+
 function paintEffects(where) {
   const host = document.querySelector("#fx-" + where);
   if (!host) return;
   host.innerHTML = "";
   for (const fx of state.effects || []) {
+    // 188. NOT CONDITIONS. They have their own chips on the card
+    // header since 187, and a thing shown in two places is a thing
+    // somebody ends in one and then wonders why it is still there.
+    if (fx.condition) continue;
     const chip = sEl("span", "fx");
     chip.append(sEl("span", "nm", fx.name));
     chip.append(sEl("span", "who", whoIs(fx.character_id)));
@@ -6342,6 +6434,53 @@ async function paintFightCard(id, turns, enc) {
     who.append(sw);
   }
 
+  // 187. AND WHAT IS TRUE OF THEM RIGHT NOW. Conditions sit beside AC
+  // and hit points because that is the line a DM reads before deciding
+  // anything - "can it even act" belongs next to "how hard is it to
+  // hit".
+  //
+  // DRAWN FROM `list_effects`, which marks which rows are conditions.
+  // The screen does not test the key prefix itself: which pile a row
+  // belongs in is a rule, and `conditions::of_key` owns it.
+  //
+  // THE GLYPH IS A PLACEHOLDER and the title carries the meaning -
+  // Dave's plan is for these to hang on character modals once there
+  // are graphics. Until then a symbol nobody can decode is a symbol,
+  // so the hover leads with the name.
+  for (const e of conditionsOn(focus.character_id)) {
+    const c = chip(e.condition.glyph, "no cond");
+    c.title = e.condition.said + (e.left != null ? " · " + e.said : "");
+    // A click ends it, which is the other half of being able to set
+    // one - a condition nobody can clear is worse than none at all.
+    guard(c, async () => {
+      const r = await tryCall("end_effect", { gameId: state.gameId, effectId: e.id });
+      if (!r.ok) return dmSay(r.error, true);
+      dmSay(focus.label + " is no longer " + e.condition.name.toLowerCase());
+      await loadEffects();
+      await selectEncounter(id);
+    });
+    who.append(c);
+  }
+  who.append(conditionPicker(focus, id));
+
+  // 190. AND WHETHER THEY CAN ACT AT ALL, said loudly.
+  //
+  // Dave's cleric cast Bless while PARALYSED and nothing anywhere
+  // mentioned it. IT SAYS, IT DOES NOT REFUSE - 051 took that decision
+  // about turn order and `spent.rs` about the action budget, and it is
+  // right here for the same reason: a DM waving something through is
+  // normal, and the app knowing and keeping quiet is not.
+  //
+  // Beside the chips rather than on the buttons, because it is true of
+  // the creature and not of any one thing they might press.
+  const halted = conditionsOn(focus.character_id)
+    .find((e) => (state.halting || []).includes(e.condition.key));
+  if (halted) {
+    const stop = chip("cannot act · " + halted.condition.name.toLowerCase(), "no");
+    stop.title = halted.condition.said;
+    who.append(stop);
+  }
+
   // 062. THE THREE SLOTS, ticked by hand because nothing rolls for
   // them. The attack count above is spent by swinging and the action
   // by rolling; these three had no way to be recorded at all.
@@ -6455,11 +6594,21 @@ function paintFightResult(focus) {
       atLevel: ps.atLevel || null,
     });
     if (!got.ok) return dmSay(got.error, true);
-    dmSay(got.value.said);
+    // 187. AND WHAT IT LEFT ON THEM, which is the half a DM would
+    // otherwise have to spot on the chips.
+    dmSay(got.value.said + (got.value.condition
+      ? " · " + ps.target.label + " is " + got.value.condition.toLowerCase()
+      : ""));
     // SPENT, SO IT GOES. A second press would roll another save against
     // a spell that has already landed - 120's lesson, one click one
     // effect.
     state.pendingSave = null;
+    // 188. AND THE EFFECTS, because the save may have just put a
+    // CONDITION on somebody. Without this the chip does not appear
+    // until something else repaints - the row was written, the panel
+    // was stale, and the banner said "Luci is blinded" beside a header
+    // showing nothing.
+    await loadEffects();
     await loadRolls();
     await loadTargets();
     await selectEncounter(ps.encounterId);

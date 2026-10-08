@@ -1179,6 +1179,69 @@ pub fn resolve_spell_save(
         }
     }
 
+    // 187. AND WHAT A FAILED SAVE LEAVES ON THEM.
+    //
+    // HERE AND NOT AT THE CAST. `cast_spell` applies a spell's grants
+    // the moment it goes off, which is right for Bless and would
+    // PARALYSE SOMEBODY WHO MADE THEIR SAVE. The condition belongs
+    // where the outcome is known, and 158 split the spell in two for
+    // exactly this reason.
+    //
+    // ITS OWN EFFECT ROW, beside the spell's. Hold Person puts two
+    // things on the target: the spell, which is what the caster is
+    // concentrating on and what ends when they stop, and the
+    // condition, which is what the target is actually suffering. The
+    // panel was only ever showing the first.
+    //
+    // IT ENDS WHEN THE SPELL WOULD. The first cut gave it no deadline,
+    // on the argument that a second expiry would be the same fact in
+    // two places - and that was wrong in the only way that matters:
+    // NOTHING ELSE ENDED IT. Blindness/Deafness runs a minute and the
+    // chip sat on Luci until somebody clicked it.
+    //
+    // Both deadlines are written once, from one reading of
+    // `spellcast::lasts`, at the same instant. They cannot drift
+    // because neither is ever recomputed.
+    //
+    // WHAT THIS STILL DOES NOT DO is end the condition when the caster
+    // DROPS concentration early. The spell's own row goes and the
+    // condition keeps its deadline. That wants `drop_concentration` to
+    // know what it put on whom, which is a link neither row carries
+    // today - and a DM can click the chip. Said rather than hidden.
+    let mut left_on: Option<String> = None;
+    if !saved {
+        if let Some(c) = spell
+            .get("imposes")
+            .and_then(|v| v.as_str())
+            .map(|k| format!("{}{}", crate::conditions::PREFIX, k))
+            .as_deref()
+            .and_then(crate::conditions::of_key)
+        {
+            let now = crate::commands::effects::read_tick(&token, &target.game_id)?;
+            let ticks = match crate::spellcast::lasts(spell.get("duration").and_then(|v| v.as_str())) {
+                crate::spellcast::Lasts::Instant => None,
+                crate::spellcast::Lasts::Ticks(n) => Some(n),
+                crate::spellcast::Lasts::Indefinite => None,
+            };
+            crate::commands::effects::apply_inner(
+                &token,
+                &target.game_id,
+                &target_character_id,
+                &crate::conditions::key_for(c),
+                c.name,
+                ticks,
+                None,
+                "replace",
+                Some(&caster_character_id),
+                Some("spell"),
+                Some(&format!("from {}", name)),
+                &json!([]),
+                now,
+            )?;
+            left_on = Some(c.name.to_string());
+        }
+    }
+
     if let Some(enc) = encounter_id.as_deref().filter(|s| !s.is_empty()) {
         let mut act = json!({
             "game_id": target.game_id,
@@ -1215,6 +1278,7 @@ pub fn resolve_spell_save(
         "detail": rolled.detail,
         "saved": saved,
         "damage": took,
+        "condition": left_on,
         "said": format!(
             "{} rolled {} vs DC {} - {}{}",
             target.name,
@@ -1458,7 +1522,7 @@ fn one_spell_full(token: &str, game_id: &str, key: &str) -> Result<Value, String
             // `prof_bonus`, `character_name` and `special_text` each
             // existed unread for weeks. A column the query never asks
             // for does not exist as far as the engine is concerned.
-            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants,on_save,at_higher_dice"),
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants,on_save,at_higher_dice,imposes"),
             ("key", &format!("eq.{}", key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("order", "game_id.asc.nullslast"),

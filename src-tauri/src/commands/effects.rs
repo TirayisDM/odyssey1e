@@ -35,11 +35,60 @@ pub fn list_effects(state: State<AppState>, game_id: String) -> Result<Value, St
                 "stacks": e.stacks.as_str(),
                 "left": e.left(now),
                 "said": e.said(now),
+                // 187. AND WHETHER IT IS A CONDITION, decided here
+                // rather than by the screen comparing a prefix. The
+                // panel shows conditions as their own row of chips and
+                // everything else as the effects list it always was,
+                // and which pile a row belongs in is a rule.
+                "condition": crate::conditions::of_key(&e.key).map(|c| json!({
+                    "key": c.key,
+                    "name": c.name,
+                    "glyph": c.glyph,
+                    "said": crate::conditions::said(c, e.magnitude),
+                })),
             })
         })
         .collect();
 
     Ok(json!({ "tick": now, "effects": live }))
+}
+
+/// Which conditions stop a creature acting, so the screen can say so
+/// without holding its own copy of the list.
+///
+/// 190. THE SCREEN ASKS, IT DOES NOT KNOW. Five of the fifteen stop a
+/// turn and four of those five say it only by including the fifth -
+/// a frontend list would be five words that have to stay in step with
+/// `conditions::cannot_act`, and the day one drifts the warning stops
+/// firing for whichever condition was forgotten.
+#[tauri::command]
+pub fn halting_conditions() -> Result<Value, String> {
+    Ok(json!(crate::conditions::ALL
+        .iter()
+        .filter(|c| crate::conditions::cannot_act(&[crate::conditions::key_for(c)]).is_some())
+        .map(|c| c.key)
+        .collect::<Vec<&str>>()))
+}
+
+/// The conditions a DM may apply, as a list to build a picker from.
+///
+/// 187. OFF THE ENGINE, not a list typed into the screen. There are
+/// fifteen and they are closed - inventing a sixteenth on the frontend
+/// would put a state on somebody that no rule describes, and a word
+/// missing from the frontend's copy would be a condition nobody could
+/// apply.
+#[tauri::command]
+pub fn list_conditions() -> Result<Value, String> {
+    Ok(json!(crate::conditions::ALL
+        .iter()
+        .map(|c| json!({
+            "key": crate::conditions::key_for(c),
+            "name": c.name,
+            "glyph": c.glyph,
+            "does": c.does,
+            "said": crate::conditions::said(c, None),
+        }))
+        .collect::<Vec<Value>>()))
 }
 
 /// Put something on somebody.
@@ -219,6 +268,44 @@ pub(crate) fn end_one(token: &str, effect_id: &str, now: i64) -> Result<(), Stri
 /// is a record and not a bonus - and the grants come off the row
 /// rather than the catalogue, so what is running is what was true when
 /// it was cast.
+/// The condition keys running on somebody right now.
+///
+/// 189. THE SAME READ AS `grants_on` and deliberately a separate
+/// function: that one asks what somebody's effects ADD to a roll, this
+/// asks what STATE they are in. They answer different questions off
+/// one table, and folding them together would mean a caller that wants
+/// one paying for the other.
+pub(crate) fn conditions_on(
+    token: &str,
+    game_id: &str,
+    character_id: &str,
+) -> Result<Vec<String>, String> {
+    let now = read_tick(token, game_id)?;
+    let rows = supabase::rest_get(
+        token,
+        "effects",
+        &[
+            ("select", "key,started_at,expires_at"),
+            ("character_id", &format!("eq.{}", character_id)),
+            ("ended_at", "is.null"),
+        ],
+    )?;
+    let mut out = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        if let Some(at) = r.get("expires_at").and_then(|v| v.as_i64()) {
+            if crate::clock::expired(now, at) {
+                continue;
+            }
+        }
+        if let Some(k) = r.get("key").and_then(|v| v.as_str()) {
+            if crate::conditions::of_key(k).is_some() {
+                out.push(k.to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub(crate) fn grants_on(
     token: &str,
     game_id: &str,

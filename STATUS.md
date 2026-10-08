@@ -5798,7 +5798,181 @@ resolves against one creature and the DM rolls the rest by hand.
 It is bigger than the spell list: it needs a way to say WHO IS CAUGHT,
 and this app has no grid. Deliberately not attempted here.
 
+## Conditions - BUILT (187-190, conditions.rs)
+
+Dave: "build conditions - we will eventually hang these on character
+modals once we enable graphic elements. For now they can reside near
+the top of the character panel - icons with mouse over hints."
+
+**A condition is an EFFECT, not a grant.** 094 built that table for
+this without knowing it: its own comment names `poisoned` as an example
+key and a NULL expiry as "a condition a DM is tracking by hand".
+
+**WHY NOT A GRANT.** 100's vocabulary is for things that change a
+NUMBER, and `grants::parse` drops any row with neither value nor dice.
+"Blinded" is a bundle - cannot see, fails sight checks, attacks against
+have ADVANTAGE - and 5e is careful never to price advantage. Forcing it
+into a grant means inventing a number the book refuses to give, which
+is 158's and 183's refusal in a third place.
+
+**THE `cond.` PREFIX IS LOAD-BEARING.** Effect keys are spell keys, and
+the two share one table. It also means Hold Person puts TWO rows on a
+target: the spell, which is what the caster concentrates on and what
+ends when they stop, and the condition, which is what the target is
+actually suffering. The panel was only ever showing the first.
+
+**BOTH SPELLINGS ANSWER.** The prose here is British and the published
+list is American, so `cond.paralysed` and `cond.paralyzed` are the same
+condition. Writing one and reading back nothing is a silent miss.
+
+### 187. What a failed save leaves on you
+
+One column, `spells.imposes`, and 22 spells carry it. **Applied in
+`resolve_spell_save` and never at cast** - `cast_spell` applies grants
+the moment a spell goes off, which is right for Bless and would
+PARALYSE SOMEBODY WHO MADE THEIR SAVE. 158 split the spell in two for
+exactly this reason.
+
+**Two were drafted and taken out**, both caught by checking the cast
+type before applying rather than after:
+
+* **SLEEP** really does make creatures unconscious and has **no save** -
+  it is 5d8 hit points spent on the weakest first, which is why it is
+  `Utility`. `resolve_spell_save` will never run for it, and a column
+  nothing can read is a promise nothing keeps.
+* **SILENCE was simply wrong.** It makes an AREA soundless; it does not
+  deafen a creature. The rule was misremembered and the data would have
+  carried that into play.
+
+### 188. Three faults the first screenshot showed
+
+**THE CHIP NEVER APPEARED.** The row was written, the banner said "Luci
+is blinded", and the header showed nothing - the save handler refreshed
+rolls, targets and the encounter but **not effects**.
+
+**THE PICKER BLEW OUT THE LAYOUT.** A `<select>` sizes itself to its
+widest OPTION and "incapacitated" is a long word, so it took the whole
+card width and pushed the bonus/reaction/free boxes onto their own
+line.
+
+**CONDITIONS WOULD HAVE SHOWN TWICE** once the first was fixed - as a
+chip and in the general effects strip. A thing shown in two places is a
+thing somebody ends in one and then wonders why it is still there.
+
+**And one I got wrong in the design.** I gave the condition NO EXPIRY,
+arguing a second deadline would be the same fact in two places. That
+was wrong in the only way that matters: **nothing else ended it.**
+Blindness/Deafness runs a minute and the chip would have sat there
+until somebody clicked it. It takes the spell's duration now - both
+written once, from one reading of `lasts`, so neither can drift.
+
+STILL NOT DONE: dropping concentration early leaves the condition with
+its deadline. That wants `drop_concentration` to know what it put on
+whom, a link neither row carries.
+
+### 189. The line drawn in the wrong place
+
+Dave held Hold Person on a cleric and the slam that followed rolled
+`1d20+3 (normal)` for `1d6`.
+
+**187 refused to put conditions in `grants` because advantage is not a
+number - correct - and then concluded the engine should not APPLY
+advantage. That does not follow.** `dice::d20_formula` has taken "adv"
+since the beginning. Advantage is a WORD this engine already speaks.
+
+So `conditions::against` and `attacking_with` give both sides of it,
+and they combine by 5e's own cancellation: three reasons for advantage
+is still advantage, one of each cancels. A DM's disadvantage call still
+overrides a condition's advantage.
+
+**`crits_on_hit` is paralysed and unconscious only.** PRONE IS NOT ONE
+OF THEM - it gives advantage up close and nothing more, and it is the
+one people remember wrong. With no grid, the honest stand-in for
+"within 5 feet" is the attack's own mode: a slam is in reach by
+definition and a bowshot is not.
+
+### And two columns that lied about the dice beside them
+
+Checking the fix found both. **013's log is a record of what happened,
+and a column that disagrees with the dice next to it is worse than an
+absent one, because it is believed.**
+
+**THE MODE** was the caller's word, not the one that reached the dice -
+so the row read `2d20kh1+3 = 19 (normal)`, a line that contradicts
+itself.
+
+**THE FORMULA** was `resolved.formula`, the roll BEFORE 114's effect
+dice are appended. Every roll ever made under Bless, Guidance, Bane or
+Resistance recorded a formula missing the die that changed the result:
+
+    formula  1d20+5
+    detail   1d20 [18]  +5  1d4 [1]
+    total    24
+
+That one has been true since 114. Both now record what was rolled.
+
+### 190. It says, it does not refuse
+
+Luci cast Bless **while paralysed**. A paralysed creature is
+incapacitated - no actions, no reactions - and nothing anywhere
+mentioned it.
+
+`conditions::cannot_act` names the five: incapacitated, paralysed,
+petrified, stunned, unconscious. **Four of those say it only by
+INCLUDING the fifth** in their own text, which is why they are a list
+and not a derivation - nothing records which conditions contain which.
+
+The card shows `cannot act · paralysed` beside the chips. **It says, it
+does not refuse** - 051 took that decision about turn order and
+`spent.rs` about the action budget, and it is right here for the same
+reason: a DM waving something through is normal, and the app knowing
+and keeping quiet is not.
+
+THE SCREEN ASKS WHICH CONDITIONS HALT A TURN rather than holding its
+own list, so the warning cannot stop firing for a word somebody forgot
+to copy across.
+
+### What conditions still do not do
+
+**NOTHING APPLIES THE REST OF A CONDITION.** Speed 0, auto-failing
+Strength and Dexterity saves, being unable to speak - all of it is text
+in the tooltip for a DM to apply. Only the d20 lean and the auto-crit
+are mechanised, because those are the two the engine can express
+without inventing a number.
+
+**CONDITIONS FROM AN ATTACK SPELL ARE NOT WIRED.** There is no "on a
+hit" half to hang them on.
+
+**EXHAUSTION HAS A LEVEL AND NOTHING READS IT.** `magnitude` holds it
+and `said` prints it; the six tiers of penalty are the DM's.
+
+1046 tests pass, up 12.
+
 ## Pick up here
+
+### FOR THE DESKTOP, PULLING 2026-10-08
+
+A long laptop day and most of it reached the schema. **Pull before
+touching anything**, because the code and the database have moved
+together and either half alone is broken:
+
+| migration | what moved |
+|---|---|
+| 177 | `character_prayers` is now **`character_spells`**, and both `instantiate_*` functions were recreated |
+| 183 | `cast_type` has a fifth value, **`Auto`** |
+| 185 | `spells.at_higher_dice` |
+| 186 | 30 spells carry it |
+| 187 | `spells.imposes`, and 22 spells carry it |
+
+**AND THE RUST MOVED UNDER IT.** `prayers.rs` is `casting.rs`,
+`commands/prayers.rs` is `commands/casting.rs`, and the four commands
+are `list_casting`, `prepare_spell`, `forget_spell`, `cast_spell`. A
+checkout from before 176 pointed at this database will fail on the
+table that no longer exists.
+
+The check this file has asked for since 115, run on the laptop before
+pushing: git and the database agree, newest four on both sides are 183,
+185, 186, 187. Nothing applied without a file.
 
 **Be clear about what is and is not done.** The foundation is square
 and the combat loop runs: the access model, the dice, the sheet

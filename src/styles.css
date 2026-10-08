@@ -1019,3 +1019,17 @@ button.wide{width:100%}
    a qualifier on it. */
 .castpair{display:inline-flex;align-items:center;gap:2px}
 .castslot{font-size:11px;padding:1px 2px}
+
+/* 187. Conditions on the card header, beside AC and hit points.
+   The glyph is a placeholder until the graphics land, so the chip is
+   small and the title carries the meaning. Clickable, because a
+   condition nobody can clear is worse than none at all. */
+.chip.cond{cursor:pointer;font-size:13px;padding:1px 5px;line-height:1.1}
+.chip.cond:hover{filter:brightness(1.35)}
+/* 188. WIDTH PINNED, because a <select> sizes itself to its widest
+   OPTION and "incapacitated" is a long word. Unconstrained it took the
+   whole card width and pushed the bonus/reaction/free boxes onto their
+   own line - the header reflowed around a control that is the least
+   important thing in it. */
+.condpick{font-size:11px;padding:1px 2px;margin-left:4px;
+  width:6.5rem;max-width:6.5rem;flex:0 0 auto}

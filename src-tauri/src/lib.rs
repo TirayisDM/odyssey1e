@@ -32,6 +32,7 @@ mod creature_io;
 mod currency;
 mod death;
 mod dice;
+mod conditions;
 mod effects;
 mod encounter;
 mod equipment;
@@ -819,7 +820,52 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
     // cannot record what it was for.
     let target = parse_target(target_value, target_kind, target_label)?;
 
-    let resolved = character::resolve_request(sheet, &request, &mode);
+    // 189. WHAT THE TARGET'S CONDITION DOES TO THIS ROLL.
+    //
+    // Dave held Hold Person on a cleric and the slam that followed
+    // rolled `1d20+3 (normal)`. 187 built the conditions and decided
+    // the engine should not apply advantage - the reasoning was that
+    // advantage is not a number and cannot be priced, which is true,
+    // and the conclusion did not follow. `dice::d20_formula` has taken
+    // "adv" since the beginning: advantage is a WORD this engine
+    // already speaks.
+    //
+    // ONLY FOR AN ATTACK. A condition on the person you are making an
+    // Insight check about does not lean the check - 5e attaches these
+    // to attack rolls, and `resolve_request` has to be asked twice
+    // because the mode is baked into the formula it builds.
+    //
+    // A FAILURE TO READ THEM DOES NOT STOP THE SWING, the same bargain
+    // `effect_grants` makes below: the lean is the smaller fact, and
+    // refusing to roll because the network was slow would block the
+    // table.
+    let probe = character::resolve_request(sheet, &request, &mode);
+    let target_conditions: Vec<String> = match (&probe.attack, target_character_id.as_deref()) {
+        (Some(_), Some(on)) if !on.is_empty() => {
+            commands::effects::conditions_on(&session.access_token, &sheet.game_id, on)
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    // AND THE ROLLER'S OWN. A blinded swing has disadvantage whoever
+    // it is aimed at, and a poisoned one does too - the same rule from
+    // the other side, and leaving it for later is how the two halves
+    // drift. They combine by 5e's cancellation: a blinded attacker
+    // against a paralysed target rolls STRAIGHT, because advantage and
+    // disadvantage cancel however many of each there are.
+    let own_conditions: Vec<String> = match (&probe.attack, sheet.character_id.as_deref()) {
+        (Some(_), Some(me)) => {
+            commands::effects::conditions_on(&session.access_token, &sheet.game_id, me)
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    let leaned = conditions::Lean::of_mode(&mode)
+        .and(conditions::against(&target_conditions))
+        .and(conditions::attacking_with(&own_conditions))
+        .as_mode();
+
+    let resolved = character::resolve_request(sheet, &request, leaned);
 
     // 111. WHAT THIS ROLL MAY BE AIMED AT. The target picker offers a
     // creature and a creature's number is their armour class, whatever
@@ -878,13 +924,31 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
     let mut damage_total: Option<i64> = None;
 
     let role = if resolved.attack.is_some() { "to_hit" } else { "check" };
+    // 189. THE ROW RECORDS WHAT WAS ROLLED, which it did not before,
+    // in two different ways.
+    //
+    // THE MODE was the caller's word and not the one that reached the
+    // dice. A paralysed target made the slam roll `2d20kh1+3` and the
+    // row said `(normal)` beside it - a line that contradicts itself,
+    // and the only place a reader could have caught the lean working
+    // was by reading the formula.
+    //
+    // THE FORMULA was `resolved.formula`, which is the roll BEFORE
+    // 114's effect dice are appended - so a save under Bless recorded
+    // `1d20+5` while the detail said `1d20 [18] +5 1d4 [1]` and the
+    // total said 24. That one is older than today and the same shape:
+    // the dice told the truth and the column beside them did not.
+    //
+    // 013'S LOG IS A RECORD OF WHAT HAPPENED. A column that disagrees
+    // with the dice it sits next to is worse than an absent one,
+    // because it is believed.
     let mut rolls = vec![roll_row(
         sheet,
         session,
         &request,
         &resolved.label,
-        &mode,
-        &resolved.formula,
+        leaned,
+        &formula,
         &first,
         Some(thresholds),
         line,
@@ -897,7 +961,15 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
     // leaves the modifier alone — 1d6+1 becomes 2d6+1, never 2d6+2.
     if let Some(a) = &resolved.attack {
         if attack::rolls_damage(verdict.as_ref().map(|v| v.success)) {
-            let crit = first.outcome == Some(dice::Outcome::Crit);
+            // 189. AND A HIT ON SOMETHING HELPLESS IS A CRIT.
+            // Paralysed and unconscious both say "any attack that hits
+            // is a critical hit if the attacker is within 5 feet", and
+            // with no grid the honest stand-in for within-5-feet is
+            // the attack's own mode - a slam is in reach by
+            // definition and a bowshot is not.
+            let helpless = a.mode == equipment::Mode::Melee
+                && conditions::crits_on_hit(&target_conditions);
+            let crit = first.outcome == Some(dice::Outcome::Crit) || helpless;
             let formula = if crit {
                 dice::double_dice(&a.damage)?
             } else {
@@ -1496,6 +1568,8 @@ pub fn run() {
             commands::casting::spend_spell_slot,
             commands::casting::restore_spell_slot,
             commands::effects::list_effects,
+            commands::effects::list_conditions,
+            commands::effects::halting_conditions,
             commands::effects::apply_effect,
             commands::effects::end_effect,
             commands::time::game_clock,

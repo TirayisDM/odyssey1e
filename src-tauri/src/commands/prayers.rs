@@ -99,7 +99,7 @@ pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Valu
     let abil = sheet.ability_mod(&caster.ability);
     let pb = sheet.proficiency_bonus();
 
-    let chosen = load_chosen(&token, &character_id)?;
+    let chosen = load_chosen(&token, &character_id, Some(caster.source))?;
     let of = |want: &str| -> Vec<String> {
         chosen
             .iter()
@@ -169,7 +169,7 @@ pub fn prepare_prayer(
         .unwrap_or_default();
     let spell_level = spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0);
 
-    let chosen = load_chosen(&token, &character_id)?;
+    let chosen = load_chosen(&token, &character_id, Some(caster.source))?;
     // 150. WHAT THEY MAY REACH FOR - the cleric list, or this wizard's
     // own book. See prayers::may_reach.
     prayers::may_reach(
@@ -269,7 +269,7 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
     let abil = sheet.ability_mod(&caster.ability);
     let pb = sheet.proficiency_bonus();
 
-    let chosen = load_chosen(&token, &character_id)?;
+    let chosen = load_chosen(&token, &character_id, Some(caster.source))?;
     if chosen.is_empty() {
         return Ok(json!([]));
     }
@@ -396,7 +396,7 @@ pub fn cast_prayer(
         return Err(format!("{} does not cast spells", sheet.name));
     };
 
-    let held = load_chosen(&token, &character_id)?;
+    let held = load_chosen(&token, &character_id, Some(caster.source))?;
     if !held.iter().any(|(k, _)| *k == spell_key) {
         return Err("they do not have that prepared".to_string());
     }
@@ -1135,7 +1135,11 @@ fn hp_state(token: &str, character_id: &str) -> Result<(i64, i64), String> {
     Ok((hp_max, summed))
 }
 
-fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, String)>, String> {
+fn load_chosen(
+    token: &str,
+    character_id: &str,
+    source: Option<prayers::Source>,
+) -> Result<Vec<(String, String)>, String> {
     let rows = supabase::rest_get(
         token,
         "character_prayers",
@@ -1144,7 +1148,7 @@ fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, String)>,
             ("character_id", &format!("eq.{}", character_id)),
         ],
     )?;
-    Ok(rows
+    let mut out: Vec<(String, String)> = rows
         .as_array()
         .unwrap_or(&Vec::new())
         .iter()
@@ -1157,7 +1161,126 @@ fn load_chosen(token: &str, character_id: &str) -> Result<Vec<(String, String)>,
                     .to_string(),
             ))
         })
-        .collect())
+        .collect();
+
+    // 172. AND WHAT IS WRITTEN IN THE BOOKS THEY ARE CARRYING.
+    //
+    // A wizard's book is not rows on the character any more - it is a
+    // physical object with writing in it, so the spells they may
+    // prepare from depend on what they have in hand. Everything that
+    // asks what a caster holds comes through here, which is why this is
+    // the only place that had to learn it: `may_reach` is unchanged and
+    // still just asks whether the state is `book`.
+    //
+    // ONLY FOR A BOOK CASTER. A cleric reaches the whole list every day
+    // and would pay three queries for an answer that cannot change what
+    // they may do.
+    //
+    // `character_prayers` WINS A TIE. A spell already prepared is
+    // prepared, whatever the book says; adding `book` beside it would
+    // make `find` return whichever came first.
+    if source == Some(prayers::Source::Book) {
+        for key in in_books(token, character_id)? {
+            if !out.iter().any(|(k, _)| *k == key) {
+                out.push((key, "book".to_string()));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Every spell written in a book this character is carrying.
+///
+/// 172. A BOOK IN HAND OR IN A PACK, and nothing further. 038 caps
+/// container depth at one, so those two are every place a carried
+/// object can be - there is no third level to walk.
+///
+/// A SCROLL DOES NOT COUNT, which is the rule and not an oversight: a
+/// wizard copies a scroll into the book and prepares from the book. The
+/// test is `items.spell_levels`, which only a book has.
+///
+/// THREE QUERIES, PAID BY WIZARDS. The count to watch, and the same
+/// bargain `load_sheet` makes for its prepared list: a cleric, a
+/// fighter and every creature in the bestiary pay none of it.
+fn in_books(token: &str, character_id: &str) -> Result<Vec<String>, String> {
+    // Who they are as a holder - 031.
+    let me = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "entity_id"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let Some(entity) = me
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("entity_id"))
+        .and_then(|v| v.as_str())
+    else {
+        return Ok(Vec::new());
+    };
+
+    // Anything they carry that is itself a holder: a pack, a chest.
+    let carried = supabase::rest_get(
+        token,
+        "objects",
+        &[
+            ("select", "entity_id"),
+            ("holder_id", &format!("eq.{}", entity)),
+            ("entity_id", "not.is.null"),
+        ],
+    )?;
+    let mut holders = vec![entity.to_string()];
+    for r in carried.as_array().unwrap_or(&Vec::new()) {
+        if let Some(e) = r.get("entity_id").and_then(|v| v.as_str()) {
+            holders.push(e.to_string());
+        }
+    }
+
+    // THE WRITING, WITH THE THING IT IS WRITTEN ON. 153's lesson: the
+    // relationship is named even though `scribed_spells` has only one
+    // foreign key to `objects` today, because "only one today" is what
+    // 139 falsified for `encounter_actors`.
+    let rows = supabase::rest_get(
+        token,
+        "scribed_spells",
+        &[
+            (
+                "select",
+                "spell_key,objects!scribed_spells_object_id_fkey!inner(item_key,holder_id)",
+            ),
+            ("objects.holder_id", &format!("in.({})", holders.join(","))),
+        ],
+    )?;
+
+    // Which items are books. Small, and the only honest way to tell a
+    // book from a scroll without hardcoding four keys that live in the
+    // catalogue.
+    let books = supabase::rest_get(
+        token,
+        "items",
+        &[("select", "key"), ("spell_levels", "not.is.null")],
+    )?;
+    let book_keys: std::collections::HashSet<String> = books
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|r| r.get("key")?.as_str().map(String::from))
+        .collect();
+
+    let mut out = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let on = r.get("objects").and_then(|o| o.get("item_key")).and_then(|v| v.as_str());
+        let Some(on) = on else { continue };
+        if !book_keys.contains(on) {
+            continue;
+        }
+        if let Some(k) = r.get("spell_key").and_then(|v| v.as_str()) {
+            out.push(k.to_string());
+        }
+    }
+    Ok(out)
 }
 
 /// One catalogue row with everything casting needs.

@@ -1472,6 +1472,10 @@ pub fn run() {
             commands::characters::rename_character,
             commands::characters::set_class_level,
             commands::characters::remove_class,
+            // 172. The spellbook.
+            commands::books::list_book,
+            commands::books::scribe_spell,
+            commands::books::erase_spell,
             commands::prayers::list_spells,
             commands::prayers::list_prayers,
             commands::prayers::prepare_prayer,

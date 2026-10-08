@@ -5235,7 +5235,57 @@ standard book holds ten and a wizard who wants more buys another book.
 Reuses the column rather than adding a second idea of capacity, and
 makes "spell book(s)" plural for a reason.
 
-### THE FORK: where do a book's contents live?
+### TAKEN (172): contents belong to the OBJECT
+
+`scribed_spells(object_id, spell_key, scribed_at)`. One row per spell
+written in one book. **ON DELETE CASCADE** - burning the book burns what
+is in it. **No `game_id`**: RLS reads it through the object, so a book's
+contents are exactly as reachable as the book.
+
+**Writing is not gear, which is why this is not an `objects` row.** 027
+wrote `spell_book accepts {spell}` and meant a spell to be an object in
+a container. The machinery is real and 030's entities would carry it -
+but the operations are wrong. An object can be dropped, equipped,
+stacked, split and sold on its own. A page can be written, erased and
+copied, and that is the whole list. Modelling writing as gear invites
+every operation that makes no sense and then needs a guard against each.
+
+**`may_reach` did not change.** It already takes `held` and lets the
+caller decide. The only seam that moved is `load_chosen`, which all five
+callers go through - it now unions `character_prayers` with what is
+written in books the character carries, and only for a Book caster. A
+cleric pays none of it.
+
+**A book in hand or in a pack, and nothing further.** 038 caps container
+depth at one, so those two are every place a carried object can be. **A
+scroll does not count** - a wizard copies a scroll into the book and
+prepares from the book; the test is `items.spell_levels`, which only a
+book has.
+
+Commands: `list_book`, `scribe_spell`, `erase_spell`. `scribe_spell`
+refuses before it spends - a scribing that takes the ink and then finds
+the book full has cost somebody money for nothing.
+
+**The clock is not advanced.** `scribe::to_copy` says how many hours and
+the answer reports them, but moving the clock expires effects and ends
+concentration. That belongs to a DM saying "you spend the afternoon",
+not to a button.
+
+Verified live and rolled back: a Mage's Spell Book holding Fireball,
+Magic Missile and Fire Bolt reads **5 of 30 levels used** (3 + 1 + a
+cantrip at 1), and all three are reachable through the holder chain from
+a book sitting in a backpack.
+
+### What is still missing
+
+**Nothing writes a scroll yet.** `scribe::to_scroll` exists and
+`scroll_blank` is in the catalogue, but there is no command to make one
+and no way to cast from one. A scroll IS storable now - it is the same
+table with one row - so this is a command, not a design question.
+
+**No UI.** The three commands are registered and nothing calls them.
+
+### The fork as it stood (kept for the record)
 
 **This is the decision, and it is not 50/50 - the current model cannot
 do what was asked.**
@@ -5268,9 +5318,8 @@ carrying". `character_prayers` keeps `prepared` and `cantrip`.
 What it buys, all from the one table: found books, stolen books,
 lending, a second book, real capacity, and scrolls.
 
-**Not taken, because it moves where a wizard's spells live and that is a
-one-way door.** Everything above is useful under either answer, which is
-why it was built first.
+**Taken in 172** - see above. Everything in 170 and 171 was useful
+under either answer, which is why it was built first.
 
 ## Pick up here
 

@@ -77,6 +77,7 @@
 use crate::supabase::{AppState, Session};
 use tauri::State;
 
+pub mod books;
 pub mod characters;
 pub mod containers;
 pub mod creatures;

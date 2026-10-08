@@ -5567,6 +5567,173 @@ as the question 170 found rather than the state of things.
 
 1001 tests pass, up 4 from 997.
 
+## A caster can take a turn in a fight - BUILT (179-185)
+
+One fight found all of this. Dave ran fourteen rounds with a Lich, a
+wizard and a cleric, and **one hit point changed hands in the first
+ten** - a slam did it. Nine spells were cast and none of them touched
+anybody. Every item below came out of watching that.
+
+### 179. The encounter had no way to cast
+
+022 settled that a monster IS a character and there is no monster
+branch. The two screens disagreed with it: casting lived on the
+player's panel keyed to `state.characterId` - whoever you are RUNNING,
+not whoever's turn it is - and the encounter only ever had
+`attackRow`. **A Lich holding 25 prepared spells was a slam attack**,
+and reaching them meant leaving the fight to "become" the Lich.
+
+`castRow(actor, encounterId)` is a sibling of `attackRow`: same
+signature, same two mount points, same target picker. No Rust was
+needed - `turn_order` already selected `character_id`.
+
+**FOLDED, and that is the whole reason it is not inline.** An attack
+list is two to five rows; a prepared list is one to twenty-five.
+Tarren's single Magic Missile would read fine among the attacks and
+the Lich's twenty-five would bury them.
+
+### 181. It shipped without the second half
+
+158 splits a save spell in two: casting prints the DC, and
+`resolve_spell_save` rolls the save and applies what lands. The
+player's panel offers that as a prompt. **179 did not**, so Fireball
+printed "DEX save DC 16, 8d6" and there was no way to finish it.
+
+The first fix drew the prompt into a node and then called
+`selectEncounter`, which repaints the card - **so it existed for about
+a frame.** State that matters, kept in a node something else owns.
+
+It lives in `state.pendingSave` now and is drawn by
+`paintFightResult`, which was Dave's suggestion and is the better
+place: that box already says what the creature just did, and an
+unrolled save is the unfinished part of exactly that.
+
+### 180 and 182. The strip could not say a caster had acted
+
+Two faults in the same badge, found a round apart.
+
+**`swingText` prints ATTACKS**, and three of the four badge sites used
+it. Tarren cast Magic Missile twice in round 10 and the strip read
+`0/1`. Worse, the card's chip was gated on `attacks || fowed > 1`, so
+a wizard who had cast twice got **no chip at all** on the panel a DM
+reads while deciding whether they have gone.
+
+Then, with the count fixed, the Lich read `acted 2` for one Fireball
+and one forced DEX save. **`spent::this_round` counts EVERYTHING into
+`actions`** - attacks, checks, death saves, and a save somebody else
+forced on you. `other` is the one that means *spent the action*.
+
+Both are one rule in one place now, `spentText`. The wording had been
+written out longhand at four sites and **only one of the four was
+right** - which is how the other three came to be wrong.
+
+`spendTitle` had said `0 attacks of 1 · 1 other action` the whole
+time. **The tooltip was right while the badge was wrong**, which is how
+it went unseen.
+
+### 183. A spell that simply lands
+
+`cast_spell` has ONE route to a hit point - the `Heal` branch 156
+built. Everything else goes through the Attack path's to-hit or 158's
+`resolve_spell_save`. **Magic Missile has neither**, by its own text:
+"no attack roll and no save, which is why this is not an Attack." So
+it sat in `Utility` and **had never dealt damage in its life**. Dave
+cast it five times.
+
+`cast_type` answers one question - how does this resolve - and had
+four answers. "It simply lands" is a fifth answer to the same
+question, so it is a value and not a new column.
+
+**WHY NOT INFER IT** from "has dice, no save, not an Attack": nine
+Utility spells carry dice and **eight must not fire at cast time** -
+Bless's d4 is a bonus somebody adds, Glyph and Forbiddance trigger
+later, Fire Shield answers a melee hit, Faithful Hound and Arcane Hand
+strike on their own. A rule guessed from the shape of the columns
+would have damaged somebody with Bless.
+
+The branch is the mirror of the heal above it: same roll, same
+`write_action`, opposite sign, role `damage`. **One rename fell out of
+it**: that branch wrote into `healed_said`, returned as `"healed"`, so
+the response would have carried "7 damage" under a key called healed -
+the same lie as `wis_mod` carrying Intelligence, on the same day it
+was removed. It is `moved` now.
+
+### 184. A correct refusal that looked like a broken button
+
+Tarren spent all four first-level slots, so Magic Missile was greyed
+with "no level 1 slots left" - **in a tooltip**. The player's panel has
+printed it as text since 110. It is on the level line now, once per
+level rather than once per spell, and the reasons are COMPARED as
+strings, never parsed: reading meaning out of engine text would be the
+screen deciding a rule it was handed.
+
+### 185. What another slot level buys
+
+`at_level` has picked which slot gets SPENT since 107. Nothing scaled
+what the spell DOES, and **every caller passed null**, so the
+parameter had one value in practice. Tarren had three third-level
+slots free and could not cast a first-level spell.
+
+**Upcasting is five rules and only one is arithmetic:**
+
+| shape | example |
+|---|---|
+| more dice | Fireball +1d6, Magic Missile a whole DART at 1d4+1 |
+| more targets | Bless, Hold Person |
+| longer | Mass Suggestion - 10 days at 7th, a year at 9th |
+| wider | Confusion - 5 feet a level |
+| bigger | Conjure Elemental - a higher CR |
+
+`at_higher_dice` is the first and nothing else. **It is a formula, not
+a number**, which is exactly why it could not be inferred from `dice`:
+Fireball's extra is a bare die and Magic Missile's is a die AND a plus
+one. `dice::add_formula` merges terms by face, so `3d4+3` and two
+darts is `5d4+5` rather than a string nobody can read. Keep terms are
+refused the way `double_dice` refuses them.
+
+**A broken column understates rather than failing.** The column is
+ours; a typo should cost damage, not stop a cast in the middle of a
+fight.
+
+**WHICH SLOTS COULD CARRY IT is the engine's answer** - `castable`
+returns `levels` - because that is the rule deciding whether somebody
+can act at all.
+
+**One gap closed before it shipped:** a save spell rolls its damage in
+`resolve_spell_save`, not at the cast. Fireball upcast to 5th would
+have shown **10d6 on the card and rolled 8d6** - the card and the roll
+disagreeing, which is the one thing 154 built `spellcast::cast` to
+prevent. The chosen level now travels with the save prompt on both
+panels and both callers scale through one function.
+
+### Verified in the fight, not on the screen
+
+Round 14, read out of `actions` and `hp_events`:
+
+    Magic Missile — 5d4+5    5d4+5 = 17 [damage]    Lich 0001 -17
+
+The picker, `at_level`, the scaled formula on the card, the same
+formula rolled, the damage applied, the right creature. And round 13
+the other way: `1d20+0 = 11 [check]`, missed DC 16, `8d6 = 19
+[damage]`, `Tarren -19`.
+
+### What is deliberately not done
+
+**TWO SPELLS CARRY `at_higher_dice`** - Magic Missile and Fireball, the
+two fought with. Roughly sixty more have a "+NdN per slot level"
+rider. **Filling them from that rider text is the guess 183 refused**:
+the riders are prose this project wrote, and parsing them to populate
+a rules column would make a typo in a sentence into a damage bug. They
+go in checked against the published list, a level at a time, the way
+161-167 filled the catalogue.
+
+**Upcasting that buys targets, duration or area is still the DM's**,
+and the rider says so on the card. So is splitting Magic Missile's
+darts between targets - the engine takes one target, and `3d4+3`
+describes three darts at one creature.
+
+1023 tests pass, up 22.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

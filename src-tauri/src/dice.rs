@@ -426,6 +426,98 @@ pub fn roll_formula_with<R: Roller>(
 /// Not called yet - the attack resolver applies it when `Outcome::Crit`
 /// comes back. See `Thresholds::new`.
 #[allow(dead_code)]
+/// Add `times` copies of `extra` onto `base`, as one formula.
+///
+/// 185. WHAT ANOTHER SLOT LEVEL BUYS. Fireball at 5th is 8d6 plus two
+/// lots of 1d6; Magic Missile at 3rd is 3d4+3 plus two lots of 1d4+1.
+/// Both end up as ONE formula - "10d6", "5d4+5" - because the card
+/// shows a formula and the roll has to match what it shows.
+///
+/// TERMS ARE MERGED BY FACE, not concatenated. "3d4+3" plus "1d4+1"
+/// twice is 5d4+5 and not "3d4+3+1d4+1+1d4+1": the same roll, and the
+/// second is unreadable on a card and unparseable by anything that
+/// wants to know how many dice are involved.
+///
+/// KEEP TERMS ARE REFUSED, as `double_dice` refuses them. "4d6kh3"
+/// scaled is not a question this has an answer to, and guessing would
+/// be worse than saying so.
+///
+/// `times` OF ZERO RETURNS THE BASE untouched, which is the ordinary
+/// case - a spell cast at its own level is not upcast at all.
+pub fn add_formula(base: &str, extra: &str, times: i64) -> Result<String, String> {
+    if times <= 0 {
+        return Ok(base.trim().to_string());
+    }
+
+    // faces -> count, and the flat part on its own. A BTreeMap so the
+    // output is ordered by die size rather than by hash, which keeps
+    // "2d4+1d6" from swapping ends between two calls.
+    let mut dice: std::collections::BTreeMap<u32, i64> = std::collections::BTreeMap::new();
+    let mut flat: i64 = 0;
+
+    let mut take = |formula: &str, mult: i64| -> Result<(), String> {
+        let clean: String = formula
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            .to_lowercase();
+        if clean.is_empty() {
+            return Err("Empty formula".to_string());
+        }
+        for raw in clean.replace('-', "+-").split('+').filter(|t| !t.is_empty()) {
+            let (neg, term) = match raw.strip_prefix('-') {
+                Some(rest) => (true, rest),
+                None => (false, raw),
+            };
+            if term.is_empty() {
+                return Err(format!("Bad term: \"{}\"", raw));
+            }
+            let sign = if neg { -1 } else { 1 };
+            if let Some(d) = parse_dice_term(term) {
+                if d.keep.is_some() {
+                    return Err(format!("Cannot scale a keep term: \"{}\"", term));
+                }
+                *dice.entry(d.faces).or_insert(0) += sign * mult * i64::from(d.count);
+            } else if term.bytes().all(|c| c.is_ascii_digit()) {
+                let n: i64 = term.parse().map_err(|_| format!("Bad term: \"{}\"", term))?;
+                flat += sign * mult * n;
+            } else {
+                return Err(format!("Bad term: \"{}\"", term));
+            }
+        }
+        Ok(())
+    };
+
+    take(base, 1)?;
+    take(extra, times)?;
+
+    // Largest die first, which is how a spell writes itself: 8d6 before
+    // any d4s, and the flat part last.
+    let mut out = String::new();
+    for (faces, count) in dice.iter().rev() {
+        if *count == 0 {
+            continue;
+        }
+        if !out.is_empty() && *count > 0 {
+            out.push('+');
+        }
+        if *count < 0 {
+            out.push('-');
+        }
+        out.push_str(&format!("{}d{}", count.abs(), faces));
+    }
+    if flat != 0 {
+        if flat > 0 && !out.is_empty() {
+            out.push('+');
+        }
+        out.push_str(&flat.to_string());
+    }
+    if out.is_empty() {
+        out.push('0');
+    }
+    Ok(out)
+}
+
 pub fn double_dice(formula: &str) -> Result<String, String> {
     let clean: String = formula
         .chars()
@@ -500,6 +592,56 @@ pub fn d20_formula(modifier: i64, mode: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------- 185. what another slot level buys ---------- */
+
+    #[test]
+    fn fireball_at_a_higher_slot_is_more_d6() {
+        // 8d6 base, 1d6 a level. Cast at 5th from 3rd is two levels up.
+        assert_eq!(add_formula("8d6", "1d6", 2).unwrap(), "10d6");
+    }
+
+    #[test]
+    fn magic_missile_scales_the_flat_part_too() {
+        // A WHOLE DART, which is 1d4+1 and not a bare die - the thing
+        // that made this a column rather than a number.
+        assert_eq!(add_formula("3d4+3", "1d4+1", 1).unwrap(), "4d4+4");
+        assert_eq!(add_formula("3d4+3", "1d4+1", 3).unwrap(), "6d4+6");
+    }
+
+    #[test]
+    fn at_its_own_level_nothing_is_added() {
+        // The ordinary case. Not an error and not a rebuild - the same
+        // string back.
+        assert_eq!(add_formula("8d6", "1d6", 0).unwrap(), "8d6");
+        assert_eq!(add_formula("3d4+3", "1d4+1", -1).unwrap(), "3d4+3");
+    }
+
+    #[test]
+    fn terms_merge_by_face_rather_than_piling_up() {
+        // "3d4+3+1d4+1" is the same roll and unreadable on a card.
+        assert_eq!(add_formula("2d8", "2d8", 1).unwrap(), "4d8");
+    }
+
+    #[test]
+    fn different_dice_keep_both_terms_largest_first() {
+        assert_eq!(add_formula("2d4", "1d6", 1).unwrap(), "1d6+2d4");
+    }
+
+    #[test]
+    fn a_keep_term_is_refused_rather_than_guessed() {
+        // `double_dice` refuses these for the same reason: scaling
+        // "4d6kh3" has no obvious answer, and inventing one is worse
+        // than saying so.
+        assert!(add_formula("4d6kh3", "1d6", 1).is_err());
+        assert!(add_formula("1d6", "4d6kh3", 1).is_err());
+    }
+
+    #[test]
+    fn rubbish_is_refused() {
+        assert!(add_formula("", "1d6", 1).is_err());
+        assert!(add_formula("8d6", "banana", 1).is_err());
+    }
 
     fn roll(formula: &str, dice: &[i64]) -> RollResult {
         roll_as(formula, dice, Thresholds::STANDARD)

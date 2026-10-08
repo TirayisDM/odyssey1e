@@ -67,10 +67,77 @@ impl Stance {
 /// What a spell's `cast_type` says about which way it points.
 pub fn stance(cast_type: &str) -> Stance {
     match cast_type {
-        "Attack" | "Save" => Stance::Offensive,
+        "Attack" | "Save" | "Auto" => Stance::Offensive,
         "Heal" => Stance::Defensive,
         _ => Stance::Neutral,
     }
+}
+
+/// Whether this spell's dice land on the target with no roll by either
+/// side.
+///
+/// 183. THE FIFTH SHAPE, AND MAGIC MISSILE IS THE ONLY ONE. The four
+/// words said how a spell resolves: `Attack` rolls to hit, `Save` lets
+/// the target resist, `Heal` restores, `Utility` does nothing to hit
+/// points at the moment of casting. Magic Missile is none of them - its
+/// own text says "no attack roll and no save, which is why this is not
+/// an Attack" - so it was filed `Utility`, and `cast_spell` has exactly
+/// one route to a hit point: the `Heal` branch.
+///
+/// SO IT HAS NEVER DEALT DAMAGE. Dave cast it five times across four
+/// rounds and nothing moved. 156 wrote the same sentence about healing
+/// - "every route to `hp_events` ran through `resolved.attack` and a
+/// heal is not an attack" - and fixed it for one cast type. This is
+/// that fault one cast type over.
+///
+/// A FIFTH VALUE ON AN EXISTING AXIS, not a new column. `cast_type`
+/// already answers "how does this resolve", and "it simply lands" is an
+/// answer to that question rather than a new question.
+///
+/// WHY NOT INFER IT from dice with no save and no attack: nine Utility
+/// spells carry dice and eight of them must NOT fire at cast time -
+/// Bless's 1d4 is a bonus somebody adds to a roll, Glyph of Warding and
+/// Forbiddance trigger later, Fire Shield answers a melee hit, Faithful
+/// Hound and Arcane Hand strike on their own. Guessing from the shape
+/// of the columns would damage somebody with Bless.
+pub fn lands_automatically(cast_type: &str) -> bool {
+    cast_type == "Auto"
+}
+
+/// The dice this spell rolls when cast with a slot of `at_level`.
+///
+/// 185. THE SLOT YOU SPEND AND THE DICE YOU ROLL ARE TWO QUESTIONS.
+/// `at_level` has picked the slot since 107; this is the other half.
+/// `at_higher_dice` is what one extra level buys, as a formula, and
+/// NULL means a bigger slot buys no extra dice - true for most of the
+/// catalogue, where the rider promises targets or duration instead.
+///
+/// A CANTRIP IS NEVER UPCAST. Its dice climb with the CASTER's level,
+/// not with a slot, and it costs no slot at all - so level 0 returns
+/// the base whatever it is handed.
+///
+/// DOWNCASTING IS NOT A THING. A slot lower than the spell cannot cast
+/// it, which `may_spend_slot` already refuses; if one arrives here it
+/// scales by zero rather than subtracting dice.
+pub fn upcast_dice(
+    dice: Option<&str>,
+    at_higher: Option<&str>,
+    spell_level: i64,
+    at_level: Option<i64>,
+) -> Option<String> {
+    let base = dice.map(str::trim).filter(|d| !d.is_empty())?;
+    if spell_level == 0 {
+        return Some(base.to_string());
+    }
+    let extra = match at_higher.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(e) => e,
+        None => return Some(base.to_string()),
+    };
+    let steps = at_level.unwrap_or(spell_level) - spell_level;
+    // A BAD FORMULA KEEPS THE BASE rather than failing the cast. The
+    // column is ours and a typo in it should understate the spell, not
+    // stop somebody casting in the middle of a fight.
+    Some(crate::dice::add_formula(base, extra, steps).unwrap_or_else(|_| base.to_string()))
 }
 
 /// What an action costs on a turn, in 062's vocabulary.
@@ -425,6 +492,119 @@ pub fn label(c: &Cast) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------- 185. what a bigger slot rolls ---------- */
+
+    #[test]
+    fn fireball_at_fifth_rolls_ten_d6() {
+        assert_eq!(
+            upcast_dice(Some("8d6"), Some("1d6"), 3, Some(5)).as_deref(),
+            Some("10d6")
+        );
+    }
+
+    #[test]
+    fn magic_missile_gains_whole_darts() {
+        assert_eq!(
+            upcast_dice(Some("3d4+3"), Some("1d4+1"), 1, Some(3)).as_deref(),
+            Some("5d4+5")
+        );
+    }
+
+    #[test]
+    fn at_its_own_level_the_base_comes_back() {
+        assert_eq!(
+            upcast_dice(Some("8d6"), Some("1d6"), 3, Some(3)).as_deref(),
+            Some("8d6")
+        );
+        assert_eq!(
+            upcast_dice(Some("8d6"), Some("1d6"), 3, None).as_deref(),
+            Some("8d6")
+        );
+    }
+
+    #[test]
+    fn no_column_means_no_extra_dice() {
+        // Most of the catalogue. A bigger slot still gets SPENT - that
+        // is `at_level`'s job - and the dice do not move.
+        assert_eq!(
+            upcast_dice(Some("4d8"), None, 2, Some(5)).as_deref(),
+            Some("4d8")
+        );
+    }
+
+    #[test]
+    fn a_cantrip_is_never_upcast() {
+        // Its dice climb with the CASTER, not with a slot, and it
+        // spends no slot to be raised by.
+        assert_eq!(
+            upcast_dice(Some("1d10"), Some("1d10"), 0, Some(5)).as_deref(),
+            Some("1d10")
+        );
+    }
+
+    #[test]
+    fn a_lower_slot_does_not_subtract_dice() {
+        // `may_spend_slot` refuses this before it gets here; if it ever
+        // arrives, understating is safe and negative dice are not.
+        assert_eq!(
+            upcast_dice(Some("8d6"), Some("1d6"), 3, Some(1)).as_deref(),
+            Some("8d6")
+        );
+    }
+
+    #[test]
+    fn a_broken_column_understates_rather_than_failing() {
+        // The column is ours; a typo should cost damage, not stop a
+        // cast in the middle of a fight.
+        assert_eq!(
+            upcast_dice(Some("8d6"), Some("banana"), 3, Some(5)).as_deref(),
+            Some("8d6")
+        );
+    }
+
+    #[test]
+    fn no_dice_at_all_stays_none() {
+        assert_eq!(upcast_dice(None, Some("1d6"), 3, Some(5)), None);
+        assert_eq!(upcast_dice(Some("  "), Some("1d6"), 3, Some(5)), None);
+    }
+
+    /* ---------- 183. a spell that simply lands ---------- */
+
+    #[test]
+    fn only_auto_lands_by_itself() {
+        assert!(lands_automatically("Auto"));
+    }
+
+    #[test]
+    fn the_other_four_do_not() {
+        // EACH FOR ITS OWN REASON, which is why this is a list and not
+        // a negation. Attack rolls to hit, Save lets the target resist,
+        // Heal already has its own branch, and Utility is the pile this
+        // was wrongly in - eight of the nine Utility spells carrying
+        // dice must NOT fire at cast time.
+        for other in ["Attack", "Save", "Heal", "Utility"] {
+            assert!(!lands_automatically(other), "{} should not land by itself", other);
+        }
+    }
+
+    #[test]
+    fn an_unknown_cast_type_does_not_land() {
+        // A typo or a word nobody taught this must not deal damage.
+        // Inventing a hit is worse than refusing one - the same reason
+        // `save_damage` returns None for a rule it does not know.
+        for odd in ["", "auto", "AUTO", "Damage", "Automatic"] {
+            assert!(!lands_automatically(odd), "{:?} should not land", odd);
+        }
+    }
+
+    #[test]
+    fn landing_by_itself_is_offensive() {
+        // It deals damage, so it reads as an attack on the panel rather
+        // than as a neutral utility - which is what it looked like for
+        // as long as it was filed Utility.
+        assert_eq!(stance("Auto"), Stance::Offensive);
+    }
 
     /* ------------- 158. what a successful save is worth ------------- */
 

@@ -1,0 +1,62 @@
+-- 183. A SPELL THAT SIMPLY LANDS.
+--
+-- Dave cast Magic Missile five times across four rounds of a real
+-- fight. Nothing moved. One hit point changed hands in that whole
+-- encounter and a slam did it.
+--
+-- MAGIC MISSILE IS NEITHER OF THE TWO SHAPES THAT REACH A HIT POINT.
+-- `cast_spell` has one route - the `Heal` branch 156 built - and
+-- everything else goes through either the Attack path's to-hit or
+-- 158's `resolve_spell_save`. Magic Missile has no attack roll and no
+-- save; its own `special_text`, written in 102, says exactly that:
+-- "No attack roll and no save, which is why this is not an Attack."
+--
+-- So it was filed `Utility`, which is the pile for spells that do
+-- nothing to hit points at the moment of casting, and it did nothing.
+-- That sentence was true and the conclusion drawn from it was wrong.
+--
+-- ---------------------------------------------------------------------
+-- A FIFTH VALUE ON AN EXISTING AXIS
+-- ---------------------------------------------------------------------
+--
+-- `cast_type` answers ONE question - how does this resolve - and it had
+-- four answers: roll to hit, let them resist, restore, do nothing now.
+-- "It simply lands" is a fifth answer to the same question, so it is a
+-- value rather than a new column. `spellcast::lands_automatically` owns
+-- it and is tested.
+--
+-- WHY NOT INFER IT from "has dice, has no save, is not an Attack".
+-- NINE Utility spells carry dice and EIGHT of them must not fire when
+-- cast:
+--
+--   Guidance, Resistance, Bless   a d4 somebody ADDS to a roll
+--   Glyph of Warding, Forbiddance  triggered later, by somebody else
+--   Fire Shield                    answers a melee hit, as a reaction
+--   Faithful Hound, Arcane Hand    strike on their own initiative
+--
+-- A rule guessed from the shape of the columns would have hit somebody
+-- with Bless. The catalogue has to SAY it, which is what this does.
+--
+-- ---------------------------------------------------------------------
+-- WHAT IS STILL THE DM'S, AND SAID SO ON THE CARD
+-- ---------------------------------------------------------------------
+--
+-- UPCASTING IS NOT AUTOMATED. Magic Missile gains a whole dart per slot
+-- level - 1d4+1, not a flat die - and Fireball gains 1d6, and nothing
+-- in the catalogue records which. `at_level` already reaches the engine
+-- and picks the slot; scaling the DICE is a column this table does not
+-- have, and inventing one for a single spell would be the same guess
+-- this migration just refused. The rider on the card says "One more
+-- dart per slot level above 1st" and the DM adds it.
+--
+-- SPLITTING THE DARTS between targets is also the DM's. The engine
+-- takes one target, and three darts at one creature is the common case
+-- and the one `3d4+3` describes.
+--
+-- ONE SPELL, ON PURPOSE. Dave: "lets dial in one spell at a time."
+-- This is the only spell in 276 that needs the new word today.
+
+update public.spells
+   set cast_type = 'Auto'
+ where game_id is null
+   and key = 'sp_magicmissile';

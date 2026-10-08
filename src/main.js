@@ -53,6 +53,13 @@ let state = {
   // 173. Which spellbooks are open, by object id, so a repaint does
   // not close one somebody is reading.
   openBooks: {},
+  // 181. THE SAVE A CAST IS STILL OWED, on the DM's side of the fight.
+  // In state rather than in the DOM because every cast ends with
+  // `selectEncounter`, which repaints the whole card - the first
+  // version of this wrote the prompt into a node that the refresh
+  // immediately rebuilt, so it existed for about a frame. Painted from
+  // here, it survives.
+  pendingSave: null,
   // 109. Whether the add-a-prayer section is open. Closed by default:
   // adding happens at a long rest and reading happens constantly.
   addOpen: false,
@@ -1131,9 +1138,14 @@ function paintCastable() {
     const pickKind = (sp.choices || []).length ? kindPicker(sp.choices) : null;
     if (pickKind) row.append(pickKind);
 
+    // 185. AND WITH WHICH SLOT.
+    const pickSlot = castSlotPicker(sp);
+    if (pickSlot) row.append(pickSlot);
+
     // 120. GUARDED. A double-click here spent one slot and cast twice -
     // two effects on the target and two action rows, out of one slot.
-    guard(go, () => doCast(sp, at.value, pickKind ? pickKind.value : null));
+    guard(go, () => doCast(sp, at.value, pickKind ? pickKind.value : null,
+                          pickSlot ? Number(pickSlot.value) : null));
 
     row.append(sEl("span", "castname", sp.name));
     row.append(sEl("span", "caststance", sp.stance));
@@ -1153,6 +1165,37 @@ function paintCastable() {
     if (sp.blocked) row.append(sEl("span", "castwhy", sp.blocked));
     host.append(row);
   }
+}
+
+// 185. WHICH SLOT TO SPEND, when there is a choice.
+//
+// Tarren had four spent first-level slots and three free thirds, and
+// Magic Missile could legally go in any of them - but every caller
+// passed `atLevel: null`, so the only castable level was the spell's
+// own and he could not cast at all.
+//
+// THE LEVELS COME FROM THE ENGINE. `castable` returns which slots could
+// carry this spell and still have one left; working that out on screen
+// would be the rule in a second place, and it is the rule that decides
+// whether somebody can act.
+//
+// NOTHING WHEN THERE IS NO CHOICE - a cantrip, or one level left. A
+// dropdown with a single option is furniture.
+function castSlotPicker(sp) {
+  const levels = sp.levels || [];
+  if (levels.length < 2) return null;
+  const sel = document.createElement("select");
+  sel.className = "castslot";
+  for (const l of levels) {
+    const o = document.createElement("option");
+    o.value = String(l);
+    // The spell's own level named as itself, so "level 1" reads as the
+    // ordinary cast and the rest as a deliberate choice.
+    o.textContent = l === sp.level ? "level " + l : "at level " + l;
+    sel.append(o);
+  }
+  sel.value = String(levels.includes(sp.level) ? sp.level : levels[0]);
+  return sel;
 }
 
 // Who this spell is aimed at. Everything in the encounter, grouped so
@@ -1195,7 +1238,7 @@ function kindPicker(kinds) {
 // CASTING AND ROLLING ARE TWO STEPS, which is the engine's own shape.
 // The cast spends the slot and says what to roll; the roll goes
 // through the box below, where every other d20 in this app goes.
-async function doCast(sp, targetId, choice) {
+async function doCast(sp, targetId, choice, atLevel) {
   // 112. THE TARGET REACHES THE ENGINE NOW. It was picked here and used
   // only for a log line, so Luci cast Bless on Falon four times, four
   // slots went, and nothing was written down or landed on anybody.
@@ -1204,7 +1247,9 @@ async function doCast(sp, targetId, choice) {
   const r = await tryCall("cast_spell", {
     characterId: state.characterId,
     spellKey: sp.key,
-    atLevel: null,
+    // 185. THE CHOSEN SLOT, which was hardcoded null since 107 - so the
+    // parameter reached the engine and only ever carried one value.
+    atLevel: atLevel || null,
     targetCharacterId: at ? at.character_id || null : null,
     targetActorId: at && at.row === "actor" ? at.id : null,
     targetLabel: at ? at.label : null,
@@ -1231,7 +1276,7 @@ async function doCast(sp, targetId, choice) {
   // 156. AND WHAT A HEAL ACTUALLY MOVED, which is not always the dice:
   // capped at the maximum, and bigger than the roll when the target was
   // below zero and had a hole to climb out of first.
-  if (r.value.healed) said.push(r.value.healed);
+  if (r.value.moved) said.push(r.value.moved);
   log("cast_spell", said.join(" \u00b7 "));
 
   // THE TO-HIT GOES IN THE ROLL BOX rather than being rolled here. An
@@ -1254,7 +1299,10 @@ async function doCast(sp, targetId, choice) {
   showPendingSave(
     r.value.save_dc && at && at.character_id
       ? { spellKey: sp.key, name: r.value.name, dc: r.value.save_dc,
-          ability: r.value.save_ability, target: at }
+          ability: r.value.save_ability, target: at,
+          // 185. THE SLOT IT WENT IN, because the save rolls the damage
+          // and an upcast Fireball must roll what the card showed.
+          atLevel: atLevel || null }
       : null,
   );
 
@@ -1292,6 +1340,7 @@ function showPendingSave(pending) {
       targetActorId: pending.target.row === "actor" ? pending.target.id : null,
       encounterId: state.encounterId || null,
       mode: val("#mode") || "normal",
+      atLevel: pending.atLevel || null,
     });
     if (!r.ok) return log("resolve_spell_save", r.error, true);
     log("resolve_spell_save", r.value.said);
@@ -5467,6 +5516,44 @@ function swingText(sp) {
   return sp.attacks + "/" + owed;
 }
 
+// 180. WHAT A CREATURE HAS DONE THIS ROUND, IN WORDS - and one place
+// decides them.
+//
+// Dave cast Magic Missile twice with Tarren in round 10 and the strip
+// still read "0/1": "seems like spell casting isn't using character's
+// action". The engine had it right - `spent::this_round` counted two
+// and set `over_budget` - but THREE OF THE FOUR BADGES PRINT
+// `swingText`, which is ATTACKS. A caster's actions are not attacks, so
+// they showed as nought out of one.
+//
+// Only the edit roster said it properly, and it said it by writing the
+// conditional out longhand. Four screens phrasing one fact four ways is
+// how the other three came to be wrong, so the phrasing lives here.
+//
+// IT SAYS, IT DOES NOT REFUSE - `spent.rs` is explicit that a second
+// action in a round is NORMAL at this table, and the whole point of
+// counting is that the screen can SAY so.
+function spentText(sp) {
+  if (!sp) return "";
+  // Swings out of swings owed while there are any: "1/2" says another
+  // is coming and "2/2" says they are done, which a bare count cannot.
+  if (sp.attacks) return swingText(sp) + " attacks";
+  // 182. `other`, NOT `actions`. `spent::this_round` counts EVERYTHING
+  // into `actions` - attacks, checks, death saves, and the forced save
+  // a creature makes against somebody else's spell. The Lich cast
+  // Fireball and then rolled a DEX save against Luci's Sacred Flame,
+  // and the strip said "acted 2" for one action and one thing done TO
+  // it.
+  //
+  // `other` is what spent the ACTION, which is the question this badge
+  // is read for. The save is not lost: it costs `free`, the Free box on
+  // the card is wired to `sp.free`, and `spendTitle` has said "0
+  // attacks of 1 · 1 other action" all along - the tooltip was right
+  // while the badge was wrong.
+  if (sp.other) return "acted " + sp.other;
+  return "";
+}
+
 // What to say on hover, spelled out rather than abbreviated.
 function spendTitle(sp) {
   if (!sp) return "nothing spent this round";
@@ -6147,8 +6234,9 @@ async function paintFightCard(id, turns, enc) {
     tally.className = "fo-tally" + (sp && sp.over_budget ? " warn" : "");
     // SWINGS OUT OF SWINGS OWED, not a bare count of everything. "2"
     // beside a Barbarian said nothing; "2/2" says they are done and
-    // "1/2" says they have another coming.
-    tally.textContent = sp && sp.actions ? swingText(sp) : "";
+    // "1/2" says they have another coming. 180: and "acted 2" for a
+    // caster, whose actions are not swings.
+    tally.textContent = spentText(sp);
     if (sp) tally.title = spendTitle(sp);
 
     // WHOSE GO IT IS, said in the markup rather than only in colour.
@@ -6232,9 +6320,22 @@ async function paintFightCard(id, turns, enc) {
   // points, which is where a DM is already looking before they swing.
   const fsp = (state.encSpent || []).find((x) => x.actor_id === focus.id);
   const fowed = (fsp && fsp.budget && fsp.budget.attacks) || 1;
-  if (fowed > 1 || (fsp && fsp.attacks)) {
+  // 180. AND IT SHOWS FOR A CASTER NOW. The condition was attacks or a
+  // multiattack budget, so a wizard who had cast twice got NO CHIP AT
+  // ALL on the card - the one panel a DM is looking at while deciding
+  // whether this creature has already gone.
+  //
+  // The fallback keeps "0/2 attacks" for somebody with swings owed and
+  // none taken, which is a different and useful thing to say.
+  // 182. GATED ON THE TEXT, not on `actions`. A creature whose only act
+  // was a forced save has spent no action and `spentText` says nothing,
+  // so the chip would have been empty. The `fowed > 1` arm stays: a
+  // multiattacker shows "0/2 attacks" before swinging, which is worth
+  // saying on its own.
+  const ftxt = spentText(fsp);
+  if (fowed > 1 || ftxt) {
     const sw = chip(
-      (fsp ? fsp.attacks : 0) + "/" + fowed + " attacks",
+      ftxt || (fsp ? fsp.attacks : 0) + "/" + fowed + " attacks",
       fsp && fsp.over_budget ? "no" : "use",
     );
     sw.title = spendTitle(fsp);
@@ -6298,6 +6399,9 @@ async function paintFightCard(id, turns, enc) {
   }
 
   opts.append(await attackRow(focus, id));
+  // 179. AND WHAT THEY CAN CAST, beside what they can swing. Both rows
+  // key off the actor, so a PC and a monster get the same two.
+  opts.append(await castRow(focus, id));
 
   paintFightResult(focus);
 }
@@ -6321,6 +6425,47 @@ function paintFightResult(focus) {
   cap.className = "sub";
   cap.textContent = "last thing they did";
   box.append(cap, logLine(mine));
+
+  // 181. AND WHAT IT IS STILL OWED. A save spell is two halves - 158
+  // prints the DC on the cast and `resolve_spell_save` rolls the save
+  // and applies what lands - and the DM's side only ever had the first.
+  // Dave: "how about the line I'm pointing at being where the roll to
+  // save is". It is the right line: this box already says what the
+  // creature just did, and an unrolled save is the unfinished part of
+  // exactly that.
+  //
+  // FROM `state`, not from a node the cast handler wrote, because every
+  // cast ends in `selectEncounter` and repaints this whole card.
+  const ps = state.pendingSave;
+  if (!ps || ps.actorId !== focus.id) return;
+
+  const row = sEl("div", "row pending");
+  row.append(sEl("span", "muted",
+    ps.target.label + " — " + String(ps.ability || "").toUpperCase() +
+    " save vs DC " + ps.dc));
+  const roll = sEl("button", "tiny", "roll the save");
+  guard(roll, async () => {
+    const got = await tryCall("resolve_spell_save", {
+      casterCharacterId: ps.casterCharacterId,
+      spellKey: ps.spellKey,
+      targetCharacterId: ps.target.characterId,
+      targetActorId: ps.target.row === "actor" ? ps.target.id : null,
+      encounterId: ps.encounterId,
+      mode: "normal",
+      atLevel: ps.atLevel || null,
+    });
+    if (!got.ok) return dmSay(got.error, true);
+    dmSay(got.value.said);
+    // SPENT, SO IT GOES. A second press would roll another save against
+    // a spell that has already landed - 120's lesson, one click one
+    // effect.
+    state.pendingSave = null;
+    await loadRolls();
+    await loadTargets();
+    await selectEncounter(ps.encounterId);
+  });
+  row.append(roll);
+  box.append(row);
 }
 
 function paintOrderStrip(turns) {
@@ -6345,7 +6490,7 @@ function paintOrderStrip(turns) {
     const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
     chip.textContent =
       (a.initiative == null ? "—" : a.initiative) + " " + a.label +
-      (sp && sp.actions ? " " + swingText(sp) : "");
+      (spentText(sp) ? " " + spentText(sp) : "");
     if (sp && sp.over_budget) chip.classList.add("again");
     if (sp) chip.title = spendTitle(sp);
     chip.title = a.takes_turns
@@ -7375,13 +7520,16 @@ async function selectEncounter(id) {
     // ask was to be able to SEE that a character has swung again and
     // again, which nothing anywhere could say before this.
     const sp = (state.encSpent || []).find((x) => x.actor_id === a.id);
-    if (sp && sp.actions) {
+    const goneText = spentText(sp);
+    if (goneText) {
       const gone = document.createElement("span");
       gone.className = "tag spent" + (sp.over_budget ? " warn" : "");
       // The pair, not a bare count. What a DM is deciding between
-      // swings is whether this one has another attack coming.
-      gone.textContent =
-        sp.attacks ? swingText(sp) + " attacks" : "acted " + sp.actions;
+      // swings is whether this one has another attack coming. 180 moved
+      // this wording into `spentText` - it was the only site that had
+      // it right, and the other three were wrong because each wrote
+      // their own.
+      gone.textContent = goneText;
       gone.title = spendTitle(sp);
       head.append(gone);
     }
@@ -7442,6 +7590,7 @@ async function selectEncounter(id) {
     // whole roster on every repaint to display nothing.
     if (a.active && !a.dead && (!e || e.status !== "active")) {
       li.append(await attackRow(a, id));
+      li.append(await castRow(a, id));
     }
 
     const view = document.createElement("div");
@@ -7775,6 +7924,220 @@ function actorKitRow(it, onDone) {
 // Every button is guarded against a second click for the same reason
 // the roll buttons are: a duplicate is not a harmless repeat, it is a
 // swing nobody took.
+// What this actor can CAST on its turn, beside what it can swing.
+//
+// 179. 022 SAYS A MONSTER IS A CHARACTER AND THE SCREENS DISAGREED.
+// Casting lived on the player's panel, keyed to `state.characterId` -
+// whoever you are RUNNING, not whoever's turn it is - and the encounter
+// only ever had `attackRow`. So a Lich holding 25 prepared spells was a
+// slam attack, and reaching them meant leaving the fight to "become"
+// the Lich. Dave found it the first time the Lich took a turn.
+//
+// A SIBLING OF `attackRow`, deliberately: same signature, same two
+// mount points, same target picker. The two questions - what can it
+// swing, what can it cast - are asked of the engine separately today,
+// which is the SECOND half of this and not done here. See STATUS.
+//
+// FOLDED, AND THAT IS THE WHOLE REASON THIS IS NOT INLINE. An attack
+// list is two to five rows; a prepared list is one to twenty-five.
+// Tarren's single Magic Missile would read fine among the attacks and
+// the Lich's twenty-five would bury them, so the spells go behind a
+// disclosure that says how many are there.
+async function castRow(actor, encounterId) {
+  const wrap = document.createElement("div");
+  wrap.className = "casts";
+  if (!actor.character_id) return wrap;
+
+  // CASTS NOTHING IS NOT AN ERROR - `castable` refuses anybody who does
+  // not cast, which is most creatures, and a goblin should not report a
+  // failure for being a goblin.
+  const spells = await invoke("castable", { characterId: actor.character_id })
+    .catch(() => null);
+  if (!Array.isArray(spells) || !spells.length) return wrap;
+
+  const key = "cast:" + actor.id;
+  const open = !!state.openLevels[key];
+
+  const head = sEl("button", "lvlhead section" + (open ? " open" : ""));
+  head.append(sEl("span", "caret", open ? "▾" : "▸"));
+  head.append(sEl("span", "lvlname", actor.label + " casts"));
+  head.append(sEl("span", "lvlcount", spells.length + " ready"));
+  head.addEventListener("click", () => {
+    state.openLevels[key] = !state.openLevels[key];
+    body.hidden = !state.openLevels[key];
+    head.classList.toggle("open", !!state.openLevels[key]);
+    head.querySelector(".caret").textContent =
+      state.openLevels[key] ? "▾" : "▸";
+  });
+  wrap.append(head);
+
+  const body = document.createElement("div");
+  body.hidden = !open;
+  wrap.append(body);
+
+  // THE SAME LIST `attackRow` AIMS WITH, and the same caption shape, so
+  // the two rows under one creature do not disagree about who is acting
+  // or what can be pointed at.
+  const pick = document.createElement("select");
+  // GUARDED, unlike `attackRow`'s copy. This renders inside the fight
+  // card, so an unset target list would throw and take the whole card
+  // down with it rather than losing one row.
+  for (const t of state.dmTargets || []) {
+    const o = document.createElement("option");
+    o.value = JSON.stringify({
+      id: t.id, row: t.row, kind: t.target_kind,
+      value: t.value, label: t.label, characterId: t.character_id,
+    });
+    o.textContent =
+      t.label + " · " + String(t.target_kind).toUpperCase() + " " + t.value +
+      (t.hp_current !== null && t.hp_current !== undefined
+        ? " · " + t.hp_current + "/" + t.hp_max + "hp" : "");
+    pick.append(o);
+  }
+  if (!pick.childElementCount) {
+    const o = document.createElement("option");
+    o.textContent = "nothing to aim at";
+    pick.append(o);
+  }
+  body.append(labelledControl(actor.label + " casts at", pick, "wide aim"));
+
+
+  // BY LEVEL, cantrips first, because that is the order a caster thinks
+  // in and the order the sheet already uses.
+  const levels = [...new Set(spells.map((s) => s.level))].sort((a, b) => a - b);
+  for (const lvl of levels) {
+    const here = spells.filter((s) => s.level === lvl);
+    const line = document.createElement("div");
+    line.className = "attack-line";
+    line.append(sEl("span", "attack-of", lvl === 0 ? "cantrips" : "level " + lvl));
+    for (const sp of here) line.append(buildCastButton(sp));
+
+    // 184. AND WHY THE WHOLE LEVEL IS OUT, said once and in the open.
+    //
+    // Tarren had spent all four first-level slots, so Magic Missile was
+    // correctly greyed - and the reason lived in a TOOLTIP, so the
+    // screen looked broken rather than strict. The player's panel has
+    // printed it as text since 110; this row only whispered it.
+    //
+    // ON THE LEVEL LINE, because "no level 1 slots left" is a fact
+    // about the level and printing it beside each of a Lich's five
+    // third-level spells would be the same sentence five times.
+    //
+    // COMPARED, NOT PARSED. The reasons are strings the engine wrote;
+    // when every spell here carries the same one it is a fact about the
+    // level, and when they differ the tooltips still say which is
+    // which. Reading meaning out of the text would be the screen
+    // deciding a rule it was handed.
+    const why = [...new Set(here.map((sp) => sp.blocked || ""))];
+    if (why.length === 1 && why[0]) {
+      line.append(sEl("span", "castwhy", why[0]));
+    }
+    body.append(line);
+  }
+
+  // A closure over the picker and the actor, the same reason
+  // `buildAttackButton` is nested.
+  function buildCastButton(sp) {
+    // 185. THE SLOT, WHERE THERE IS A CHOICE. Wrapped with the button
+    // so the two travel together on the level line - picking "at level
+    // 3" beside Magic Missile and then clicking a different spell would
+    // be a control that means something different depending on what you
+    // press next.
+    const pickSlot = castSlotPicker(sp);
+    const b = sEl("button", "tiny technique", sp.name);
+    // WHAT IT TAKES TO LAND, off `spellcast::label` - the same facts the
+    // player's panel shows, because it is the same answer.
+    const bits = [];
+    if (sp.to_hit != null) bits.push(withSign(sp.to_hit) + " to hit");
+    if (sp.save_dc != null) bits.push((sp.save_ability || "").toUpperCase() + " DC " + sp.save_dc);
+    if (sp.dice) bits.push(sp.dice);
+    if (sp.cost && sp.cost !== "action") bits.push(sp.cost);
+    b.title = bits.join(" · ");
+    // BLOCKED SAYS WHY, rather than vanishing. Prayer of Healing takes
+    // ten minutes and a round is six seconds; hiding it would leave a
+    // DM hunting for a spell the creature really does have.
+    if (sp.blocked) {
+      b.disabled = true;
+      b.title = sp.blocked;
+      b.classList.add("blocked");
+    }
+    guard(b, async () => {
+      let t = null;
+      try { t = JSON.parse(pick.value); } catch (e) { t = null; }
+      dmSay("");
+      const r = await tryCall("cast_spell", {
+        characterId: actor.character_id,
+        spellKey: sp.key,
+        atLevel: pickSlot ? Number(pickSlot.value) : null,
+        targetCharacterId: t ? t.characterId || null : null,
+        targetActorId: t && t.row === "actor" ? t.id : null,
+        targetLabel: t ? t.label : null,
+        encounterId,
+        // 060. THE PERFORMER AS A PARTICIPANT, which for a creature on
+        // its own turn is this actor - not derived from whoever the
+        // screen happens to be running.
+        actorId: actor.id,
+        choice: null,
+      });
+      if (!r.ok) return dmSay(r.error, true);
+      const said = [actor.label + " casts " + r.value.name];
+      if (t) said.push("at " + t.label);
+      said.push(r.value.slot_used ? "level " + r.value.slot_used + " slot" : "no slot");
+      if (r.value.save_dc) {
+        said.push((t ? t.label : "the target") + " makes a " +
+          (r.value.save_ability || "").toUpperCase() + " save vs DC " + r.value.save_dc);
+      }
+      if (r.value.dice) said.push(r.value.dice);
+      if (r.value.landed) said.push(r.value.landed);
+      if (r.value.moved) said.push(r.value.moved);
+      dmSay(said.join(" · "));
+
+      // 181. AND THE SECOND HALF, WHICH THIS ROW SHIPPED WITHOUT.
+      //
+      // 158 split a save spell in two: casting prints the DC, and
+      // `resolve_spell_save` rolls the target's save and applies what
+      // lands. The player's panel offers that as a prompt. 179 did not,
+      // so the Lich's Fireball printed "DEX save DC 16, 8d6" into the
+      // log and THERE WAS NO WAY TO FINISH IT - nine spells across four
+      // rounds moved a single hit point between them, and the only one
+      // that did was a slam.
+      //
+      // RECORDED, NOT DRAWN HERE. `paintFightResult` draws it, beside
+      // the last thing they did, which is where Dave put it and where
+      // it belongs: the save is what that action is still owed.
+      state.pendingSave =
+        r.value.save_dc && t && t.characterId
+          ? {
+              actorId: actor.id,
+              casterCharacterId: actor.character_id,
+              spellKey: sp.key,
+              name: r.value.name,
+              dc: r.value.save_dc,
+              ability: r.value.save_ability,
+              target: t,
+              encounterId,
+              atLevel: pickSlot ? Number(pickSlot.value) : null,
+            }
+          : null;
+
+      // THE SAME THREE `attackRow` REFRESHES, for the same reasons: a
+      // slot went, hit points may have moved, and the card still shows
+      // the state before the cast.
+      await loadRolls();
+      await loadTargets();
+      await selectEncounter(encounterId);
+    });
+    if (!pickSlot) return b;
+    // A span rather than appending both to the line, so the picker
+    // cannot drift away from the button it belongs to.
+    const pair = sEl("span", "castpair");
+    pair.append(b, pickSlot);
+    return pair;
+  }
+
+  return wrap;
+}
+
 async function attackRow(actor, encounterId) {
   const wrap = document.createElement("div");
   wrap.className = "attacks";

@@ -340,13 +340,25 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
                 "takes {}",
                 r.get("casting_time").and_then(|v| v.as_str()).unwrap_or("too long")
             ))
-        } else if c.needs_slot && left[(c.level - 1).max(0) as usize] == 0 {
+        } else if c.needs_slot && !slots_for(c.level, &left).is_empty() {
+            None
+        } else if c.needs_slot {
             Some(format!("no level {} slots left", c.level))
         } else {
             None
         };
 
+        // 185. WHICH SLOTS COULD CARRY IT, which is the engine's
+        // question and not the screen's. A 1st-level spell can go in
+        // any slot from 1st up, and a wizard with four spent firsts and
+        // three free thirds can still cast it - Tarren could not,
+        // because every caller passed `atLevel: null`.
+        //
+        // EMPTY FOR A CANTRIP, which spends nothing.
+        let levels = if c.needs_slot { slots_for(c.level, &left) } else { Vec::new() };
+
         out.push(json!({
+            "levels": levels,
             "key": c.key, "name": c.name, "level": c.level,
             "stance": c.stance.as_str(),
             "cost": c.cost.as_str(),
@@ -444,7 +456,7 @@ pub fn cast_spell(
     }
 
     let spell = one_spell_full(&token, &sheet.game_id, &spell_key)?;
-    let c = crate::spellcast::cast(
+    let mut c = crate::spellcast::cast(
         &spell_key,
         spell.get("name").and_then(|v| v.as_str()).unwrap_or(""),
         spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0),
@@ -454,6 +466,22 @@ pub fn cast_spell(
         spell.get("dice").and_then(|v| v.as_str()),
         sheet.proficiency_bonus(),
         sheet.ability_mod(&caster.ability),
+    );
+
+    // 185. AND WHAT THE BIGGER SLOT ROLLS. `at_level` has chosen which
+    // slot is SPENT since 107; this is the other half of the same
+    // decision, and it had never been wired - a wizard spending a 3rd
+    // level slot on Magic Missile got three darts for it.
+    //
+    // AFTER `cast`, not inside it, because `cast` takes the catalogue's
+    // own dice and a Heal has already had the caster's modifier folded
+    // in by the time this runs. Scaling what is on the card is the
+    // right order: the card and the roll must agree.
+    c.dice = crate::spellcast::upcast_dice(
+        c.dice.as_deref(),
+        spell.get("at_higher_dice").and_then(|v| v.as_str()),
+        spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0),
+        at_level,
     );
 
     if !c.cost.in_a_fight() {
@@ -506,9 +534,14 @@ pub fn cast_spell(
     // runs below zero while the reading is floored at zero, so healing
     // Falon at a raw -1 has to write +9 to put him on 8. That is a rule
     // and it is tested; this is the plumbing that calls it.
-    let mut healed_said: Option<String> = None;
-    let mut heal_rolls: Vec<Value> = Vec::new();
-    let mut heal_hp: Value = Value::Null;
+    // 183. ONE PAIR OF SLOTS FOR BOTH BRANCHES - the heal below and
+    // the automatic damage after it. They are mutually exclusive by
+    // cast type, they both end in the same `write_action`, and two sets
+    // of variables for one transaction would only invite a spell that
+    // somehow filled both.
+    let mut moved_said: Option<String> = None;
+    let mut extra_rolls: Vec<Value> = Vec::new();
+    let mut extra_hp: Value = Value::Null;
 
     if spell.get("cast_type").and_then(|v| v.as_str()) == Some("Heal") {
         if let (Some(on), Some(dice)) = (
@@ -519,7 +552,7 @@ pub fn cast_spell(
             let (hp_max, summed) = hp_state(&token, on)?;
             let delta = crate::death::healed(hp_max, summed, rolled.total);
 
-            heal_rolls.push(json!({
+            extra_rolls.push(json!({
                 "game_id": sheet.game_id,
                 "character_id": character_id,
                 "owner_uid": session.user_id,
@@ -541,18 +574,64 @@ pub fn cast_spell(
             // wasted spell and not a zero-delta row - 013's log is a
             // record of what CHANGED.
             if delta > 0 {
-                heal_hp = json!({
+                extra_hp = json!({
                     "game_id": sheet.game_id,
                     "character_id": on,
                     "delta": delta,
                     "note": format!("{} healing", c.name),
                 });
             }
-            healed_said = Some(if delta > 0 {
+            moved_said = Some(if delta > 0 {
                 format!("healed {} ({} rolled {})", delta, dice, rolled.total)
             } else {
                 format!("{} rolled {} - already at full health", dice, rolled.total)
             });
+        }
+    }
+
+    // 183. AND A SPELL THAT SIMPLY LANDS, which until now could not
+    // reach a hit point either. See `spellcast::lands_automatically`:
+    // Magic Missile has no attack roll and no save, so neither the
+    // Attack path nor 158's `resolve_spell_save` was ever going to
+    // carry it, and it sat in `Utility` dealing nothing.
+    //
+    // THE MIRROR OF THE HEAL ABOVE, deliberately - same roll, same
+    // `write_action`, opposite sign. The role is `damage`, which is
+    // what `resolve_spell_save` already writes, so the log tells the
+    // two apart without a new word.
+    if crate::spellcast::lands_automatically(
+        spell.get("cast_type").and_then(|v| v.as_str()).unwrap_or(""),
+    ) {
+        if let (Some(on), Some(dice)) = (
+            target_character_id.as_deref().filter(|s| !s.is_empty()),
+            c.dice.as_deref().filter(|d| !d.trim().is_empty()),
+        ) {
+            let rolled = crate::dice::roll_formula(dice)?;
+            extra_rolls.push(json!({
+                "game_id": sheet.game_id,
+                "character_id": character_id,
+                "owner_uid": session.user_id,
+                "request": c.name,
+                "label": format!("{} damage", c.name),
+                "mode": "normal",
+                "formula": dice,
+                "detail": rolled.detail,
+                "total": rolled.total,
+                "natural_roll": rolled.natural,
+                "status": "resolved",
+                "role": "damage",
+            }));
+            if rolled.total > 0 {
+                extra_hp = json!({
+                    "game_id": sheet.game_id,
+                    "character_id": on,
+                    // SIGNED, and negative - 013's log, the same shape
+                    // `resolve_spell_save` writes.
+                    "delta": -rolled.total,
+                    "note": c.name.clone(),
+                });
+            }
+            moved_said = Some(format!("{} damage ({} rolled {})", rolled.total, dice, rolled.total));
         }
     }
 
@@ -583,8 +662,8 @@ pub fn cast_spell(
             "write_action",
             &json!({
                 "p_action": act,
-                "p_rolls": heal_rolls,
-                "p_hp": heal_hp,
+                "p_rolls": extra_rolls,
+                "p_hp": extra_hp,
                 "p_vitals": Value::Null,
             }),
         )?;
@@ -691,7 +770,11 @@ pub fn cast_spell(
         // the same reason 116 says why damage and hit points disagree:
         // a number that moves differently from the dice beside it looks
         // like a bug until something explains it.
-        "healed": healed_said,
+        // 183. "moved", NOT "healed". This carried only a heal until the
+        // Auto branch above started writing damage into it, and a key
+        // called `healed` holding "7 damage" is the same kind of lie
+        // 176 spent the day pulling out of this module.
+        "moved": moved_said,
         "concentration": concentrates,
     }))
 }
@@ -957,6 +1040,18 @@ pub fn resolve_spell_save(
     target_actor_id: Option<String>,
     encounter_id: Option<String>,
     mode: Option<String>,
+    // 185. THE SLOT IT WAS CAST WITH, because a save spell rolls its
+    // damage HERE and not at the cast. A Fireball upcast to 5th showed
+    // 10d6 on the card and would have rolled the catalogue's 8d6 - the
+    // card and the roll disagreeing, which is the one thing 154 built
+    // `spellcast::cast` to prevent.
+    //
+    // CARRIED BY THE CALLER rather than stored on the action: the
+    // prompt that offers the save is the thing that just did the cast,
+    // and it already holds the rest of what this needs. A column on
+    // `actions` would be the better answer the day something other
+    // than that prompt can resolve a save.
+    at_level: Option<i64>,
 ) -> Result<Value, String> {
     let session = state.current()?.ok_or_else(|| "not signed in".to_string())?;
     let token = session.access_token.clone();
@@ -1034,12 +1129,16 @@ pub fn resolve_spell_save(
 
     let mut hp = Value::Null;
     let mut took: Option<i64> = None;
-    if let Some(dice) = spell
-        .get("dice")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|d| !d.is_empty())
-    {
+    // 185. SCALED FIRST, by the same rule the card used. One function,
+    // two callers, so the number shown and the number rolled cannot
+    // drift apart.
+    let scaled = crate::spellcast::upcast_dice(
+        spell.get("dice").and_then(|v| v.as_str()),
+        spell.get("at_higher_dice").and_then(|v| v.as_str()),
+        spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0),
+        at_level,
+    );
+    if let Some(dice) = scaled.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         let dmg = crate::dice::roll_formula(dice)?;
         // 158 OWNS WHAT LANDS. None means these dice were never save
         // damage - Bane's penalty, Geas's daily toll - and nothing is
@@ -1245,6 +1344,19 @@ fn load_chosen(
 /// THREE QUERIES, PAID BY WIZARDS. The count to watch, and the same
 /// bargain `load_sheet` makes for its prepared list: a cleric, a
 /// fighter and every creature in the bestiary pay none of it.
+/// The slot levels that could carry a spell of `level`, and have one
+/// left.
+///
+/// 185. FROM THE SPELL'S OWN LEVEL UPWARD. A 1st-level spell goes in a
+/// 1st, 2nd or 3rd slot; a 3rd-level spell never goes in a 1st. Empty
+/// means there is nothing left to cast it with, which is what `blocked`
+/// then says in words.
+fn slots_for(level: i64, left: &[i64; 9]) -> Vec<i64> {
+    (level.max(1)..=9)
+        .filter(|l| left[(*l - 1) as usize] > 0)
+        .collect()
+}
+
 fn in_books(token: &str, character_id: &str) -> Result<Vec<String>, String> {
     // Who they are as a holder - 031.
     let me = supabase::rest_get(
@@ -1341,7 +1453,12 @@ fn one_spell_full(token: &str, game_id: &str, key: &str) -> Result<Value, String
         token,
         "spells",
         &[
-            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants,on_save"),
+            // 185. `at_higher_dice` IS LISTED HERE, and an explicit column
+            // list is a second schema - 021's lesson, and the reason
+            // `prof_bonus`, `character_name` and `special_text` each
+            // existed unread for weeks. A column the query never asks
+            // for does not exist as far as the engine is concerned.
+            ("select", "key,name,level,cast_type,casting_time,save_ability,dice,duration,concentration,grants,on_save,at_higher_dice"),
             ("key", &format!("eq.{}", key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("order", "game_id.asc.nullslast"),

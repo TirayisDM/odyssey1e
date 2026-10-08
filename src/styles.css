@@ -1013,3 +1013,9 @@ button.wide{width:100%}
 .scribenote{display:block;font-size:11px;margin:.2rem 0 .1rem}
 .scribenote.can{color:var(--ok)}
 .scribenote.cannot{color:var(--bad)}
+
+/* 185. The slot picker beside a cast button, and the pair that keeps
+   them together. Small, because the button is the verb and the level is
+   a qualifier on it. */
+.castpair{display:inline-flex;align-items:center;gap:2px}
+.castslot{font-size:11px;padding:1px 2px}

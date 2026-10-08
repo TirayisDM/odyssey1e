@@ -1,28 +1,64 @@
 -- 167. THE WIZARD LIST: EIGHTH AND NINTH CIRCLE.
 --
--- RECOVERED FROM THE DATABASE, NOT FROM THE LAPTOP THAT WROTE IT.
--- Applied 2026-10-07 at 21:44 UTC; the file was never pushed. Supabase
--- kept the statement and stripped the comment header, so everything
--- below this block is EXACTLY what ran - MD5-verified against
--- `supabase_migrations.schema_migrations` - and everything inside it
--- was written afterwards by somebody who was not there.
+-- 21 spells, and the list is finished: 13 of 13 at eighth, 12 of 12 at
+-- ninth, 206 wizard spells in the catalogue. Same contract as 161 to
+-- 166 and 102-104: mechanical values read off the published list, every
+-- description written here.
 --
--- THE ORIGINAL HEADER IS STILL ON THE LAPTOP and will say why rather
--- than what. Overwrite this file from there; the SQL will match.
+-- TELEPATHY IS A JUDGEMENT CALL. The reference we have been checking
+-- against puts it outside the SRD, as copyright material from the
+-- Player's Handbook, and leaves it off both the full spell index and
+-- the wizard list. It does the same to Feign Death - WHICH THIS
+-- CATALOGUE ALREADY HOLDS, seeded in 102 as a cleric spell that
+-- happens to be a wizard spell too. So the choice was between a list
+-- that holds one of a pair and not the other for no reason anybody
+-- could reconstruct later, or one that holds both. Both. If the
+-- reference is right and we are wrong, the correction is one row.
 --
--- WHAT IT DOES, read off the statement: 21 spells, finishing the wizard
--- list at eighth and ninth circle - the last of the run that began at
--- 161.
+-- FEEBLEMIND IS A CASE 158 DID NOT NAME. Its 4d6 psychic lands whether
+-- the target makes the save or not - the save only decides whether its
+-- Intelligence and Charisma drop to 1. 158 gave `on_save` three
+-- answers: half, none, and NULL for dice that are not save damage. This
+-- is a fourth: damage that is not conditional on the save at all.
 --
--- WORTH NOTING, because the rows argue with themselves about it: three
--- of these deal damage that `on_save` cannot describe. Feeblemind's
--- 4d6 lands whether the save succeeds or not, so it is NULL and the
--- engine will not apply it. Weird is 'none' because its damage comes on
--- a LATER save, not the one the spell is cast with. Meteor Swarm holds
--- only the fire half of two damage types. All three are the same
--- missing column - a spell's damage has no type and no second die -
--- and all three say so in their own special_text rather than quietly
--- doing the wrong thing.
+-- It goes in as NULL, which is the least wrong of the three, and that
+-- means `save_damage` returns `None` and the engine writes no hit point
+-- event - the DM reads the 4d6 off the card and applies it. The
+-- alternative was `half` or `none`, and both of those are a wrong
+-- number applied with total confidence, which is worse than a right
+-- number applied by hand. A fourth value - say `always` - is the actual
+-- fix, and it is a Rust change with tests, not a data change, so it is
+-- not in this file. Magic Missile is the same shape and 102 reached the
+-- same place by a different route: Utility, dice in the column, nothing
+-- automatic.
+--
+-- TIME STOP KEEPS ITS 1d4+1 OUT OF THE DICE COLUMN, which is 158 at its
+-- plainest. Those are turns, not damage, and a column that holds both
+-- is a column that means nothing.
+--
+-- METEOR SWARM AND PRISMATIC WALL both have more damage than one column
+-- holds. The swarm does 20d6 fire AND 20d6 bludgeoning and only the
+-- fire is stored; the wall does 10d6 per intact layer and the column
+-- holds one layer. 163 did the same with Ice Storm. The text carries
+-- the rest.
+--
+-- POWER WORD KILL AND MAZE ARE `Utility`, not `Save`, because neither
+-- has a saving throw anywhere in it. The word kills outright under 100
+-- hit points and the maze is escaped on an Intelligence CHECK against a
+-- fixed DC 20. POWER WORD STUN IS `Save` on the strength of the
+-- recurring save only, the way 166 handled Irresistible Dance, and the
+-- text says the landing is automatic.
+--
+-- REUNITED. The SQL below is the database's own record of what ran,
+-- MD5-verified when 8f726b4 recovered these four files; the header
+-- above it is the original, off the laptop that wrote them. They were
+-- separated because 165-168 were APPLIED WITHOUT THEIR HEADERS - the
+-- statement was pasted on its own - and Supabase stores the statement,
+-- so the reasoning never left this machine. 161-164 went in whole and
+-- never lost anything.
+--
+-- THE LESSON IS ABOUT THE APPLY, NOT THE RECOVERY: a migration applied
+-- body-only is a migration whose header exists in exactly one place.
 
 insert into spells
   (key, name, roll_name, level, cast_type, category, school, save_ability, dice,

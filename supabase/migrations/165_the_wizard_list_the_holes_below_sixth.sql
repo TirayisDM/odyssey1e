@@ -1,25 +1,48 @@
 -- 165. THE WIZARD LIST: THE HOLES BELOW SIXTH.
 --
--- RECOVERED FROM THE DATABASE, NOT FROM THE LAPTOP THAT WROTE IT.
--- Applied 2026-10-07 at 21:35 UTC; the file was never pushed. Supabase
--- kept the statement and stripped the comment header, so everything
--- below this block is EXACTLY what ran - MD5-verified against
--- `supabase_migrations.schema_migrations` - and everything inside it
--- was written afterwards by somebody who was not there.
+-- 21 spells at levels 1 to 5 that 161, 162 and 163 missed, found by
+-- diffing the catalogue against the published wizard spell list instead
+-- of against my own count of it. The count was wrong: 163 said both
+-- fourth and fifth were finished at 14 and 19, and the list holds 23
+-- each.
 --
--- THE ORIGINAL HEADER IS STILL ON THE LAPTOP and will say why rather
--- than what. Overwrite this file from there; the SQL will match.
+-- THIRD LEVEL IS THE INTERESTING ONE. It held 28 spells against a list
+-- of 28 and looked complete, and the 28 were not the same 28. Feign
+-- Death arrived in 102 as a cleric spell that happens to be a wizard
+-- spell too, and Phantom Steed was never seeded at all. A MATCHING
+-- TOTAL IS NOT A MATCHING SET, which is 142's digest lesson from the
+-- other direction - there the numbers disagreed and the data was fine,
+-- here the numbers agreed and the data was not.
 --
--- WHAT IT DOES, read off the statement: 161-163 filled the wizard list
--- level by level and left gaps - 24 wizard-only spells below sixth
--- circle that those three did not carry. This is that set, from Find
--- Familiar at first to Wall of Force at fifth.
+-- THREE JUDGEMENT CALLS, all of them 158.
 --
--- WORTH NOTING, because it is the first migration to do it: these rows
--- set `on_save` in the INSERT itself rather than being swept afterwards
--- the way 164 had to sweep 161-163. Black Tentacles and Phantasmal
--- Killer are both 'none', and both for the same reason - neither deals
--- its damage on the save that the spell's own DC is rolled against.
+-- PHANTASMAL KILLER carries its 4d10 even though the FIRST save does
+-- not damage - a failure only frightens, and the dice come on the
+-- end-of-turn saves after it. 158 says dice that are not damage stay
+-- out of the column, and these are damage, just not yet. Glyph of
+-- Warding is the precedent: 5d8 in the column for a trigger that fires
+-- later. The text says which save is which.
+--
+-- FIRE SHIELD, FAITHFUL HOUND and ARCANE HAND are Utility with dice,
+-- which looks like a contradiction and is not. Their damage is real and
+-- rollable and belongs to nothing the caster does on the turn the spell
+-- goes off - a reaction to being hit, a dog biting on its own account, a
+-- fist swung later with a bonus action. Casting them deals nothing, so
+-- `on_save` is NULL and 158's rule holds.
+--
+-- GREASE and RESILIENT SPHERE are Save with no dice at all, because
+-- what their saves decide is prone or not and enclosed or not.
+--
+-- REUNITED. The SQL below is the database's own record of what ran,
+-- MD5-verified when 8f726b4 recovered these four files; the header
+-- above it is the original, off the laptop that wrote them. They were
+-- separated because 165-168 were APPLIED WITHOUT THEIR HEADERS - the
+-- statement was pasted on its own - and Supabase stores the statement,
+-- so the reasoning never left this machine. 161-164 went in whole and
+-- never lost anything.
+--
+-- THE LESSON IS ABOUT THE APPLY, NOT THE RECOVERY: a migration applied
+-- body-only is a migration whose header exists in exactly one place.
 
 insert into spells
   (key, name, roll_name, level, cast_type, category, school, save_ability, dice,

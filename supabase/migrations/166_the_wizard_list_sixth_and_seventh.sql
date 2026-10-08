@@ -1,23 +1,51 @@
 -- 166. THE WIZARD LIST: SIXTH AND SEVENTH CIRCLE.
 --
--- RECOVERED FROM THE DATABASE, NOT FROM THE LAPTOP THAT WROTE IT.
--- Applied 2026-10-07 at 21:40 UTC; the file was never pushed. Supabase
--- kept the statement and stripped the comment header, so everything
--- below this block is EXACTLY what ran - MD5-verified against
--- `supabase_migrations.schema_migrations` - and everything inside it
--- was written afterwards by somebody who was not there.
+-- 29 spells, finishing both levels: 19 of 19 at sixth, 15 of 15 at
+-- seventh. 21 left after this, all of them 8th and 9th, and 167 ends
+-- it. Same contract as 161 to 165 and 102-104: mechanical values read
+-- off the published list, every description written here.
 --
--- THE ORIGINAL HEADER IS STILL ON THE LAPTOP and will say why rather
--- than what. Overwrite this file from there; the SQL will match.
+-- EVERY SAVE SPELL IN THIS FILE CARRIES `on_save`, which is what 164
+-- was for. The question to ask of each one is not "does it do damage"
+-- but "what does a creature that MAKES the save take", and the three
+-- answers are half, none, and it was never cast damage to begin with.
 --
--- WHAT IT DOES, read off the statement: 29 spells, finishing the sixth
--- and seventh circles of the wizard list that 161-163 and 165 had been
--- working through.
+-- DISINTEGRATE TAKES `none`, not `half`. It is the only big damage
+-- spell at these levels where a successful save means nothing at all,
+-- and it is also the one that looks most like the ones that halve.
 --
--- WORTH NOTING: `on_save` is set in the INSERT, and Disintegrate is
--- 'none' rather than 'half' - a successful save takes nothing at all,
--- which is unusual for a levelled damage spell and exactly the sort of
--- thing 158's column exists to record rather than assume.
+-- 10d6+40 IN THE DICE COLUMN, which the catalogue has done once before
+-- - Magic Missile is 3d4+3 - and Finger of Death does the same with
+-- 7d8+30. The flat part is not a modifier anyone can earn or lose, it
+-- is the spell.
+--
+-- SUNBEAM AND WALL OF ICE both damage again after the turn they are
+-- cast, and both keep their dice. Sunbeam fires again on each of your
+-- turns for the same 6d8; Wall of Ice does 10d6 where it appears and a
+-- separate 5d6 to anything pushing through a broken panel, and only the
+-- first of those is in the column. The second is in the text, because
+-- 158 allows one number per row and this spell has two.
+--
+-- ARCANE SWORD IS `Attack` AND ARCANE HAND IS NOT, though both are a
+-- conjured weapon you steer with a bonus action afterwards. The sword
+-- swings the moment it appears - casting it is an attack roll - and the
+-- hand does nothing at all until the turn after. 165 drew the same line
+-- with Faithful Hound.
+--
+-- FORCECAGE AND PROJECT IMAGE ARE NOT CONCENTRATION, which is worth
+-- saying only because every neighbour at this level is. An hour of cage
+-- and a day of double both run on their own.
+--
+-- REUNITED. The SQL below is the database's own record of what ran,
+-- MD5-verified when 8f726b4 recovered these four files; the header
+-- above it is the original, off the laptop that wrote them. They were
+-- separated because 165-168 were APPLIED WITHOUT THEIR HEADERS - the
+-- statement was pasted on its own - and Supabase stores the statement,
+-- so the reasoning never left this machine. 161-164 went in whole and
+-- never lost anything.
+--
+-- THE LESSON IS ABOUT THE APPLY, NOT THE RECOVERY: a migration applied
+-- body-only is a migration whose header exists in exactly one place.
 
 insert into spells
   (key, name, roll_name, level, cast_type, category, school, save_ability, dice,

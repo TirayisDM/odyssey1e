@@ -1,20 +1,50 @@
 -- 168. THE LAST TWO COLUMNS THE RESCUED PAIR NEVER HAD.
 --
--- RECOVERED FROM THE DATABASE, NOT FROM THE LAPTOP THAT WROTE IT.
--- This migration was applied on 2026-10-07 at 21:46 UTC and its file
--- was never pushed. Supabase keeps the statements and strips the
--- comment header, so the SQL below is EXACTLY what ran - MD5-verified
--- against `supabase_migrations.schema_migrations` - and everything
--- above this line was written afterwards by somebody who was not there.
+-- A sweep for half-filled rows after finishing the wizard list turned up
+-- exactly two spells with an EMPTY COMPONENTS ARRAY, and they are the
+-- same two 159 found with no casting time: sp_fireball and
+-- sp_auraoflife, the pair 105 rescued off ONE CHARACTER'S SHEET instead
+-- of taking from a list.
 --
--- THE ORIGINAL HEADER IS STILL ON THE LAPTOP and is better than this
--- one. Overwrite this file from there; the SQL will match.
+-- 159 FIXED THE SYMPTOM IN FRONT OF IT. Dave cast Hold Person, saw
+-- Fireball greyed out, and the casting time was filled in. The header
+-- named the cause correctly - these two came from a sheet and nobody
+-- filled the columns in - and then fixed one column, because that was
+-- the one that had failed out loud. The rest of the row was never
+-- checked.
 --
--- WHAT IT DOES, read off the statements: Fireball and Aura of Life are
--- the pair 105 rescued off one character's sheet rather than writing
--- from a list, and 159 found they had no `casting_time` at all. These
--- are the rest of what that pair never had - components, material,
--- range, and a duration for the aura.
+-- That is the shape worth recording: A CORRECT DIAGNOSIS AND A PARTIAL
+-- FIX. Knowing the cause is a class of problem is not the same as
+-- looking for the rest of the class, and the thing that found these was
+-- not reasoning, it was `cardinality(components) = 0` run over the
+-- whole table.
+--
+-- Fireball has had no V, S or M since 105 - a spell cast silently,
+-- motionlessly and out of nothing, which no caster could be prevented
+-- from casting while gagged, bound or stripped of a focus. Aura of Life
+-- is verbal only and had nothing either.
+--
+-- AND THE FORMATS GO WITH THEM. Fireball is the only row in the
+-- catalogue that writes its range as "150 ft" rather than "150 feet",
+-- and Aura of Life is the only one that writes "10 min" rather than
+-- naming the concentration cap the way 166 and 167 do. Both are the
+-- same sheet showing through, so they are in the same file.
+--
+-- STILL NOT FIXED, AND DELIBERATELY: Fireball's `guidance` names a
+-- particular campaign's deity. It is our own writing, so it breaks
+-- nothing 102-104 set down, but it is one game's flavour sitting in the
+-- shared catalogue. Changing somebody's prose is not a correction.
+--
+-- REUNITED. The SQL below is the database's own record of what ran,
+-- MD5-verified when 8f726b4 recovered these four files; the header
+-- above it is the original, off the laptop that wrote them. They were
+-- separated because 165-168 were APPLIED WITHOUT THEIR HEADERS - the
+-- statement was pasted on its own - and Supabase stores the statement,
+-- so the reasoning never left this machine. 161-164 went in whole and
+-- never lost anything.
+--
+-- THE LESSON IS ABOUT THE APPLY, NOT THE RECOVERY: a migration applied
+-- body-only is a migration whose header exists in exactly one place.
 
 update public.spells
    set components = array['v','s','m'],

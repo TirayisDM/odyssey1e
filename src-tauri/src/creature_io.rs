@@ -45,7 +45,7 @@ pub const FORMAT: &str = "odyssey1e.creature";
 /// wrong. An older FILE stays readable - see `admits`.
 pub const VERSION: i64 = 1;
 
-/// 152. The three states `character_prayers.state` allows. The column is
+/// 152. The three states `character_spells.state` allows. The column is
 /// NOT NULL and defaults to 'prepared'; 'cantrip' is known rather than
 /// prepared, and 'book' is held but not up today.
 pub const STATES: [&str; 3] = ["cantrip", "prepared", "book"];
@@ -129,13 +129,13 @@ pub struct Choice {
     pub choice: String,
 }
 
-/// 152. A PRAYER CARRIES ITS STATE, which is one of three words and not
-/// a yes or no. `character_prayers.state` is 'cantrip', 'prepared' or
+/// 152. A HELD SPELL CARRIES ITS STATE, which is one of three words and not
+/// a yes or no. `character_spells.state` is 'cantrip', 'prepared' or
 /// 'book': a cantrip is KNOWN rather than prepared, and a spell in the
 /// book is neither. A boolean can hold two of those and silently turns
 /// the third into something the rules have no word for.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Prayer {
+pub struct HeldSpell {
     pub spell_key: String,
     /// Defaults to the column's own default, so a hand-written file may
     /// leave it out and mean the ordinary case.
@@ -189,8 +189,12 @@ pub struct Creature {
     pub classes: Vec<ClassLevel>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prayers: Vec<Prayer>,
+    /// 176. WAS `prayers` AND STILL READS AS ONE. Every creature file
+    /// written before the rename says "prayers", and `admits` promises
+    /// an older file opens - so the alias is that promise, not a
+    /// convenience. Exports write `spells` from now on.
+    #[serde(default, alias = "prayers", skip_serializing_if = "Vec::is_empty")]
+    pub spells: Vec<HeldSpell>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kit: Vec<KitItem>,
 }
@@ -319,7 +323,7 @@ pub fn vet(mut c: Creature, known: &Known) -> (Creature, Vec<Warning>) {
         ok
     });
 
-    c.prayers.retain_mut(|x| {
+    c.spells.retain_mut(|x| {
         let ok = known.spells.contains(&x.spell_key);
         if !ok {
             warn.push(Warning::new("spell", &x.spell_key, "not in this game - not prepared"));
@@ -330,7 +334,7 @@ pub fn vet(mut c: Creature, known: &Known) -> (Creature, Vec<Warning>) {
             warn.push(Warning::new(
                 "spell",
                 &x.spell_key,
-                "not a prayer state - taken as prepared",
+                "not a spell state - taken as prepared",
             ));
             x.state = prepared();
         }
@@ -455,7 +459,7 @@ mod tests {
             name: "Cave Goblin".into(),
             species_key: Some("goblin".into()),
             skills: vec![SkillProf { skill_key: "ste".into(), prof: 1.0 }],
-            prayers: vec![Prayer { spell_key: "sp_bless".into(), state: "prepared".into() }],
+            spells: vec![HeldSpell { spell_key: "sp_bless".into(), state: "prepared".into() }],
             kit: vec![item("torch", vec![])],
             ..Default::default()
         };
@@ -537,14 +541,14 @@ mod tests {
     fn an_unknown_spell_is_not_prepared() {
         let c = Creature {
             name: "x".into(),
-            prayers: vec![
-                Prayer { spell_key: "sp_bless".into(), state: "cantrip".into() },
-                Prayer { spell_key: "sp_invented".into(), state: "prepared".into() },
+            spells: vec![
+                HeldSpell { spell_key: "sp_bless".into(), state: "cantrip".into() },
+                HeldSpell { spell_key: "sp_invented".into(), state: "prepared".into() },
             ],
             ..Default::default()
         };
         let (out, warn) = vet(c, &known_of(&[], &["sp_bless"], &[], &[], &[]));
-        assert_eq!(out.prayers.len(), 1);
+        assert_eq!(out.spells.len(), 1);
         assert_eq!(warn.len(), 1);
         assert_eq!(warn[0].key, "sp_invented");
     }
@@ -555,16 +559,16 @@ mod tests {
     fn a_cantrip_survives_the_journey_as_a_cantrip() {
         let c = Creature {
             name: "x".into(),
-            prayers: vec![
-                Prayer { spell_key: "sp_light".into(), state: "cantrip".into() },
-                Prayer { spell_key: "sp_bless".into(), state: "book".into() },
+            spells: vec![
+                HeldSpell { spell_key: "sp_light".into(), state: "cantrip".into() },
+                HeldSpell { spell_key: "sp_bless".into(), state: "book".into() },
             ],
             ..Default::default()
         };
         let (out, warn) = vet(c, &known_of(&[], &["sp_light", "sp_bless"], &[], &[], &[]));
         assert!(warn.is_empty(), "{:?}", warn);
-        assert_eq!(out.prayers[0].state, "cantrip");
-        assert_eq!(out.prayers[1].state, "book");
+        assert_eq!(out.spells[0].state, "cantrip");
+        assert_eq!(out.spells[1].state, "book");
     }
 
     /// A word the column would refuse costs the state, not the spell.
@@ -572,12 +576,12 @@ mod tests {
     fn a_state_the_column_would_refuse_is_taken_as_prepared() {
         let c = Creature {
             name: "x".into(),
-            prayers: vec![Prayer { spell_key: "sp_bless".into(), state: "memorised".into() }],
+            spells: vec![HeldSpell { spell_key: "sp_bless".into(), state: "memorised".into() }],
             ..Default::default()
         };
         let (out, warn) = vet(c, &known_of(&[], &["sp_bless"], &[], &[], &[]));
-        assert_eq!(out.prayers.len(), 1, "the spell is kept");
-        assert_eq!(out.prayers[0].state, "prepared");
+        assert_eq!(out.spells.len(), 1, "the spell is kept");
+        assert_eq!(out.spells[0].state, "prepared");
         assert_eq!(warn.len(), 1);
         assert!(warn[0].note.contains("prepared"), "{}", warn[0].note);
     }
@@ -585,8 +589,8 @@ mod tests {
     /// A file that leaves the field out means the ordinary case, which is
     /// the column's own default.
     #[test]
-    fn a_prayer_with_no_state_is_prepared() {
-        let p: Prayer = serde_json::from_str(r#"{"spell_key":"sp_bless"}"#).unwrap();
+    fn a_held_spell_with_no_state_is_prepared() {
+        let p: HeldSpell = serde_json::from_str(r#"{"spell_key":"sp_bless"}"#).unwrap();
         assert_eq!(p.state, "prepared");
     }
 

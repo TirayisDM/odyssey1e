@@ -384,9 +384,9 @@ pub struct Sheet {
     /// RESOLVED ONCE, HERE. Six commands used to find a cleric class on
     /// the sheet and refuse anybody else, which is why a Lich could not
     /// cast a spell: a monster has no classes at all. A class says so or
-    /// a statblock does, and `prayers::caster` owns which wins.
+    /// a statblock does, and `casting::caster` owns which wins.
     #[serde(skip_deserializing)]
-    pub caster: Option<crate::prayers::Caster>,
+    pub caster: Option<crate::casting::Caster>,
     /// 133. THE LEVEL A TECHNIQUE GATE READS, which is not always this
     /// character's level - `attack::gate_level` owns the rule and this
     /// is its answer, carried so that the three things which gate a
@@ -724,7 +724,7 @@ pub fn resolve_request(sheet: &Sheet, request: &str, mode: &str) -> Resolved {
     // THEN A SPELL, for the same reason an attack comes first: a spell
     // name is a specific thing and collides with no skill or ability.
     //
-    // 154. THE SECOND HALF OF CASTING, which was missing. `cast_prayer`
+    // 154. THE SECOND HALF OF CASTING, which was missing. `cast_spell`
     // deliberately does not roll - it spends the slot, writes the action
     // and puts the spell's name in the roll box, because an attack spell
     // is a d20 like any other and belongs in the one place that makes
@@ -1262,7 +1262,7 @@ fn load_castable(
 ) -> Result<Vec<crate::spellcast::Known>, String> {
     let chosen = supabase::rest_get(
         token,
-        "character_prayers",
+        "character_spells",
         &[
             ("select", "spell_key,state"),
             ("character_id", &format!("eq.{}", character_id)),
@@ -1886,15 +1886,15 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     // this function says seven is the count to watch and that a hover
     // preview pays all of it; this makes it nine for a caster and
     // leaves it at seven for every fighter, every monster and every
-    // creature in the bestiary. `prayers::caster` is the gate and it is
+    // creature in the bestiary. `casting::caster` is the gate and it is
     // already computed from `classes`, which is read above.
     //
-    // TWO AND NOT ONE because `character_prayers.spell_key` references
+    // TWO AND NOT ONE because `character_spells.spell_key` references
     // `spells` BY VALUE - the nullable-tenancy pattern, where a partial
     // unique index cannot back a foreign key - so there is no
     // relationship for PostgREST to embed across and the keys have to
     // be known before the catalogue can be asked about them.
-    let caster = crate::prayers::caster(&classes);
+    let caster = crate::casting::caster(&classes);
     let spells = match &caster {
         Some(_) => load_castable(token, &game_id, character_id)?,
         None => Vec::new(),
@@ -2059,7 +2059,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     let mut sheet = Sheet {
         // 150. OFF THE CLASS ROWS, the same ones a player character
         // has. A creature that casts has class levels - see
-        // prayers::caster, and 022 for why there is no second path.
+        // casting::caster, and 022 for why there is no second path.
         caster,
         spells,
         from_statblock: from_statblock_row,
@@ -2670,11 +2670,11 @@ mod tests {
     fn luci() -> Sheet {
         let mut s = rodnar();
         s.name = "Luci".into();
-        s.caster = Some(crate::prayers::Caster {
+        s.caster = Some(crate::casting::Caster {
             class_key: "cleric".into(),
             level: 5,
             ability: "wis".into(),
-            source: crate::prayers::Source::WholeList,
+            source: crate::casting::Source::WholeList,
         });
         s.spells = vec![
             crate::spellcast::Known {

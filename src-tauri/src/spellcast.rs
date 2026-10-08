@@ -212,17 +212,17 @@ pub fn cast(
     save_ability: Option<&str>,
     dice: Option<&str>,
     prof_bonus: i64,
-    wis_mod: i64,
+    ability_mod: i64,
 ) -> Cast {
     let stance = stance(cast_type);
-    let to_hit = (cast_type == "Attack").then(|| crate::prayers::attack_bonus(prof_bonus, wis_mod));
+    let to_hit = (cast_type == "Attack").then(|| crate::casting::attack_bonus(prof_bonus, ability_mod));
     let save_dc = save_ability
         .filter(|s| !s.is_empty())
-        .map(|_| crate::prayers::save_dc(prof_bonus, wis_mod));
+        .map(|_| crate::casting::save_dc(prof_bonus, ability_mod));
 
     let dice = dice.filter(|d| !d.is_empty()).map(|d| {
-        if cast_type == "Heal" && wis_mod != 0 {
-            format!("{}{}{}", d, if wis_mod > 0 { "+" } else { "-" }, wis_mod.abs())
+        if cast_type == "Heal" && ability_mod != 0 {
+            format!("{}{}{}", d, if ability_mod > 0 { "+" } else { "-" }, ability_mod.abs())
         } else {
             d.to_string()
         }
@@ -250,7 +250,7 @@ pub fn cast(
 /// the same arithmetic to live and drift.
 ///
 /// WHAT IS ON IT IS WHAT `cast()` TAKES, so the sheet can hand one
-/// straight to the same function `cast_prayer` calls and get the same
+/// straight to the same function `cast_spell` calls and get the same
 /// answer. Two callers, one rule.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Known {

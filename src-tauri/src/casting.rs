@@ -1,29 +1,54 @@
-//! What a cleric can prepare, and what they can spend it with.
+//! What a prepared caster may hold, and what they spend it with.
 //!
-//! 106. THE CLERIC IS A PREPARED CASTER and that is the whole shape of
-//! this: the list they can draw from is the ENTIRE cleric list, every
-//! day, and what limits them is how many they may hold at once and how
-//! many slots they have to spend.
+//! 176. WIZARDS GET SPELLS, CLERICS GET PRAYERS, AND THEY ARE ALL
+//! SPELLS. 106 built this for the cleric and named everything after
+//! one - the file was `prayers.rs`, the parameters were `cleric_level`
+//! and `wis_mod`, and the module doc said outright that it was "named
+//! for the cleric rather than for casting". 150 then put the wizard
+//! through the same functions and renamed nothing, so A WIZARD'S
+//! INTELLIGENCE WAS BEING PASSED INTO AN ARGUMENT CALLED `wis_mod`,
+//! and `save_dc`'s own comment promised Wisdom.
 //!
-//! That is different from a bard or a sorcerer, who KNOW a small
-//! number permanently. Nothing here would serve them, which is why the
-//! module is named for the cleric rather than for casting.
+//! The arithmetic was right the whole time, which is the worst pairing
+//! available: nothing fails, so nothing draws attention, and anybody
+//! reading a signature to learn how a wizard casts is told something
+//! untrue by it.
 //!
 //! ---------------------------------------------------------------------
-//! THREE NUMBERS, AND THEY COME FROM DIFFERENT PLACES
+//! WHAT IS GENUINELY SHARED, AND MUST STAY IN ONE PLACE
 //! ---------------------------------------------------------------------
 //!
-//!   PREPARED   Wisdom modifier + cleric level, minimum 1. Changes
-//!              when either does, which is why it is derived on every
-//!              read rather than stored.
+//!   PREPARED   Casting ability modifier + class level, minimum 1.
+//!              Derived on every read rather than stored, because it
+//!              changes when either part does.
 //!   CANTRIPS   3, then 4 at level 4 and 5 at level 10. Known rather
-//!              than prepared - they are always there and never cost a
-//!              slot.
-//!   SLOTS      The full-caster table. A cleric 5 has 4/3/2, and the
+//!              than prepared - always there, never costing a slot.
+//!   SLOTS      The full-caster table. A caster 5 has 4/3/2, and the
 //!              table is the only part of this that is simply data.
 //!
-//! THE LEVEL IS THE CLERIC'S, never the character's total. A Fighter 4
-//! / Cleric 1 prepares as a cleric 1 - which is the same rule
+//! ALL THREE ARE IDENTICAL FOR THE CLERIC AND THE WIZARD in 5e - the
+//! same table, the same formula, a different ability feeding it. A
+//! module per class would be one derived number computed in two
+//! places, and the copies would drift the first time either was
+//! edited. 001's rule, and the reason this file is shared rather than
+//! split.
+//!
+//! ---------------------------------------------------------------------
+//! WHAT IS GENUINELY DIFFERENT
+//! ---------------------------------------------------------------------
+//!
+//! `Source` and `may_reach`, and nothing else in this file. A CLERIC
+//! DRAWS FROM THE WHOLE CLERIC LIST EVERY DAY; A WIZARD REACHES ONLY
+//! INTO A BOOK that somebody has written in. Every other difference
+//! between the two follows from that one, and `casts` is the only
+//! place a class is named at all.
+//!
+//! A bard or a sorcerer KNOWS a small number permanently and neither
+//! shape fits them, which is why `casts` leaves them out rather than
+//! guessing.
+//!
+//! THE LEVEL IS THE CASTING CLASS'S, never the character's total. A
+//! Fighter 4 / Cleric 1 prepares as a cleric 1 - the same rule
 //! `features::held` and `uses::Context` already follow, for the same
 //! reason.
 //!
@@ -32,25 +57,29 @@
 //! table, with half and third progressions for paladins and rangers.
 //! That is a real rule and it needs more than one class to be worth
 //! writing - `slots_at` takes a single level and says so.
+//!
+//! Also not here: what it costs to WRITE a spell down, which is
+//! `scribe.rs`, and where the writing lives, which is 172's
+//! `scribed_spells` and belongs to the book rather than the caster.
 
 use serde::{Deserialize, Serialize};
 
-/// How many spells a cleric may have prepared.
+/// How many spells a prepared caster may hold at once.
 ///
-/// MINIMUM ONE, which is 5e's own floor: a cleric with Wisdom 10 at
-/// level 1 still prepares something. Without it a dump-stat cleric
-/// would prepare nothing at all.
-pub fn prepared_max(cleric_level: i64, wis_mod: i64) -> i64 {
-    (cleric_level.max(0) + wis_mod).max(1)
+/// MINIMUM ONE, which is 5e's own floor: a caster with a +0 in their
+/// casting ability at level 1 still prepares something. Without it a
+/// dump-stat cleric would prepare nothing at all.
+pub fn prepared_max(caster_level: i64, ability_mod: i64) -> i64 {
+    (caster_level.max(0) + ability_mod).max(1)
 }
 
-/// How many cantrips a cleric knows.
+/// How many cantrips a prepared caster knows.
 ///
 /// KNOWN, NOT PREPARED. They do not come out of the prepared count and
 /// they never cost a slot - which is why they are a separate number
 /// rather than a line in the same budget.
-pub fn cantrips_known(cleric_level: i64) -> i64 {
-    match cleric_level {
+pub fn cantrips_known(caster_level: i64) -> i64 {
+    match caster_level {
         l if l >= 10 => 5,
         l if l >= 4 => 4,
         l if l >= 1 => 3,
@@ -58,15 +87,15 @@ pub fn cantrips_known(cleric_level: i64) -> i64 {
     }
 }
 
-/// Spell slots by cleric level: index 0 is 1st-level slots.
+/// Spell slots by casting-class level: index 0 is 1st-level slots.
 ///
 /// THE FULL-CASTER TABLE, which the cleric, bard, druid, sorcerer and
 /// wizard all share. Written out rather than computed because it is
 /// not a formula - the jumps at 11th and 13th are the book's own
 /// shape, and a clever closed form would be a different table that
 /// happened to agree for a while.
-pub fn slots_at(cleric_level: i64) -> [i64; 9] {
-    match cleric_level.clamp(0, 20) {
+pub fn slots_at(caster_level: i64) -> [i64; 9] {
+    match caster_level.clamp(0, 20) {
         0 => [0, 0, 0, 0, 0, 0, 0, 0, 0],
         1 => [2, 0, 0, 0, 0, 0, 0, 0, 0],
         2 => [3, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -88,9 +117,9 @@ pub fn slots_at(cleric_level: i64) -> [i64; 9] {
     }
 }
 
-/// The highest spell level this cleric can cast at all.
-pub fn top_slot(cleric_level: i64) -> i64 {
-    slots_at(cleric_level)
+/// The highest spell level this caster can cast at all.
+pub fn top_slot(caster_level: i64) -> i64 {
+    slots_at(caster_level)
         .iter()
         .rposition(|n| *n > 0)
         .map(|i| i as i64 + 1)
@@ -195,17 +224,45 @@ pub fn caster(classes: &[crate::multiclass::Taken]) -> Option<Caster> {
 /// `held` IS THE STATE THIS CASTER HAS THE SPELL IN, or None for one
 /// they have never held. For a book caster that is the whole question:
 /// `book` means written down and not prepared today, which is exactly
-/// the state a wizard prepares FROM.
+/// the state a wizard prepares FROM. Since 172 that state can come from
+/// a book the wizard is CARRYING as well as a row on the character -
+/// `load_chosen` folds the two together and this function cannot tell.
+///
+/// 176. A CANTRIP IS NOT IN THE BOOK AND NEVER WAS. The wizard's own
+/// rules say the spellbook holds the spells they know "except your
+/// cantrips, which are fixed in your mind": a cantrip is chosen off the
+/// class list at level-up, exactly like a cleric's, and is never
+/// copied.
+///
+/// This arm was missing, and `prepare_spell` asks this question BEFORE
+/// it branches on level, so A WIZARD COULD NOT LEARN A CANTRIP AT ALL -
+/// the book arm refused it for not being written down, in a book that
+/// by rule cannot contain it.
+///
+/// 170 TO 175 MADE IT WORSE BY MAKING IT WORK. `scribe::fits` charges a
+/// cantrip a page like anything else, so once a book existed there was
+/// a path: pay the ink and the hours, write Fire Bolt down, and then
+/// the wizard may "learn" it. A wrong answer that looks deliberate is
+/// harder to find than one that fails, which is 159's lesson in a
+/// different column.
+///
+/// SCRIBING A CANTRIP IS STILL ALLOWED. A scroll of one is a real
+/// thing and a book may hold the words; what changes here is only that
+/// a wizard no longer has to do it before knowing one.
 pub fn may_reach(
     caster: &Caster,
     spell_classes: &[String],
+    spell_level: i64,
     held: Option<&str>,
 ) -> Result<(), String> {
+    let on_list = || match spell_classes.iter().any(|c| *c == caster.class_key) {
+        true => Ok(()),
+        false => Err(format!("that is not a {} spell", caster.class_key)),
+    };
     match caster.source {
-        Source::WholeList => match spell_classes.iter().any(|c| *c == caster.class_key) {
-            true => Ok(()),
-            false => Err(format!("that is not a {} spell", caster.class_key)),
-        },
+        Source::WholeList => on_list(),
+        // 176. A cantrip is a class-list question for everybody.
+        Source::Book if spell_level == 0 => on_list(),
         Source::Book => match held {
             Some("book") | Some("prepared") => Ok(()),
             _ => Err("that is not in their book - a wizard prepares from what they have written down".to_string()),
@@ -213,17 +270,21 @@ pub fn may_reach(
     }
 }
 
-/// The save DC for this cleric's spells: 8 + proficiency + Wisdom.
+/// The save DC: 8 + proficiency + the CASTING ability's modifier.
+///
+/// NOT WISDOM, whatever this comment said until 176. A cleric's is
+/// Wisdom and a wizard's is Intelligence; the caller reads which off
+/// `Caster.ability` rather than this function assuming one.
 ///
 /// A PROPERTY OF THE CASTER, which is exactly what 101 cleared the
 /// baked 15 out of the catalogue for.
-pub fn save_dc(prof_bonus: i64, wis_mod: i64) -> i64 {
-    8 + prof_bonus + wis_mod
+pub fn save_dc(prof_bonus: i64, ability_mod: i64) -> i64 {
+    8 + prof_bonus + ability_mod
 }
 
 /// The attack bonus for a spell that makes an attack roll.
-pub fn attack_bonus(prof_bonus: i64, wis_mod: i64) -> i64 {
-    prof_bonus + wis_mod
+pub fn attack_bonus(prof_bonus: i64, ability_mod: i64) -> i64 {
+    prof_bonus + ability_mod
 }
 
 /// How many slots of each level are left, given what has been spent.
@@ -231,8 +292,8 @@ pub fn attack_bonus(prof_bonus: i64, wis_mod: i64) -> i64 {
 /// 107. NEVER BELOW ZERO. A level lost, or a DM editing a class row,
 /// can leave somebody having spent more than they now have, and
 /// "minus one slot" helps nobody.
-pub fn slots_left(cleric_level: i64, spent: &[i64; 9]) -> [i64; 9] {
-    let have = slots_at(cleric_level);
+pub fn slots_left(caster_level: i64, spent: &[i64; 9]) -> [i64; 9] {
+    let have = slots_at(caster_level);
     let mut left = [0; 9];
     for i in 0..9 {
         left[i] = (have[i] - spent[i].max(0)).max(0);
@@ -246,21 +307,21 @@ pub fn slots_left(cleric_level: i64, spent: &[i64; 9]) -> [i64; 9] {
 /// 3rd-level slot can carry a 1st-level spell and often should -
 /// tying expenditure to the spell would make upcasting
 /// unrepresentable.
-pub fn may_spend_slot(cleric_level: i64, spent: &[i64; 9], level: i64) -> Result<(), String> {
+pub fn may_spend_slot(caster_level: i64, spent: &[i64; 9], level: i64) -> Result<(), String> {
     if !(1..=9).contains(&level) {
         return Err("a spell slot is level 1 to 9".to_string());
     }
     let i = (level - 1) as usize;
-    if slots_at(cleric_level)[i] == 0 {
+    if slots_at(caster_level)[i] == 0 {
         return Err(format!("they have no level {} slots", level));
     }
-    if slots_left(cleric_level, spent)[i] == 0 {
+    if slots_left(caster_level, spent)[i] == 0 {
         return Err(format!("no level {} slots left until they rest", level));
     }
     Ok(())
 }
 
-/// What a rest gives back, for a cleric.
+/// What a rest gives back.
 ///
 /// EVERYTHING ON A LONG REST AND NOTHING ON A SHORT ONE. That is the
 /// cleric's rule and not everybody's - a warlock's Pact Magic comes
@@ -280,8 +341,8 @@ pub fn slots_restored(class_key: &str, long: bool) -> bool {
 /// is full, and it is already there. Each says which.
 pub fn may_prepare(
     spell_level: i64,
-    cleric_level: i64,
-    wis_mod: i64,
+    caster_level: i64,
+    ability_mod: i64,
     already: &[String],
     key: &str,
 ) -> Result<(), String> {
@@ -291,14 +352,14 @@ pub fn may_prepare(
     if already.iter().any(|k| k == key) {
         return Err("already prepared".to_string());
     }
-    let top = top_slot(cleric_level);
+    let top = top_slot(caster_level);
     if spell_level > top {
         return Err(match top {
             0 => "they have no spell slots yet".to_string(),
             t => format!("that is a level {} spell and they cast up to {}", spell_level, t),
         });
     }
-    let max = prepared_max(cleric_level, wis_mod);
+    let max = prepared_max(caster_level, ability_mod);
     if already.len() as i64 >= max {
         return Err(format!(
             "that is {} prepared and they may hold {} - put one down first",
@@ -383,13 +444,13 @@ mod tests {
     #[test]
     fn a_cleric_reaches_for_anything_on_the_cleric_list() {
         let on = vec!["cleric".to_string(), "paladin".to_string()];
-        assert!(may_reach(&cleric5(), &on, None).is_ok(), "never held it, and that is fine");
+        assert!(may_reach(&cleric5(), &on, 2, None).is_ok(), "never held it, and that is fine");
     }
 
     #[test]
     fn a_cleric_is_refused_a_spell_off_their_list() {
         let on = vec!["wizard".to_string()];
-        let e = may_reach(&cleric5(), &on, None).unwrap_err();
+        let e = may_reach(&cleric5(), &on, 2, None).unwrap_err();
         assert!(e.contains("not a cleric spell"), "{}", e);
     }
 
@@ -398,15 +459,15 @@ mod tests {
         // THE WHOLE DIFFERENCE. Being a wizard spell is not enough -
         // somebody has to have written it down.
         let on = vec!["wizard".to_string()];
-        let e = may_reach(&wizard9(), &on, None).unwrap_err();
+        let e = may_reach(&wizard9(), &on, 3, None).unwrap_err();
         assert!(e.contains("not in their book"), "{}", e);
     }
 
     #[test]
     fn a_wizard_prepares_from_the_book() {
         let on = vec!["wizard".to_string()];
-        assert!(may_reach(&wizard9(), &on, Some("book")).is_ok());
-        assert!(may_reach(&wizard9(), &on, Some("prepared")).is_ok(), "already up is not a refusal here");
+        assert!(may_reach(&wizard9(), &on, 3, Some("book")).is_ok());
+        assert!(may_reach(&wizard9(), &on, 3, Some("prepared")).is_ok(), "already up is not a refusal here");
     }
 
     #[test]
@@ -414,7 +475,55 @@ mod tests {
         // A spell written into the book is castable whatever the
         // catalogue says it is - a wizard who copied something odd has
         // it, and the book is the authority for a book caster.
-        assert!(may_reach(&wizard9(), &[], Some("book")).is_ok());
+        assert!(may_reach(&wizard9(), &[], 3, Some("book")).is_ok());
+    }
+
+    /* ---------- 176. a cantrip is not in the book ---------- */
+
+    #[test]
+    fn a_wizard_learns_a_cantrip_off_the_class_list() {
+        // NOT OUT OF THE BOOK. The wizard's rules exclude cantrips from
+        // the spellbook - they are fixed in the mind - so the class
+        // list is the only question, exactly as for a cleric.
+        //
+        // Before 176 the book arm refused this and a wizard could not
+        // learn a cantrip at all. 170-175 then made the refusal
+        // avoidable by scribing the cantrip into a book first, which is
+        // a thing the rules never ask anybody to do.
+        let on = vec!["wizard".to_string(), "sorcerer".to_string()];
+        assert!(may_reach(&wizard9(), &on, 0, None).is_ok());
+    }
+
+    #[test]
+    fn a_wizard_is_still_refused_a_cantrip_off_their_list() {
+        // The exemption is from the BOOK, not from the class list.
+        let on = vec!["cleric".to_string()];
+        let e = may_reach(&wizard9(), &on, 0, None).unwrap_err();
+        assert!(e.contains("not a wizard spell"), "{}", e);
+    }
+
+    #[test]
+    fn the_book_still_gates_everything_above_a_cantrip() {
+        // Level 0 and nothing else, so a 1st-level spell is as gated as
+        // a 9th. A loop rather than one case, because an off-by-one
+        // here would hand a wizard the whole list.
+        let on = vec!["wizard".to_string()];
+        for lvl in 1..=9 {
+            assert!(
+                may_reach(&wizard9(), &on, lvl, None).is_err(),
+                "level {} should still need the book",
+                lvl
+            );
+        }
+    }
+
+    #[test]
+    fn a_scribed_cantrip_is_reachable_too() {
+        // 170-175 allow a cantrip to be written into a book or onto a
+        // scroll, and 176 does not take that away - it only stops the
+        // writing being REQUIRED. Either route reaches it.
+        let on = vec!["wizard".to_string()];
+        assert!(may_reach(&wizard9(), &on, 0, Some("book")).is_ok());
     }
 
     use super::*;
@@ -422,7 +531,7 @@ mod tests {
     /* ---------- how many they hold ---------- */
 
     #[test]
-    fn prepared_is_wisdom_plus_cleric_level() {
+    fn prepared_is_ability_mod_plus_caster_level() {
         assert_eq!(prepared_max(1, 3), 4);
         assert_eq!(prepared_max(5, 3), 8);
         assert_eq!(prepared_max(20, 5), 25);
@@ -620,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn a_cleric_level_is_not_a_character_level() {
+    fn a_casting_class_level_is_not_a_character_level() {
         // A Fighter 4 / Cleric 1 prepares as a cleric 1 - the same rule
         // features::held and uses::Context already follow. Passing 5
         // here would give them a 3rd-level slot they have not earned.

@@ -124,7 +124,7 @@ pub fn take_rest(state: State<AppState>, game_id: String, long: bool) -> Result<
         // 107. AND THE SPELL SLOTS, if the class gets them back from
         // this kind of rest. A cleric's return on a long rest and not
         // a short one; a warlock's on either, which is why
-        // prayers::slots_restored takes the class rather than it being
+        // casting::slots_restored takes the class rather than it being
         // a property of the slot.
         restore_slots(&token, &p.id, kind)?;
 
@@ -387,10 +387,10 @@ fn restore_slots(token: &str, character_id: &str, kind: Rest) -> Result<(), Stri
         .unwrap_or(&Vec::new())
         .iter()
         .filter_map(|r| r.get("class_key").and_then(|v| v.as_str()))
-        .any(|k| crate::prayers::slots_restored(k, kind == Rest::Long));
+        .any(|k| crate::casting::slots_restored(k, kind == Rest::Long));
 
     if gives_back {
-        crate::commands::prayers::clear_slots(token, character_id)?;
+        crate::commands::casting::clear_slots(token, character_id)?;
     }
     Ok(())
 }

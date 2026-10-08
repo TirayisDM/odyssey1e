@@ -332,7 +332,7 @@ pub fn export_creature(state: State<AppState>, template_id: String) -> Result<Va
             "class_key,feature_key,pick,choice",
         )?)
         .unwrap_or_default(),
-        prayers: serde_json::from_value(sat("character_prayers", "spell_key,state")?)
+        spells: serde_json::from_value(sat("character_spells", "spell_key,state")?)
             .unwrap_or_default(),
         kit: read_kit(&token, &entity, 0)?,
     };
@@ -571,10 +571,10 @@ pub fn import_creature(
             }),
         )?;
     }
-    for p in &c.prayers {
+    for p in &c.spells {
         supabase::rest_upsert(
             &token,
-            "character_prayers",
+            "character_spells",
             &json!({ "character_id": cid, "spell_key": p.spell_key, "state": p.state }),
             "character_id,spell_key",
         )?;

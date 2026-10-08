@@ -543,7 +543,13 @@
           <!-- 106. CLERICS ONLY. Hidden for everybody else rather than
                shown empty - a fighter has no prepared list, and "0 of
                0" would invite the question of how to raise it. -->
-          <button class="tab" data-sheet="prayers" id="tab-prayers" hidden>Prayers</button>
+          <!-- 176. THE LABEL IS WRITTEN BY `loadPrayers` off the
+               caster's source - Spells for a wizard, Prayers for a
+               cleric. The text here is only what it reads before any
+               caster has been loaded, and the tab is hidden then
+               anyway. It used to be gated on HAVING A CLERIC CLASS BY
+               NAME, so a wizard never saw it. -->
+          <button class="tab" data-sheet="prayers" id="tab-prayers" hidden>Spells</button>
         </nav>
 
         <div class="sheet-pane" data-sheet="stats">
@@ -829,12 +835,12 @@
              reasoning 068 applied to the character creation form. -->
         <button id="add-prayer-head" class="lvlhead section">
           <span class="caret">&#9656;</span>
-          <span class="lvlname">Add a prayer</span>
+          <span class="lvlname" id="add-prayer-word">Add a spell</span>
           <span class="lvlcount" id="add-prayer-count"></span>
         </button>
         <div id="add-prayer-body" hidden>
           <div class="row">
-            <input id="prep-find" placeholder="search the cleric list" />
+            <input id="prep-find" placeholder="search" />
           </div>
           <div id="prep-list"></div>
         </div>

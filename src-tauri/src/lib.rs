@@ -47,7 +47,7 @@ mod naming;
 mod narrative;
 mod objects;
 mod pin;
-mod prayers;
+mod casting;
 mod resist;
 mod resolution;
 mod scribe;
@@ -1478,10 +1478,10 @@ pub fn run() {
             commands::books::erase_spell,
             commands::books::copy_from_scroll,
             commands::books::scribe_options,
-            commands::prayers::list_spells,
-            commands::prayers::list_prayers,
-            commands::prayers::prepare_prayer,
-            commands::prayers::forget_prayer,
+            commands::casting::list_spells,
+            commands::casting::list_casting,
+            commands::casting::prepare_spell,
+            commands::casting::forget_spell,
             // 123. The bestiary.
             commands::creatures::list_creatures,
             commands::creatures::import_statblock,
@@ -1489,12 +1489,12 @@ pub fn run() {
             commands::creatures::delete_creature,
             commands::creatures::export_creature,
             commands::creatures::import_creature,
-            commands::prayers::castable,
-            commands::prayers::cast_prayer,
+            commands::casting::castable,
+            commands::casting::cast_spell,
             // 158. The second half of a save spell.
-            commands::prayers::resolve_spell_save,
-            commands::prayers::spend_spell_slot,
-            commands::prayers::restore_spell_slot,
+            commands::casting::resolve_spell_save,
+            commands::casting::spend_spell_slot,
+            commands::casting::restore_spell_slot,
             commands::effects::list_effects,
             commands::effects::apply_effect,
             commands::effects::end_effect,

@@ -40,7 +40,7 @@ let state = {
   // 094. What is running, already filtered and ordered by Rust.
   effects: [],
   // 106. The cleric catalogue, read once per game, and one cleric's
-  // own numbers as list_prayers last reported them.
+  // own numbers as list_casting last reported them.
   spells: [],
   prayers: null,
   // 110. What this character can cast on their turn, as castable()
@@ -430,7 +430,7 @@ async function selectGame(id) {
   await loadSlots();
   await loadClock();
   await loadEffects();
-  await loadClericCatalogue();
+  await loadCatalogue();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1201,7 +1201,7 @@ async function doCast(sp, targetId, choice) {
   // slots went, and nothing was written down or landed on anybody.
   const at = (state.targets || []).find((t) => t.id === targetId) || null;
 
-  const r = await tryCall("cast_prayer", {
+  const r = await tryCall("cast_spell", {
     characterId: state.characterId,
     spellKey: sp.key,
     atLevel: null,
@@ -1212,7 +1212,7 @@ async function doCast(sp, targetId, choice) {
     actorId: performerActorId(),
     choice: choice || null,
   });
-  if (!r.ok) return log("cast_prayer", r.error, true);
+  if (!r.ok) return log("cast_spell", r.error, true);
 
   const said = [r.value.name];
   if (at) said.push("at " + at.label);
@@ -1232,7 +1232,7 @@ async function doCast(sp, targetId, choice) {
   // capped at the maximum, and bigger than the roll when the target was
   // below zero and had a hole to climb out of first.
   if (r.value.healed) said.push(r.value.healed);
-  log("cast_prayer", said.join(" \u00b7 "));
+  log("cast_spell", said.join(" \u00b7 "));
 
   // THE TO-HIT GOES IN THE ROLL BOX rather than being rolled here. An
   // attack spell is a d20 like any other and belongs in the one place
@@ -1306,7 +1306,7 @@ function showPendingSave(pending) {
   box.append(row);
 }
 
-/* ===================== CLERIC PRAYERS (106) ===================== */
+/* ================ SPELLS AND PRAYERS (106, 176) ================ */
 //
 // ONE SURFACE NOW, NOT TWO. This was a reference TAB and a sheet
 // SUBTAB off one catalogue. 169 made the Spells tab the reference book
@@ -1323,24 +1323,43 @@ function showPendingSave(pending) {
 // skips the row without a word.
 //
 // EVERY NUMBER COMES FROM RUST. How many may be prepared, how many
-// cantrips are known, what the save DC is - prayers.rs works all of it
+// cantrips are known, what the save DC is - casting.rs works all of it
 // out from the CLERIC's level, which is not the character's total. A
 // Fighter 4 / Cleric 1 prepares as a cleric 1.
 const SCHOOLS = ["abjuration","conjuration","divination","enchantment",
                  "evocation","illusion","necromancy","transmutation"];
 
-// The catalogue the SHEET prepares from. Still cleric-only, and that is
-// the frontend lagging the engine rather than a rule: `list_prayers`,
-// `castable` and `cast_prayer` have all gone through `sheet.caster`
-// since 150, so a wizard can cast - but `loadPrayers` hides the subtab
-// unless the character is a cleric and this asks for the cleric list,
-// so a wizard has no way to prepare anything. Recorded in STATUS.
-async function loadClericCatalogue() {
+// 176. THE WHOLE CATALOGUE, AND ONE COPY OF IT. This was
+// `loadClericCatalogue` and asked for `classKey: "cleric"`, which its
+// own comment called the frontend lagging the engine. Three things came
+// of that, and the third is the one that mattered:
+//
+//   * a wizard was offered the cleric list to prepare from
+//   * the Spells tab fetched the same table again into `state.allSpells`
+//   * `paintMine`'s `byKey` looks a prepared spell up in here, so a
+//     WIZARD'S OWN PREPARED SPELLS RENDERED AS NOTHING - `find`
+//     returned undefined and `if (sp)` skipped the row in silence
+//
+// So there is one catalogue now, `state.spells`, holding every row.
+// Which spells a given caster may reach is a question for the caster,
+// asked where that is known, and `casting::may_reach` is still the
+// authority - the screen only avoids offering what the engine would
+// refuse.
+async function loadCatalogue() {
   if (!state.gameId) return;
-  const rows = await call("list_spells", { gameId: state.gameId, classKey: "cleric" });
+  const rows = await call("list_spells", { gameId: state.gameId, classKey: "" });
   if (!rows) return;
   state.spells = rows;
+
   fillOnce("#prep-level", levelOptions(rows));
+  // OFF THE DATA, not a hardcoded list of classes. `spells.classes` is
+  // an array and a game may add a spell naming a class nobody seeded,
+  // so the only honest source for this dropdown is what is in it.
+  const classes = [...new Set(rows.flatMap((r) => r.classes || []))].sort();
+  fillOnce("#spell-class", classes.map((c) => [c, c]));
+  fillOnce("#spell-level", levelOptions(rows));
+  fillOnce("#spell-school", SCHOOLS.map((x) => [x, x]));
+  paintSpells();
 }
 
 function levelOptions(rows) {
@@ -1363,20 +1382,16 @@ function fillOnce(sel, pairs) {
 // prayers tab uses and the same `spellRow` renders it - the only new
 // thing is that the class is a control instead of a premise.
 
+// 176. ONE LOADER FOR BOTH SURFACES. This held its own copy in
+// `state.allSpells` while the sheet held a cleric-only copy in
+// `state.spells` - the same table fetched twice, going stale on
+// different schedules. `loadCatalogue` is now the only reader of
+// `list_spells`, and calling it on this tab switch is what the comment
+// in the dispatch asked for: the sheet's catalogue refreshes too, so a
+// spell seeded from the other machine stops being invisible until
+// sign-out.
 async function loadSpells() {
-  if (!state.gameId) return;
-  const rows = await call("list_spells", { gameId: state.gameId, classKey: "" });
-  if (!rows) return;
-  state.allSpells = rows;
-
-  // OFF THE DATA, not a hardcoded list of classes. `spells.classes` is
-  // an array and a game may add a spell naming a class nobody seeded,
-  // so the only honest source for this dropdown is what is in it.
-  const classes = [...new Set(rows.flatMap((r) => r.classes || []))].sort();
-  fillOnce("#spell-class", classes.map((c) => [c, c]));
-  fillOnce("#spell-level", levelOptions(rows));
-  fillOnce("#spell-school", SCHOOLS.map((x) => [x, x]));
-  paintSpells();
+  await loadCatalogue();
 }
 
 function paintSpells() {
@@ -1387,7 +1402,7 @@ function paintSpells() {
   const lvl = val("#spell-level");
   const school = val("#spell-school");
 
-  const shown = (state.allSpells || []).filter((sp) =>
+  const shown = (state.spells || []).filter((sp) =>
     (!cls || (sp.classes || []).includes(cls)) &&
     (!lvl || String(sp.level) === lvl) &&
     (!school || sp.school === school) &&
@@ -1400,7 +1415,7 @@ function paintSpells() {
   host.innerHTML = "";
   for (const sp of shown) host.append(spellRow(sp, null));
   document.querySelector("#spell-count").textContent =
-    shown.length + " of " + (state.allSpells || []).length;
+    shown.length + " of " + (state.spells || []).length;
 }
 
 // One spell, with everything a table needs. `action` is null on the
@@ -1446,24 +1461,58 @@ function componentWords(sp) {
   return got.length ? got.join(", ") : null;
 }
 
-/* ---------------------- one cleric's own list ---------------------- */
+/* ------------------- what one caster is holding ------------------- */
+
+// 176. WIZARDS GET SPELLS, CLERICS GET PRAYERS, and the catalogue is
+// spells either way. The difference is not what the rows are, it is
+// what a class calls reaching for one - so this word comes off the
+// caster's SOURCE, which `casting::casts` decided and nothing on the
+// screen gets a vote in.
+function castingWord(source) {
+  return source === "book" ? "Spells" : "Prayers";
+}
 
 async function loadPrayers(sheet) {
   const tab = document.querySelector("#tab-prayers");
-  const isCleric = (sheet.classes || []).some((c) => c.key === "cleric");
-  if (tab) tab.hidden = !isCleric;
-  if (!isCleric) {
-    // A sheet left on the Prayers tab and then switched to a fighter
-    // would be looking at a hidden pane. Send them somewhere real.
+  // 176. CASTS OR DOES NOT. This asked whether the character had a
+  // CLERIC CLASS BY NAME, so a wizard's sheet never showed this tab at
+  // all - and the rule for who casts lived in two places, one of them
+  // in a language with no compiler, waiting to disagree.
+  //
+  // `sheet.caster` is the engine's own answer, resolved once in
+  // `casting::caster`, which is the same thing `list_casting`,
+  // `castable` and `cast_spell` have all gone through since 150.
+  const casts = !!sheet.caster;
+  if (tab) tab.hidden = !casts;
+  if (!casts) {
+    // A sheet left on this tab and then switched to a fighter would be
+    // looking at a hidden pane. Send them somewhere real.
     if (document.querySelector('#sheet-tabs .tab.on[data-sheet="prayers"]')) {
       showSub("sheet-tabs", "sheet", "stats");
     }
     return;
   }
 
-  const got = await call("list_prayers", { characterId: state.characterId });
+  const got = await call("list_casting", { characterId: state.characterId });
   if (!got) return;
   state.prayers = got;
+
+  // 176. THE SCREEN TAKES ITS WORDS FROM THE ENGINE'S ANSWER, every
+  // one of them, so a wizard is never told they are praying.
+  const word = castingWord(got.source);
+  if (tab) tab.textContent = word;
+  const addWord = document.querySelector("#add-prayer-word");
+  if (addWord) {
+    addWord.textContent = got.source === "book"
+      ? "Prepare from the book"
+      : "Add a prayer";
+  }
+  const prepFind = document.querySelector("#prep-find");
+  if (prepFind) {
+    prepFind.placeholder = got.source === "book"
+      ? "search their book"
+      : "search the " + got.class_key + " list";
+  }
 
   // 150. THE CLASS SAYS WHAT TO CALL THEM. This read "cleric N" off a
   // field named `cleric_level`, true while a cleric was the only thing
@@ -1610,11 +1659,11 @@ function ordinal(n) {
 function forgetButton(key) {
   const b = sEl("button", "ghost tiny", "put down");
   guard(b, async () => {
-    const r = await tryCall("forget_prayer", {
+    const r = await tryCall("forget_spell", {
       characterId: state.characterId,
       spellKey: key,
     });
-    if (!r.ok) return log("forget_prayer", r.error, true);
+    if (!r.ok) return log("forget_spell", r.error, true);
     await loadPrayers(state.sheet);
   });
   return b;
@@ -1636,8 +1685,26 @@ function paintPrepList(got) {
   const have = new Set([...(got.prepared || []), ...(got.cantrips || [])]);
   const find = (val("#prep-find") || "").toLowerCase();
 
+  // 176. WHAT THIS CASTER CAN ACTUALLY REACH, which the catalogue no
+  // longer answers now that it holds all 276 rows. This MIRRORS
+  // `casting::may_reach` and does not replace it - the engine still
+  // refuses; the screen just stops offering a refusal.
+  //
+  //   a WHOLE-LIST caster reaches anything naming their class
+  //   a BOOK caster reaches what is written down - and CANTRIPS off
+  //     the class list, because a cantrip is never in the book
+  //
+  // `got.book` is 172's answer: rows on the character plus whatever is
+  // written in the books they are carrying, folded together by
+  // `load_chosen`.
+  const onList = (sp) => (sp.classes || []).includes(got.class_key);
+  const inBook = new Set(got.book || []);
+  const reachable = got.source === "book"
+    ? (sp) => (sp.level === 0 ? onList(sp) : inBook.has(sp.key))
+    : onList;
+
   const free = (state.spells || []).filter((sp) =>
-    !have.has(sp.key) &&
+    !have.has(sp.key) && reachable(sp) &&
     (!find || (sp.name + " " + (sp.description || "")).toLowerCase().includes(find)));
 
   // 109. THE SECTION'S OWN FOLD. Painted here rather than in its
@@ -1670,7 +1737,7 @@ function paintPrepList(got) {
 function prepareButton(sp) {
   const b = sEl("button", "ghost tiny", sp.level === 0 ? "learn" : "prepare");
   guard(b, async () => {
-    const r = await tryCall("prepare_prayer", {
+    const r = await tryCall("prepare_spell", {
       characterId: state.characterId,
       spellKey: sp.key,
     });
@@ -1679,7 +1746,7 @@ function prepareButton(sp) {
     // only into the log.
     if (!r.ok) {
       document.querySelector("#prayer-head").textContent = r.error;
-      return log("prepare_prayer", r.error, true);
+      return log("prepare_spell", r.error, true);
     }
     await loadPrayers(state.sheet);
   });

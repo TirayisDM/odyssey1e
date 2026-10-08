@@ -8,7 +8,7 @@
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::prayers;
+use crate::casting;
 use crate::scribe;
 use crate::supabase::{self, AppState};
 
@@ -112,7 +112,7 @@ pub fn scribe_spell(
 
     // THE HIGHEST SLOT THEY HAVE, which is what the book's own rule
     // means by "a spell you can prepare".
-    let top_slot = prayers::slots_at(caster.level)
+    let top_slot = casting::slots_at(caster.level)
         .iter()
         .enumerate()
         .filter(|(_, n)| **n > 0)
@@ -218,7 +218,7 @@ pub fn scribe_options(
     let Some(caster) = sheet.caster.clone() else {
         return Ok(json!({ "ink": 0, "options": [] }));
     };
-    if caster.source != prayers::Source::Book {
+    if caster.source != casting::Source::Book {
         return Ok(json!({ "ink": 0, "options": [] }));
     }
 
@@ -327,7 +327,7 @@ pub fn copy_from_scroll(
         .map(|a| a.iter().filter_map(|c| c.as_str()).map(String::from).collect())
         .unwrap_or_default();
 
-    let top_slot = prayers::slots_at(caster.level)
+    let top_slot = casting::slots_at(caster.level)
         .iter()
         .enumerate()
         .filter(|(_, n)| **n > 0)
@@ -442,7 +442,7 @@ fn book_of(token: &str, object_id: &str) -> Result<(String, i64, String, bool), 
             // THE GAME'S OWN ROW WINS. `game_id.desc` would not do it:
             // Postgres puts NULLS FIRST on a descending sort, so the
             // global row would come back ahead of the override. This is
-            // the spelling prayers.rs uses.
+            // the spelling casting.rs uses.
             ("order", "game_id.asc.nullslast"),
         ],
     )?;
@@ -649,7 +649,7 @@ fn one_spell(token: &str, game_id: &str, key: &str) -> Result<Value, String> {
             // THE GAME'S OWN ROW WINS. `game_id.desc` would not do it:
             // Postgres puts NULLS FIRST on a descending sort, so the
             // global row would come back ahead of the override. This is
-            // the spelling prayers.rs uses.
+            // the spelling casting.rs uses.
             ("order", "game_id.asc.nullslast"),
         ],
     )?;

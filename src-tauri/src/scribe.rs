@@ -1,6 +1,6 @@
 //! Writing a spell down: what it costs, how long it takes, and who may.
 //!
-//! 170. 150 BUILT THE WIZARD AND LEFT THE BOOK EMPTY. `prayers::caster`
+//! 170. 150 BUILT THE WIZARD AND LEFT THE BOOK EMPTY. `casting::caster`
 //! returns `Source::Book` for a wizard and `may_reach` already enforces
 //! the rule that matters - a wizard prepares only from what somebody has
 //! written down - but nothing has ever written anything down. 161's own
@@ -51,19 +51,24 @@
 //! WHAT THIS DOES NOT DECIDE
 //! ---------------------------------------------------------------------
 //!
-//! WHERE THE WRITING GOES. A wizard's book is `character_prayers` rows
-//! in state 'book' today, which cannot describe a spellbook found in a
-//! dungeon or taken off a corpse, because those rows belong to a
-//! character. Scrolls have the same problem from the other end. That is
-//! a schema decision and it is Dave's; this module is the arithmetic
-//! either way, because what a copy costs does not depend on where the
-//! answer is stored. See STATUS.
+//! WHERE THE WRITING GOES - AND 172 ANSWERED IT, so this is the
+//! question as 170 found it rather than the state of things. A wizard's
+//! book was rows on the CHARACTER in state 'book', which could not
+//! describe a spellbook found in a dungeon or taken off a corpse, and
+//! could not describe a scroll at all. 172 took the decision: the
+//! writing belongs to the OBJECT, in `scribed_spells`, and
+//! `load_chosen` folds what a carried book holds into the states
+//! `casting::may_reach` reads.
 //!
-//! SO NOTHING CALLS THIS YET, and `acquire.rs` is the precedent for
-//! saying so in an attribute rather than rushing a caller: the rule is
-//! settled and tested first, because the rule is the part that was
-//! specified and the part worth getting right before a migration
-//! hardens a shape around it.
+//! This module was the arithmetic either way, which was the point of
+//! not waiting - what a copy costs does not depend on where the answer
+//! is kept. 177 then renamed the character-side table to
+//! `character_spells`, for the reason that migration gives: a wizard's
+//! rows had never been prayers.
+//!
+//! `acquire.rs` IS THE PRECEDENT for settling the rule before any
+//! caller exists: the rule is the part that was specified, and the part
+//! worth getting right before a migration hardens a shape around it.
 #![allow(dead_code)]
 
 /// What one scribing takes out of the world.
@@ -219,20 +224,20 @@ pub fn fits_on(capacity: i64, used: i64, level: i64, scroll: bool) -> Result<(),
 /// NO HIGHER THAN THEY CAN CAST. A 3rd-level wizard cannot copy a
 /// 9th-level spell out of a captured book and sit on it: the book's rule
 /// is that you must be able to prepare it. `top_slot` is the highest
-/// slot level they have, which `prayers::slots_at` already answers.
+/// slot level they have, which `casting::slots_at` already answers.
 ///
 /// AND NOT TWICE. A spell already written is already written, and the
 /// second copy would be a second row saying the same thing - 013's rule
 /// about a log recording what changed, applied to a book.
 pub fn may_copy(
-    source: crate::prayers::Source,
+    source: crate::casting::Source,
     spell_classes: &[String],
     class_key: &str,
     spell_level: i64,
     top_slot: i64,
     already_written: bool,
 ) -> Result<(), String> {
-    if source != crate::prayers::Source::Book {
+    if source != crate::casting::Source::Book {
         return Err("only a wizard copies spells into a book".to_string());
     }
     if !spell_classes.iter().any(|c| c == class_key) {
@@ -255,7 +260,7 @@ pub fn may_copy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prayers::Source;
+    use crate::casting::Source;
 
     /* ---------------------- what it costs ---------------------- */
 

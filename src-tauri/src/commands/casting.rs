@@ -1,30 +1,47 @@
 //! The spell catalogue, and what a caster has chosen from it.
 //!
 //! 106. Plumbing. Every number - how many may be prepared, how many
-//! cantrips are known, what slots exist, the save DC - is prayers.rs.
+//! cantrips are known, what slots exist, the save DC - is casting.rs.
 //!
-//! THE CLERIC'S LEVEL, NEVER THE CHARACTER'S. A Fighter 4 / Cleric 1
-//! prepares as a cleric 1, and reading their total of 5 would hand them
+//! 176. A CLERIC AND A WIZARD COME THROUGH THE SAME COMMANDS, which is
+//! right: preparing a spell and spending a slot are the same act for
+//! both, and the one thing that differs is what they may reach for.
+//! That question is asked once, of `casting::may_reach`.
+//!
+//! THE CASTING CLASS'S LEVEL, NEVER THE CHARACTER'S. A Fighter 4 /
+//! Cleric 1 prepares as a cleric 1, and reading their total of 5 would
+//! hand them
 //! a 3rd-level slot they have not earned. The same rule
 //! `features::held` and `uses::Context` already follow.
 
 use serde_json::{json, Value};
 use tauri::State;
 
-use crate::prayers;
+use crate::casting;
 use crate::supabase::{self, AppState};
 
 /// The spell catalogue, global rows and this game's own.
 ///
 /// BY CLASS RATHER THAN A TABLE PER CLASS. `spells.classes` is an
-/// array, so the cleric list is a query and the wizard list is a seed
-/// rather than a schema - see 101.
+/// array, so every class's list is the same query with a different
+/// argument, and adding the wizard's 206 was a seed rather than a
+/// schema change - see 101.
+///
+/// ONE TABLE IS THE POINT, not a convenience. Dispel Magic is ONE
+/// SPELL on two lists; a table per class would hold it twice and let
+/// the copies drift. A prayer and a spell differ in WHO MAY REACH FOR
+/// ONE, not in where the row is kept.
 ///
 /// 169. AND NO CLASS AT ALL IS THE WHOLE BOOK. An empty `class_key`
 /// drops the filter, which is what the Spells tab reads: 161-167 took
 /// the catalogue from 108 to 276 and only one class had a surface to
-/// see any of it through. The Cleric Prayers tab still passes
-/// "cleric" and is unchanged.
+/// see any of it through.
+///
+/// 176. AND NOW NOBODY PASSES A CLASS. The sheet used to ask for the
+/// cleric list, which offered a wizard the wrong spells and - worse -
+/// made their own prepared ones render as nothing, because the lookup
+/// that resolves a key could not find them. One catalogue, filtered
+/// where the caster is known.
 ///
 /// `special_text` IS SELECTED NOW, and its absence was the usual fault.
 /// It is where the mechanical rider lives - the three rays of a
@@ -79,18 +96,22 @@ pub fn list_spells(
     Ok(json!(out))
 }
 
-/// What this cleric can do today: their numbers, and what they hold.
+/// What this caster can do today: their numbers, and what they hold.
 ///
-/// REFUSES A CHARACTER WHO IS NOT A CLERIC, rather than answering with
+/// 176. THE CLASS AND THE SOURCE ARE BOTH IN THE ANSWER, so the screen
+/// can label itself - Prayers for a cleric, Spells for a wizard -
+/// without deciding a rule of its own.
+///
+/// REFUSES A CHARACTER WHO DOES NOT CAST, rather than answering with
 /// zeroes. A fighter has no prepared list and saying "0 of 0" would
 /// invite the question of how to raise it.
 #[tauri::command]
-pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Value, String> {
+pub fn list_casting(state: State<AppState>, character_id: String) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
 
     // 150. WHOEVER IS CASTING, which is a class row and not a creature
-    // question - see prayers::caster, and 022 for why there is no
+    // question - see casting::caster, and 022 for why there is no
     // second path for a monster.
     let Some(caster) = sheet.caster.clone() else {
         return Err(format!("{} does not cast spells", sheet.name));
@@ -113,23 +134,23 @@ pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Valu
     // and not prepared today. A wizard's book.
     let book = of("book");
 
-    let slots = prayers::slots_at(level);
+    let slots = casting::slots_at(level);
     let spent = load_slots(&token, &character_id)?;
-    let left = prayers::slots_left(level, &spent);
+    let left = casting::slots_left(level, &spent);
     Ok(json!({
         "caster_level": level,
         "casting_ability": caster.ability,
         "ability_mod": abil,
         "class_key": caster.class_key,
         "source": caster.source,
-        "save_dc": prayers::save_dc(pb, abil),
-        "attack_bonus": prayers::attack_bonus(pb, abil),
+        "save_dc": casting::save_dc(pb, abil),
+        "attack_bonus": casting::attack_bonus(pb, abil),
         "prepared": prepared,
-        "prepared_max": prayers::prepared_max(level, abil),
+        "prepared_max": casting::prepared_max(level, abil),
         "cantrips": cantrips,
         "book": book,
-        "cantrips_known": prayers::cantrips_known(level),
-        "top_slot": prayers::top_slot(level),
+        "cantrips_known": casting::cantrips_known(level),
+        "top_slot": casting::top_slot(level),
         // 1st-level slots first. 107 made the spending real, so these
         // are three different facts and the tab needs all three: how
         // many they have, how many are gone, how many are left.
@@ -145,7 +166,7 @@ pub fn list_prayers(state: State<AppState>, character_id: String) -> Result<Valu
 /// and the engine can see it. Asking the screen to pick between two
 /// commands would be the screen deciding a rule.
 #[tauri::command]
-pub fn prepare_prayer(
+pub fn prepare_spell(
     state: State<AppState>,
     character_id: String,
     spell_key: String,
@@ -153,7 +174,7 @@ pub fn prepare_prayer(
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
     // 150. WHOEVER IS CASTING, which is a class row and not a creature
-    // question - see prayers::caster, and 022 for why there is no
+    // question - see casting::caster, and 022 for why there is no
     // second path for a monster.
     let Some(caster) = sheet.caster.clone() else {
         return Err(format!("{} does not cast spells", sheet.name));
@@ -171,10 +192,13 @@ pub fn prepare_prayer(
 
     let chosen = load_chosen(&token, &character_id, Some(caster.source))?;
     // 150. WHAT THEY MAY REACH FOR - the cleric list, or this wizard's
-    // own book. See prayers::may_reach.
-    prayers::may_reach(
+    // own book. 176 adds the level, because a cantrip is a class-list
+    // question even for a wizard, and THIS CALL HAPPENS BEFORE the
+    // branch on level further down. See casting::may_reach.
+    casting::may_reach(
         &caster,
         &on_lists,
+        spell_level,
         chosen
             .iter()
             .find(|(k, _)| *k == spell_key)
@@ -199,7 +223,7 @@ pub fn prepare_prayer(
         if known.iter().any(|k| **k == spell_key) {
             return Err("already known".to_string());
         }
-        let max = prayers::cantrips_known(level);
+        let max = casting::cantrips_known(level);
         if known.len() as i64 >= max {
             return Err(format!(
                 "that is {} cantrips and they know {} - forget one first",
@@ -208,12 +232,12 @@ pub fn prepare_prayer(
             ));
         }
     } else {
-        prayers::may_prepare(spell_level, level, abil, &held, &spell_key)?;
+        casting::may_prepare(spell_level, level, abil, &held, &spell_key)?;
     }
 
     supabase::rest_upsert(
         &token,
-        "character_prayers",
+        "character_spells",
         &json!({
             "character_id": character_id,
             "spell_key": spell_key,
@@ -229,7 +253,7 @@ pub fn prepare_prayer(
 /// hold TODAY and changes at every long rest; there is no history worth
 /// keeping in which spells you held last Tuesday.
 #[tauri::command]
-pub fn forget_prayer(
+pub fn forget_spell(
     state: State<AppState>,
     character_id: String,
     spell_key: String,
@@ -237,7 +261,7 @@ pub fn forget_prayer(
     let token = state.token()?;
     supabase::rest_delete(
         &token,
-        "character_prayers",
+        "character_spells",
         &[
             ("character_id", &format!("eq.{}", character_id)),
             ("spell_key", &format!("eq.{}", spell_key)),
@@ -246,22 +270,22 @@ pub fn forget_prayer(
     Ok(json!({ "ok": true }))
 }
 
-/// What this cleric can cast right now, as turn actions.
+/// What this caster can cast right now, as turn actions.
 ///
 /// 110. PREPARED AND CANTRIPS ONLY, which is the whole point - the
-/// catalogue is 106 long and what a cleric can do on their turn is the
+/// catalogue is 276 long and what a caster can do on their turn is the
 /// dozen they are holding.
 ///
 /// WHAT CANNOT BE CAST IS STILL LISTED, with the reason on it. Prayer
 /// of Healing takes ten minutes and a fight is six seconds a round, so
-/// it is shown as too long rather than hidden - a cleric reaching for
+/// it is shown as too long rather than hidden - anybody reaching for
 /// it should be told why rather than wondering where it went.
 #[tauri::command]
 pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, String> {
     let token = state.token()?;
     let sheet = crate::character::load_sheet(&token, &character_id)?;
     // 150. WHOEVER IS CASTING, which is a class row and not a creature
-    // question - see prayers::caster, and 022 for why there is no
+    // question - see casting::caster, and 022 for why there is no
     // second path for a monster.
     let Some(caster) = sheet.caster.clone() else {
         return Err(format!("{} does not cast spells", sheet.name));
@@ -285,7 +309,7 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
     )?;
 
     let spent = load_slots(&token, &character_id)?;
-    let left = prayers::slots_left(caster.level, &spent);
+    let left = casting::slots_left(caster.level, &spent);
 
     let mut out: Vec<Value> = Vec::new();
     for r in rows.as_array().unwrap_or(&Vec::new()) {
@@ -360,7 +384,7 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
 /// rather than by spell.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn cast_prayer(
+pub fn cast_spell(
     state: State<AppState>,
     character_id: String,
     spell_key: String,
@@ -390,7 +414,7 @@ pub fn cast_prayer(
     let token = session.access_token.clone();
     let sheet = crate::character::load_sheet(&token, &character_id)?;
     // 150. WHOEVER IS CASTING, which is a class row and not a creature
-    // question - see prayers::caster, and 022 for why there is no
+    // question - see casting::caster, and 022 for why there is no
     // second path for a monster.
     let Some(caster) = sheet.caster.clone() else {
         return Err(format!("{} does not cast spells", sheet.name));
@@ -433,7 +457,7 @@ pub fn cast_prayer(
             ));
         }
         let spent = load_slots(&token, &character_id)?;
-        prayers::may_spend_slot(caster.level, &spent, want)?;
+        casting::may_spend_slot(caster.level, &spent, want)?;
         let i = (want - 1) as usize;
         move_slot(&token, &character_id, want, spent[i], spent[i] + 1)?;
         used = Some(want);
@@ -520,7 +544,7 @@ pub fn cast_prayer(
         // which a plain insert here could not keep. It took `cost` being
         // added to that function's column list to become possible: a
         // bonus-action spell written through it would otherwise have
-        // been stamped "action" and taken the cleric's whole turn.
+        // been stamped "action" and taken the caster's whole turn.
         let mut act = json!({
             "game_id": sheet.game_id,
             "character_id": character_id,
@@ -733,11 +757,11 @@ pub fn spend_spell_slot(
     let token = state.token()?;
     let level = caster_level(&token, &character_id)?;
     let spent = load_slots(&token, &character_id)?;
-    prayers::may_spend_slot(level, &spent, slot_level)?;
+    casting::may_spend_slot(level, &spent, slot_level)?;
 
     let i = (slot_level - 1) as usize;
     move_slot(&token, &character_id, slot_level, spent[i], spent[i] + 1)?;
-    Ok(json!({ "left": prayers::slots_left(level, &spent)[i] - 1 }))
+    Ok(json!({ "left": casting::slots_left(level, &spent)[i] - 1 }))
 }
 
 /// Give one back, for a misclick or a DM's say-so.
@@ -758,7 +782,7 @@ pub fn restore_spell_slot(
         return Err("nothing to give back".to_string());
     }
     move_slot(&token, &character_id, slot_level, spent[i], spent[i] - 1)?;
-    Ok(json!({ "left": prayers::slots_left(level, &spent)[i] + 1 }))
+    Ok(json!({ "left": casting::slots_left(level, &spent)[i] + 1 }))
 }
 
 /* ======================== THE WORKING PARTS ======================== */
@@ -855,8 +879,9 @@ const STALE: &str =
 
 /// The caster level, refusing anybody who does not cast.
 ///
-/// 150. Was `cleric_level` and found a cleric class by name, which is
-/// the lookup that kept a Lich out of its own spell list.
+/// 150. Was named `cleric_level` and found a cleric class by name,
+/// which is the lookup that kept a Lich out of its own spell list. 176
+/// renamed it for the same reason it renamed the module.
 fn caster_level(token: &str, character_id: &str) -> Result<i64, String> {
     let sheet = crate::character::load_sheet(token, character_id)?;
     sheet
@@ -941,7 +966,7 @@ pub fn resolve_spell_save(
         .and_then(|v| v.as_str())
         .unwrap_or(&spell_key)
         .to_string();
-    let dc = prayers::save_dc(
+    let dc = casting::save_dc(
         caster_sheet.proficiency_bonus(),
         caster_sheet.ability_mod(&caster.ability),
     );
@@ -1138,11 +1163,11 @@ fn hp_state(token: &str, character_id: &str) -> Result<(i64, i64), String> {
 fn load_chosen(
     token: &str,
     character_id: &str,
-    source: Option<prayers::Source>,
+    source: Option<casting::Source>,
 ) -> Result<Vec<(String, String)>, String> {
     let rows = supabase::rest_get(
         token,
-        "character_prayers",
+        "character_spells",
         &[
             ("select", "spell_key,state"),
             ("character_id", &format!("eq.{}", character_id)),
@@ -1176,10 +1201,10 @@ fn load_chosen(
     // and would pay three queries for an answer that cannot change what
     // they may do.
     //
-    // `character_prayers` WINS A TIE. A spell already prepared is
+    // `character_spells` WINS A TIE. A spell already prepared is
     // prepared, whatever the book says; adding `book` beside it would
     // make `find` return whichever came first.
-    if source == Some(prayers::Source::Book) {
+    if source == Some(casting::Source::Book) {
         for key in in_books(token, character_id)? {
             if !out.iter().any(|(k, _)| *k == key) {
                 out.push((key, "book".to_string()));

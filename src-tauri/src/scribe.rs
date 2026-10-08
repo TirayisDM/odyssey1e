@@ -18,12 +18,15 @@
 //! not charge 50 gp AND consume ink - it consumes the ink, and the ink
 //! is what costs the money.
 //!
-//! TWO VIALS PER LEVEL, AT 25 GP A VIAL, which comes to 50 gp per level
-//! exactly. A ninth-level spell wants eighteen vials and 450 gp, which
-//! is the published number arrived at by buying something real. A wizard
-//! who already has ink does not pay twice, and a wizard in a wilderness
-//! with a full purse and no ink cannot copy anything - which is the
-//! point of making it a thing rather than a price.
+//! TWO VIALS PER LEVEL, AND THIS MODULE DOES NOT KNOW WHAT A VIAL
+//! COSTS. The ratio is the rule; the price is a row in `items`, which
+//! is what lets 171 move the whole economy from gold to silver without
+//! touching a line of Rust. A first-level spell is two vials whatever
+//! those are worth that week.
+//!
+//! A wizard who already has ink does not pay twice, and a wizard in a
+//! wilderness with a full purse and no ink cannot copy anything - which
+//! is the point of making it a thing rather than a price.
 //!
 //! THE QUILL IS A TOOL AND IS NOT CONSUMED. It wears instead, through
 //! 093's `uses_spent` / `uses_max`, so it is a thing to replace rather
@@ -133,6 +136,45 @@ fn bend(base: i64, pct: i64) -> i64 {
     scaled.max(FLOOR)
 }
 
+/// How much room one spell takes in a book.
+///
+/// 171. A BOOK HOLDS SPELL LEVELS, NOT SPELLS. Dave's Tome holds fifty,
+/// which is five ninth-level spells or fifty cantrips - a unit that
+/// makes a big spell expensive to carry as well as to write, which
+/// counting spells never did.
+///
+/// A CANTRIP TAKES ONE. Level 0 would be free and a book would hold
+/// infinitely many of them; a page is a page. Same floor `to_copy`
+/// applies to the time and the ink.
+pub fn pages(level: i64) -> i64 {
+    level.max(1)
+}
+
+/// Whether a spell of this level still fits.
+///
+/// `used` IS THE SUM OF `pages()` OVER WHAT IS ALREADY WRITTEN, which
+/// the caller counts because only it knows what is in the book. The
+/// rule is the arithmetic and the refusal.
+///
+/// IT SAYS WHAT IS LEFT. "No room" sends somebody to count pages by
+/// hand; "needs 3, 2 left of 10" is a sentence they can act on - buy a
+/// bigger book, or write a smaller spell.
+pub fn fits(capacity: i64, used: i64, level: i64) -> Result<(), String> {
+    let want = pages(level);
+    let left = capacity - used;
+    if want <= left {
+        return Ok(());
+    }
+    Err(format!(
+        "that needs {} level{} of room and there {} {} left of {}",
+        want,
+        if want == 1 { "" } else { "s" },
+        if left == 1 { "is" } else { "are" },
+        left.max(0),
+        capacity
+    ))
+}
+
 /// Whether this caster may write this spell into their book at all.
 ///
 /// 170. FOUR REFUSALS, AND EVERY ONE OF THEM IS A SENTENCE A PLAYER CAN
@@ -191,16 +233,18 @@ mod tests {
 
     /* ---------------------- what it costs ---------------------- */
 
-    /// The published rate, arrived at by buying ink: two hours and two
-    /// vials a level, and a vial is 25 gp.
+    /// Two hours and two vials a level.
+    ///
+    /// 171. AND NOT A WORD ABOUT WHAT A VIAL COSTS. The price is a row
+    /// in `items` - 5 sp in this campaign, 25 gp in the catalogue 170
+    /// shipped with - and a test that asserted the gold would have had
+    /// to be rewritten when the economy moved. The ratio is the rule.
     #[test]
-    fn the_books_own_rate_falls_out_of_the_materials() {
+    fn two_hours_and_two_vials_a_level() {
         for (level, hours, ink) in [(1, 2, 2), (3, 6, 6), (5, 10, 10), (9, 18, 18)] {
             let s = to_copy(level, 100);
             assert_eq!(s.hours, hours, "level {}", level);
             assert_eq!(s.ink, ink, "level {}", level);
-            // 25 gp a vial, which is the 50 gp per level the book prints.
-            assert_eq!(s.ink * 25, 50 * level, "level {}", level);
         }
     }
 
@@ -244,6 +288,55 @@ mod tests {
     #[test]
     fn hours_become_ticks_for_the_clock() {
         assert_eq!(to_copy(1, 100).ticks(), 2 * crate::clock::HOUR);
+    }
+
+    /* ---------------------- how much room ---------------------- */
+
+    #[test]
+    fn a_spell_takes_its_level_in_room() {
+        assert_eq!(pages(3), 3);
+        assert_eq!(pages(9), 9);
+    }
+
+    /// Level 0 would be free and a book would hold infinitely many.
+    #[test]
+    fn a_cantrip_takes_a_page_like_everything_else() {
+        assert_eq!(pages(0), 1);
+    }
+
+    /// Dave's Tome holds fifty levels: five ninth-level spells, or
+    /// fifty cantrips, and the unit is what makes those different.
+    #[test]
+    fn a_tome_is_five_ninths_or_fifty_cantrips() {
+        let tome = 50;
+        assert!(fits(tome, 9 * 5 - 9, 9).is_ok(), "the fifth ninth fits");
+        assert!(fits(tome, 9 * 5, 9).is_err(), "the sixth does not");
+        assert!(fits(tome, 49, 0).is_ok(), "the fiftieth cantrip fits");
+        assert!(fits(tome, 50, 0).is_err(), "the fifty-first does not");
+    }
+
+    #[test]
+    fn an_adventure_book_runs_out_fast() {
+        // 10 levels: three 3rd-level spells and a cantrip fill it.
+        assert!(fits(10, 9, 0).is_ok());
+        assert!(fits(10, 10, 0).is_err());
+        // And a 3rd-level spell will not go into the last two.
+        assert!(fits(10, 8, 3).is_err());
+    }
+
+    /// "No room" sends somebody to count pages by hand.
+    #[test]
+    fn the_refusal_says_what_is_left() {
+        let e = fits(10, 8, 3).unwrap_err();
+        assert!(e.contains("needs 3 levels"), "{}", e);
+        assert!(e.contains("2 left of 10"), "{}", e);
+    }
+
+    /// A book somehow over its limit must not report a negative.
+    #[test]
+    fn an_overfull_book_says_zero_left() {
+        let e = fits(10, 14, 1).unwrap_err();
+        assert!(e.contains("0 left of 10"), "{}", e);
     }
 
     /* ---------------------- who may ---------------------- */

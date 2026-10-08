@@ -5168,12 +5168,44 @@ ink does not pay twice. A wizard with a full purse and no ink in a
 wilderness cannot copy anything, which is the whole reason to make it a
 thing instead of a price.
 
+**171 set the campaign's rates and they are SILVER** - Dave's campaign
+is not gold heavy. The ratio did not move, only the price of a vial,
+which is 170's decision paying off: the economy is rows in `items`, not
+a constant in Rust.
+
 | | | |
 |---|---|---|
-| `ink_vial` | 25 gp | consumed, two per spell level |
+| `ink_vial` | **5 sp** | consumed, two per spell level |
 | `quill` | 2 sp | a tool, required, not consumed |
-| `scroll_blank` | 10 gp | vellum with nothing on it yet |
-| `spell_book` | 50 gp | **already existed since 027** |
+| `scroll_blank` | **10 sp** | vellum with nothing on it yet |
+
+So a 1st-level spell is **10 sp** and a 9th is 90 sp.
+
+### Four books, measured in spell levels
+
+| | | | | |
+|---|---|---|---|---|
+| Adventure Spell Book | 20 sp | sm | 2.5 lb | **10 levels** |
+| Acolyte's Spell Book | 30 sp | med | 5 lb | **20 levels** |
+| Mage's Spell Book | 50 sp | med | 5 lb | **30 levels** |
+| Tome of Spells | 100 sp | med | 10 lb | **50 levels** |
+
+**Levels, not spells** - a Tome holds five ninth-level spells or fifty
+cantrips, and the unit is what makes those different. `scribe::pages`
+is `max(1, level)`: a cantrip takes a page like everything else,
+because level 0 would be free and a book would hold infinitely many.
+That floor is this project's call, not Dave's.
+
+**`capacity_slots` could not carry it**, which corrects 170. That column
+is the CONTAINER system's volume measure - what 036 walks to decide a
+backpack is full - and spell levels are not a volume. 170 reused it and
+called it "the page count now", a pun that would have collided the first
+time somebody put a real object in a book. `items.spell_levels` is its
+own column and the books hold no gear.
+
+`spell_book` has been in the catalogue since 027 and **nothing has ever
+owned one**, so it was free to reshape into the Mage's rather than being
+deleted and leaving a key that once meant something.
 
 ### Per level and per school, and the school part is data
 

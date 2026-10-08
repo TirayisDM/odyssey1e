@@ -4765,6 +4765,70 @@ reader that broke:**
 Four live readers and a signpost, in one command, before any of it
 reached a user. 152 had to find and fix all four the hard way.
 
+## The Spells tab, and Cleric Prayers dropped - BUILT (169)
+
+161-167 took the catalogue from 108 spells to 276, **206 of them the
+wizard's, and nothing in the app could show one.** Cleric Prayers was
+cleric-only by design. So the Spells tab is the catalogue itself, with
+the class as a FILTER rather than as the premise: search, class, level,
+school, and the same `spellRow` that rendered the old tab.
+
+`list_spells` takes an empty `class_key` to mean every class. The class
+dropdown is built from `spells.classes` in the data rather than a
+hardcoded list, so a game that seeds a spell naming an eighth class
+gets it for free.
+
+**`special_text` is selected now, and never has been.** That column is
+where the rules are - three rays rather than one roll, what a
+successful save is worth, what another slot level buys - and the
+reference book was printing the flavour sentence and dropping every
+mechanical rider. 473 rows carry one. **THIS IS THE THIRD IN THREE
+DAYS**: 155's `character_name`, 865c8be's `prof_bonus`, now this. Three
+columns that existed, were filled, and were never asked for, each
+invisible until somebody noticed the screen was quietly wrong. 021 named
+the shape - "an explicit column list is a SECOND schema that has to be
+kept in step with the first, and nothing checks it" - and naming it has
+not been enough. **A check that walks every `("select", ...)` against
+the fields its caller reads would have caught all three.**
+
+**THE TAB CAME OUT, THE SUBTAB STAYED.** Dave's call, and the line is
+exactly right: the top-level Cleric Prayers tab was a reference book the
+Spells tab now does better, and the SHEET's Prayers subtab is one
+cleric's own list - what they hold, what they may hold, what to add -
+which nothing else does.
+
+**The loader did NOT come out with it**, and would have been easy to
+delete alongside: `state.spells` is read by `paintMine` to render what
+is prepared and by `paintPrepList` to offer what is not, so losing it
+would have emptied a cleric's sheet SILENTLY - `byKey` returns undefined
+and the render skips the row without a word. It survives as
+`loadClericCatalogue`, named for what it actually does now that no tab
+depends on it.
+
+### Still open: a wizard cannot prepare anything
+
+Found while checking what the tab was load-bearing for. **The engine has
+been class-agnostic since 150** - `list_prayers`, `castable` and
+`cast_prayer` all go through `sheet.caster`. The frontend never caught
+up:
+
+| | |
+|---|---|
+| `loadPrayers` | hides the sheet's Prayers subtab unless the character is a **cleric** |
+| `loadClericCatalogue` | asks for `classKey: "cleric"`, unconditionally |
+| cast panel | already class-agnostic - shows for anyone the engine says can cast |
+| engine | class-agnostic since 150 |
+
+So a wizard gets no Prayers subtab, cannot prepare, and therefore has
+nothing for the cast panel to offer - while 206 wizard spells sit in the
+catalogue and the whole backend is ready for them. Two stale comments
+mark the spot: `list_prayers` still says "REFUSES A CHARACTER WHO IS NOT
+A CLERIC" and the cast panel says "Everybody who is not a cleric refuses
+this". Both describe code 150 changed.
+
+The fix is to let the sheet follow `sheet.caster` the way the engine
+does. Not taken yet.
+
 ## A spell attack is an attack - BUILT (154, spellcast.rs, character.rs)
 
 Dave cast Spiritual Weapon to end a round and asked whether it had done

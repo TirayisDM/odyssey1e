@@ -427,7 +427,7 @@ async function selectGame(id) {
   await loadSlots();
   await loadClock();
   await loadEffects();
-  await loadSpellBook();
+  await loadClericCatalogue();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -1305,10 +1305,19 @@ function showPendingSave(pending) {
 
 /* ===================== CLERIC PRAYERS (106) ===================== */
 //
-// Two surfaces off one catalogue. The TAB is a reference book - every
-// cleric spell, searched and filtered, knowing nothing about any
-// particular character. The SHEET SUBTAB is one cleric's own: what
-// they hold, what they may hold, and the list to add from.
+// ONE SURFACE NOW, NOT TWO. This was a reference TAB and a sheet
+// SUBTAB off one catalogue. 169 made the Spells tab the reference book
+// for every class, which showed the cleric's 106 and the rider text
+// the old tab had never asked for, so the tab was the same job done
+// twice and came out. THE SHEET SUBTAB STAYS: it is one cleric's own
+// list - what they hold, what they may hold, and the list to add from -
+// and nothing else does that.
+//
+// WHAT IS LEFT HERE IS A LOADER, NOT A SCREEN. `state.spells` is read
+// by `paintMine` to render what is prepared and by `paintPrepList` to
+// offer what is not, so deleting this with the tab would have emptied
+// a cleric's sheet silently - `byKey` returns undefined and the render
+// skips the row without a word.
 //
 // EVERY NUMBER COMES FROM RUST. How many may be prepared, how many
 // cantrips are known, what the save DC is - prayers.rs works all of it
@@ -1317,16 +1326,18 @@ function showPendingSave(pending) {
 const SCHOOLS = ["abjuration","conjuration","divination","enchantment",
                  "evocation","illusion","necromancy","transmutation"];
 
-async function loadSpellBook() {
+// The catalogue the SHEET prepares from. Still cleric-only, and that is
+// the frontend lagging the engine rather than a rule: `list_prayers`,
+// `castable` and `cast_prayer` have all gone through `sheet.caster`
+// since 150, so a wizard can cast - but `loadPrayers` hides the subtab
+// unless the character is a cleric and this asks for the cleric list,
+// so a wizard has no way to prepare anything. Recorded in STATUS.
+async function loadClericCatalogue() {
   if (!state.gameId) return;
   const rows = await call("list_spells", { gameId: state.gameId, classKey: "cleric" });
   if (!rows) return;
   state.spells = rows;
-
-  fillOnce("#prayer-level", levelOptions(rows));
   fillOnce("#prep-level", levelOptions(rows));
-  fillOnce("#prayer-school", SCHOOLS.map((x) => [x, x]));
-  paintSpellBook();
 }
 
 function levelOptions(rows) {
@@ -1340,24 +1351,6 @@ function fillOnce(sel, pairs) {
   const el = document.querySelector(sel);
   if (!el || el.options.length > 1) return;
   for (const [v, label] of pairs) el.append(new Option(label, v));
-}
-
-function paintSpellBook() {
-  const host = document.querySelector("#prayer-list");
-  if (!host) return;
-  const find = (val("#prayer-find") || "").toLowerCase();
-  const lvl = val("#prayer-level");
-  const school = val("#prayer-school");
-
-  const shown = (state.spells || []).filter((sp) =>
-    (!lvl || String(sp.level) === lvl) &&
-    (!school || sp.school === school) &&
-    (!find || (sp.name + " " + (sp.description || "")).toLowerCase().includes(find)));
-
-  host.innerHTML = "";
-  for (const sp of shown) host.append(spellRow(sp, null));
-  document.querySelector("#prayer-count").textContent =
-    shown.length + " of " + (state.spells || []).length;
 }
 
 /* ========================= THE WHOLE BOOK (169) ========================= */
@@ -8118,12 +8111,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       doRest(b.dataset.clock, b.dataset.rest === "long"));
   }
 
-  for (const sel of ["#prayer-find", "#prayer-level", "#prayer-school"]) {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("input", paintSpellBook);
-  }
-  // 169. The same four for the whole book. `input` covers a select as
-  // well as a text box, which is what the line above relies on too.
+  // 169. `input` covers a select as well as a text box.
   for (const sel of ["#spell-find", "#spell-class", "#spell-level", "#spell-school"]) {
     const el = document.querySelector(sel);
     if (el) el.addEventListener("input", paintSpells);

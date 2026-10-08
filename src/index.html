@@ -89,7 +89,6 @@
         <button class="tab" data-tab="chars">Characters</button>
         <button class="tab" data-tab="objects">Objects</button>
         <button class="tab" data-tab="creatures">Creatures</button>
-        <button class="tab" data-tab="prayers">Cleric Prayers</button>
         <button class="tab" data-tab="spells">Spells</button>
         <button class="tab" data-tab="trade">Trade</button>
       </nav>
@@ -939,29 +938,6 @@
            is what buy, sell, barter and give all are with different
            columns filled in. The counterparty being a shop or a person
            is decided by whether they have a markup, not by a mode. -->
-      <!-- 106. THE CATALOGUE, read-only. Every cleric spell in the
-           game, filtered and searched - what a player browses before
-           they decide, and what a DM looks up mid-session.
-
-           PREPARING HAPPENS ON THE SHEET, not here. This tab knows
-           nothing about any particular character, which is why it is a
-           primary tab rather than a subtab: it is a reference book. -->
-      <div class="pane" data-pane="prayers" hidden>
-        <section>
-          <h2>Cleric Prayers <span id="prayer-count" class="muted"></span></h2>
-          <div class="row">
-            <input id="prayer-find" placeholder="search by name or text" />
-            <select id="prayer-level">
-              <option value="">every level</option>
-            </select>
-            <select id="prayer-school">
-              <option value="">every school</option>
-            </select>
-          </div>
-          <div id="prayer-list" class="list"></div>
-        </section>
-      </div>
-
       <!-- 169. THE WHOLE BOOK, NOT ONE CLASS'S.
            161-167 took the catalogue from 108 spells to 276 and 206 of
            them are the wizard's, with no surface anywhere in the app

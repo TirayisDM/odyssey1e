@@ -270,6 +270,33 @@ pub fn may_reach(
     }
 }
 
+/// Whether a spell held in this state can be cast RIGHT NOW.
+///
+/// 178. THREE STATES, AND ONLY TWO OF THEM ARE UP. `prepared` is what
+/// the caster chose this morning and `cantrip` is always there; `book`
+/// is WRITTEN DOWN AND NOT UP, which is the whole distinction a
+/// prepared caster exists to make.
+///
+/// WHY THIS IS A FUNCTION AND NOT TWO `if`s. `castable` and `cast_spell`
+/// both filtered `load_chosen`'s list by MEMBERSHIP and never looked at
+/// the state, which was sound while nothing ever wrote `book`. 172 made
+/// `load_chosen` append everything written in the books a wizard is
+/// CARRYING, and both callers silently widened with it: Tarren cast
+/// Magic Missile with nothing prepared and `PREPARED 0 OF 6` on screen.
+/// `cast_spell`'s own refusal said "they do not have that prepared",
+/// which was the check it had stopped making.
+///
+/// A CLERIC WAS NEVER AFFECTED - `load_chosen` only folds books in for
+/// `Source::Book` - which is why this went unseen: the only wizard in
+/// the game was a Lich whose rows 151 wrote as `prepared`.
+///
+/// So the question lives here, once, where it can be tested. Writing
+/// the same predicate at both call sites would be the two-places
+/// problem that let the first one drift.
+pub fn up_today(state: &str) -> bool {
+    matches!(state, "prepared" | "cantrip")
+}
+
 /// The save DC: 8 + proficiency + the CASTING ability's modifier.
 ///
 /// NOT WISDOM, whatever this comment said until 176. A cleric's is
@@ -476,6 +503,35 @@ mod tests {
         // catalogue says it is - a wizard who copied something odd has
         // it, and the book is the authority for a book caster.
         assert!(may_reach(&wizard9(), &[], 3, Some("book")).is_ok());
+    }
+
+    /* ---------- 178. written down is not up today ---------- */
+
+    #[test]
+    fn prepared_and_cantrips_are_up_today() {
+        assert!(up_today("prepared"));
+        assert!(up_today("cantrip"));
+    }
+
+    #[test]
+    fn a_spell_in_the_book_is_not_up_today() {
+        // THE WHOLE REGRESSION. 172 made `load_chosen` return a carried
+        // book's contents in this state, and both `castable` and
+        // `cast_spell` filtered by membership alone - so a wizard with
+        // NOTHING PREPARED could cast anything written down. Tarren cast
+        // Magic Missile with `PREPARED 0 OF 6` on screen.
+        assert!(!up_today("book"));
+    }
+
+    #[test]
+    fn a_state_nobody_taught_this_is_not_up() {
+        // 152's three words are the whole vocabulary. Anything else is
+        // a typo or a column that drifted, and casting off it would be
+        // inventing permission - the same reason `save_damage` returns
+        // None for a word it does not know.
+        for odd in ["", "memorised", "known", "Prepared", "BOOK"] {
+            assert!(!up_today(odd), "{:?} should not be castable", odd);
+        }
     }
 
     /* ---------- 176. a cantrip is not in the book ---------- */

@@ -293,7 +293,15 @@ pub fn castable(state: State<AppState>, character_id: String) -> Result<Value, S
     let abil = sheet.ability_mod(&caster.ability);
     let pb = sheet.proficiency_bonus();
 
-    let chosen = load_chosen(&token, &character_id, Some(caster.source))?;
+    // 178. WHAT IS UP TODAY, which is not everything they hold. A
+    // wizard's carried books come back from `load_chosen` as `book`
+    // since 172, and this took every key regardless - so the cast panel
+    // offered a wizard their whole spellbook and the prepared budget
+    // meant nothing. `casting::up_today` owns the rule.
+    let chosen: Vec<(String, String)> = load_chosen(&token, &character_id, Some(caster.source))?
+        .into_iter()
+        .filter(|(_, st)| casting::up_today(st))
+        .collect();
     if chosen.is_empty() {
         return Ok(json!([]));
     }
@@ -420,9 +428,19 @@ pub fn cast_spell(
         return Err(format!("{} does not cast spells", sheet.name));
     };
 
+    // 178. UP TODAY, not merely written down. This asked only whether
+    // the key was in the list, which 172 widened to include every spell
+    // in a carried book - so a wizard could cast anything in the book
+    // without preparing it, and the refusal below never fired.
     let held = load_chosen(&token, &character_id, Some(caster.source))?;
-    if !held.iter().any(|(k, _)| *k == spell_key) {
-        return Err("they do not have that prepared".to_string());
+    let state = held.iter().find(|(k, _)| *k == spell_key).map(|(_, st)| st.as_str());
+    match state {
+        Some(st) if casting::up_today(st) => {}
+        // Told apart, because they are different problems: one is
+        // solved by preparing it this morning and the other by writing
+        // it down first.
+        Some(_) => return Err("that is in their book but not prepared today".to_string()),
+        None => return Err("they do not have that prepared".to_string()),
     }
 
     let spell = one_spell_full(&token, &sheet.game_id, &spell_key)?;

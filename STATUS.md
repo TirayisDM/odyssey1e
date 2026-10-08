@@ -3241,7 +3241,7 @@ Protection from Evil and Good does not add 1d4, and Resistance is one
 save rather than every save. Corrected in a new migration rather than by
 editing 114, because 114 had been applied.
 
-## Spells and prayers - BUILT (101-112, prayers.rs, spellcast.rs)
+## Spells and prayers - BUILT (101-112, casting.rs, spellcast.rs)
 
 A spell catalogue rather than one character's list - 006 had ported
 spells with a single character's numbers baked in (spell_atk +7, DC 15),
@@ -3249,7 +3249,7 @@ flagged BAKED in the column comments. 101 replaced that with a real
 catalogue; 102-104 seeded the whole cleric list; 106 and 107 gave a
 character prepared prayers and slots that can actually be spent.
 
-`prayers.rs` is the 5e arithmetic - prepared maximum is WIS + cleric
+`casting.rs` is the 5e arithmetic - prepared maximum is WIS + cleric
 level, the full-caster slot table, save DC and attack bonus.
 `spellcast.rs` reads a spell's own text to decide what it COSTS (action,
 bonus, reaction, or too long to cast in a fight) and how long it LASTS,
@@ -3387,7 +3387,7 @@ VERIFIED BOTH ENDS. A rolled-back probe on the live database:
 `winner=1 rows, loser=0 rows, final spent=4` - the stale write matched
 nothing rather than overwriting. And in the stub rig, three presses
 inside thirty milliseconds against a 400ms cast produced ONE
-`cast_prayer`, the button disabled for the flight and enabled after,
+`cast_spell`, the button disabled for the flight and enabled after,
 and a handler that throws still leaves its button usable.
 
 AND THE SAME FAULT ONE FUNCTION OVER. `character_uses` had the identical
@@ -4490,9 +4490,9 @@ the start of a turn. The clock (092) and effects (094) tick on game
 time, not on turn order. It wants a turn-start event, which does not
 exist, and the Troll has carried it as prose since 127.
 
-**Spellcasting has a whole subsystem already** - 101-107, `prayers.rs`,
-`spellcast.rs` - and it is cleric-shaped: `character_prayers` keyed to a
-character, slots from `prayers::slots_at` and a class level.
+**Spellcasting has a whole subsystem already** - 101-107, `casting.rs`,
+`spellcast.rs` - and it is cleric-shaped: `character_spells` keyed to a
+character, slots from `casting::slots_at` and a class level.
 `instantiate_npc` copies kit and scores and no spells. A spellcasting
 creature wants its prayers copied in the same breath as its weapons,
 which is a change to one function and a new kit-shaped table rather than
@@ -4576,7 +4576,7 @@ only window `actions.round` can express.
 ## A creature casts the way a character does - BUILT (150, 151)
 
 Spellcasting was the last of 147's four and the only one with a whole
-subsystem already built - 101 to 107, `prayers.rs`, `spellcast.rs`, a
+subsystem already built - 101 to 107, `casting.rs`, `spellcast.rs`, a
 108-spell catalogue, slots that can be spent. **None of it could be
 reached by a monster.** Six commands found a cleric class on the sheet
 and refused anybody else, and a monster has no classes at all, so a
@@ -4595,7 +4595,7 @@ anyone's.
 
 **So a creature that casts has CLASS LEVELS.** `character_classes` is
 what a player character has, `sheet.classes` reads it, and
-`prayers::caster` finds a casting class there without caring what kind
+`casting::caster` finds a casting class there without caring what kind
 of thing it belongs to. `npcs.class_key` has existed since 064 and was
 set on exactly one statblock; what was missing was a level to go with
 it, and `instantiate_npc` writing the class row rather than only copying
@@ -4619,8 +4619,8 @@ mechanism to describe something an existing one already covered.
 101-107 built one shape and called it prayers, and the name hid the
 question. A cleric draws from the WHOLE list every day and prepares a
 subset; a wizard may only prepare what is written in a book.
-`prayers::Source` is the vocabulary - `whole_list` or `book` - and
-`prayers::casts` is the table of which class casts on which ability from
+`casting::Source` is the vocabulary - `whole_list` or `book` - and
+`casting::casts` is the table of which class casts on which ability from
 which source. A rule rather than a column: `classes` has never said
 anything about spellcasting, and this is 5e's own table.
 
@@ -4630,7 +4630,7 @@ database a level-0 spell - and a wizard needs a third value for a spell
 in the book and not prepared today. One column, three states, which is
 what it was always describing.
 
-`prayers::may_reach` is where the difference lives: a cleric is checked
+`casting::may_reach` is where the difference lives: a cleric is checked
 against `spells.classes`, and a wizard against **what they have already
 written down**, because being a wizard spell is not enough.
 
@@ -4649,7 +4649,7 @@ The Lich casts up to Gate and Astral Projection.
 ### What is deliberately absent
 
 **The known casters** - bard, sorcerer, warlock have a fixed list and
-never prepare, a third shape absent from `prayers::casts` rather than
+never prepare, a third shape absent from `casting::casts` rather than
 listed and quietly treated as clerics. **The half-casters** - paladin
 and ranger prepare on a half slot table, and `slots_at` is the full one.
 **The wizard's acquisition path** - a player wizard's book grows two
@@ -4673,10 +4673,11 @@ Found by Dave in about a minute of using the thing:
 **It was not a prayer bug. It was an ENROL bug.** 150 taught
 `instantiate_character` to carry a creature's prayers across when it is
 placed - right, and missing until then - but wrote them through a
-`prepared` column. `character_prayers` has never had one. It has
+`prepared` column. The table (then `character_prayers`, renamed by
+177) has never had one. It has
 `state`: text, NOT NULL, default `'prepared'`, and **three** values,
 not two - `cantrip`, `prepared`, `book`. A cantrip is KNOWN rather than
-prepared, which is why `prayers::may_reach` accepts `book` and
+prepared, which is why `casting::may_reach` accepts `book` and
 `prepared` and refuses to prepare a cantrip at all.
 
 `instantiate_character` IS 123's "placing one is a copy", so this took
@@ -4714,7 +4715,7 @@ account above says 150 "taught `instantiate_character` to carry a
 creature's prayers across - right, and missing until then". It did not.
 The copy has been there since **123**, carried forward verbatim by 124:
 
-    123, line 165:  insert into public.character_prayers
+    123, line 165:  insert into public.character_spells
                       (character_id, spell_key, prepared)
     124, line 160:  the same three lines again
 
@@ -4753,6 +4754,29 @@ and is exactly that. **plpgsql will not warn you**: it resolves a
 statement's columns on first execution, so the migration applies
 cleanly, the tests pass, the commit looks fine, and the failure waits
 for whoever next presses the button.
+
+**177 FOUND A BETTER HALF OF THIS GUARD.** The grep asks the repo; ask
+the database instead and it answers for what is actually deployed,
+including anything applied without a file:
+
+```sql
+select p.proname, pg_get_function_identity_arguments(p.oid)
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.prosrc ilike '%<name>%';
+```
+
+Run both. The grep catches what the repo knows and the query catches
+what the server knows, and the gap between them is the thing this
+section exists about. 177 also took the rest of the inventory the same
+way - `pg_policies`, `pg_constraint`, `pg_indexes`, `pg_trigger`,
+`pg_views` - because a rename touches all of them and memory does not
+list them reliably.
+
+**AND THEN RUN THE FUNCTION.** Neither the grep nor the query proves a
+body works; only executing it does. 177's probe called
+`instantiate_npc`, copied the result with `instantiate_character`,
+asserted the spell counts matched and deleted both. That is the step
+152 skipped, and it costs one `do` block.
 
 **Run against the commit before 150, that one line returns every
 reader that broke:**
@@ -4802,14 +4826,24 @@ delete alongside: `state.spells` is read by `paintMine` to render what
 is prepared and by `paintPrepList` to offer what is not, so losing it
 would have emptied a cleric's sheet SILENTLY - `byKey` returns undefined
 and the render skips the row without a word. It survives as
-`loadClericCatalogue`, named for what it actually does now that no tab
+`loadCatalogue`, named for what it actually does now that no tab
 depends on it.
 
-### Still open: a wizard cannot prepare anything
+### A wizard cannot prepare anything - FIXED IN 176
+
+**This section is the diagnosis; 176 is the fix.** It was right about
+every part of it, including which two comments marked the spot. Left
+here because the reasoning is the useful bit, and because it correctly
+predicted the shape of the repair: "let the sheet follow `sheet.caster`
+the way the engine does."
+
+What it did NOT see was the fault waiting behind the gate - opening it
+alone would have shown a wizard an empty sheet that looked correct. 176
+has it.
 
 Found while checking what the tab was load-bearing for. **The engine has
-been class-agnostic since 150** - `list_prayers`, `castable` and
-`cast_prayer` all go through `sheet.caster`. The frontend never caught
+been class-agnostic since 150** - `list_casting`, `castable` and
+`cast_spell` all go through `sheet.caster`. The frontend never caught
 up:
 
 | | |
@@ -4822,12 +4856,12 @@ up:
 So a wizard gets no Prayers subtab, cannot prepare, and therefore has
 nothing for the cast panel to offer - while 206 wizard spells sit in the
 catalogue and the whole backend is ready for them. Two stale comments
-mark the spot: `list_prayers` still says "REFUSES A CHARACTER WHO IS NOT
+mark the spot: `list_casting` still says "REFUSES A CHARACTER WHO IS NOT
 A CLERIC" and the cast panel says "Everybody who is not a cleric refuses
 this". Both describe code 150 changed.
 
 The fix is to let the sheet follow `sheet.caster` the way the engine
-does. Not taken yet.
+does. **Taken in 176.**
 
 ## A spell attack is an attack - BUILT (154, spellcast.rs, character.rs)
 
@@ -4836,7 +4870,7 @@ anything. It had not. The slot went, the bonus action went, the log said
 **"Spiritual Weapon — +6 to hit, 1d8"**, and `rolls = 0`, `hp_events = 0`.
 
 **Casting was always meant to be two steps and the second one did not
-exist.** `cast_prayer` deliberately does not roll - `main.js` says why,
+exist.** `cast_spell` deliberately does not roll - `main.js` says why,
 and it is right: "an attack spell is a d20 like any other and belongs in
 the one place that makes them". So casting spends the slot, writes the
 action and puts the spell's name in the roll box. But `resolve_request`
@@ -4852,7 +4886,7 @@ struct: `resolution::admits` lets the roll be aimed at an AC, the crit
 range decides the verdict, `a.damage` is rolled and doubled on a crit,
 `a.damage_types` and `a.magical` are what the target resists, and the
 hit point event falls out at the end. A spell attack that fills it in
-gets all of that for free. The alternative - having `cast_prayer` roll
+gets all of that for free. The alternative - having `cast_spell` roll
 and write the damage itself - is less code and builds a second damage
 pipeline beside `attack.rs`, which is the thing `spellcast.rs`'s header
 says the module exists to avoid.
@@ -4890,11 +4924,11 @@ has seeded silently loses a character their prose.
 
 `load_sheet`'s own note says seven queries "is the count to watch" and
 that a hover preview pays all of it. The prepared list makes it nine -
-but only when `prayers::caster` says this character casts, which is
+but only when `casting::caster` says this character casts, which is
 computed from class rows already read. **A fighter, a monster and every
 creature in the bestiary still pay seven.**
 
-Two and not one because `character_prayers.spell_key` references
+Two and not one because `character_spells.spell_key` references
 `spells` BY VALUE - the nullable-tenancy pattern, where a partial unique
 index cannot back a foreign key - so there is no relationship to embed
 across and the keys must be known before the catalogue can be asked.
@@ -4906,7 +4940,7 @@ putting it on the encounter would break for a long spell that outlives
 the fight.
 
 The chip went on **Webbys** - the thing Luci was hitting - because
-`cast_prayer` applied the effect to `target_character_id`
+`cast_spell` applied the effect to `target_character_id`
 unconditionally. That is right for Bless and wrong for a floating weapon
 the caster maintains. Worse, its `grants` was `[]`, so it sat there for
 ten ticks doing nothing: the silent-no-op shape again.
@@ -4958,7 +4992,7 @@ among them, so a caller could not say what an action costs.
 wanted what it derives - but a spell is where that breaks: Healing Word
 and Spiritual Weapon are BONUS actions with key 'spell', so the trigger
 would say "action" and quietly take a cleric's whole turn. That is why
-`cast_prayer` wrote its own action row and so could never write a heal
+`cast_spell` wrote its own action row and so could never write a heal
 atomically with it. **This is 021's lesson word for word** - "an explicit
 column list in a writer function is a SECOND schema" - same function,
 different column.
@@ -4982,7 +5016,7 @@ two-step design. The action has known `character_id` all along.
 `character_name` to the writer as well as the table, because that
 function drops what it does not list. A BEFORE INSERT trigger needs
 nothing from the writer, so the name cannot be lost in transit by
-`write_action`, by `cast_prayer`'s REST insert, or by whatever writes an
+`write_action`, by `cast_spell`'s REST insert, or by whatever writes an
 action next. `write_action` was deliberately not touched by 155.
 
 **And `character_name` had to be added to the log's SELECT** - the same
@@ -5252,7 +5286,7 @@ every operation that makes no sense and then needs a guard against each.
 
 **`may_reach` did not change.** It already takes `held` and lets the
 caller decide. The only seam that moved is `load_chosen`, which all five
-callers go through - it now unions `character_prayers` with what is
+callers go through - it now unions `character_spells` with what is
 written in books the character carries, and only for a Book caster. A
 cleric pays none of it.
 
@@ -5331,7 +5365,7 @@ floors to 1, and an untuned school is untouched.
 **This is the decision, and it is not 50/50 - the current model cannot
 do what was asked.**
 
-**Today (150):** a wizard's book is `character_prayers` rows in state
+**Today (150):** a wizard's book is `character_spells` rows in state
 `'book'`. `may_reach` enforces "a wizard prepares only from what is
 written down" and is tested. But those rows belong to a CHARACTER, so:
 
@@ -5354,13 +5388,184 @@ that holds exactly one and is consumed.
 **`may_reach` does not change.** It already takes `held: Option<&str>`
 and lets the caller decide; only the lookup that feeds it moves, from
 "rows on this character" to "spells in books this character is
-carrying". `character_prayers` keeps `prepared` and `cantrip`.
+carrying". `character_spells` keeps `prepared` and `cantrip`.
 
 What it buys, all from the one table: found books, stolen books,
 lending, a second book, real capacity, and scrolls.
 
 **Taken in 172** - see above. Everything in 170 and 171 was useful
 under either answer, which is why it was built first.
+
+## Wizards get spells, clerics get prayers - RENAMED (176, 177)
+
+> **The sections above this one use TODAY'S names.** They were written
+> when the module was `prayers.rs`, the parameters were `cleric_level`
+> and `wis_mod`, the commands were `cast_prayer` and friends and the
+> table was `character_prayers`. The names were brought forward so a
+> reader can follow them to a file that exists; what each migration
+> DID is unchanged.
+>
+> Two places keep the old spelling on purpose, because they are about
+> it: 152's quoted error message, which is what was on screen that day,
+> and 169's table naming `loadClericCatalogue`, which is the function
+> as it was broken.
+
+Dave: *"is there still cross contamination between prayers and clerics
+and spells and wizards … they are spells - wizards get spells, clerics
+get prayers."*
+
+**The rules had been separated since 150. Every name still said
+cleric.** 106 built the subsystem for the cleric and said so outright -
+its module doc read "the module is named for the cleric rather than for
+casting" - and 150 then put the wizard through the same functions and
+renamed nothing.
+
+### The headline
+
+**A wizard's INTELLIGENCE was being passed into a parameter called
+`wis_mod`**, through `spellcast::cast` into `save_dc`, `attack_bonus`
+and the heal dice. `save_dc`'s own doc comment promised "8 +
+proficiency + Wisdom". The arithmetic was right the entire time, which
+is the worst pairing available: nothing fails, so nothing draws
+attention, and anybody reading the signature to learn how a wizard
+casts is told something false by it.
+
+### What moved
+
+| was | is |
+|---|---|
+| `prayers.rs` | `casting.rs` |
+| `commands/prayers.rs` | `commands/casting.rs` |
+| `cleric_level` | `caster_level` |
+| `wis_mod` | `ability_mod` |
+| `list_prayers` | `list_casting` |
+| `prepare_prayer` | `prepare_spell` |
+| `forget_prayer` | `forget_spell` |
+| `cast_prayer` | `cast_spell` |
+| `creature_io::Prayer` | `creature_io::HeldSpell` |
+| `Creature.prayers` | `Creature.spells` |
+| `character_prayers` | `character_spells` (177) |
+
+**In that order, smallest risk first**: Rust symbols where the compiler
+checks the work, then the command names where JS and Rust must move
+together, then the table.
+
+**`uses.rs` and `time.rs` keep their `wis_mod`.** Those are a genuine
+Wisdom modifier in an ability context, not the lie - a blanket sed
+would have taken them too.
+
+**`Creature.spells` carries `#[serde(alias = "prayers")]`**, because
+`creature_io::admits` promises an older file opens and every creature
+kit exported before today says `prayers`. The alias is that promise,
+not a convenience. Exports write `spells`.
+
+### What was already right, and stays
+
+- **`Source` and `may_reach`** - the one place the two differ, and the
+  only place a class is named at all (`casts`, mapping cleric→(wis,
+  WholeList) and wizard→(int, Book)). Everything downstream reads
+  `Caster`.
+- **One `spells` table.** Dispel Magic is ONE spell on two lists; a
+  table per class would hold it twice and let the copies drift. A
+  prayer and a spell differ in WHO MAY REACH FOR ONE, not in where the
+  row is kept.
+- **`prepared_max`, `cantrips_known`, `slots_at`, `top_slot`,
+  `save_dc`, `attack_bonus` - one of each.** These are identical for
+  the cleric and the wizard in 5e: same table, same formula, a
+  different ability feeding it. A module per class would be one derived
+  number computed in two places. **This is the part that looks like
+  contamination and is not.**
+
+### The fault behind the gate
+
+`loadPrayers` gated on "has a cleric class by name", so a wizard's
+sheet never showed the tab. Opening that alone would have been worse
+than leaving it shut: **`state.spells` held the cleric list, and
+`paintMine`'s `byKey` resolves a prepared spell through it**, so a
+wizard's own prepared spells would have rendered as NOTHING - `find`
+returns undefined, `if (sp)` skips the row, no error anywhere. An empty
+sheet that looks correct.
+
+So the catalogue is one list of all 276 rows now, and the Spells tab's
+second copy in `state.allSpells` is gone with it - the same table had
+been fetched twice and went stale on different schedules. One loader,
+`loadCatalogue`, and the sheet refreshes when that tab is opened.
+
+The screen takes every word from `list_casting`: the subtab reads
+**Spells** for a wizard and **Prayers** for a cleric, and the add
+section reads "Prepare from the book" or "Add a prayer". No executable
+line in `main.js` names a class any more.
+
+### The cantrip arm, which the fix forced
+
+Writing the picker's filter exposed it: **a wizard could not learn a
+cantrip either.** `prepare_spell` asks `may_reach` BEFORE it branches
+on level, and the `Source::Book` arm refused anything not written
+down - including a cantrip, which by the wizard's own rules is never in
+the book: the spellbook holds the spells they know *except cantrips,
+which are fixed in the mind.*
+
+**170 to 175 made it worse by making it work.** `scribe::fits` charges
+a cantrip a page like anything else, so once books existed there was a
+path - pay the ink and the hours, write Fire Bolt down, then "learn"
+it. A wrong answer that looks deliberate is harder to find than one
+that fails, which is 159's lesson in a different column.
+
+`may_reach` now takes `spell_level` and a cantrip is a class-list
+question whatever the source. Four tests, including a loop over levels
+1 to 9 proving the exemption is level 0 and nothing else, because an
+off-by-one there hands a wizard the whole list. Scribing a cantrip is
+still allowed - what changed is that it is no longer required.
+
+### 177, which is the part with teeth
+
+`pg_proc` found **two** plpgsql functions reading the table -
+`instantiate_character` and `instantiate_npc` - and both are recreated
+in the same migration, because plpgsql resolves a statement's columns
+on FIRST EXECUTION and a function left pointing at a renamed table
+deploys cleanly and fails on the next enrol. That is 152 exactly.
+
+**095 holds: both signatures are byte-for-byte**, including
+`p_as_template boolean default false`. PostgREST dispatches on
+parameter names, so a `create or replace` that renames or reorders an
+argument creates a second overload rather than replacing anything, and
+every call then fails as ambiguous. Verified afterwards: **one overload
+each.**
+
+Verified after applying: 64 rows carried, 4 policies and 3 constraints
+renamed, 0 function bodies still naming the old table, old table gone.
+**Then the probe ran both functions for real** - instantiate an
+acolyte, copy it, assert the spell counts match, delete both. Compiling
+is not working, and executing is the only proof.
+
+**Not renamed:** `state` keeps its three words - 'cantrip', 'prepared',
+'book' - and `npc_spells` was already named right in 150. Since 172,
+'book' means "reachable from a book a wizard is carrying" rather than
+"a row somebody wrote", which is 172's design and not 177's to
+revisit.
+
+### Two slips, caught
+
+**A sed rewrote history, twice.** `commands/casting.rs` briefly read
+"Was `caster_level` and found a cleric class by name" - but the old name
+was `cleric_level`, which is the whole point of the sentence. Then the
+same blanket rename over STATUS turned 152's QUOTED ERROR MESSAGE into
+`relation "character_spells" does not exist`, which is not what was on
+screen that day, and renamed `loadClericCatalogue` in 169's table,
+where the broken function is the subject.
+
+**A mechanical rename corrupts anything that quotes the old name on
+purpose**, and prose is full of that in a way code is not: history
+notes, error transcripts, "this used to be called" comments. Both
+caught by re-reading the diff rather than by any tool. The fix is to
+split the file at the section that is ABOUT the rename and only sed
+above it - then check what the sed touched inside quotes.
+
+**`scribe.rs`'s header described the pre-172 design as current**, since
+170 was written before the storage question was answered. It now reads
+as the question 170 found rather than the state of things.
+
+1001 tests pass, up 4 from 997.
 
 ## Pick up here
 

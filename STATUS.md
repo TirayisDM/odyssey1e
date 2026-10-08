@@ -5145,6 +5145,101 @@ gates techniques and 132 had to put those back once already. Now that
 `Sheet::proficiency_bonus` and its callers, and belongs in its own
 commit.
 
+## The scribe's rules - BUILT (170, scribe.rs). STORAGE IS DAVE'S CALL
+
+Dave: *"develop the spell book and scroll rules 1st ... the actual
+physical spell book(s) item, pens, ink, time, cost, special materials
+... then the rules for scribe time per level and spell type."*
+
+**The rules and the things are built. Where the writing GOES is not,
+and that is the one decision left - see the fork below.**
+
+### The cost is the materials, not a number beside them
+
+The book charges *2 hours and 50 gp per spell level*, and says the 50 gp
+is the fine inks and components burnt through working the spell out. So
+nothing charges 50 gp. It consumes **ink**, and the ink is what costs:
+
+    two vials per spell level, at 25 gp a vial = 50 gp per level
+
+A ninth-level spell wants eighteen vials and 450 gp - **the published
+figure, arrived at by buying something real.** A wizard who already has
+ink does not pay twice. A wizard with a full purse and no ink in a
+wilderness cannot copy anything, which is the whole reason to make it a
+thing instead of a price.
+
+| | | |
+|---|---|---|
+| `ink_vial` | 25 gp | consumed, two per spell level |
+| `quill` | 2 sp | a tool, required, not consumed |
+| `scroll_blank` | 10 gp | vellum with nothing on it yet |
+| `spell_book` | 50 gp | **already existed since 027** |
+
+### Per level and per school, and the school part is data
+
+`scribe::to_copy(level, school_pct)` - hours and ink from the level,
+bent by a percentage and **rounded up**, with a floor of one of each so
+a cantrip is never free. `scribe::to_scroll` is twice that, and is a
+house rate: the SRD prices scrolls as treasure and leaves writing one to
+the DM.
+
+`scribe_schools` is the tuning, **seeded at 100 with no reagent for all
+eight**. That is deliberate and is not the same as not having built it:
+100 is the only rate anybody can defend yet, and which jar a conjurer
+empties is a question about Dave's world rather than about 5e. Tuning is
+eight UPDATEs, not a Rust change.
+
+`scribe::may_copy` refuses four ways, each a sentence a player can act
+on: not a book caster, not on their list, already written, and **above
+what they could prepare** - a 3rd-level wizard cannot bank a 9th-level
+spell out of a captured book. 13 tests.
+
+### `spell_book.capacity_slots` is the page count now
+
+027 made `spell_book` a container with `accepts = {spell}` and
+`capacity_slots = 10` - an intention nothing ever implemented, and no
+item has ever been tagged `spell`. One spell now takes one slot, so the
+standard book holds ten and a wizard who wants more buys another book.
+Reuses the column rather than adding a second idea of capacity, and
+makes "spell book(s)" plural for a reason.
+
+### THE FORK: where do a book's contents live?
+
+**This is the decision, and it is not 50/50 - the current model cannot
+do what was asked.**
+
+**Today (150):** a wizard's book is `character_prayers` rows in state
+`'book'`. `may_reach` enforces "a wizard prepares only from what is
+written down" and is tested. But those rows belong to a CHARACTER, so:
+
+- a spellbook **found in a dungeon** or taken off a corpse cannot have
+  contents - there is no character to hang them on
+- **a second book means nothing** - no row says which book a spell is
+  in, so the capacity rule above has nothing to attach to
+- **a scroll cannot exist** - it is an unowned object with a spell on
+  it, which is the same problem from the other end
+
+Scrolls alone force the change, and solving scrolls separately from
+books would be the same fact in two places.
+
+**The fix: contents belong to the OBJECT.** One table -
+`scribed_spells(object_id, spell_key, scribed_at)` - and a book and a
+scroll become the same story: *a spell written on a physical thing*. A
+book is an object that holds several up to its capacity; a scroll is one
+that holds exactly one and is consumed.
+
+**`may_reach` does not change.** It already takes `held: Option<&str>`
+and lets the caller decide; only the lookup that feeds it moves, from
+"rows on this character" to "spells in books this character is
+carrying". `character_prayers` keeps `prepared` and `cantrip`.
+
+What it buys, all from the one table: found books, stolen books,
+lending, a second book, real capacity, and scrolls.
+
+**Not taken, because it moves where a wizard's spells live and that is a
+one-way door.** Everything above is useful under either answer, which is
+why it was built first.
+
 ## Pick up here
 
 **Be clear about what is and is not done.** The foundation is square

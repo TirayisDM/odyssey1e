@@ -1,0 +1,299 @@
+//! Writing a spell down: what it costs, how long it takes, and who may.
+//!
+//! 170. 150 BUILT THE WIZARD AND LEFT THE BOOK EMPTY. `prayers::caster`
+//! returns `Source::Book` for a wizard and `may_reach` already enforces
+//! the rule that matters - a wizard prepares only from what somebody has
+//! written down - but nothing has ever written anything down. 161's own
+//! header says so: "nothing writes `book`, so a player wizard has an
+//! empty book and no way to fill it". 161-167 then put 206 wizard spells
+//! in the catalogue, which made the gap the whole feature.
+//!
+//! ---------------------------------------------------------------------
+//! THE COST IS THE MATERIALS, NOT A NUMBER BESIDE THEM
+//! ---------------------------------------------------------------------
+//!
+//! The book says copying a spell costs "2 hours and 50 gp per spell
+//! level", and the 50 gp is explicitly the fine inks and the material
+//! components burnt through while working the spell out. So this does
+//! not charge 50 gp AND consume ink - it consumes the ink, and the ink
+//! is what costs the money.
+//!
+//! TWO VIALS PER LEVEL, AT 25 GP A VIAL, which comes to 50 gp per level
+//! exactly. A ninth-level spell wants eighteen vials and 450 gp, which
+//! is the published number arrived at by buying something real. A wizard
+//! who already has ink does not pay twice, and a wizard in a wilderness
+//! with a full purse and no ink cannot copy anything - which is the
+//! point of making it a thing rather than a price.
+//!
+//! THE QUILL IS A TOOL AND IS NOT CONSUMED. It wears instead, through
+//! 093's `uses_spent` / `uses_max`, so it is a thing to replace rather
+//! than a thing to buy per spell.
+//!
+//! ---------------------------------------------------------------------
+//! PER LEVEL AND PER SCHOOL
+//! ---------------------------------------------------------------------
+//!
+//! Level drives it and school bends it. `school_pct` is a percentage so
+//! the tuning lives in DATA - `scribe_schools` - rather than in a match
+//! arm here that only Dave should be writing. 100 means the book's own
+//! rate and is the default for every school until somebody says
+//! otherwise; 150 would make necromancy half again as slow and costly.
+//!
+//! THE REAGENT IS DATA FOR THE SAME REASON and is not in this module at
+//! all: which jar a conjurer empties is a question about the world, and
+//! a rule that hardcoded it would be this file having opinions about
+//! somebody else's setting.
+//!
+//! ---------------------------------------------------------------------
+//! WHAT THIS DOES NOT DECIDE
+//! ---------------------------------------------------------------------
+//!
+//! WHERE THE WRITING GOES. A wizard's book is `character_prayers` rows
+//! in state 'book' today, which cannot describe a spellbook found in a
+//! dungeon or taken off a corpse, because those rows belong to a
+//! character. Scrolls have the same problem from the other end. That is
+//! a schema decision and it is Dave's; this module is the arithmetic
+//! either way, because what a copy costs does not depend on where the
+//! answer is stored. See STATUS.
+//!
+//! SO NOTHING CALLS THIS YET, and `acquire.rs` is the precedent for
+//! saying so in an attribute rather than rushing a caller: the rule is
+//! settled and tested first, because the rule is the part that was
+//! specified and the part worth getting right before a migration
+//! hardens a shape around it.
+#![allow(dead_code)]
+
+/// What one scribing takes out of the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scribing {
+    /// Hours at the desk. The clock takes ticks - multiply by
+    /// `clock::HOUR` - but hours is what a person says out loud.
+    pub hours: i64,
+    /// Vials of fine ink, consumed.
+    pub ink: i64,
+}
+
+impl Scribing {
+    /// Ticks, for the one caller that has to move the clock.
+    pub fn ticks(self) -> i64 {
+        self.hours * crate::clock::HOUR
+    }
+}
+
+/// A cantrip is level 0 and every per-level formula gives nothing for
+/// it. Writing one down is still an afternoon's work and a pot of ink,
+/// so the floor is one of each rather than a special case per rule.
+const FLOOR: i64 = 1;
+
+/// Two hours and two vials per spell level, bent by the school.
+///
+/// `school_pct` IS A PERCENTAGE AND 100 IS THE BOOK. It is applied to
+/// the level-driven figure and then floored, so a cheap school never
+/// makes a spell free and a cantrip is never nothing.
+///
+/// ROUNDED UP. Half a vial of ink is a vial you had to open, and half an
+/// hour at the desk is an hour of the day gone. Rounding a cost down is
+/// how a rule quietly becomes generous.
+pub fn to_copy(level: i64, school_pct: i64) -> Scribing {
+    let level = level.max(0);
+    let pct = school_pct.max(1);
+    Scribing {
+        hours: bend(2 * level, pct),
+        ink: bend(2 * level, pct),
+    }
+}
+
+/// Making a scroll of a spell already in the book.
+///
+/// NOT IN THE BOOK'S RULES AT ALL, which is worth saying plainly: the
+/// SRD prices scrolls as treasure and leaves writing one to the DM.
+/// This is a house rate and the numbers are the first honest guess:
+/// TWICE the copying time and twice the ink, plus the blank it is
+/// written on.
+///
+/// WHY TWICE. Copying into a book is transcription - the spell is
+/// already understood and the book is a reference. A scroll has to carry
+/// the whole working on its own, for somebody who may not understand it,
+/// which is the harder job and the one worth charging for. If it should
+/// be days rather than hours, that is a number in this function and a
+/// line in STATUS, not a redesign.
+pub fn to_scroll(level: i64, school_pct: i64) -> Scribing {
+    let base = to_copy(level, school_pct);
+    Scribing {
+        hours: base.hours * 2,
+        ink: base.ink * 2,
+    }
+}
+
+/// The level-driven figure bent by a percentage, rounded up, floored.
+fn bend(base: i64, pct: i64) -> i64 {
+    // Integer ceiling: (a + b - 1) / b, with the multiply first so the
+    // percentage is not lost to truncation before it is applied.
+    let scaled = (base * pct + 99) / 100;
+    scaled.max(FLOOR)
+}
+
+/// Whether this caster may write this spell into their book at all.
+///
+/// 170. FOUR REFUSALS, AND EVERY ONE OF THEM IS A SENTENCE A PLAYER CAN
+/// ACT ON. "You cannot" with no reason is the thing this app keeps
+/// refusing to do.
+///
+/// A BOOK CASTER ONLY. A cleric does not copy spells - they are granted
+/// the whole list every day, which is `Source::WholeList` and the reason
+/// that enum exists. Refusing here rather than silently succeeding keeps
+/// a Copy button off a cleric's sheet by accident.
+///
+/// ON THE CASTER'S OWN LIST. Being a spell is not enough; being a WIZARD
+/// spell is the test, and `spells.classes` is the list - the same check
+/// `may_reach` makes for a cleric, from the other side.
+///
+/// NO HIGHER THAN THEY CAN CAST. A 3rd-level wizard cannot copy a
+/// 9th-level spell out of a captured book and sit on it: the book's rule
+/// is that you must be able to prepare it. `top_slot` is the highest
+/// slot level they have, which `prayers::slots_at` already answers.
+///
+/// AND NOT TWICE. A spell already written is already written, and the
+/// second copy would be a second row saying the same thing - 013's rule
+/// about a log recording what changed, applied to a book.
+pub fn may_copy(
+    source: crate::prayers::Source,
+    spell_classes: &[String],
+    class_key: &str,
+    spell_level: i64,
+    top_slot: i64,
+    already_written: bool,
+) -> Result<(), String> {
+    if source != crate::prayers::Source::Book {
+        return Err("only a wizard copies spells into a book".to_string());
+    }
+    if !spell_classes.iter().any(|c| c == class_key) {
+        return Err(format!("that is not a {} spell", class_key));
+    }
+    if already_written {
+        return Err("that is already in the book".to_string());
+    }
+    if spell_level > top_slot {
+        return Err(format!(
+            "a level {} spell needs a level {} slot to prepare, and they have nothing above {}",
+            spell_level, spell_level, top_slot
+        ));
+    }
+    Ok(())
+}
+
+/* ============================ TESTS ============================ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prayers::Source;
+
+    /* ---------------------- what it costs ---------------------- */
+
+    /// The published rate, arrived at by buying ink: two hours and two
+    /// vials a level, and a vial is 25 gp.
+    #[test]
+    fn the_books_own_rate_falls_out_of_the_materials() {
+        for (level, hours, ink) in [(1, 2, 2), (3, 6, 6), (5, 10, 10), (9, 18, 18)] {
+            let s = to_copy(level, 100);
+            assert_eq!(s.hours, hours, "level {}", level);
+            assert_eq!(s.ink, ink, "level {}", level);
+            // 25 gp a vial, which is the 50 gp per level the book prints.
+            assert_eq!(s.ink * 25, 50 * level, "level {}", level);
+        }
+    }
+
+    #[test]
+    fn a_cantrip_is_not_free() {
+        let s = to_copy(0, 100);
+        assert_eq!(s.hours, 1);
+        assert_eq!(s.ink, 1);
+    }
+
+    #[test]
+    fn a_school_bends_it_and_cannot_zero_it() {
+        // Half again as hard.
+        assert_eq!(to_copy(2, 150).hours, 6);
+        // Generous, but never free: the floor holds.
+        assert_eq!(to_copy(1, 1).hours, 1);
+        assert_eq!(to_copy(1, 1).ink, 1);
+        // A percentage of zero or less is nonsense and is treated as 1
+        // rather than dividing the world by nothing.
+        assert_eq!(to_copy(5, 0).hours, 1);
+        assert_eq!(to_copy(5, -40).hours, 1);
+    }
+
+    /// Rounding a cost DOWN is how a rule quietly becomes generous.
+    #[test]
+    fn it_rounds_up() {
+        // 2 hours at 125% is 2.5, which is three hours of the day.
+        assert_eq!(to_copy(1, 125).hours, 3);
+        // 6 at 110% is 6.6.
+        assert_eq!(to_copy(3, 110).hours, 7);
+    }
+
+    #[test]
+    fn a_scroll_is_twice_the_work() {
+        let book = to_copy(3, 100);
+        let scroll = to_scroll(3, 100);
+        assert_eq!(scroll.hours, book.hours * 2);
+        assert_eq!(scroll.ink, book.ink * 2);
+    }
+
+    #[test]
+    fn hours_become_ticks_for_the_clock() {
+        assert_eq!(to_copy(1, 100).ticks(), 2 * crate::clock::HOUR);
+    }
+
+    /* ---------------------- who may ---------------------- */
+
+    fn wizard_list() -> Vec<String> {
+        vec!["sorcerer".to_string(), "wizard".to_string()]
+    }
+
+    #[test]
+    fn a_wizard_may_copy_a_wizard_spell_they_can_cast() {
+        assert!(may_copy(Source::Book, &wizard_list(), "wizard", 3, 5, false).is_ok());
+    }
+
+    #[test]
+    fn a_cleric_does_not_copy_anything() {
+        let e = may_copy(Source::WholeList, &wizard_list(), "cleric", 1, 9, false).unwrap_err();
+        assert!(e.contains("only a wizard"), "{}", e);
+    }
+
+    #[test]
+    fn a_spell_off_the_list_is_refused_by_name() {
+        let cleric_only = vec!["cleric".to_string()];
+        let e = may_copy(Source::Book, &cleric_only, "wizard", 1, 9, false).unwrap_err();
+        assert!(e.contains("not a wizard spell"), "{}", e);
+    }
+
+    /// The captured-spellbook case: a third-level wizard cannot bank a
+    /// ninth-level spell against the day they can cast it.
+    #[test]
+    fn nothing_above_what_they_could_prepare() {
+        let e = may_copy(Source::Book, &wizard_list(), "wizard", 9, 2, false).unwrap_err();
+        assert!(e.contains("level 9"), "{}", e);
+        assert!(e.contains("nothing above 2"), "{}", e);
+    }
+
+    #[test]
+    fn exactly_at_the_top_slot_is_allowed() {
+        assert!(may_copy(Source::Book, &wizard_list(), "wizard", 5, 5, false).is_ok());
+    }
+
+    #[test]
+    fn a_spell_already_written_is_not_written_again() {
+        let e = may_copy(Source::Book, &wizard_list(), "wizard", 1, 9, true).unwrap_err();
+        assert!(e.contains("already in the book"), "{}", e);
+    }
+
+    /// A cantrip is level 0, so it clears any slot a wizard has - and a
+    /// wizard with no slots at all is still level 1 and still writes.
+    #[test]
+    fn a_cantrip_needs_no_slot() {
+        assert!(may_copy(Source::Book, &wizard_list(), "wizard", 0, 0, false).is_ok());
+    }
+}

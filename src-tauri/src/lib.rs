@@ -50,6 +50,7 @@ mod pin;
 mod prayers;
 mod resist;
 mod resolution;
+mod scribe;
 mod size;
 mod slots;
 mod species;

@@ -569,6 +569,54 @@ mod tests {
         assert_eq!(upcast_dice(Some("  "), Some("1d6"), 3, Some(5)), None);
     }
 
+    #[test]
+    fn every_shape_the_catalogue_actually_holds_scales_cleanly() {
+        // 186. THE SWEEP'S SAFETY NET. `at_higher_dice` is data, and a
+        // test cannot read the database - but it CAN pin the distinct
+        // (dice, at_higher_dice) shapes the sweep produced, so a future
+        // row in a shape nothing has seen is a shape somebody has to
+        // think about rather than one that silently understates.
+        //
+        // Twenty pairs across 32 spells, taken straight out of the
+        // catalogue after 186 ran.
+        let pairs = [
+            ("3d10", "1d10"), ("4d10", "1d10"),
+            ("1d4", "1d4"), ("4d4", "1d4"), ("3d4+3", "1d4+1"),
+            ("2d6", "1d6"), ("3d6", "1d6"), ("4d6", "1d6"),
+            ("8d6", "1d6"), ("10d6", "1d6"), ("12d6", "1d6"),
+            ("1d8", "1d8"), ("2d8", "1d8"), ("3d8", "1d8"),
+            ("5d8", "1d8"), ("8d8", "1d8"),
+            ("8d6", "2d6"), ("10d6", "2d6"), ("4d8", "2d8"),
+            ("10d6+40", "3d6"),
+        ];
+        for (base, per) in pairs {
+            for up in 1..=8 {
+                let got = crate::dice::add_formula(base, per, up)
+                    .unwrap_or_else(|e| panic!("{} + {}x{} failed: {}", base, up, per, e));
+                // IT MUST STILL ROLL. A formula that scales into
+                // something the dice engine cannot parse would fail at
+                // the moment somebody casts, which is the worst place.
+                crate::dice::roll_formula(&got)
+                    .unwrap_or_else(|e| panic!("{} did not roll: {}", got, e));
+            }
+        }
+    }
+
+    #[test]
+    fn the_two_that_carry_a_flat_part_keep_it_proportional() {
+        // Magic Missile's dart and Disintegrate's +40 are the only flat
+        // parts in the catalogue, and they behave differently ON
+        // PURPOSE: a dart brings its +1 along, the +40 does not grow.
+        assert_eq!(
+            upcast_dice(Some("3d4+3"), Some("1d4+1"), 1, Some(4)).as_deref(),
+            Some("6d4+6")
+        );
+        assert_eq!(
+            upcast_dice(Some("10d6+40"), Some("3d6"), 6, Some(8)).as_deref(),
+            Some("16d6+40")
+        );
+    }
+
     /* ---------- 183. a spell that simply lands ---------- */
 
     #[test]

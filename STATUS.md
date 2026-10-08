@@ -5732,7 +5732,71 @@ and the rider says so on the card. So is splitting Magic Missile's
 darts between targets - the engine takes one target, and `3d4+3`
 describes three darts at one creature.
 
-1023 tests pass, up 22.
+1025 tests pass, up 24.
+
+### 186. The sweep, and what it found in the cleric half
+
+185 filled two rows and said the rest wanted checking against the
+published list a level at a time. **30 spells gain dice from a bigger
+slot**, and every value was derived from the list FIRST and then
+compared against the rider this project already carried.
+
+That order is the whole method. 183 refused to populate a rules column
+by reading our own prose, because a typo in a sentence would become a
+damage bug. Deriving first and using the rider as a CHECK is the
+opposite move - two sources that have to agree.
+
+**THEY DID NOT ALL AGREE, AND THE PATTERN IS EXACT.** Eleven spells
+scale in the book and said nothing about it:
+
+> Cure Wounds, Healing Word, Mass Healing Word, Mass Cure Wounds,
+> Prayer of Healing, Guiding Bolt, Inflict Wounds, Spirit Guardians,
+> Flame Strike, Insect Plague, Glyph of Warding
+
+**Every one is a cleric spell from 102-104.** Everything 161-167 seeded
+carries its upcast line, because by then the riders were being written
+from the list deliberately. The cleric half was written earlier and
+never recorded it - so a cleric upcasting Cure Wounds has been getting
+1d8 since 102, and nothing on the card claimed otherwise.
+
+**Filling only the spells whose riders mentioned a slot would have
+reproduced the gap exactly and then confirmed it.** That is the lesson
+worth keeping: a sweep driven by the thing you are checking cannot find
+what the thing never said.
+
+**A DANGLING REFERENCE, found on the way.** Cure Wounds read "Cast
+higher for more: see Cure Wounds II / III." Those spells have never
+existed in any migration. The column makes the promise real.
+
+**Four are NULL on purpose** and the verification confirms exactly
+those four. Bless and Chain Lightning gain targets. **Scorching Ray
+gains a whole ray, which is its own ATTACK ROLL** - scaling the dice
+would turn three rolls into one, so a miss would cost all of it rather
+than a third. **Spiritual Weapon is +1d8 per TWO slot levels**, a
+cadence the column cannot hold, so it says nothing rather than doubling
+the rate.
+
+**Pinned with a test**: all twenty distinct `(dice, at_higher_dice)`
+shapes in the catalogue, scaled one to eight levels up, each result fed
+back through `roll_formula` - because a formula that scales into
+something unparseable would fail at the moment somebody casts.
+
+**Verified in play.** Fireball at 9th rolled `14d6`; Magic Missile at
+3rd rolled `5d4+5`; Cure Wounds at 4th rolled `4d8+3` - and that last
+is the one that proves the ORDER is right. `spellcast::cast` folds the
+caster's modifier in for a Heal, so the base is already `1d8+3` when
+the scale runs. Three dice added, the flat part left alone. Inside
+`cast` it would have been `4d8+12`.
+
+### Next, and named rather than left to be rediscovered
+
+**AN AREA SPELL DAMAGES ONE CREATURE.** A 14d6 Fireball went off in a
+tavern holding three and hit whoever was pointed at. `cast_spell` takes
+a single target, so every cone, cube, sphere and line in the catalogue
+resolves against one creature and the DM rolls the rest by hand.
+
+It is bigger than the spell list: it needs a way to say WHO IS CAUGHT,
+and this app has no grid. Deliberately not attempted here.
 
 ## Pick up here
 

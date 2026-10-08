@@ -727,10 +727,11 @@ pub fn load_world(
         &[
             ("select", "key,game_id,size,holds_size,weight,slots,capacity_slots,damage_number,damage_denomination,damage_types,properties,base_ac"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            // This campaign's row first, so the de-duplication below
-            // keeps the override - the same precedence
-            // collapse_overrides applies, done by the sort.
-            ("order", "game_id.desc"),
+            // 174. This campaign's row first, so the de-duplication
+            // below keeps the override. `game_id.desc` did NOT do
+            // that - Postgres sorts NULLS FIRST on a descending sort,
+            // so the global row arrived first and won.
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     let mut types: Vec<Kind> = Vec::new();

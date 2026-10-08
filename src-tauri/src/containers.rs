@@ -197,7 +197,11 @@ pub fn load_profile(
             ("select", "key,game_id,kind,accepts,capacity_slots,holds_size"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("key", &format!("in.({})", quoted(key))),
-            ("order", "game_id.desc"),
+            // 174. THE GAME'S OWN ROW WINS, and `game_id.desc` does
+            // NOT do that: Postgres sorts NULLS FIRST on a descending
+            // sort, so the global row came back ahead of the override
+            // and `.first()` took the wrong one.
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     let Some(r) = rows.as_array().and_then(|a| a.first()) else {
@@ -231,15 +235,17 @@ pub fn load_bulk(token: &str, game_id: &str, keys: &[String]) -> Result<Vec<Bulk
             ("select", "key,game_id,slots,content_tags,size"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("key", &format!("in.({})", list.join(","))),
-            ("order", "game_id.desc"),
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     let mut out: Vec<Bulk> = Vec::new();
     for r in rows.as_array().unwrap_or(&Vec::new()) {
         let key = r.get("key").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        // game_id.desc puts this campaign's override first, so the
-        // first row for a key wins - the same precedence
-        // collapse_overrides applies, done by the sort.
+        // 174. THE FIRST ROW FOR A KEY WINS, which is why the sort
+        // has to put the override there. It said `game_id.desc` and
+        // this comment said that put the campaign's row first; it
+        // does the opposite, because Postgres sorts NULLS FIRST on a
+        // descending sort. Never bit: no game has an override yet.
         if out.iter().any(|b| b.key == key) {
             continue;
         }

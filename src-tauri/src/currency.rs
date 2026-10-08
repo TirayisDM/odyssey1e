@@ -312,15 +312,17 @@ pub fn load_coins(token: &str, game_id: &str) -> Result<Vec<(String, String, i64
             ("select", "key,game_id,price,denom"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("content_tags", "cs.{coin}"),
-            ("order", "game_id.desc"),
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     let mut out: Vec<(String, String, i64)> = Vec::new();
     for r in rows.as_array().unwrap_or(&Vec::new()) {
         let key = r.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        // game_id.desc puts a campaign's own row first, so the first
-        // one for a key wins - the same precedence collapse_overrides
-        // applies, done by the sort.
+        // 174. THE FIRST ROW FOR A KEY WINS, so the sort has to put
+        // the override there. This said `game_id.desc` did that; it
+        // does the opposite, because Postgres sorts NULLS FIRST on a
+        // descending sort, so a campaign's own coin would have been
+        // ignored in favour of the global one.
         if key.is_empty() || out.iter().any(|(k, _, _)| *k == key) {
             continue;
         }

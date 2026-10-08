@@ -162,7 +162,12 @@ fn base_price(token: &str, game_id: &str, key: &str) -> Result<i64, String> {
             ("select", "key,game_id,price,denom"),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             ("key", &format!("eq.{}", key)),
-            ("order", "game_id.desc"),
+            // 174. THE GAME'S OWN ROW WINS, and `game_id.desc` does NOT
+            // do that: Postgres sorts NULLS FIRST on a descending
+            // sort, so the global row came back ahead of the
+            // override and `.first()` took the wrong one. Proven
+            // against the live database rather than remembered.
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     let r = rows

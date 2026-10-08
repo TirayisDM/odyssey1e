@@ -14,11 +14,25 @@ use tauri::State;
 use crate::prayers;
 use crate::supabase::{self, AppState};
 
-/// The spell catalogue for one class, global rows and this game's own.
+/// The spell catalogue, global rows and this game's own.
 ///
 /// BY CLASS RATHER THAN A TABLE PER CLASS. `spells.classes` is an
 /// array, so the cleric list is a query and the wizard list is a seed
 /// rather than a schema - see 101.
+///
+/// 169. AND NO CLASS AT ALL IS THE WHOLE BOOK. An empty `class_key`
+/// drops the filter, which is what the Spells tab reads: 161-167 took
+/// the catalogue from 108 to 276 and only one class had a surface to
+/// see any of it through. The Cleric Prayers tab still passes
+/// "cleric" and is unchanged.
+///
+/// `special_text` IS SELECTED NOW, and its absence was the usual fault.
+/// It is where the mechanical rider lives - the three rays of a
+/// Scorching Ray, what a successful save is worth, which spells scale
+/// with the slot - and the reference book has been dropping all of it
+/// because one column list did not mention it. Same shape as 155's
+/// `character_name` and 865c8be's `prof_bonus`: a column that exists,
+/// is filled, and is never asked for.
 #[tauri::command]
 pub fn list_spells(
     state: State<AppState>,
@@ -26,21 +40,23 @@ pub fn list_spells(
     class_key: String,
 ) -> Result<Value, String> {
     let token = state.token()?;
-    let rows = supabase::rest_get(
-        &token,
-        "spells",
-        &[
-            (
-                "select",
-                "key,game_id,name,level,cast_type,category,school,save_ability,dice,\
-                 concentration,ritual,range,duration,casting_time,components,material,\
-                 classes,description",
-            ),
-            ("classes", &format!("cs.{{{}}}", class_key)),
-            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            ("order", "level.asc,name.asc"),
-        ],
-    )?;
+    let scope = format!("(game_id.is.null,game_id.eq.{})", game_id);
+    let holds = format!("cs.{{{}}}", class_key.trim());
+
+    let mut query: Vec<(&str, &str)> = vec![
+        (
+            "select",
+            "key,game_id,name,level,cast_type,category,school,save_ability,dice,\
+             on_save,concentration,ritual,range,duration,casting_time,components,\
+             material,classes,special_text,description",
+        ),
+        ("or", &scope),
+        ("order", "level.asc,name.asc"),
+    ];
+    if !class_key.trim().is_empty() {
+        query.push(("classes", &holds));
+    }
+    let rows = supabase::rest_get(&token, "spells", &query)?;
 
     // The game's own row wins over the global one of the same key - the
     // precedence every tenanted catalogue in this schema uses.

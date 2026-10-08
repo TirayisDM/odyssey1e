@@ -90,6 +90,7 @@
         <button class="tab" data-tab="objects">Objects</button>
         <button class="tab" data-tab="creatures">Creatures</button>
         <button class="tab" data-tab="prayers">Cleric Prayers</button>
+        <button class="tab" data-tab="spells">Spells</button>
         <button class="tab" data-tab="trade">Trade</button>
       </nav>
 
@@ -958,6 +959,38 @@
             </select>
           </div>
           <div id="prayer-list" class="list"></div>
+        </section>
+      </div>
+
+      <!-- 169. THE WHOLE BOOK, NOT ONE CLASS'S.
+           161-167 took the catalogue from 108 spells to 276 and 206 of
+           them are the wizard's, with no surface anywhere in the app
+           that could show one. Cleric Prayers is cleric-only by
+           design - it is that class's reference book and stays as it
+           is - so this is the catalogue itself, with the class as a
+           filter rather than as the premise.
+
+           A REFERENCE BOOK AND NOT A FORM. Nothing here prepares,
+           casts or spends anything; preparing happens on the sheet and
+           casting happens beside the roll box. Same reasoning as the
+           prayers tab's own header, and the same `spellRow` renders
+           both. -->
+      <div class="pane" data-pane="spells" hidden>
+        <section>
+          <h2>Spells <span id="spell-count" class="muted"></span></h2>
+          <div class="row">
+            <input id="spell-find" placeholder="search by name or text" />
+            <select id="spell-class">
+              <option value="">every class</option>
+            </select>
+            <select id="spell-level">
+              <option value="">every level</option>
+            </select>
+            <select id="spell-school">
+              <option value="">every school</option>
+            </select>
+          </div>
+          <div id="spell-list" class="list"></div>
         </section>
       </div>
 

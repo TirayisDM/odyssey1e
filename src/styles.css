@@ -930,6 +930,10 @@ button.wide{width:100%}
 .spell-fact .v{font-family:ui-monospace,Menlo,monospace}
 .spell-mat{font-size:11px;color:var(--muted);font-style:italic}
 .spell-text{font-size:12px;margin:.25rem 0 0;line-height:1.45}
+/* 169. The mechanical rider, set below the flavour: smaller, quieter,
+   and ruled off so the eye can tell the rule from the prose. */
+.spell-rider{font-size:11px;margin:.3rem 0 0;line-height:1.45;
+  border-left:2px solid var(--line);padding-left:.5rem}
 #prayer-find,#prep-find{flex:1 1 14rem}
 
 /* 108. A LEVEL, FOLDED. The header carries the count and the slots,

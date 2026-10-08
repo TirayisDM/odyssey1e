@@ -1360,6 +1360,53 @@ function paintSpellBook() {
     shown.length + " of " + (state.spells || []).length;
 }
 
+/* ========================= THE WHOLE BOOK (169) ========================= */
+//
+// The catalogue rather than one class's part of it. `list_spells` with
+// an empty class drops the filter, so this is the same command the
+// prayers tab uses and the same `spellRow` renders it - the only new
+// thing is that the class is a control instead of a premise.
+
+async function loadSpells() {
+  if (!state.gameId) return;
+  const rows = await call("list_spells", { gameId: state.gameId, classKey: "" });
+  if (!rows) return;
+  state.allSpells = rows;
+
+  // OFF THE DATA, not a hardcoded list of classes. `spells.classes` is
+  // an array and a game may add a spell naming a class nobody seeded,
+  // so the only honest source for this dropdown is what is in it.
+  const classes = [...new Set(rows.flatMap((r) => r.classes || []))].sort();
+  fillOnce("#spell-class", classes.map((c) => [c, c]));
+  fillOnce("#spell-level", levelOptions(rows));
+  fillOnce("#spell-school", SCHOOLS.map((x) => [x, x]));
+  paintSpells();
+}
+
+function paintSpells() {
+  const host = document.querySelector("#spell-list");
+  if (!host) return;
+  const find = (val("#spell-find") || "").toLowerCase();
+  const cls = val("#spell-class");
+  const lvl = val("#spell-level");
+  const school = val("#spell-school");
+
+  const shown = (state.allSpells || []).filter((sp) =>
+    (!cls || (sp.classes || []).includes(cls)) &&
+    (!lvl || String(sp.level) === lvl) &&
+    (!school || sp.school === school) &&
+    // THE RIDER IS SEARCHABLE TOO. "three rays", "half on a success"
+    // and "per slot level" all live in special_text, and a search that
+    // could not reach it would miss most of what a player looks for.
+    (!find || (sp.name + " " + (sp.description || "") + " " +
+               (sp.special_text || "")).toLowerCase().includes(find)));
+
+  host.innerHTML = "";
+  for (const sp of shown) host.append(spellRow(sp, null));
+  document.querySelector("#spell-count").textContent =
+    shown.length + " of " + (state.allSpells || []).length;
+}
+
 // One spell, with everything a table needs. `action` is null on the
 // reference tab - it is a book there, not a form.
 function spellRow(sp, action) {
@@ -1390,6 +1437,11 @@ function spellRow(sp, action) {
   li.append(facts);
   if (sp.material) li.append(sEl("div", "spell-mat", "material: " + sp.material));
   if (sp.description) li.append(sEl("p", "spell-text", sp.description));
+  // 169. AND THE RIDER, which the query has never asked for until now.
+  // This is where the rules actually are - three rays rather than one
+  // roll, what a successful save is worth, what another slot level
+  // buys - and the book was printing the flavour and dropping it.
+  if (sp.special_text) li.append(sEl("p", "spell-rider muted", sp.special_text));
   return li;
 }
 
@@ -3594,6 +3646,13 @@ async function refreshTab(name) {
       await loadObjects();
     } else if (name === "trade") {
       await loadTrade();
+    } else if (name === "spells") {
+      // 169. IN THE DISPATCH, which this comment's own rule asks for -
+      // "so a new tab cannot forget to be in it". The prayers tab is
+      // the one that did forget: it is read once when the game opens
+      // and never again, so a spell added from the other machine is
+      // invisible there until sign-out. Not changed here, but noted.
+      await loadSpells();
     }
   } catch (e) {
     // A refresh that fails must not take the tab switch with it. The
@@ -8062,6 +8121,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   for (const sel of ["#prayer-find", "#prayer-level", "#prayer-school"]) {
     const el = document.querySelector(sel);
     if (el) el.addEventListener("input", paintSpellBook);
+  }
+  // 169. The same four for the whole book. `input` covers a select as
+  // well as a text box, which is what the line above relies on too.
+  for (const sel of ["#spell-find", "#spell-class", "#spell-level", "#spell-school"]) {
+    const el = document.querySelector(sel);
+    if (el) el.addEventListener("input", paintSpells);
   }
   const addHead = document.querySelector("#add-prayer-head");
   if (addHead) addHead.addEventListener("click", () => {

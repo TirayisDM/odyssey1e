@@ -50,6 +50,9 @@ let state = {
   // across repaints - a fold that closed itself every time you
   // prepared something would be worse than no fold.
   openLevels: {},
+  // 173. Which spellbooks are open, by object id, so a repaint does
+  // not close one somebody is reading.
+  openBooks: {},
   // 109. Whether the add-a-prayer section is open. Closed by default:
   // adding happens at a long rest and reading happens constantly.
   addOpen: false,
@@ -2836,6 +2839,154 @@ function dropLine(it, n) {
   return who + " is dropping " + many + thing + " at " + place + ".";
 }
 
+/* ======================= THE SPELLBOOK (173) ======================= */
+//
+// A BOOK IS OPENED FROM THE THING ITSELF, not from a tab. It is an
+// object in somebody's hands with writing in it - 172 - so the control
+// belongs beside `drop` and `destroy` rather than on a screen of its
+// own, and both inventory surfaces get it from the one place.
+//
+// ANYBODY MAY OPEN ONE. A book is a book: a fighter who takes one off a
+// dead wizard can read what is in it, and a cleric may own one. What
+// changes is whether they can WRITE in it, which is `scribe::may_copy`
+// and is the engine's to refuse.
+//
+// AND IT IS NOT ADVERTISED TO PRAYER CASTERS. A cleric prepares the
+// whole list every day and needs no book for it, so nothing here offers
+// them one - but nothing refuses them either. A holy book that serves
+// the same purpose for a cleric is a thing Dave has said he wants
+// later, and this leaves the door open by not pretending it is shut.
+
+function isSpellBook(it) {
+  return !!(it && it.item && it.item.spell_levels != null);
+}
+
+// "1st Level", the way Dave drew it, rather than levelBlock's "Level 1".
+function bookBand(lvl) {
+  return lvl === 0 ? "Cantrips" : ordinal(lvl) + " Level";
+}
+
+function spellBookButton(it, wrap) {
+  if (!isSpellBook(it)) return null;
+  const btn = sEl("button", "tiny", "View Spells");
+  btn.title = "what is written in it";
+  guard(btn, async () => {
+    state.openBooks[it.id] = !state.openBooks[it.id];
+    await paintBook(it, wrap);
+  });
+  return btn;
+}
+
+// The dropped-open section, as a sibling of the controls row so it
+// spans the whole block rather than sitting inside a row of buttons.
+async function paintBook(it, wrap) {
+  // The panel is a SIBLING, so there has to be a parent to put it
+  // beside. `objectControls` builds its row before the caller appends
+  // it, and a reopen scheduled from there arrives a tick later.
+  if (!wrap.parentNode) return;
+  const old = wrap.nextElementSibling;
+  if (old && old.classList.contains("bookpanel")) old.remove();
+  if (!state.openBooks[it.id]) return;
+
+  const panel = sEl("div", "bookpanel");
+  wrap.insertAdjacentElement("afterend", panel);
+  panel.append(sEl("div", "muted", "reading…"));
+
+  const got = await tryCall("list_book", { objectId: it.id });
+  panel.textContent = "";
+  if (!got.ok) {
+    panel.append(sEl("div", "dm-msg", got.error));
+    return;
+  }
+  const b = got.value;
+
+  const head = sEl("div", "bookhead");
+  head.append(sEl("span", "nm", "Spells"));
+  head.append(sEl("span", "muted", b.used + " of " + b.capacity + " levels used"));
+  panel.append(head);
+
+  if (!b.spells.length) {
+    panel.append(sEl("div", "muted", "nothing written in it yet"));
+  } else {
+    // ONLY THE BANDS THAT HAVE SOMETHING. An empty book printing nine
+    // headings is nine lines saying nothing.
+    const byLevel = new Map();
+    for (const sp of b.spells) {
+      if (!byLevel.has(sp.level)) byLevel.set(sp.level, []);
+      byLevel.get(sp.level).push(sp);
+    }
+    for (const lvl of [...byLevel.keys()].sort((x, y) => x - y)) {
+      const band = sEl("div", "bookband");
+      band.append(sEl("div", "lvlname", bookBand(lvl)));
+      const ul = sEl("ul", "list");
+      for (const sp of byLevel.get(lvl)) {
+        const li = sEl("li", "flat item");
+        li.append(sEl("span", "nm", sp.name));
+        if (sp.school) li.append(chip(sp.school, "cls"));
+        li.append(sEl("span", "muted", sp.pages + (sp.pages === 1 ? " level" : " levels")));
+        const out = sEl("button", "tiny ghost", "erase");
+        out.title = "scraped off - the ink is spent and nothing comes back";
+        guard(out, async () => {
+          if (!confirm("Erase " + sp.name + " from " + b.name + "?")) return;
+          const r = await tryCall("erase_spell", { objectId: it.id, spellKey: sp.key });
+          if (!r.ok) return log("erase_spell", r.error, true);
+          await paintBook(it, wrap);
+        });
+        li.append(out);
+        ul.append(li);
+      }
+      band.append(ul);
+      panel.append(band);
+    }
+  }
+
+  await addScribing(panel, it, wrap, b);
+}
+
+// Writing something new in, for a caster who writes.
+//
+// SHOWN FOR A BOOK CASTER AND NOBODY ELSE - that is the "do not
+// advertise" half. A cleric looking at a book they picked up sees what
+// is in it and no invitation to add to it.
+async function addScribing(panel, it, wrap, b) {
+  const caster = state.sheet && state.sheet.caster;
+  if (!caster || caster.source !== "book") return;
+
+  const rows = await call("list_spells", {
+    gameId: state.gameId,
+    classKey: caster.class_key,
+  });
+  if (!rows) return;
+
+  const have = new Set((b.spells || []).map((s) => s.key));
+  const free = rows.filter((sp) => !have.has(sp.key));
+  if (!free.length) return;
+
+  const row = sEl("div", "row");
+  const pick = document.createElement("select");
+  for (const sp of free) {
+    pick.append(new Option(
+      sp.name + " · " + (sp.level === 0 ? "cantrip" : bookBand(sp.level)), sp.key));
+  }
+  const go = sEl("button", "tiny", "Copy in");
+  go.title = "ink and hours, and the engine says how many";
+  guard(go, async () => {
+    // tryCall: a refusal here is the rule working - no room, no ink,
+    // nothing above what they could prepare - and every one of those
+    // is a sentence worth reading.
+    const r = await tryCall("scribe_spell", {
+      characterId: state.characterId,
+      objectId: it.id,
+      spellKey: pick.value,
+    });
+    if (!r.ok) return log("scribe_spell", r.error, true);
+    log("scribe_spell", r.value.said);
+    await paintBook(it, wrap);
+  });
+  row.append(pick, go);
+  panel.append(row);
+}
+
 function objectControls(it, onDone) {
   const wrap = document.createElement("div");
   wrap.className = "row obj-controls";
@@ -2936,6 +3087,17 @@ function objectControls(it, onDone) {
   });
 
   wrap.append(nameBox, nameBtn, qty, dropBtn, killBtn);
+
+  // 173. AND A BOOK OPENS. Only on a book, so every other object's
+  // controls look exactly as they did.
+  const read = spellBookButton(it, wrap);
+  if (read) {
+    wrap.append(read);
+    // A BOOK LEFT OPEN STAYS OPEN across a repaint - the same promise
+    // `state.openLevels` makes for the prepared list. Deferred by a
+    // tick because this row is not in the document yet.
+    if (state.openBooks[it.id]) setTimeout(() => paintBook(it, wrap), 0);
+  }
 
   // Into a container. Only rendered when there is one to choose, so an
   // inventory with no bags looks exactly as it did before 032.

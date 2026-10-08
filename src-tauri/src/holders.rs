@@ -443,6 +443,7 @@ fn as_item(t: &Kind) -> crate::equipment::Item {
         dex_cap: None,
         size: t.size.clone(),
         holds_size: t.holds_size.clone(),
+        spell_levels: None,
         weight: t.weight.clone(),
         accepts: Vec::new(),
         capacity_slots: t.capacity_slots.map(|c| c.to_string()),

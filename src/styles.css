@@ -990,3 +990,16 @@ button.wide{width:100%}
 .casttarget{font-size:11px;margin:0;padding:.1rem .25rem;width:auto;min-width:8rem;
             background:#0f1114;color:var(--fg);border:1px solid var(--line);
             border-radius:3px}
+
+/* 173. THE SPELLBOOK, dropped open under the thing itself. Ruled off on
+   the left so it reads as part of the book above it rather than as the
+   next item in the list. */
+.bookpanel{margin:.4rem 0 .6rem;padding:.4rem 0 .2rem .6rem;
+  border-left:2px solid var(--line)}
+.bookhead{display:flex;justify-content:space-between;align-items:baseline;
+  margin:0 0 .4rem}
+.bookhead .nm{font-weight:600}
+.bookband{margin:0 0 .4rem}
+.bookband .lvlname{margin:0 0 .2rem}
+.bookband .item{display:flex;align-items:center;gap:.4rem}
+.bookband .item .nm{flex:1}

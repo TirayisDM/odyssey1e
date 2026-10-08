@@ -229,7 +229,11 @@ fn book_of(token: &str, object_id: &str) -> Result<(String, i64, String), String
             ("select", "key,name,spell_levels,game_id"),
             ("key", &format!("eq.{}", item_key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            ("order", "game_id.desc"),
+            // THE GAME'S OWN ROW WINS. `game_id.desc` would not do it:
+            // Postgres puts NULLS FIRST on a descending sort, so the
+            // global row would come back ahead of the override. This is
+            // the spelling prayers.rs uses.
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     let item = items
@@ -407,7 +411,11 @@ fn one_spell(token: &str, game_id: &str, key: &str) -> Result<Value, String> {
             ("select", "key,name,level,school,classes"),
             ("key", &format!("eq.{}", key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
-            ("order", "game_id.desc"),
+            // THE GAME'S OWN ROW WINS. `game_id.desc` would not do it:
+            // Postgres puts NULLS FIRST on a descending sort, so the
+            // global row would come back ahead of the override. This is
+            // the spelling prayers.rs uses.
+            ("order", "game_id.asc.nullslast"),
         ],
     )?;
     rows.as_array()

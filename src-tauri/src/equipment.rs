@@ -103,6 +103,13 @@ pub struct Item {
     /// which is the opposite of what None means for a capacity - see
     /// containers::Profile, where the same pair is explained at length.
     pub holds_size: Option<String>,
+    /// 171. SPELLBOOKS ONLY: how many SPELL LEVELS it holds. None means
+    /// this is not a book, which is the test everything uses to tell a
+    /// spellbook from a scroll and from a sword.
+    ///
+    /// NOT `capacity_slots`, which is the container system's volume
+    /// measure. 171 says why at length.
+    pub spell_levels: Option<i64>,
     /// Pounds, from the book, seeded by 027 and 032. TEXT rather than
     /// f64 because a weight is printed far more often than it is summed
     /// and `5` reads better than `5.0` on a sheet. The comment that used
@@ -602,6 +609,7 @@ fn item_from_row(r: &Value) -> Item {
         // unmeasurable.
         size: as_opt_str(r, "size").unwrap_or_else(|| "med".to_string()),
         holds_size: as_opt_str(r, "holds_size"),
+        spell_levels: r.get("spell_levels").and_then(|x| x.as_i64()),
         // TEXT RATHER THAN A NUMBER, because nothing here does
         // arithmetic on it and a parse would turn 0.05 into a rounding
         // question only the screen has to answer. How `numeric`
@@ -653,6 +661,7 @@ pub fn blank(name: &str, kind: &str) -> Item {
         dex_cap: None,
         size: "med".to_string(),
         holds_size: None,
+        spell_levels: None,
         weight: None,
         accepts: Vec::new(),
         capacity_slots: None,
@@ -669,7 +678,7 @@ pub fn blank(name: &str, kind: &str) -> Item {
 
 pub(crate) const ITEM_COLUMNS: &str = "key,game_id,name,kind,base_item,weapon_class,grants,damage_number,\
 damage_denomination,damage_types,properties,range_reach,range_value,range_long,armor_category,base_ac,dex_cap,\
-size,holds_size,weight,accepts,capacity_slots,\
+size,holds_size,weight,accepts,capacity_slots,spell_levels,\
 description,price,denom,rarity,slots,versatile_number,versatile_denomination,worn_slot";
 
 /// Global rows plus this game's overrides, collapsed so an override
@@ -1150,6 +1159,7 @@ mod tests {
             // changed.
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1187,6 +1197,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1224,6 +1235,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1258,6 +1270,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1295,6 +1308,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1457,6 +1471,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1612,6 +1627,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1650,6 +1666,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,
@@ -1676,6 +1693,7 @@ mod tests {
             dex_cap: Some(0),
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             description: None,
             price: None,
             denom: None,

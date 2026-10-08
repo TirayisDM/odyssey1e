@@ -802,6 +802,7 @@ mod tests {
             // changed.
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: vec![],
             capacity_slots: None,

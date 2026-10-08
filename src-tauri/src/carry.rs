@@ -230,6 +230,7 @@ mod tests {
             worn_slot: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: None,
             accepts: Vec::new(),
             capacity_slots: None,

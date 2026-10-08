@@ -395,6 +395,7 @@ mod tests {
             dex_cap: None,
             size: "med".into(),
             holds_size: None,
+            spell_levels: None,
             weight: Some("3".into()),
             description: None,
             price: None,

@@ -5313,11 +5313,18 @@ line beneath and the button disabled. The engine still decides - this
 is a label, and it says so - but finding out by being refused is a
 worse way to learn a price than reading it.
 
-**The school percentage is not applied to the label.** It lives in
-`scribe_schools`, is 100 for every school today, and fetching it per
-keystroke would cost a round trip to change nothing. When Dave tunes
-one, the label under-reports until that is fixed - a smaller wrong than
-the alternative, and recorded here rather than discovered.
+**177 fixed the half that did not make the journey.** 176 priced the
+picker by doing the arithmetic again in JavaScript - it worked, and it
+was the same rule in two places, with the per-school percentage left
+out of the copy. `scribe_options` now returns the list already priced,
+so `scribe.rs` is the only thing that knows what a copy costs and a
+school tuned in `scribe_schools` reaches the label the same second it
+starts being charged.
+
+One read for all eight schools rather than one per candidate - there
+are two hundred candidates. Verified live and rolled back: necromancy
+at 150% prices Blight at 12 vials where 100% gives 8, a cantrip still
+floors to 1, and an untuned school is untouched.
 
 ### The fork as it stood (kept for the record)
 

@@ -187,6 +187,90 @@ pub fn scribe_spell(
     }))
 }
 
+/// Everything this character could write into this thing, priced.
+///
+/// 177. THE ENGINE PRICES IT, NOT THE SCREEN. 176 put the cost on the
+/// picker by doing the arithmetic again in JavaScript, which worked and
+/// was one fact in two places - the per-school percentage was the half
+/// that did not make the journey, and the label quietly under-reported
+/// the moment anybody tuned a school.
+///
+/// So the list arrives priced. `scribe.rs` is still the only thing that
+/// knows what a copy costs, the screen reads `ink` and `hours` off each
+/// row, and a school tuned in `scribe_schools` shows up on the label the
+/// same second it starts being charged.
+///
+/// ONE QUERY FOR THE SCHOOLS, not one per spell. Eight rows, read once
+/// and looked up in memory - the alternative is a round trip per
+/// candidate and there are two hundred of them.
+///
+/// EMPTY FOR ANYBODY WHO DOES NOT WRITE. A cleric gets no list rather
+/// than an error: the screen asks this to decide whether to offer
+/// anything at all, and "nothing to offer" is the answer, not a fault.
+#[tauri::command]
+pub fn scribe_options(
+    state: State<AppState>,
+    character_id: String,
+    object_id: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let sheet = crate::character::load_sheet(&token, &character_id)?;
+    let Some(caster) = sheet.caster.clone() else {
+        return Ok(json!({ "ink": 0, "options": [] }));
+    };
+    if caster.source != prayers::Source::Book {
+        return Ok(json!({ "ink": 0, "options": [] }));
+    }
+
+    let (_, _, game_id, scroll) = book_of(&token, &object_id)?;
+    let written: std::collections::HashSet<String> =
+        written_in(&token, &object_id)?.into_iter().collect();
+    let rates = school_rates(&token)?;
+    let ink = count_held(&token, &entity_of(&token, &character_id)?, "ink_vial")?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "spells",
+        &[
+            ("select", "key,name,level,school,game_id"),
+            ("classes", &format!("cs.{{{}}}", caster.class_key)),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
+            ("order", "level.asc,name.asc"),
+        ],
+    )?;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<Value> = Vec::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        let Some(key) = r.get("key").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if written.contains(key) || !seen.insert(key.to_string()) {
+            continue;
+        }
+        let level = r.get("level").and_then(|v| v.as_i64()).unwrap_or(0);
+        let school = r.get("school").and_then(|v| v.as_str()).unwrap_or("");
+        let pct = rates.get(school).copied().unwrap_or(100);
+        let cost = if scroll {
+            scribe::to_scroll(level, pct)
+        } else {
+            scribe::to_copy(level, pct)
+        };
+        out.push(json!({
+            "key": key,
+            "name": r.get("name").and_then(|v| v.as_str()).unwrap_or(key),
+            "level": level,
+            "school": school,
+            "ink": cost.ink,
+            "hours": cost.hours,
+            "pages": scribe::pages_on(level, scroll),
+            "affordable": cost.ink <= ink,
+        }));
+    }
+
+    Ok(json!({ "ink": ink, "scroll": scroll, "options": out }))
+}
+
 /// Copy the spell off a scroll and into a book, consuming the scroll.
 ///
 /// 175. WHAT A SCROLL IS FOR. A wizard cannot prepare from one - that
@@ -458,6 +542,23 @@ fn school_pct(token: &str, school: &str) -> Result<i64, String> {
         .and_then(|r| r.get("pct"))
         .and_then(|v| v.as_i64())
         .unwrap_or(100))
+}
+
+/// 177. EVERY SCHOOL'S RATE IN ONE READ. `school_pct` asks about one
+/// and is right for one scribing; pricing two hundred candidates with
+/// it would be two hundred round trips.
+fn school_rates(token: &str) -> Result<std::collections::HashMap<String, i64>, String> {
+    let rows = supabase::rest_get(token, "scribe_schools", &[("select", "school,pct")])?;
+    let mut out = std::collections::HashMap::new();
+    for r in rows.as_array().unwrap_or(&Vec::new()) {
+        if let (Some(s), Some(p)) = (
+            r.get("school").and_then(|v| v.as_str()),
+            r.get("pct").and_then(|v| v.as_i64()),
+        ) {
+            out.insert(s.to_string(), p);
+        }
+    }
+    Ok(out)
 }
 
 fn entity_of(token: &str, character_id: &str) -> Result<String, String> {

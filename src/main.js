@@ -2947,62 +2947,51 @@ async function paintBook(it, wrap) {
 //
 // SHOWN FOR A BOOK CASTER AND NOBODY ELSE - that is the "do not
 // advertise" half. A cleric looking at a book they picked up sees what
-// is in it and no invitation to add to it.
+// is in it and no invitation to add to it. The engine decides that:
+// `scribe_options` hands back an empty list for anybody who does not
+// write, so this asks rather than guessing from the class.
 //
-// 176. AND IT SAYS WHAT EACH ONE COSTS BEFORE YOU PRESS IT. The engine
-// refuses an unaffordable copy with a good sentence, but finding out
-// by being refused is a worse way to learn it than reading the price.
-// Green is affordable, red is not, and the count of vials in hand is
-// on the row so the red has a reason.
+// 177. AND THE PRICES COME WITH IT. 176 did this arithmetic here, in
+// JavaScript, which worked and was the same rule in two places - the
+// per-school percentage was the half that did not make the journey.
+// Every row now arrives with its ink, its hours and whether this
+// character can pay, so a school tuned in `scribe_schools` shows up on
+// the label the same second it starts being charged.
 async function addScribing(panel, it, wrap, b) {
-  const caster = state.sheet && state.sheet.caster;
-  if (!caster || caster.source !== "book") return;
-
-  const rows = await call("list_spells", {
-    gameId: state.gameId,
-    classKey: caster.class_key,
+  const got = await tryCall("scribe_options", {
+    characterId: state.characterId,
+    objectId: it.id,
   });
-  if (!rows) return;
-
-  const have = new Set((b.spells || []).map((s) => s.key));
-  const free = rows.filter((sp) => !have.has(sp.key));
-  if (!free.length) return;
-
-  // WHAT THEY ARE CARRYING, off the sheet rather than a fresh read -
-  // the inventory is already loaded and a scribing panel is not worth
-  // a round trip to count bottles.
-  const ink = inkInHand();
+  if (!got.ok) return;
+  const { ink, options } = got.value;
+  if (!options || !options.length) return;
 
   const row = sEl("div", "row");
   const pick = document.createElement("select");
   pick.className = "scribepick";
-  for (const sp of free) {
-    const c = scribeCost(sp, b.scroll);
-    const o = new Option(
-      sp.name + " · " + (sp.level === 0 ? "cantrip" : bookBand(sp.level)) +
-        " · " + c.ink + (c.ink === 1 ? " vial" : " vials") +
-        " · " + c.hours + (c.hours === 1 ? " hr" : " hrs"),
-      sp.key);
+  for (const o of options) {
+    const opt = new Option(
+      o.name + " · " + (o.level === 0 ? "cantrip" : bookBand(o.level)) +
+        " · " + plural(o.ink, "vial") + " · " + plural(o.hours, "hr"),
+      o.key);
     // Option colour is honoured by the webview this ships in; the line
     // under the picker is the part that is guaranteed to be read.
-    o.className = c.ink <= ink ? "can" : "cannot";
-    pick.append(o);
+    opt.className = o.affordable ? "can" : "cannot";
+    pick.append(opt);
   }
 
-  const go = sEl("button", "tiny", "Copy in");
+  const go = sEl("button", "tiny", b.scroll ? "Write it" : "Copy in");
   const note = sEl("span", "scribenote");
 
   const saySo = () => {
-    const sp = free.find((x) => x.key === pick.value);
-    if (!sp) return;
-    const c = scribeCost(sp, b.scroll);
-    const ok = c.ink <= ink;
-    note.className = "scribenote " + (ok ? "can" : "cannot");
-    note.textContent = ok
-      ? c.ink + (c.ink === 1 ? " vial" : " vials") + " and " + c.hours +
-        (c.hours === 1 ? " hour" : " hours") + " · " + ink + " in hand"
-      : "needs " + c.ink + (c.ink === 1 ? " vial" : " vials") + " and they have " + ink;
-    go.disabled = !ok;
+    const o = options.find((x) => x.key === pick.value);
+    if (!o) return;
+    note.className = "scribenote " + (o.affordable ? "can" : "cannot");
+    note.textContent = o.affordable
+      ? plural(o.ink, "vial") + " and " + plural(o.hours, "hour") +
+        " · " + ink + " in hand"
+      : "needs " + plural(o.ink, "vial") + " and they have " + ink;
+    go.disabled = !o.affordable;
   };
   pick.addEventListener("change", saySo);
 
@@ -3025,26 +3014,8 @@ async function addScribing(panel, it, wrap, b) {
   saySo();
 }
 
-// Vials of ink this character is carrying, counting stacks.
-function inkInHand() {
-  return ((state.sheet && state.sheet.loadout) || [])
-    .filter((o) => o.item && o.item.key === "ink_vial")
-    .reduce((n, o) => n + (o.quantity || 1), 0);
-}
-
-// 170/175. The same arithmetic scribe.rs does, for the label only -
-// the engine is still the one that decides. Two vials and two hours a
-// level, floored at one each, and DOUBLE on a scroll because a scroll
-// carries the whole working on its own.
-//
-// THE SCHOOL PERCENTAGE IS NOT APPLIED HERE. It lives in
-// `scribe_schools` and is 100 for every school today; when Dave tunes
-// one this label will under-report until it is fetched, which is a
-// smaller wrong than a round trip per keystroke.
-function scribeCost(sp, onScroll) {
-  const base = Math.max(1, 2 * (sp.level || 0));
-  const mult = onScroll ? 2 : 1;
-  return { ink: base * mult, hours: base * mult };
+function plural(n, word) {
+  return n + " " + word + (n === 1 ? "" : "s");
 }
 
 function objectControls(it, onDone) {

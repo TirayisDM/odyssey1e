@@ -5276,14 +5276,48 @@ Magic Missile and Fire Bolt reads **5 of 30 levels used** (3 + 1 + a
 cantrip at 1), and all three are reachable through the holder chain from
 a book sitting in a backpack.
 
-### What is still missing
+### A scroll is a one-page book - BUILT (175, 176)
 
-**Nothing writes a scroll yet.** `scribe::to_scroll` exists and
-`scroll_blank` is in the catalogue, but there is no command to make one
-and no way to cast from one. A scroll IS storable now - it is the same
-table with one row - so this is a command, not a design question.
+Dave's words, and they settle the shape. `scroll_blank` has
+`spell_levels = 1`, so exactly one spell fits and a second is refused
+by the same `scribe::fits` a full book is refused by.
 
-**No UI.** The three commands are registered and nothing calls them.
+**And the page cost is one whatever the level**, which does not follow
+from the column: in a book a 3rd-level spell takes three levels of
+room; on a scroll it takes the scroll. Charging three pages against a
+one-page scroll would make every scroll a cantrip scroll.
+`scribe::pages_on` and `scribe::fits_on` are those two rules.
+
+**A tag, because `spell_levels` now means two things.** `in_books`
+finds what a wizard prepares from by looking for a `spell_levels`, and
+giving a scroll one would have let a wizard prepare straight off a
+scroll - the one thing the rule is firm about. `content_tags` carries
+`scroll`, which is where 126 put `natural` for the same reason. **Not**
+a third column to keep in step.
+
+| | |
+|---|---|
+| writing a scroll | `to_scroll` - twice the ink and hours |
+| copying one into a book | `to_copy`, and **the scroll is destroyed** |
+
+172's cascade does the destroying: delete the object and its one row
+goes with it. Verified live and rolled back - a scroll of Fireball in
+Tarren's hands holds Fireball and is correctly **absent** from what he
+may prepare.
+
+### The price is on the picker before you press it (176)
+
+Every option reads `Sleep · 1st Level · 2 vials · 4 hrs`, coloured
+green when affordable and red when not, with the vials in hand on the
+line beneath and the button disabled. The engine still decides - this
+is a label, and it says so - but finding out by being refused is a
+worse way to learn a price than reading it.
+
+**The school percentage is not applied to the label.** It lives in
+`scribe_schools`, is 100 for every school today, and fetching it per
+keystroke would cost a round trip to change nothing. When Dave tunes
+one, the label under-reports until that is fixed - a smaller wrong than
+the alternative, and recorded here rather than discovered.
 
 ### The fork as it stood (kept for the record)
 

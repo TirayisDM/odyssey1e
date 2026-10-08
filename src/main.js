@@ -2948,6 +2948,12 @@ async function paintBook(it, wrap) {
 // SHOWN FOR A BOOK CASTER AND NOBODY ELSE - that is the "do not
 // advertise" half. A cleric looking at a book they picked up sees what
 // is in it and no invitation to add to it.
+//
+// 176. AND IT SAYS WHAT EACH ONE COSTS BEFORE YOU PRESS IT. The engine
+// refuses an unaffordable copy with a good sentence, but finding out
+// by being refused is a worse way to learn it than reading the price.
+// Green is affordable, red is not, and the count of vials in hand is
+// on the row so the red has a reason.
 async function addScribing(panel, it, wrap, b) {
   const caster = state.sheet && state.sheet.caster;
   if (!caster || caster.source !== "book") return;
@@ -2962,18 +2968,47 @@ async function addScribing(panel, it, wrap, b) {
   const free = rows.filter((sp) => !have.has(sp.key));
   if (!free.length) return;
 
+  // WHAT THEY ARE CARRYING, off the sheet rather than a fresh read -
+  // the inventory is already loaded and a scribing panel is not worth
+  // a round trip to count bottles.
+  const ink = inkInHand();
+
   const row = sEl("div", "row");
   const pick = document.createElement("select");
+  pick.className = "scribepick";
   for (const sp of free) {
-    pick.append(new Option(
-      sp.name + " · " + (sp.level === 0 ? "cantrip" : bookBand(sp.level)), sp.key));
+    const c = scribeCost(sp, b.scroll);
+    const o = new Option(
+      sp.name + " · " + (sp.level === 0 ? "cantrip" : bookBand(sp.level)) +
+        " · " + c.ink + (c.ink === 1 ? " vial" : " vials") +
+        " · " + c.hours + (c.hours === 1 ? " hr" : " hrs"),
+      sp.key);
+    // Option colour is honoured by the webview this ships in; the line
+    // under the picker is the part that is guaranteed to be read.
+    o.className = c.ink <= ink ? "can" : "cannot";
+    pick.append(o);
   }
+
   const go = sEl("button", "tiny", "Copy in");
-  go.title = "ink and hours, and the engine says how many";
+  const note = sEl("span", "scribenote");
+
+  const saySo = () => {
+    const sp = free.find((x) => x.key === pick.value);
+    if (!sp) return;
+    const c = scribeCost(sp, b.scroll);
+    const ok = c.ink <= ink;
+    note.className = "scribenote " + (ok ? "can" : "cannot");
+    note.textContent = ok
+      ? c.ink + (c.ink === 1 ? " vial" : " vials") + " and " + c.hours +
+        (c.hours === 1 ? " hour" : " hours") + " · " + ink + " in hand"
+      : "needs " + c.ink + (c.ink === 1 ? " vial" : " vials") + " and they have " + ink;
+    go.disabled = !ok;
+  };
+  pick.addEventListener("change", saySo);
+
   guard(go, async () => {
-    // tryCall: a refusal here is the rule working - no room, no ink,
-    // nothing above what they could prepare - and every one of those
-    // is a sentence worth reading.
+    // tryCall: a refusal here is the rule working - no room, nothing
+    // above what they could prepare - and every one is worth reading.
     const r = await tryCall("scribe_spell", {
       characterId: state.characterId,
       objectId: it.id,
@@ -2981,10 +3016,35 @@ async function addScribing(panel, it, wrap, b) {
     });
     if (!r.ok) return log("scribe_spell", r.error, true);
     log("scribe_spell", r.value.said);
+    await loadSheet();
     await paintBook(it, wrap);
   });
+
   row.append(pick, go);
-  panel.append(row);
+  panel.append(row, note);
+  saySo();
+}
+
+// Vials of ink this character is carrying, counting stacks.
+function inkInHand() {
+  return ((state.sheet && state.sheet.loadout) || [])
+    .filter((o) => o.item && o.item.key === "ink_vial")
+    .reduce((n, o) => n + (o.quantity || 1), 0);
+}
+
+// 170/175. The same arithmetic scribe.rs does, for the label only -
+// the engine is still the one that decides. Two vials and two hours a
+// level, floored at one each, and DOUBLE on a scroll because a scroll
+// carries the whole working on its own.
+//
+// THE SCHOOL PERCENTAGE IS NOT APPLIED HERE. It lives in
+// `scribe_schools` and is 100 for every school today; when Dave tunes
+// one this label will under-report until it is fetched, which is a
+// smaller wrong than a round trip per keystroke.
+function scribeCost(sp, onScroll) {
+  const base = Math.max(1, 2 * (sp.level || 0));
+  const mult = onScroll ? 2 : 1;
+  return { ink: base * mult, hours: base * mult };
 }
 
 function objectControls(it, onDone) {

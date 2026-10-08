@@ -20,7 +20,7 @@ use crate::supabase::{self, AppState};
 #[tauri::command]
 pub fn list_book(state: State<AppState>, object_id: String) -> Result<Value, String> {
     let token = state.token()?;
-    let (name, capacity, game_id) = book_of(&token, &object_id)?;
+    let (name, capacity, game_id, scroll) = book_of(&token, &object_id)?;
     let written = written_in(&token, &object_id)?;
 
     // The catalogue rows for what is in it, so the screen can show a
@@ -48,9 +48,10 @@ pub fn list_book(state: State<AppState>, object_id: String) -> Result<Value, Str
                 continue;
             }
             let level = r.get("level").and_then(|v| v.as_i64()).unwrap_or(0);
-            used += scribe::pages(level);
+            let pages = scribe::pages_on(level, scroll);
+            used += pages;
             let mut row = r.clone();
-            row["pages"] = json!(scribe::pages(level));
+            row["pages"] = json!(pages);
             out.push(row);
         }
     }
@@ -61,6 +62,9 @@ pub fn list_book(state: State<AppState>, object_id: String) -> Result<Value, Str
         "capacity": capacity,
         "used": used,
         "left": (capacity - used).max(0),
+        // 175. So the screen can say "scroll" and offer the right
+        // things - a scroll is read and copied FROM, not prepared from.
+        "scroll": scroll,
         "spells": out,
     }))
 }
@@ -91,7 +95,7 @@ pub fn scribe_spell(
         return Err(format!("{} does not cast spells", sheet.name));
     };
 
-    let (book_name, capacity, game_id) = book_of(&token, &object_id)?;
+    let (book_name, capacity, game_id, scroll) = book_of(&token, &object_id)?;
     let spell = one_spell(&token, &game_id, &spell_key)?;
     let level = spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0);
     let school = spell.get("school").and_then(|v| v.as_str()).unwrap_or("");
@@ -127,11 +131,21 @@ pub fn scribe_spell(
     )?;
 
     // How full it is, in the unit 171 chose.
-    let used = used_levels(&token, &game_id, &already)?;
-    scribe::fits(capacity, used, level)?;
+    let used = used_levels(&token, &game_id, &already, scroll)?;
+    // 175. ON A SCROLL THE SPELL TAKES THE SCROLL, whatever its level,
+    // so a one-page scroll holds exactly one of anything.
+    scribe::fits_on(capacity, used, level, scroll)?;
 
     let pct = school_pct(&token, school)?;
-    let cost = scribe::to_copy(level, pct);
+    // WRITING A SCROLL IS TWICE WRITING IT DOWN. Copying into a book is
+    // transcription - the spell is understood and the book is a
+    // reference. A scroll carries the whole working on its own, for
+    // somebody who may not understand it.
+    let cost = if scroll {
+        scribe::to_scroll(level, pct)
+    } else {
+        scribe::to_copy(level, pct)
+    };
 
     // THE TOOL, WHICH IS NOT CONSUMED. 170: nothing is written without
     // one, and it is not used up by the work.
@@ -160,15 +174,127 @@ pub fn scribe_spell(
         "book": book_name,
         "hours": cost.hours,
         "ink": cost.ink,
-        "pages": scribe::pages(level),
-        "left": (capacity - used - scribe::pages(level)).max(0),
+        "pages": scribe::pages_on(level, scroll),
+        "left": (capacity - used - scribe::pages_on(level, scroll)).max(0),
         "said": format!(
             "{} copied into {} - {} hours and {} vials, {} levels of room left",
             name,
             book_name,
             cost.hours,
             cost.ink,
-            (capacity - used - scribe::pages(level)).max(0)
+            (capacity - used - scribe::pages_on(level, scroll)).max(0)
+        ),
+    }))
+}
+
+/// Copy the spell off a scroll and into a book, consuming the scroll.
+///
+/// 175. WHAT A SCROLL IS FOR. A wizard cannot prepare from one - that
+/// is `in_books` and the tag it filters on - so the only thing to do
+/// with somebody else's scroll is to take the hour and the ink and put
+/// it in the book where it can be prepared.
+///
+/// IT COSTS WHAT COPYING COSTS, not what writing the scroll cost. This
+/// is transcription from a source that is already worked out, which is
+/// the cheap direction; `to_scroll` is the expensive one and is what
+/// made the scroll in the first place.
+///
+/// THE SCROLL IS DESTROYED, which is the rule everywhere this exists
+/// and is why a scroll is worth what it is. 172's cascade does the
+/// writing for us: delete the object and its one row goes with it.
+#[tauri::command]
+pub fn copy_from_scroll(
+    state: State<AppState>,
+    character_id: String,
+    scroll_id: String,
+    book_id: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let sheet = crate::character::load_sheet(&token, &character_id)?;
+    let Some(caster) = sheet.caster.clone() else {
+        return Err(format!("{} does not cast spells", sheet.name));
+    };
+
+    let (scroll_name, _, game_id, is_scroll) = book_of(&token, &scroll_id)?;
+    if !is_scroll {
+        return Err(format!("{} is not a scroll", scroll_name));
+    }
+    let on_it = written_in(&token, &scroll_id)?;
+    let Some(spell_key) = on_it.first().cloned() else {
+        return Err(format!("{} is blank", scroll_name));
+    };
+
+    let (book_name, capacity, _, book_is_scroll) = book_of(&token, &book_id)?;
+    if book_is_scroll {
+        return Err("a scroll is not a book to copy into".to_string());
+    }
+
+    let spell = one_spell(&token, &game_id, &spell_key)?;
+    let level = spell.get("level").and_then(|v| v.as_i64()).unwrap_or(0);
+    let school = spell.get("school").and_then(|v| v.as_str()).unwrap_or("");
+    let name = spell
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&spell_key)
+        .to_string();
+    let classes: Vec<String> = spell
+        .get("classes")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|c| c.as_str()).map(String::from).collect())
+        .unwrap_or_default();
+
+    let top_slot = prayers::slots_at(caster.level)
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n > 0)
+        .map(|(i, _)| i as i64 + 1)
+        .next_back()
+        .unwrap_or(0);
+
+    let already = written_in(&token, &book_id)?;
+    scribe::may_copy(
+        caster.source,
+        &classes,
+        &caster.class_key,
+        level,
+        top_slot,
+        already.contains(&spell_key),
+    )?;
+    let used = used_levels(&token, &game_id, &already, false)?;
+    scribe::fits_on(capacity, used, level, false)?;
+
+    let cost = scribe::to_copy(level, school_pct(&token, school)?);
+    let entity = entity_of(&token, &character_id)?;
+    if count_held(&token, &entity, "quill")? < 1 {
+        return Err("they have no quill - nothing is written without one".to_string());
+    }
+    let ink = count_held(&token, &entity, "ink_vial")?;
+    if ink < cost.ink {
+        return Err(format!(
+            "copying {} takes {} vials of ink and they have {}",
+            name, cost.ink, ink
+        ));
+    }
+
+    // ---- past every refusal ----
+    spend_held(&token, &entity, "ink_vial", cost.ink)?;
+    supabase::rest_insert(
+        &token,
+        "scribed_spells",
+        &json!({ "object_id": book_id, "spell_key": spell_key }),
+    )?;
+    // AND THE SCROLL IS GONE. The writing on it goes too, by 172's
+    // cascade - one delete, not two.
+    supabase::rest_delete(&token, "objects", &[("id", &format!("eq.{}", scroll_id))])?;
+
+    Ok(json!({
+        "spell": name,
+        "book": book_name,
+        "hours": cost.hours,
+        "ink": cost.ink,
+        "said": format!(
+            "{} copied from {} into {} - {} hours and {} vials, and the scroll is spent",
+            name, scroll_name, book_name, cost.hours, cost.ink
         ),
     }))
 }
@@ -201,7 +327,7 @@ pub fn erase_spell(
 /// The object as a book: its name, how many spell levels it holds, and
 /// whose game it is in. Refuses anything that is not a book, which is
 /// `scribe.rs`'s rule about writing in a sword made concrete.
-fn book_of(token: &str, object_id: &str) -> Result<(String, i64, String), String> {
+fn book_of(token: &str, object_id: &str) -> Result<(String, i64, String, bool), String> {
     let rows = supabase::rest_get(
         token,
         "objects",
@@ -226,7 +352,7 @@ fn book_of(token: &str, object_id: &str) -> Result<(String, i64, String), String
         token,
         "items",
         &[
-            ("select", "key,name,spell_levels,game_id"),
+            ("select", "key,name,spell_levels,content_tags,game_id"),
             ("key", &format!("eq.{}", item_key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
             // THE GAME'S OWN ROW WINS. `game_id.desc` would not do it:
@@ -258,7 +384,15 @@ fn book_of(token: &str, object_id: &str) -> Result<(String, i64, String), String
         .or_else(|| item.get("name").and_then(|v| v.as_str()))
         .unwrap_or(item_key)
         .to_string();
-    Ok((name, capacity, game_id))
+    // 175. A SCROLL IS A ONE-PAGE BOOK, and the tag is what says so.
+    // `spell_levels` cannot: a scroll has one and so could a very small
+    // book, and only one of the two may be prepared from.
+    let scroll = item
+        .get("content_tags")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().any(|t| t.as_str() == Some("scroll")))
+        .unwrap_or(false);
+    Ok((name, capacity, game_id, scroll))
 }
 
 fn written_in(token: &str, object_id: &str) -> Result<Vec<String>, String> {
@@ -279,7 +413,7 @@ fn written_in(token: &str, object_id: &str) -> Result<Vec<String>, String> {
 }
 
 /// How many levels of room a set of written spells takes up.
-fn used_levels(token: &str, game_id: &str, keys: &[String]) -> Result<i64, String> {
+fn used_levels(token: &str, game_id: &str, keys: &[String], scroll: bool) -> Result<i64, String> {
     if keys.is_empty() {
         return Ok(0);
     }
@@ -302,7 +436,7 @@ fn used_levels(token: &str, game_id: &str, keys: &[String]) -> Result<i64, Strin
         if !seen.insert(key.to_string()) {
             continue;
         }
-        used += scribe::pages(r.get("level").and_then(|v| v.as_i64()).unwrap_or(0));
+        used += scribe::pages_on(r.get("level").and_then(|v| v.as_i64()).unwrap_or(0), scroll);
     }
     Ok(used)
 }

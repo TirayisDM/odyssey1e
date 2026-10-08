@@ -1003,3 +1003,13 @@ button.wide{width:100%}
 .bookband .lvlname{margin:0 0 .2rem}
 .bookband .item{display:flex;align-items:center;gap:.4rem}
 .bookband .item .nm{flex:1}
+
+/* 176. AFFORDABLE OR NOT, on the picker and on the line under it.
+   --ok and --bad are the palette's own yes/no, already used by the
+   proficiency chips, so this reads the same as every other verdict on
+   the screen. */
+.scribepick option.can{color:var(--ok)}
+.scribepick option.cannot{color:var(--bad)}
+.scribenote{display:block;font-size:11px;margin:.2rem 0 .1rem}
+.scribenote.can{color:var(--ok)}
+.scribenote.cannot{color:var(--bad)}

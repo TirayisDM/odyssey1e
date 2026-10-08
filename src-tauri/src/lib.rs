@@ -1476,6 +1476,7 @@ pub fn run() {
             commands::books::list_book,
             commands::books::scribe_spell,
             commands::books::erase_spell,
+            commands::books::copy_from_scroll,
             commands::prayers::list_spells,
             commands::prayers::list_prayers,
             commands::prayers::prepare_prayer,

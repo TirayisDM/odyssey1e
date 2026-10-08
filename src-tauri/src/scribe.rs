@@ -150,6 +150,24 @@ pub fn pages(level: i64) -> i64 {
     level.max(1)
 }
 
+/// How much room one spell takes on one particular thing.
+///
+/// 175. A SCROLL IS A ONE-PAGE BOOK, which is Dave's phrase and the
+/// whole rule. It holds `spell_levels = 1` and a spell written on it
+/// takes that one page WHATEVER ITS LEVEL - charging a 3rd-level spell
+/// three pages against a one-page scroll would make every scroll a
+/// cantrip scroll, which is not what a scroll is for.
+///
+/// IN A BOOK THE LEVEL IS THE COST, unchanged: that is what makes a
+/// Tome hold five ninth-level spells or fifty cantrips.
+pub fn pages_on(level: i64, scroll: bool) -> i64 {
+    if scroll {
+        1
+    } else {
+        pages(level)
+    }
+}
+
 /// Whether a spell of this level still fits.
 ///
 /// `used` IS THE SUM OF `pages()` OVER WHAT IS ALREADY WRITTEN, which
@@ -160,7 +178,15 @@ pub fn pages(level: i64) -> i64 {
 /// hand; "needs 3, 2 left of 10" is a sentence they can act on - buy a
 /// bigger book, or write a smaller spell.
 pub fn fits(capacity: i64, used: i64, level: i64) -> Result<(), String> {
-    let want = pages(level);
+    fits_on(capacity, used, level, false)
+}
+
+/// The same question for one particular thing, which is the one the
+/// plumbing asks: 175 makes a spell on a scroll cost one page whatever
+/// its level, so the room it needs depends on what it is being written
+/// on and not only on the spell.
+pub fn fits_on(capacity: i64, used: i64, level: i64, scroll: bool) -> Result<(), String> {
+    let want = pages_on(level, scroll);
     let left = capacity - used;
     if want <= left {
         return Ok(());
@@ -302,6 +328,32 @@ mod tests {
     #[test]
     fn a_cantrip_takes_a_page_like_everything_else() {
         assert_eq!(pages(0), 1);
+    }
+
+    /// 175. A scroll holds one spell whatever its level - the page cost
+    /// is the scroll, not the level. Charging by level against a
+    /// one-page scroll would make every scroll a cantrip scroll.
+    #[test]
+    fn a_spell_on_a_scroll_takes_the_scroll() {
+        for level in 0..=9 {
+            assert_eq!(pages_on(level, true), 1, "level {}", level);
+        }
+        // and a one-page scroll holds exactly one of them
+        assert!(fits(1, 0, 9).is_err(), "nine pages do not fit a one-page book");
+        assert!(fits(1, 0, pages_on(9, true) - pages_on(9, true)).is_ok());
+    }
+
+    #[test]
+    fn in_a_book_the_level_is_still_the_cost() {
+        assert_eq!(pages_on(3, false), 3);
+        assert_eq!(pages_on(0, false), 1);
+    }
+
+    /// The second spell has nowhere to go.
+    #[test]
+    fn a_scroll_takes_one_spell_and_no_more() {
+        let used = pages_on(3, true); // the first one, written
+        assert!(fits(1, used, 1).is_err());
     }
 
     /// Dave's Tome holds fifty levels: five ninth-level spells, or

@@ -1260,7 +1260,16 @@ fn in_books(token: &str, character_id: &str) -> Result<Vec<String>, String> {
     let books = supabase::rest_get(
         token,
         "items",
-        &[("select", "key"), ("spell_levels", "not.is.null")],
+        &[
+            ("select", "key"),
+            ("spell_levels", "not.is.null"),
+            // 175. A SCROLL IS A ONE-PAGE BOOK AND HAS A `spell_levels`
+            // TOO, so the column alone would let a wizard prepare
+            // straight off a scroll - the one thing the rule is firm
+            // about. You copy a scroll into the book and prepare from
+            // the book. The tag is the discriminator.
+            ("content_tags", "not.cs.{scroll}"),
+        ],
     )?;
     let book_keys: std::collections::HashSet<String> = books
         .as_array()

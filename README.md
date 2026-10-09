@@ -26,7 +26,7 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 917 tests, about a second
+cargo test           # 1046 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
@@ -158,8 +158,8 @@ slots and feature uses both go through it.
 
 A `#[tauri::command]` becomes callable from the frontend. Arguments are
 `snake_case` in Rust and `camelCase` in JS; Tauri converts. Getting that
-backwards is the standard first-day confusion. There are about 140 of
-them (136 at the time of writing), all registered in `lib.rs`.
+backwards is the standard first-day confusion. There are 144 of them,
+all registered in `lib.rs`.
 
 ### Testing the frontend without the app
 
@@ -193,6 +193,35 @@ Reference data (dice art, narrative lines, catalogues) is **not**
 tenanted — global, with a nullable `game_id` for campaign-specific
 overrides.
 
+#### A person is not a sign-in (197)
+
+**Every ownership column holds a PROFILE, never an `auth.users.id`.**
+Those are different things and the difference is load-bearing:
+
+| | |
+|---|---|
+| a **person** | `profiles.id` — what `owner_uid`, `dm_uid` and `game_members.profile_id` hold |
+| a **sign-in** | `auth.users.id` — one way of proving you are that person, and replaceable |
+| the **bridge** | `identities(auth_uid → profile_id)` — the only place that knows the two are related |
+
+Policies call **`current_profile()`**, not `auth.uid()`. `auth.uid()`
+answers "which sign-in"; a policy is asking "which person". Until 197
+`profiles.id` referenced `auth.users(id)`, so one person could not hold
+two sign-ins and the login system could not be replaced without
+rewriting ownership of every row. That FK is gone: `auth.users` now
+cascades into `identities` and stops there.
+
+**In Rust, `Session` carries both** `user_id` (the sign-in) and
+`profile_id` (the person), resolved once at sign-in. **Ownership writes
+take `profile_id`.** They hold equal values today, because every account
+has exactly one sign-in, which is exactly why writing the wrong one is
+invisible until it isn't.
+
+Reading a *fellow member's* `display_name` is allowed by
+`shares_a_game()` (198) and is symmetric — a player must be able to name
+the DM, because an initiative strip that says who is up has to say it
+with a name. A profile in no game of yours stays unreadable.
+
 ### Two traps, both already paid for
 
 Full reasoning is in the migration files; the short version:
@@ -204,19 +233,68 @@ Full reasoning is in the migration files; the short version:
    triggers fire.** Any table whose visibility depends on a row an AFTER
    trigger creates will fail in a way that blames the insert. (004)
 
-Run the security advisor after every DDL change. **Six
-`SECURITY DEFINER` warnings are expected and must not be "fixed":**
+### SECURITY DEFINER, and the hole this section used to invite
 
-| | why it has to be definer |
+RLS is the wall. **Every `SECURITY DEFINER` function is a door through
+it**, because that is what the words mean: run as the owner and do not
+consult the policies. There are 34 of them; 10 are callable rather than
+trigger bodies.
+
+**This section used to say six definer warnings "must not be fixed" and
+leave it there.** 193 found what that framing missed: three of those
+functions — `copy_kit`, `instantiate_character`, `instantiate_npc` —
+carried the *default PUBLIC grant* and checked nothing about the caller,
+so **anyone holding the publishable key could create characters and NPCs
+in any game whose UUID they knew, without signing in.** The definer flag
+was never the problem. The missing caller check and the open grant were.
+
+So the rule is not "definer is fine", it is:
+
+> A definer function is safe when **either** nothing can reach it
+> **or** it asks who is calling. Never neither.
+
+Where the 10 callable ones stand:
+
+| | |
 |---|---|
-| `is_game_member`, `is_game_dm` | every policy calls them; invoker rights and they cannot see the rows they are deciding about, so everything fails closed |
-| `holder_character`, `holder_is_a_location` | the same, for the policies on objects |
-| `join_game`, `instantiate_npc` | RPCs that write rows the caller provably cannot write yet — that is the whole job |
+| `current_profile`, `is_game_member`, `is_game_dm`, `shares_a_game`, `join_game`, `instantiate_character`, `instantiate_npc` | reachable by `authenticated`, and **each resolves the caller** rather than taking a parameter's word for it |
+| `copy_kit` | **internal only** — no grant outside the owner; only `instantiate_character` calls it |
+| `holder_character`, `holder_is_a_location` | reachable and deliberately **unguarded**: they are what the POLICIES call to decide who owns an entity, so a caller check inside them would consult the policies mid-flight that are calling them. They are the asking, which is why they are the one thing that cannot ask. Bounded instead by taking a bare entity UUID and returning one fact, and you only learn an entity UUID by reading `objects` through RLS |
 
-The first four are verifiably referenced by live policies; checking that
-is one query against `pg_policies` rather than a matter of opinion.
+#### Do not run this check by eye
 
-Two other advisor notes are real and open: leaked-password protection
+**`select * from public.security_doors()` — an empty result is the
+passing answer.** Run it after any migration that adds a function or a
+table. It reports three things no constraint can: a function `PUBLIC` or
+`anon` may execute, a definer function `authenticated` can reach that
+never looks at the caller, and a table with RLS off or with no policy.
+It is not granted to `authenticated` on purpose — the output is a map of
+which functions bypass RLS, which is reconnaissance.
+
+It has already earned this paragraph twice. It caught a false claim in
+193's own header (196), and it **refused 197 outright** because the two
+functions that migration creates were born `anon`-executable.
+
+#### Functions are born closed, mechanically
+
+`ALTER DEFAULT PRIVILEGES` **does not do this job** — verified, not
+assumed. Supabase ships its own default granting EXECUTE to `anon`, and
+the built-in PUBLIC grant for functions cannot be revoked that way at
+all. 002 and 017 both tried; every migration since quietly undid them,
+because
+
+```sql
+grant execute on function f to authenticated   -- adds a grant
+                                               -- beside an open door
+```
+
+does **not** revoke the default grant to PUBLIC. The mechanism that
+works is an event trigger, `functions_are_born_closed` (196), which
+strips PUBLIC and `anon` from any new function in `public` as the DDL
+completes. **A new definer function still needs a caller check** — the
+trigger closes the grant, not the logic.
+
+One advisor note is real and open: leaked-password protection
 (HaveIBeenPwned checking on signup) is off, and would be worth turning
 on before the project has users who are not you.
 
@@ -226,25 +304,32 @@ on before the project has users who are not you.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why 99 files run from 001 to 118.
+file here, which is why **154 files run from 001 to 198.**
 
-The 19 gaps are all of that kind, and the comments say so in as many
+The 44 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
 099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
-`species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust.
+`species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust;
+188-192 were conditions and the scribing labels, which were all code.
 
 ```
-066-070  072  079-083  090  091  099  108-112
+066-070  072  079-083  090-091  099  108-112  119-120  125
+133-134  138  140-141  153-154  169  173-174  176  178-182
+184  188-192
 ```
 
-**The chain is complete.** Every migration the database has a record of
-has a file here, MD5-verified against
-`supabase_migrations.schema_migrations`. It was not complete until
-2026-10-03: seven files (101–107 — the spell catalogue and the whole
-cleric list) had been applied to the live project and never committed,
-the same fault 0ed7491 fixed for four others. They were recovered from
-the database's own record, so they are the files AS APPLIED rather than
-a reconstruction of what they probably said.
+**The chain is complete**, re-verified 2026-10-09. Every migration the
+database has a record of has a file here, MD5-verified against
+`supabase_migrations.schema_migrations`. The database holds 164 rows for
+154 files; the difference is five migrations that were applied in parts
+and committed as one file each (026-028, 031, 032, 043), not a gap.
+
+It was not complete until 2026-10-03: seven files (101–107 — the spell
+catalogue and the whole cleric list) had been applied to the live
+project and never committed, the same fault 0ed7491 fixed for four
+others. They were recovered from the database's own record, so they are
+the files AS APPLIED rather than a reconstruction of what they probably
+said.
 
 **The habit that caused it:** applying a migration and writing the file
 afterwards, which in practice means never. Write the file and apply it
@@ -278,14 +363,14 @@ could not do.
 
 ## State
 
-About 32k lines of Rust - 24k of rules across 37 modules, 7.5k of
-plumbing across 15 command files - with 917 tests, 36 tables, and a
-frontend of 8.2k lines of plain JS.
+About 39k lines of Rust - 26k of rules across 40 modules, 10k of
+plumbing across 17 command files - with 1046 tests, 40 tables, 153
+policies, and a frontend of 9.5k lines of plain JS.
 `STATUS.md` is the detailed handoff; this is the shape of it.
 
 **The app has eight top-level tabs** — Play, Run, World, Characters,
-Creatures, Objects, Cleric Prayers, Trade — and the character sheet has
-five subtabs: Stats, Description, Equipment, Skills & Talents, Prayers.
+Objects, Creatures, Spells, Trade — and the character sheet has five
+subtabs: Stats, Description, Equipment, Skills & Talents, Prayers.
 Creatures is DM-only and is offered on `amDM()`; the access rule itself
 is Postgres's.
 
@@ -294,7 +379,7 @@ Working, roughly in the order it was built:
 * **Access** — auth, games, join-by-code, RLS verified with four
   accounts. There is no DM *account*: "dm" is a per-game role in
   `game_members.role`, so the same person is DM of one game and a player
-  in another, and `is_game_dm()` backs 95 of the 143 policies
+  in another, and `is_game_dm()` backs 100 of the 153 policies
 * **Creatures** — a template IS a character (`is_template`), so a
   creature is edited with the same sheet a player uses and placing one
   on the board is a copy, contents of its containers and all. `npcs` is

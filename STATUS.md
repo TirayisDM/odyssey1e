@@ -43,35 +43,41 @@ publishable key are constants in `src-tauri/src/supabase.rs`. A fresh
 clone talks to the same database with no setup.
 
 Test accounts, all `tirayis.dm+<x>@gmail.com` with a password you set in
-the dashboard: `dm`, `p1`, `p2`, `p3`, `p4`. Display names are set.
-Existing data: one game `testdeck1` (code `Z2ZYSYVQ`), two characters
-owned by p1, and a pile of rolls.
+the dashboard: `dm`, `p1`, `p2`, `p3`, `p4`. Display names are set, and
+`jec-dev` is the second developer's own account - **this is a shared
+live database, so pull before diagnosing anything.**
 
-`Character1` and `Character2` are deliberate twins - same level, same
-ability scores, same Insight proficiency. The only difference is
-`narrative_pack`: Character1 is on `Rodnar Shieldcrest`, Character2 on
-`base`. Roll the same Insight on each and the dice math is identical
-while the prose is not, which is the fastest way to see the pack
-precedence working. Delete Character2 if it is in the way; the cascade
-takes its abilities and skills with it.
+**LIVE DATA AS OF 2026-10-09**, read off the database rather than
+remembered. Everything the previous version of this section described -
+`testdeck1`, `Character1`/`Character2`, `Unnamed`, `Snot` - has been
+deleted. There are TWO GAMES, which matters: a count that looks wrong is
+usually the other game's rows being correctly invisible.
 
-Character1 also carries an inventory now - the thirteen rows off the
-Inventory tab of `Application Data.xlsx`, cross-checked against the
-Foundry export in `_RAW`. Two items are equipped, Scale Mail and the
-Mace; the Light Hammer and the Heavy Crossbow are carried, not held; the
-Ember is attuned at 6 of 7 charges. Character2 carries nothing, which
-makes it the empty-inventory case for free.
+| | Test Game 1 | jec-game-1 |
+|---|---|---|
+| join code | `ZCSDZZJT` | `V2EZ7H2Y` |
+| DM | `Dave (DM)` | `jec-dev` |
+| player characters | Dormak rogue 4, **Falon** fighter 5, **Luci** cleric 7, **Tarren** wizard 6 | Fred fighter 1 |
+| NPC character rows | 14 | 1 |
+| encounter | `Tavern`, **active**, round 1, 3 actors | `encounter 1`, draft, round 0, 1 actor |
+| rolls | 54 | 2 |
 
-Two encounters, and they are a useful pair rather than clutter. One is
-`active` and one is not, which is the state that catches anything
-confusing "the encounter the DM is editing" with "the encounter the
-players can see". The roster holds hand-named actors from before 018
-(`Goblin 1`, `Goblin 2`) beside auto-named ones from after it
-(`Goblin 0001`, `Goblin Fighter 0001`), so both naming eras are on
-screen at once - the ordinal does NOT continue from the hand-named ones,
-because those carry a null `name_base` and the counter cannot see them.
-That is 018 behaving as written, not a bug, and a campaign started after
-it never sees the mixture.
+**The four PCs are the working set and each one carries a different
+case.** Falon holds 7 objects and is the equipment case; Tarren holds 3
+including the spell book, and is the wizard/scribing case; Luci is the
+cleric at 7th with prepared prayers and slots; Dormak carries nothing,
+which makes him the empty-inventory case for free. All four are owned by
+`Dave (DM)`, so a *player's* view of a character they do not own is NOT
+currently represented by any row - add a character under `p1` if that is
+what you are testing.
+
+The `Tavern` encounter is the only active one, and the thing it is good
+for is catching anything that confuses "the encounter the DM is editing"
+with "the encounter the players can see". Its actors are auto-named
+(`Goblin 0001`, `Lich 0001`) - the hand-named pair from before 018 that
+this section used to point at is gone, so **the two naming eras are no
+longer both on screen.** `Skeleton 1` survives among the NPC rows as the
+last example of the old style.
 
 The global `goblin` statblock carries a handaxe AND a scimitar, on
 purpose. Same creature, one set of scores, and the only difference
@@ -80,11 +86,12 @@ swings on DEX 14 for +4 where the axe swings on STR 8 for +1. The
 Monster Manual's number falls out of a property rather than being
 copied in. See the convergence note under architecture decisions.
 
-SINCE 022 EVERY ACTOR IS ALSO A CHARACTER ROW, `is_npc` true - five of
-them at the time of writing. They do not appear in a player's character
-list, which is the only thing that flag does. `Unnamed` and `Snot` are
-player characters created by hand during testing and are junk; delete
-them when they get in the way.
+SINCE 022 EVERY ACTOR IS ALSO A CHARACTER ROW, `is_npc` true - 15 of
+them across the two games now. They do not appear in a player's
+character list, which is the only thing that flag does. Several are
+duplicates from repeated placement testing (`Goblin` twice, `Lich`
+three times, `Webbys` twice) and are junk; delete them when they get in
+the way.
 
 ---
 
@@ -180,8 +187,10 @@ and 018 names it `Goblin 0003`, numbered per game.
 THE PANEL ONLY APPEARS FOR THE DM OF THE SELECTED GAME, which is a
 courtesy and not a guard: `is_game_dm` is in 011's policy on every one
 of those tables, so a player calling them is refused by Postgres.
-testdeck1 belongs to the `dm` account, so the panel is absent for p1 -
-correct, and worth knowing before wondering where it went.
+`Test Game 1` belongs to the `dm` account, so the panel is absent for
+p1 - correct, and worth knowing before wondering where it went. It is
+absent for `jec-dev` too, who is the DM of the other game and a member
+of neither.
 
 And a monster acts. Each NPC in the roster carries a target picker and
 one button per attack, DERIVED from what its statblock holds: the

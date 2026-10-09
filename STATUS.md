@@ -5970,6 +5970,80 @@ and `said` prints it; the six tiers of penalty are the DM's.
 
 1046 tests pass, up 12.
 
+### 193 and 194. The doors in the wall
+
+**Five functions could be called by anyone holding the publishable key,
+which ships inside the app.** Three of them mattered: `copy_kit`,
+`instantiate_character` and `instantiate_npc` are all SECURITY DEFINER,
+so they bypass RLS by design, and none of them looked at who was
+calling. **Creating characters and NPCs in any game whose UUID you knew,
+without signing in.** The only obstacle was that UUIDs are hard to
+guess, and the secrecy of an identifier is not an authorization model.
+
+**THE INTERESTING PART IS WHY, BECAUSE THIS IS THE THIRD ATTEMPT.** 002
+is "tighten function grants" and 017 is "tighten NEW function grants -
+the two functions 009-016 left outside 002's pattern". Both did exactly
+this job. 017 even names the failure mode in its own title and still did
+not stop it recurring, because it closed two more doors instead of
+changing how doors are made. Every function written since quietly undid
+them both, because in Postgres
+
+```
+grant execute on function f to authenticated
+```
+
+**does not revoke the default grant to PUBLIC.** It adds a grant beside
+a door that is already open. 152 wrote that line believing it was the
+permission; it was an addition to one. Nobody was careless - the
+language reads as though it grants exclusively and it does not, and
+three rounds of careful people read it the same way.
+
+So the fix is three things, and they are not equally important:
+
+| | |
+|---|---|
+| revoke PUBLIC and `anon` across the schema | closes the five |
+| **`alter default privileges`** | **a new function is born closed** |
+| `security_doors()` | notices whatever those two miss |
+
+**Only the second and third survive the next migration.** The first is
+housekeeping that has now been done twice.
+
+**And placing a creature is a DM act** - Dave's call. Both
+`instantiate_*` now refuse anyone but the game's DM as their first
+statement. The four call sites are DM surfaces already, so nothing on
+screen changed; what closed is the door BESIDE the screen, where an
+authenticated member of one game could create characters in another.
+
+Verified live and rolled back, all five outcomes: the DM still builds
+both an NPC and a copied character end to end - abilities, skills, kit
+and spells - while a signed-in stranger and an unauthenticated caller
+are refused on all three paths. **Both function bodies running to
+completion against real rows is better evidence the recreation was
+faithful than diffing the text would have been.**
+
+`security_doors()` is shaped like `check_item_keys` (090) and has the
+same contract: a flat list of faults, **empty is the passing answer**.
+It looks for functions open to `anon`, SECURITY DEFINER functions that
+never ask who is calling, and tables with RLS off or with no policy. It
+lives in SQL because `pg_proc` is not reachable through PostgREST, which
+makes it the one check that cannot sit in a tested rules module - so
+**194 runs it, and the migration would not have applied if 193 had
+missed anything.** It is a tripwire, not a proof.
+
+**Its allowlist is two functions and will grow slowly.**
+`holder_character` and `holder_is_a_location` are what the POLICIES
+call to decide who owns an entity, so they cannot check their caller
+without consulting the policies mid-flight that are calling them. They
+are the asking, which is why they are the one thing that cannot ask.
+What bounds them instead: each takes a bare entity UUID and returns one
+fact, and you only learn an entity UUID by reading `objects` through
+RLS.
+
+**Not done, and next:** the identity bridge, so one person can hold
+several sign-ins. And `supabase` still reports leaked-password
+protection off, which is a console setting rather than a migration.
+
 ## Pick up here
 
 ### FOR THE DESKTOP, PULLING 2026-10-08

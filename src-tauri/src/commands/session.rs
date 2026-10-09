@@ -36,6 +36,12 @@ use tauri::Manager;
 /// not beside the executable. A dev build and an installed one then
 /// share nothing by accident, and the path is the one the platform
 /// already expects an app to write to.
+/// 200. THE SAME PATH, reachable from `run()` so the session state can
+/// be told where to write a rotated refresh token.
+pub fn pin_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    pin_file(app)
+}
+
 fn pin_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()

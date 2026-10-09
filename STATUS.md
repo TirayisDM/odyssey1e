@@ -6281,7 +6281,8 @@ logged in recently**. That is the difference between somebody borrowing
 a session and somebody owning the account while the owner is locked
 out. With them on, a stolen refresh token buys a session that expires.
 
-It does not remove the need for the OS keychain - item 7, and `pin.rs`
+It does not remove the need for the OS keychain - item 7 of the login
+list in 201, and `pin.rs`
 names it too. It removes the worst consequence of not having it yet.
 
 ### Two limits worth knowing
@@ -6299,8 +6300,167 @@ protects the next sign-up, not the ones already there.
 
 The app has **no password change or reset flow at all**, so there was
 no call site to update and nothing to re-test. When reset is built -
-item 4 on the login list - "require current password" means the update
+item 4 of the login list in 201 - "require current password" means the update
 call carries `current_password` beside the new one.
+
+## 200. The session renews itself
+
+An access token lasts about an hour. Nothing ever replaced it, so a
+long session died partway through and the only cure was signing in
+again. `refresh` had existed since the start and `unlock` was its only
+caller - the function was there, and nothing called it when it
+mattered.
+
+### Where it goes, and why there is only one place
+
+`AppState::token()` is already the gate every data call passes through.
+It is where "not signed in" is said once instead of being rediscovered
+as a 401 at a hundred call sites, and renewal belongs in the same
+place for the same reason. **No command knows this happens.**
+
+```
+token()  ->  needs_refresh?  no  -> hand back what we have
+                             yes -> refresh -> reseat the PIN -> keep it -> hand it back
+```
+
+`Session` gained `expires_at`, built from the auth response's
+`expires_at` or, failing that, `expires_in` plus the clock now. It is
+`#[serde(default)]` because `Session` is `Deserialize`; nothing writes
+one to disk today, and a zero reads as "undated" everywhere.
+
+### Three decisions that each cost something
+
+**THE LOCK IS HELD ACROSS THE NETWORK CALL.** Two commands starting at
+once would both see an expiring token and both refresh - and **GoTrue
+refresh tokens are single-use**, so the second would spend a token the
+first had just invalidated, fail, and sign the user out. Holding the
+lock makes the second wait and find the work done. It costs one blocked
+moment an hour. Nothing inside re-enters the lock, so it cannot
+deadlock.
+
+**THE ROTATED TOKEN IS WRITTEN BACK TO THE PIN FILE.** Single-use cuts
+both ways: the moment a refresh succeeds, the token sitting in
+`fast-login.json` is dead, and the PIN would be refused on the next
+launch. `set_pin_path` is seated from the Tauri `setup` hook so
+`supabase.rs` never has to know about `AppHandle`.
+
+**AND THAT WRITE IS BEST EFFORT AND SILENT.** It never creates the file
+- no PIN set means no PIN written. If the write fails the session in
+memory is still good; the cost is a refused PIN next launch, which a
+sign-in fixes. Failing the read the user asked for because a
+convenience file would not write is the wrong trade.
+
+### The margin is 120 seconds, and not zero
+
+The refresh takes a round trip, and a token that was valid when the
+check ran can be dead by the time the request lands. And the two clocks
+are not the same clock - a device a minute fast would refresh a minute
+late, every time. The boundary is inclusive on purpose: being wrong
+there should cost an early refresh, never a dead token.
+
+## 201. What the forced test actually found
+
+200 could not be watched without waiting an hour, so the margin was set
+to 99,999 - larger than the token's own lifetime, which makes **every**
+call refresh first. The intent was to see the path run once. Two things
+came out of it and only one was expected.
+
+### It works, and the proof is one line
+
+| | |
+|---|---|
+| refresh token before | `r6z4zyti6baj` |
+| refresh token after | `uofii3yntdlw` |
+
+The token in `fast-login.json` rotated. That is the whole mechanism in
+one observation: a refresh succeeded against GoTrue, and `reseat_pin`
+wrote the new single-use token back to the file - so the PIN still
+unlocks after a refresh, which was the failure mode the reseat exists
+to prevent.
+
+### Then a wall of red, and it was mine
+
+Every other call came back `could not renew your session: Request rate
+limit reached (429)` - `list_encounters`, `list_challenges`,
+`encounter_objects`, `list_skill_keys`, `list_targets`, `list_npcs`,
+`list_individuals`, `list_creatures`. That string is the new message
+from `token()`, so the refresh path was certainly executing. **GoTrue
+rate-limits its token endpoint**, and one refresh per database read
+reaches the limit in seconds.
+
+**THE TEST DESIGN WAS WRONG, not the feature.** A margin over the token
+lifetime does not exercise the path once, it exercises it on every
+call, and the only thing that can be learned past the first refresh is
+how the rate limiter behaves. `the_margin_is_long_enough_to_be_worth_having`
+now has a second half asserting `REFRESH_MARGIN_SECS < 3_600`, because
+this was actually done and a test is the only thing that stops it being
+done again.
+
+### And underneath it, a real fault
+
+**A FAILED REFRESH WAS FAILING THE USER'S READ.** The comment in
+`token()` said - correctly - that a failed refresh leaves the old
+session in place, "clearing it would turn a flaky network into a
+sign-out." It did leave the session alone. And then the `?` on the end
+of the refresh call failed the command anyway, **with a working token in
+hand.**
+
+This is the house defect exactly: a fault wearing the costume of an
+ordinary answer. The comment describes the right policy, the code
+implements half of it, and the half it misses is invisible until a
+refresh fails - which, before the forced test, had never happened once.
+
+The margin reserves up to two minutes of life in the old token. Nothing
+was spending it. Now:
+
+```rust
+let fresh = match refresh(&live.refresh_token) {
+    Ok(fresh) => fresh,
+    Err(_) if still_usable(live.expires_at, now) => return Ok(live.access_token),
+    Err(e) => return Err(format!("could not renew your session: {}", e)),
+};
+```
+
+**`still_usable` IS A DIFFERENT QUESTION FROM `needs_refresh`** and the
+distinction is the point. Inside the margin both are true - the token
+wants replacing *and* it still works. Past expiry only the first is.
+A zero is undated and therefore not usable, the same reading
+`needs_refresh` gives it, or a token nobody can date would be refreshed
+forever and fallen back on forever.
+
+**IT DOES NOT FALL BACK PAST EXPIRY.** There is nothing to fall back
+to, and handing out a dead token would trade this clear message for an
+unexplained 401 at the call site - which is the thing the accessor
+exists to prevent. One reading of the clock serves the whole decision,
+so the token cannot be judged live by one question and dead by the
+other.
+
+**What this buys in normal use:** a transient network failure during
+the two-minute window now costs nothing visible. The read goes through
+on the old token, and the next call tries the refresh again.
+
+### The login list, written down at last
+
+199 referred to "item 7" and "item 4 on the login list". **THAT LIST
+WAS NEVER IN THIS FILE** - it lived in one conversation and nothing
+recorded it, so two entries pointed at items a reader could not find.
+Here it is, in the order the work actually wants doing:
+
+| # | | state |
+|---|---|---|
+| 1 | Profiles separated from sign-ins | **done** - 195-197 |
+| 2 | Password rules and the two change guards | **done** - 199, console only |
+| 3 | **Token refresh** | **done** - 200, 201 |
+| 4 | Password change and reset flow | not started - no call site exists |
+| 5 | Email confirmation on sign-up | not checked |
+| 6 | Linking a second sign-in | no UI, no write policy - see 197 |
+| 7 | Refresh token in the OS keychain | not started - item 8 of the work list |
+| 8 | Leaked-password protection | **Pro only, not available** - 199 |
+
+**ITEM 4 IS THE NEXT ONE AND IT HAS A DEPENDENCY NOW.** "Require
+current password when updating" is on, so the update call has to carry
+`current_password` beside the new one. A reset flow built without it
+will fail against the live project and the error will not say why.
 
 ## Pick up here
 
@@ -6492,7 +6652,14 @@ Roughly in order:
 8. Session persistence, PROPERLY. A PIN now stands in front of it, so
    a restart costs four digits instead of a password - but the session
    still lives in memory and the refresh token sits in a plain file in
-   the app data directory. The real answer is unchanged and is the OS
+   the app data directory.
+
+   **200 FIXED THE HALF THAT WAS A BUG.** A running session no longer
+   dies after an hour; it renews itself, and the rotated token is
+   written back to the PIN file. What is left here is the FILE, not the
+   expiry - and the file now matters more, because a refresh token that
+   keeps rotating is a token that keeps working indefinitely for whoever
+   can read it. The real answer is unchanged and is the OS
    keychain: Credential Manager, Keychain, the Android Keystore. Then
    the token is held by the operating system, the PIN becomes a second
    factor rather than the only one, and pin.rs changes from "where the

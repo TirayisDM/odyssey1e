@@ -47,11 +47,83 @@ pub struct Session {
     pub user_id: String,
     pub profile_id: String,
     pub email: String,
+    /// 200. WHEN THE ACCESS TOKEN STOPS WORKING, as unix seconds.
+    ///
+    /// GoTrue has always sent this and we always threw it away, which
+    /// is why nothing could renew: you cannot refresh before expiry
+    /// without knowing when expiry is.
+    ///
+    /// ZERO MEANS UNKNOWN and is treated as "refresh now" - a session
+    /// from an older build, or a response that omitted it. Guessing
+    /// "probably fine" would reproduce the bug this closes.
+    #[serde(default)]
+    pub expires_at: i64,
+}
+
+/// How long before expiry to go and get a new token, in seconds.
+///
+/// NOT ZERO, for two reasons that both bite. The refresh itself takes a
+/// round trip, and a token that was valid when the check ran can be
+/// dead by the time the request lands. And the two clocks are not the
+/// same clock - a device a minute fast would refresh a minute late,
+/// every time.
+///
+/// AND NOT HUGE. Set larger than the token's own lifetime it forces a
+/// refresh before EVERY database read, which is how the path was first
+/// watched end to end - and which GoTrue answers with `429 Request rate
+/// limit reached` within a few seconds. See 201.
+pub const REFRESH_MARGIN_SECS: i64 = 120;
+
+/// Whether this access token should be replaced before it is used.
+///
+/// 200. THE WHOLE RULE, kept here as one tested function rather than an
+/// inline comparison, because "is it time yet" is the thing that will
+/// be got wrong - off by a sign, or by the margin, or by trusting a
+/// zero.
+pub fn needs_refresh(expires_at: i64, now: i64) -> bool {
+    expires_at <= 0 || now + REFRESH_MARGIN_SECS >= expires_at
+}
+
+/// Whether this access token would still be accepted right now.
+///
+/// 201. A DIFFERENT QUESTION FROM `needs_refresh`, and the distinction
+/// is the whole point. Inside the margin both are true: the token wants
+/// replacing AND it still works. Past expiry only the first is. The
+/// margin is only worth having if something spends the life it
+/// reserves, and this is what spends it.
+///
+/// A zero is UNKNOWN and therefore not usable - same reading as
+/// `needs_refresh` gives it, because a token we cannot date is one we
+/// cannot vouch for.
+pub fn still_usable(expires_at: i64, now: i64) -> bool {
+    expires_at > 0 && now < expires_at
+}
+
+/// Unix seconds, now.
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Default)]
 pub struct AppState {
     session: Mutex<Option<Session>>,
+    /// 200. WHERE THE FAST-LOGIN FILE IS, when one is set up.
+    ///
+    /// THE SESSION IS THE THING BEING PERSISTED, so keeping the stored
+    /// copy in step with the live one belongs here rather than in each
+    /// caller. `pin.rs` owns the file's SHAPE and its hashing and stays
+    /// pure; this owns the fact that a refresh token which has rotated
+    /// must be written down again.
+    ///
+    /// WITHOUT THIS, AUTO-REFRESH WOULD BREAK THE PIN. A refresh token
+    /// is single-use: spending one kills it and issues another. The
+    /// file would be left holding the dead one, and the PIN would work
+    /// exactly once - which is the bug `unlock` already had to fix in
+    /// its own path and names in its comment.
+    pin_path: Mutex<Option<std::path::PathBuf>>,
 }
 
 impl AppState {
@@ -76,9 +148,103 @@ impl AppState {
     /// through here, so "not signed in" is stated once rather than
     /// rediscovered as a 401 at each call site.
     pub fn token(&self) -> Result<String, String> {
-        match self.current()? {
-            Some(s) => Ok(s.access_token),
-            None => Err("not signed in".to_string()),
+        // 200. AND IT RENEWS ITSELF HERE.
+        //
+        // An access token lasts about an hour and nothing ever replaced
+        // it, so a long session died partway through and the only cure
+        // was signing in again. `refresh` existed from the start and
+        // `unlock` was its only caller.
+        //
+        // THIS IS THE RIGHT PLACE because it is already the one every
+        // data call goes through - the same reason "not signed in" is
+        // said here once instead of being rediscovered as a 401 at a
+        // hundred call sites.
+        //
+        // THE LOCK IS HELD ACROSS THE NETWORK CALL, deliberately. Two
+        // commands starting at once would both see an expiring token
+        // and both refresh; the second would spend a token the first
+        // had just invalidated, fail, and sign the user out. Holding
+        // the lock makes the second one wait and then find the work
+        // already done. It costs one blocked moment an hour, and
+        // nothing here re-enters the lock, so it cannot deadlock.
+        let mut guard = self
+            .session
+            .lock()
+            .map_err(|_| "session lock poisoned".to_string())?;
+        let Some(live) = guard.clone() else {
+            return Err("not signed in".to_string());
+        };
+        // ONE READING OF THE CLOCK for the whole decision. Asking
+        // twice would let the token be judged live by the first
+        // question and dead by the second.
+        let now = now_secs();
+        if !needs_refresh(live.expires_at, now) {
+            return Ok(live.access_token);
+        }
+        if live.refresh_token.is_empty() {
+            // NOTHING TO SPEND. Say so plainly rather than letting the
+            // stale token go out and come back as an unexplained 401.
+            return Err("your session has expired - sign in again".to_string());
+        }
+
+        // A FAILED REFRESH LEAVES THE OLD SESSION IN PLACE and falls
+        // back to the token it already has.
+        //
+        // 201. THIS WAS A FAULT WEARING THE COSTUME OF AN ORDINARY
+        // ANSWER. The comment above said the old session was kept, and
+        // it was - but the `?` on the end of this call still failed the
+        // read the user asked for, with a token in hand that had up to
+        // REFRESH_MARGIN_SECS of life left. The forced-margin test
+        // showed it as a wall of `could not renew your session` on
+        // calls that would all have worked.
+        //
+        // AND IT ONLY FALLS BACK WHILE THE OLD TOKEN IS REALLY ALIVE.
+        // Past expiry there is nothing to fall back TO, and handing out
+        // a dead token would trade this clear message for an
+        // unexplained 401 at the call site - which is the thing the
+        // whole accessor exists to prevent.
+        let fresh = match refresh(&live.refresh_token) {
+            Ok(fresh) => fresh,
+            Err(_) if still_usable(live.expires_at, now) => return Ok(live.access_token),
+            Err(e) => return Err(format!("could not renew your session: {}", e)),
+        };
+        let token = fresh.access_token.clone();
+        self.reseat_pin(&fresh);
+        *guard = Some(fresh);
+        Ok(token)
+    }
+
+    /// Remember where the fast-login file is, so a rotated refresh
+    /// token can be written back to it.
+    pub fn set_pin_path(&self, path: Option<std::path::PathBuf>) {
+        if let Ok(mut g) = self.pin_path.lock() {
+            *g = path;
+        }
+    }
+
+    /// Write the current refresh token into the fast-login file, if
+    /// there is one.
+    ///
+    /// 200. BEST EFFORT, AND SILENT ON FAILURE. The session in memory
+    /// is good either way; a file that could not be written means the
+    /// PIN will be refused next time, which is recoverable by signing
+    /// in. Failing the data call the user actually asked for, because a
+    /// convenience file is read-only, would be the worse trade.
+    ///
+    /// NOTHING IS CREATED HERE. If no PIN has been set there is no file
+    /// and none is made - a refresh must not quietly start storing a
+    /// credential on disk that the user never asked it to store.
+    fn reseat_pin(&self, s: &Session) {
+        let Ok(guard) = self.pin_path.lock() else { return };
+        let Some(path) = guard.clone() else { return };
+        let Ok(text) = std::fs::read_to_string(&path) else { return };
+        let Ok(mut stored) = serde_json::from_str::<crate::pin::Stored>(&text) else { return };
+        if stored.refresh_token == s.refresh_token {
+            return;
+        }
+        stored.refresh_token = s.refresh_token.clone();
+        if let Ok(out) = serde_json::to_string_pretty(&stored) {
+            let _ = std::fs::write(&path, out);
         }
     }
 }
@@ -184,6 +350,17 @@ struct AuthUser {
 struct AuthResponse {
     access_token: Option<String>,
     refresh_token: Option<String>,
+    /// 200. WHEN THE TOKEN DIES. GoTrue sends both of these and we
+    /// ignored both; either one answers the question.
+    ///
+    /// BOTH ARE READ BECAUSE THE FAILURE MODE IS BAD. If only
+    /// `expires_in` came back and this were the only field, every
+    /// session would carry zero, `needs_refresh` would say yes to
+    /// every call, and the app would make a round trip to the auth
+    /// server BEFORE EVERY SINGLE DATABASE READ. Safe, and unusable.
+    /// Reading the other one costs a line.
+    expires_at: Option<i64>,
+    expires_in: Option<i64>,
     user: Option<AuthUser>,
 }
 
@@ -237,6 +414,12 @@ fn auth_call(path: &str, body: &Value) -> Result<Session, String> {
         user_id: user.id,
         profile_id,
         email: user.email.unwrap_or_default(),
+        // Prefer the absolute time; fall back to the relative one.
+        // Zero only if neither arrived, which means "renew now".
+        expires_at: parsed
+            .expires_at
+            .or_else(|| parsed.expires_in.map(|secs| now_secs() + secs))
+            .unwrap_or(0),
     })
 }
 
@@ -546,6 +729,141 @@ pub fn rest_upsert(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ---------- 200. when to renew the access token ---------- */
+
+    #[test]
+    fn a_token_with_an_hour_left_is_left_alone() {
+        let now = 1_000_000;
+        assert!(!needs_refresh(now + 3600, now));
+    }
+
+    #[test]
+    fn a_token_inside_the_margin_is_renewed_before_it_dies() {
+        // THE POINT OF THE MARGIN. Still valid, and not valid for long
+        // enough to survive the round trip that is about to use it.
+        let now = 1_000_000;
+        assert!(needs_refresh(now + REFRESH_MARGIN_SECS - 1, now));
+        assert!(needs_refresh(now + 1, now), "one second left is not enough");
+    }
+
+    #[test]
+    fn exactly_at_the_margin_renews() {
+        // The boundary is inclusive on purpose: being wrong here should
+        // cost an early refresh, never a dead token.
+        let now = 1_000_000;
+        assert!(needs_refresh(now + REFRESH_MARGIN_SECS, now));
+    }
+
+    #[test]
+    fn inside_the_margin_a_token_wants_renewing_and_still_works() {
+        // 201. BOTH TRUE AT ONCE, which is what lets a failed refresh
+        // fall back instead of failing the user's read.
+        let now = 1_000_000;
+        let expiring = now + 60;
+        assert!(needs_refresh(expiring, now));
+        assert!(still_usable(expiring, now));
+    }
+
+    #[test]
+    fn past_expiry_there_is_nothing_to_fall_back_to() {
+        let now = 1_000_000;
+        assert!(!still_usable(now - 1, now));
+        assert!(!still_usable(now, now), "the exact second of expiry is gone");
+    }
+
+    #[test]
+    fn an_undated_token_is_never_treated_as_usable() {
+        // A zero means we were told nothing. Both questions have to
+        // read it the same way or a token with no expiry would be
+        // refreshed forever and fallen back on forever.
+        let now = 1_000_000;
+        assert!(needs_refresh(0, now));
+        assert!(!still_usable(0, now));
+    }
+
+    #[test]
+    fn an_expired_token_is_renewed() {
+        let now = 1_000_000;
+        assert!(needs_refresh(now - 1, now));
+        assert!(needs_refresh(now - 86_400, now));
+    }
+
+    #[test]
+    fn an_unknown_expiry_renews_rather_than_hoping() {
+        // Zero is what a session from an older build carries, and what
+        // an auth response without the field leaves behind. Treating
+        // it as "probably fine" would rebuild the very bug this
+        // closes, and the cost of being wrong is one extra refresh.
+        let now = 1_000_000;
+        assert!(needs_refresh(0, now));
+        assert!(needs_refresh(-1, now));
+    }
+
+    #[test]
+    fn either_expiry_field_answers_and_neither_means_renew_now() {
+        // THE FAILURE THIS GUARDS. If only `expires_in` came back and
+        // the code read only `expires_at`, every session would carry
+        // zero and the app would hit the auth server before every
+        // database read - safe, and unusable.
+        let now = now_secs();
+
+        let absolute: AuthResponse = serde_json::from_str(
+            r#"{"access_token":"a","refresh_token":"r","expires_at":99,"user":null}"#,
+        ).unwrap();
+        assert_eq!(absolute.expires_at, Some(99));
+
+        let relative: AuthResponse = serde_json::from_str(
+            r#"{"access_token":"a","refresh_token":"r","expires_in":3600,"user":null}"#,
+        ).unwrap();
+        assert_eq!(relative.expires_at, None);
+        assert_eq!(relative.expires_in, Some(3600));
+        // The fallback turns it into an absolute time in the future.
+        let derived = relative.expires_in.map(|s| now + s).unwrap();
+        assert!(!needs_refresh(derived, now), "an hour out must not renew");
+
+        let neither: AuthResponse = serde_json::from_str(
+            r#"{"access_token":"a","refresh_token":"r","user":null}"#,
+        ).unwrap();
+        assert_eq!(neither.expires_at.or(neither.expires_in), None);
+    }
+
+    #[test]
+    fn the_margin_is_long_enough_to_be_worth_having() {
+        // A margin under a round trip is no margin. Pinned so nobody
+        // tunes it to something that cannot do its job.
+        // 201. A `const` BLOCK AND NOT A PLAIN ASSERT, on clippy's
+        // advice and it is right: these are compile-time facts, so a
+        // bad margin should fail the BUILD rather than wait for anyone
+        // to run the tests.
+        const { assert!(REFRESH_MARGIN_SECS >= 30) };
+        // AND THE OTHER END, learned the hard way. A margin at or over
+        // the hour GoTrue gives an access token means every single read
+        // refreshes first, and the auth rate limiter stops the app
+        // dead. The test exists because this was actually done.
+        const {
+            assert!(
+                REFRESH_MARGIN_SECS < 3_600,
+                "a margin over the token lifetime refreshes on every call"
+            )
+        };
+    }
+
+    #[test]
+    fn a_session_without_the_field_still_deserialises() {
+        // DEFENSIVE, AND SAID SO. Nothing writes a Session to disk
+        // today - the fast-login file stores `pin::Stored`, not this -
+        // so there is no old shape in the wild to read. The default is
+        // here because `Session` is Deserialize and crosses to the
+        // frontend, and because the zero it produces means "renew
+        // now", which is the safe direction. The test pins that
+        // direction rather than guarding a file that exists.
+        let old = r#"{"access_token":"a","refresh_token":"r",
+                      "user_id":"u","profile_id":"p","email":"e@x"}"#;
+        let s: Session = serde_json::from_str(old).expect("old shape must still read");
+        assert_eq!(s.expires_at, 0);
+        assert!(needs_refresh(s.expires_at, now_secs()));
+    }
 
     #[test]
     fn an_ordinary_query_passes() {

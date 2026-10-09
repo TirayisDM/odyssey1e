@@ -67,7 +67,7 @@ use dice::{RandomRoller, RollResult};
 use resolution::{Target, TargetKind};
 use serde_json::{json, Value};
 use supabase::{AppState, Session};
-use tauri::State;
+use tauri::{Manager, State};
 
 /* ============================ AUTH ============================ */
 
@@ -1548,6 +1548,23 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
+        // 200. TELL THE STATE WHERE THE FAST-LOGIN FILE IS, once, at
+        // startup.
+        //
+        // The auto-refresh in `AppState::token` rotates the refresh
+        // token, and a rotated token must be written back or the PIN
+        // works exactly once. The state cannot resolve the path itself
+        // - that needs the AppHandle - so it is handed over here.
+        //
+        // A FAILURE IS NOT FATAL. No path means no reseat, which means
+        // the PIN stops working after the first auto-refresh and
+        // signing in fixes it. Refusing to start the app over a
+        // convenience file would be the wrong trade.
+        .setup(|app| {
+            let state = app.state::<AppState>();
+            state.set_pin_path(commands::session::pin_path(app.handle()).ok());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             sign_up,
             sign_in,

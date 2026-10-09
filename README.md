@@ -294,9 +294,35 @@ strips PUBLIC and `anon` from any new function in `public` as the DDL
 completes. **A new definer function still needs a caller check** — the
 trigger closes the grant, not the logic.
 
-One advisor note is real and open: leaked-password protection
-(HaveIBeenPwned checking on signup) is off, and would be worth turning
-on before the project has users who are not you.
+**The remaining advisor note cannot be cleared on this plan.**
+Leaked-password protection - HaveIBeenPwned checking on sign-up and
+password change - is **Pro and above**, and the console says so on the
+toggle itself. It will keep being reported on every scan. It is not an
+oversight and it is not actionable until the plan changes.
+
+WHAT WAS DONE INSTEAD, on 2026-10-09 and all free:
+
+| setting | was | is |
+|---|---|---|
+| Minimum password length | 6 | **10** |
+| Password requirements | none | **lower, upper, digits, symbols** |
+| Secure password change | off | **on** |
+| Require current password when updating | off | **on** |
+
+The last two are the ones that matter most HERE, and for a reason
+specific to this app. `pin.rs` stores a REFRESH TOKEN in a plain file
+and says so: anyone who can read it can mint a session without knowing
+the PIN. With those two toggles off, whoever minted that session could
+then change the password **without the old one and without a recent
+login** - turning a borrowed session into a permanent takeover. With
+them on, a stolen refresh token buys a session that expires. It does
+not remove the need for the OS keychain; it removes the worst
+consequence of not having it yet.
+
+**THESE SETTINGS ARE NOT IN GIT.** They live in the Supabase console
+and no migration captures them, so a rebuilt project starts with the
+defaults - length 6, no character requirements, both change guards off.
+That is the only record of them.
 
 ### The numbering, and why it has gaps
 

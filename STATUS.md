@@ -6054,6 +6054,7 @@ RLS.
 **Not done, and next:** the identity bridge, so one person can hold
 several sign-ins. And `supabase` still reports leaked-password
 protection off, which is a console setting rather than a migration.
+*(199: that one is Pro-only and cannot be cleared on this plan.)*
 
 ### 195, 196 and 197. A person is not a sign-in
 
@@ -6166,7 +6167,7 @@ real linking flow has to prove possession of both sign-ins, which is a
 verified round trip and not an INSERT policy. **Deleting a person is now
 nothing the database does by itself**, so a real account-deletion path is
 a feature that does not exist. Leaked-password protection is still off
-in the Supabase console.
+in the Supabase console *(199: Pro-only - it cannot be turned on here)*.
 
 **Noticed in passing:** Dave, as DM, sees only **one** `game_members`
 row. ~~So a DM cannot list their own players.~~ **That conclusion was
@@ -6248,6 +6249,58 @@ that one function back as a visible line if a pre-sign-in read is ever
 wanted.
 
 1046 tests pass, unchanged.
+
+## 199. The password settings, which are not in git
+
+Dave went looking for the leaked-password toggle the advisor keeps
+reporting and could not find it. **It is Pro and above** - the console
+says so on the toggle itself - and this organisation is on the free
+plan. It was never a switch anybody had missed.
+
+**THE ADVISOR WILL KEEP REPORTING IT.** Written down here so the next
+session does not repeat the search, which is what this file is for.
+
+### What was done instead, and all of it free
+
+| setting | was | is |
+|---|---|---|
+| Minimum password length | 6 | **10** |
+| Password requirements | none selected | **lower, upper, digits, symbols** |
+| Secure password change | off | **on** |
+| Require current password when updating | off | **on** |
+| Secure email change | on | on - already right |
+
+**THE TWO CHANGE GUARDS MATTER MORE HERE THAN THE PRO FEATURE WOULD,
+and for a reason particular to this app.** `pin.rs` is honest that it
+stores a REFRESH TOKEN in a plain file - "anyone who can read the file
+can mint a session from it without ever knowing the PIN."
+
+With those two guards off, whoever minted that session could then
+change the password **without supplying the old one and without having
+logged in recently**. That is the difference between somebody borrowing
+a session and somebody owning the account while the owner is locked
+out. With them on, a stolen refresh token buys a session that expires.
+
+It does not remove the need for the OS keychain - item 7, and `pin.rs`
+names it too. It removes the worst consequence of not having it yet.
+
+### Two limits worth knowing
+
+**THESE SETTINGS ARE NOT IN GIT.** They live in the Supabase console
+and no migration captures them. A rebuilt project starts at length 6,
+no character requirements, both guards off - and nothing in the repo
+would say otherwise. This table is the only record.
+
+**LENGTH AND CHARACTER RULES APPLY TO NEW PASSWORDS ONLY.** The six
+existing accounts keep whatever they have until it is changed. This
+protects the next sign-up, not the ones already there.
+
+### Nothing broke, and one thing to remember when it might
+
+The app has **no password change or reset flow at all**, so there was
+no call site to update and nothing to re-test. When reset is built -
+item 4 on the login list - "require current password" means the update
+call carries `current_password` beside the new one.
 
 ## Pick up here
 
@@ -6542,8 +6595,12 @@ a turn rather than writing a second loader.
 - **Delete the throwaway Discord webhook** that was pasted into that
   same session. It was never used, but the URL is in a transcript and a
   Discord webhook URL is the whole credential.
-- Leaked password protection is off in Supabase auth. Turn it on before
-  real players have passwords.
+- **Leaked password protection is PRO-ONLY and will never clear on this
+  plan.** The console says so on the toggle. The advisor reports it on
+  every scan and it is not an oversight - do not spend another session
+  looking for the switch. What was done instead, on 2026-10-09 and all
+  free: minimum length 6 -> 10, password requirements set to lower +
+  upper + digits + symbols, and BOTH change guards turned on. See 199.
 - The old AppSheet system is still live and still has the outstanding
   items in `ISSUES_appsheet_audit.html`. Decide whether it is being
   maintained or retired.

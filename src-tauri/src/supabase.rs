@@ -28,11 +28,24 @@ pub const SUPABASE_ANON_KEY: &str = "sb_publishable_Zx4Am4Yjt61lE7KPJUzVEA_IG4_Y
 
 /// One signed-in user. Held in memory only — a restart signs you out.
 /// Persisting it is a later job and wants the OS keychain, not a file.
+///
+/// `user_id` AND `profile_id` ARE NOT THE SAME QUESTION (197).
+/// `user_id` is the SIGN-IN — one row in `auth.users`, one way of
+/// proving who you are, and replaceable. `profile_id` is the PERSON,
+/// and it is what every ownership column in the schema holds:
+/// `owner_uid`, `dm_uid`, `game_members.profile_id`.
+///
+/// They hold the same value today, because every account has exactly
+/// one sign-in. They stop being equal the moment anyone links a second
+/// one, and then writing `user_id` into an ownership column produces a
+/// row owned by nobody. Both are kept so the code has to say which it
+/// means.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
     pub access_token: String,
     pub refresh_token: String,
     pub user_id: String,
+    pub profile_id: String,
     pub email: String,
 }
 
@@ -204,12 +217,42 @@ fn auth_call(path: &str, body: &Value) -> Result<Session, String> {
         .user
         .ok_or_else(|| "auth response had no user".to_string())?;
 
+    // 197. ASK WHICH PERSON THIS SIGN-IN IS, ONCE, HERE. The schema's
+    // ownership columns hold a profile and GoTrue only knows about
+    // sign-ins, so something has to translate. Doing it at sign-in means
+    // the nine places that write an owner take it off the session
+    // instead of each deciding, which is the shape that let the two be
+    // confused in the first place.
+    //
+    // A HARD ERROR RATHER THAN A FALLBACK TO `user_id`. The two are
+    // equal today, so falling back would work and would keep working
+    // until the first linked account, at which point it would silently
+    // write rows owned by nobody. If we cannot tell who you are, we
+    // must not let you write rows owned by a guess.
+    let profile_id = resolve_profile(&access_token)?;
+
     Ok(Session {
         access_token,
         refresh_token: parsed.refresh_token.unwrap_or_default(),
         user_id: user.id,
+        profile_id,
         email: user.email.unwrap_or_default(),
     })
+}
+
+/// The person behind a sign-in, from `current_profile()` (197).
+///
+/// PostgREST returns a scalar-returning function's result as a bare
+/// JSON value, so a uuid arrives as a string rather than a row.
+fn resolve_profile(token: &str) -> Result<String, String> {
+    let v = rpc(token, "current_profile", &json!({}))?;
+    match v.as_str() {
+        Some(id) if !id.is_empty() => Ok(id.to_string()),
+        _ => Err(format!(
+            "signed in, but could not resolve which profile this sign-in belongs to: {}",
+            v
+        )),
+    }
 }
 
 pub fn sign_up(email: &str, password: &str, display_name: &str) -> Result<Session, String> {

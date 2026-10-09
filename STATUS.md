@@ -6003,11 +6003,13 @@ So the fix is three things, and they are not equally important:
 | | |
 |---|---|
 | revoke PUBLIC and `anon` across the schema | closes the five |
-| **`alter default privileges`** | **a new function is born closed** |
+| ~~`alter default privileges`~~ | **did not work - see 196** |
 | `security_doors()` | notices whatever those two miss |
 
-**Only the second and third survive the next migration.** The first is
-housekeeping that has now been done twice.
+**193 claimed the second line was "the only part of this that survives
+the next migration". It did nothing at all**, and 195's check caught it
+two migrations later. 196 is the real fix. The third line is what
+actually earned its keep.
 
 **And placing a creature is a DM act** - Dave's call. Both
 `instantiate_*` now refuse anyone but the game's DM as their first
@@ -6043,6 +6045,126 @@ RLS.
 **Not done, and next:** the identity bridge, so one person can hold
 several sign-ins. And `supabase` still reports leaked-password
 protection off, which is a console setting rather than a migration.
+
+### 195, 196 and 197. A person is not a sign-in
+
+Three migrations, and the first two are the check from 194 earning its
+keep immediately.
+
+**195: the check had the same bug it was written to find.** 194 asked
+for `pg_get_functiondef` while relying on a JOIN-derived
+`nspname = 'public'` to have already filtered the rows. Postgres makes no
+such promise - it applies cheap filters first and join predicates when it
+gets to them - so on another plan the call lands on `pg_catalog`, hits an
+aggregate, and throws `"array_agg" is an aggregate function`. **A check
+that throws cannot be told apart from a check that failed.**
+
+It was found because an ad-hoc query written minutes later made the
+identical mistake and threw three times in a row at the console, while
+194 sat there having passed. **194 passed by luck of the query plan.**
+The fix is to stop depending on order: `pronamespace =
+'public'::regnamespace` is a scalar test on the row, and `prokind = 'f'`
+excludes aggregates by construction.
+
+**196: and then the check refused 197.** The identity bridge creates two
+functions, its final gate ran `security_doors()`, and the migration
+would not apply - `the wall has 2 hole(s)`. The holes were its own new
+functions, born executable by `anon` exactly as if 193 had never run.
+Two separate reasons, both found by probe:
+
+- **`anon` was never a default, it is an explicit grant.** Supabase ships
+  its own `alter default privileges` granting EXECUTE to anon,
+  authenticated and service_role. 193 revoked PUBLIC and never mentioned
+  `anon`. Revoking it there does work.
+- **The built-in PUBLIC grant cannot be revoked that way at all.** After
+  the revoke, the stored default correctly loses `anon` and a function
+  created in the same transaction still comes out with `=X/postgres`.
+
+So the mechanism is an **event trigger** on `ddl_command_end`, which is
+what was wanted in the first place: it fires as the DDL completes, needs
+nobody to remember it, and does not care which role created the
+function. A function born under it comes out `postgres | authenticated |
+service_role`. **196 proves this on itself** by creating a throwaway
+function, asking what it was born with, and dropping it - which is
+exactly what 193 should have done instead of asserting it.
+
+**197: the bridge.** Dave's ask. `profiles.id` referenced
+`auth.users(id)`, so a profile was not linked to a sign-in, it **was**
+one - and 42 policies compared an owner column against `auth.uid()`.
+Two consequences, the second being the real one: one person could not
+hold two sign-ins, and **the login system could not be replaced**,
+because `auth.users.id` was the primary key of the game's data 42
+policies deep, in a schema we do not own.
+
+Three words that were one:
+
+| | |
+|---|---|
+| a **person** | `profiles.id` - what the game's data references |
+| a **sign-in** | `auth.users.id` - one way of proving you are that person |
+| the **bridge** | `identities` - which sign-in belongs to which person |
+
+`auth.uid()` answers "which sign-in"; the policies were asking it "which
+person". `current_profile()` is the only place that knows the two are
+related. **Nothing in the game schema moved** - `owner_uid`, `dm_uid`
+and `game_members.profile_id` already held profile ids and still do.
+
+**The 42 policies were generated, not retyped.** Hand-transcribing 42
+predicates to change one call in each is 021's trap at its largest, and a
+mistyped predicate is a silent authorization hole rather than a failed
+build. Each policy is read back from the catalogue, `auth.uid()` replaced
+in the text Postgres itself produced, and recreated with its own command,
+roles and permissive flag - wrapped as `(select current_profile())` so
+the planner hoists it once per statement instead of calling it per row,
+which matters now that it reads a table rather than a setting.
+
+**And the asserted count paid for itself on the first attempt.** The
+migration first went in saying 44, a number taken from reading a listing
+rather than counting it. The loop found 42, the assertion failed, and the
+whole migration rolled back rather than half-rewriting the authorization
+model. Verified afterwards: no table, no function, FK intact, 42
+policies untouched.
+
+**`profiles.id` no longer references `auth.users`.** That one line is the
+compartmentalization. `auth.users` now cascades into `identities` and
+stops: a deleted sign-in removes a way of proving who you are, not the
+human being and their characters.
+
+**Proved three ways, all rolled back.** Per-user visible row counts
+before and after are identical for all six profiles - Dave 18 characters
+and 38 objects, jec-dev 2 and 3, the four seeded players nothing - and
+each sees exactly one identity row. The sign-up chain still works end to
+end: an `auth.users` insert produces a profile, the new trigger produces
+its identity, provider `email`, resolving to self. And the feature
+itself, in one row: **linking a second sign-in to Dave's profile took it
+from 0 characters and not-DM to 18 characters and DM**, with nothing else
+touched.
+
+**The Rust was the other half, and it was still wrong.**
+`Session.user_id` is the sign-in; nine places wrote it into `owner_uid`
+and one into `dm_uid`, and the JS compared it in three more - including
+`amDM()`, which gates the entire DM interface. Equal today, wrong the
+moment anyone links a second sign-in. `Session` now carries **both**
+`user_id` and `profile_id`, resolved once at sign-in through
+`current_profile()`, and the ownership sites take the profile. Resolving
+it is a **hard error rather than a fallback** to `user_id`: the two are
+equal today, so a fallback would work and keep working until the first
+linked account, then silently write rows owned by nobody.
+
+**Not done:** linking a second sign-in has no UI and no write policy -
+`identities` is readable by its owner and writable by nobody, because a
+real linking flow has to prove possession of both sign-ins, which is a
+verified round trip and not an INSERT policy. **Deleting a person is now
+nothing the database does by itself**, so a real account-deletion path is
+a feature that does not exist. Leaked-password protection is still off
+in the Supabase console.
+
+**Noticed in passing, not fixed:** Dave, as DM, can see only **one**
+`game_members` row though his game has two members - so a DM cannot
+currently list their own players. That will matter for the player panel.
+
+1046 tests pass, unchanged - this moved plumbing, and `commands/*.rs`
+has no tests by design.
 
 ## Pick up here
 

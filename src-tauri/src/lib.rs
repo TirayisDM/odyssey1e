@@ -129,7 +129,7 @@ fn create_game(state: State<AppState>, name: String) -> Result<Value, String> {
     supabase::rest_insert(
         &session.access_token,
         "games",
-        &json!({ "name": name, "dm_uid": session.user_id }),
+        &json!({ "name": name, "dm_uid": session.profile_id }),
     )
 }
 
@@ -217,7 +217,7 @@ fn create_roll(
     let mut body = json!({
         "game_id": game_id,
         "character_id": character_id,
-        "owner_uid": session.user_id,
+        "owner_uid": session.profile_id,
         "request": request,
         "label": label,
         "status": "pending"
@@ -1256,7 +1256,7 @@ fn death_save(
         // fills a name that arrived null, blank or 'Someone', so handing
         // it the instance label here is not fighting it.
         "character_name": if v.character_id.is_none() { Some(v.label.clone()) } else { None },
-        "owner_uid": session.user_id,
+        "owner_uid": session.profile_id,
         "role": "check",
         "request": "death save",
         "label": "Death Save",
@@ -1322,7 +1322,7 @@ fn roll_row(
             Some(_) => None,
             None => Some(sheet.name.clone()),
         },
-        "owner_uid": session.user_id,
+        "owner_uid": session.profile_id,
         "request": request,
         "label": label,
         "mode": mode,

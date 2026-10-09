@@ -105,10 +105,16 @@ pub mod time;
 /// A command takes what it needs off this and stops repeating the
 /// question. `token` is `String` rather than `&str` because every call
 /// into `supabase` wants an owned one anyway.
+///
+/// `profile_id` AND NOT `user_id` (197). The id a command wants is
+/// almost always the one that goes into an ownership column, and that is
+/// the PERSON. A command that genuinely needs the sign-in - to show
+/// which account you came in by - should take it off the `Session` and
+/// say so, because the two are equal today and will not stay equal.
 #[allow(dead_code)]
 pub struct Ctx {
     pub token: String,
-    pub user_id: String,
+    pub profile_id: String,
 }
 
 #[allow(dead_code)]
@@ -121,7 +127,7 @@ impl Ctx {
         let s: Session = state.current()?.ok_or("not signed in")?;
         Ok(Ctx {
             token: s.access_token,
-            user_id: s.user_id,
+            profile_id: s.profile_id,
         })
     }
 }

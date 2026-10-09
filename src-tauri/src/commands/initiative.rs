@@ -502,7 +502,7 @@ pub fn spend_slot(
             "game_id": game_id,
             "character_id": character_id,
             "encounter_id": encounter_id,
-            "owner_uid": session.user_id,
+            "owner_uid": session.profile_id,
             "actor_id": actor_id,
             "request": cost,
             "key": cost,

@@ -217,7 +217,7 @@ pub fn create_character(
 
     let mut row = json!({
         "game_id": game_id,
-        "owner_uid": session.user_id,
+        "owner_uid": session.profile_id,
         "name": name,
         "token_name": token_name,
         "size": size,

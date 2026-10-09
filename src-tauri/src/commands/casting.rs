@@ -555,7 +555,7 @@ pub fn cast_spell(
             extra_rolls.push(json!({
                 "game_id": sheet.game_id,
                 "character_id": character_id,
-                "owner_uid": session.user_id,
+                "owner_uid": session.profile_id,
                 "request": c.name,
                 "label": format!("{} healing", c.name),
                 "mode": "normal",
@@ -610,7 +610,7 @@ pub fn cast_spell(
             extra_rolls.push(json!({
                 "game_id": sheet.game_id,
                 "character_id": character_id,
-                "owner_uid": session.user_id,
+                "owner_uid": session.profile_id,
                 "request": c.name,
                 "label": format!("{} damage", c.name),
                 "mode": "normal",
@@ -1108,7 +1108,7 @@ pub fn resolve_spell_save(
         "character_id": target.character_id,
         "character_name": target.character_id.as_ref().map_or_else(
             || Some(target.name.clone()), |_| None),
-        "owner_uid": session.user_id,
+        "owner_uid": session.profile_id,
         "request": format!("{} save vs {}", ability, name),
         "label": format!("{} Save vs {}", ability.to_uppercase(), name),
         "mode": mode,
@@ -1152,7 +1152,7 @@ pub fn resolve_spell_save(
             rolls.push(json!({
                 "game_id": target.game_id,
                 "character_id": target.character_id,
-                "owner_uid": session.user_id,
+                "owner_uid": session.profile_id,
                 "request": name,
                 "label": if saved {
                     format!("{} damage (saved, half)", name)

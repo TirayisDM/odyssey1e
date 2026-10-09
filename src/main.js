@@ -425,7 +425,7 @@ async function loadGames() {
 // buttons come back "only the DM of this game can ...".
 function amDM() {
   const g = (state.games || []).find((x) => x.id === state.gameId);
-  return !!g && !!state.user && g.dm_uid === state.user.user_id;
+  return !!g && !!state.user && g.dm_uid === state.user.profile_id;
 }
 
 async function selectGame(id) {
@@ -2161,7 +2161,7 @@ async function loadCharacters() {
   const chars = await call("list_characters", { gameId: state.gameId });
   if (!Array.isArray(chars)) return;
   for (const c of chars) {
-    const mine = state.user && c.owner_uid === state.user.user_id;
+    const mine = state.user && c.owner_uid === state.user.profile_id;
     // Only your own character is selectable — the sheet editor writes,
     // and the policies would refuse anyway. Better to not offer it.
     ul.append(
@@ -8830,7 +8830,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Attach to my own character in this game when I have one — that is
     // what makes the character_name snapshot trigger do its job.
     const chars = await invoke("list_characters", { gameId: state.gameId }).catch(() => []);
-    const mine = (chars || []).find((c) => state.user && c.owner_uid === state.user.user_id);
+    const mine = (chars || []).find((c) => state.user && c.owner_uid === state.user.profile_id);
     const r = await call("create_roll", {
       gameId: state.gameId,
       characterId: mine ? mine.id : null,

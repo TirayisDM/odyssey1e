@@ -640,6 +640,28 @@ thrown. The `check keys` button on the equipment panel runs it.
 
 Do not rediscover these.
 
+**TWO MACHINES ALLOCATE THE SAME CHANGE NUMBER.** 176 and 177 were each
+used TWICE within four hours on 2026-10-08 - the laptop for the casting
+rename and 177's migration, the desktop for pricing the scribing picker.
+Nothing failed: the desktop's pair were code-only, so there were no
+files to collide. **The damage was to the references**, which in this
+codebase are the documentation - `books.rs` said "177. THE ENGINE PRICES
+IT" while `177_a_prayer_and_a_spell_are_both_a_spell.sql` was somebody
+else's migration, so following a number landed on the wrong document.
+
+Fixed by renumbering the DESKTOP's pair to 191 and 192 - the laptop's
+had a migration file and a module rename behind them and were the
+expensive ones to move. Numbers are cheap; a wrong cross-reference is
+not.
+
+**THE RULE: when both machines are working, the one NOT applying a
+migration takes numbers from well above the high-water mark rather than
+the next free one.** The next number is the one two people reach for.
+Note that 187-190 were already spoken for by `conditions.rs` and only
+STATUS said so, which is why the first free number was 191 and not 188 -
+check what the OTHER machine's sections claim, not just the migration
+folder.
+
 **THE DATABASE CAN HOLD SCHEMA THAT GIT DOES NOT. CHECK AFTER EVERY
 PULL.** Five migrations have now been applied to the live database
 with no file in the repo, or with a file holding no SQL:
@@ -5339,7 +5361,7 @@ goes with it. Verified live and rolled back - a scroll of Fireball in
 Tarren's hands holds Fireball and is correctly **absent** from what he
 may prepare.
 
-### The price is on the picker before you press it (176)
+### The price is on the picker before you press it (191)
 
 Every option reads `Sleep · 1st Level · 2 vials · 4 hrs`, coloured
 green when affordable and red when not, with the vials in hand on the
@@ -5347,7 +5369,7 @@ line beneath and the button disabled. The engine still decides - this
 is a label, and it says so - but finding out by being refused is a
 worse way to learn a price than reading it.
 
-**177 fixed the half that did not make the journey.** 176 priced the
+**192 fixed the half that did not make the journey.** 191 priced the
 picker by doing the arithmetic again in JavaScript - it worked, and it
 was the same rule in two places, with the per-school percentage left
 out of the copy. `scribe_options` now returns the list already priced,

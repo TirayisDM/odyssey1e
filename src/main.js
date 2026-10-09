@@ -3159,7 +3159,7 @@ async function paintBook(it, wrap) {
 // `scribe_options` hands back an empty list for anybody who does not
 // write, so this asks rather than guessing from the class.
 //
-// 177. AND THE PRICES COME WITH IT. 176 did this arithmetic here, in
+// 192. AND THE PRICES COME WITH IT. 191 did this arithmetic here, in
 // JavaScript, which worked and was the same rule in two places - the
 // per-school percentage was the half that did not make the journey.
 // Every row now arrives with its ink, its hours and whether this

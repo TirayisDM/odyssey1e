@@ -1004,7 +1004,7 @@ button.wide{width:100%}
 .bookband .item{display:flex;align-items:center;gap:.4rem}
 .bookband .item .nm{flex:1}
 
-/* 176. AFFORDABLE OR NOT, on the picker and on the line under it.
+/* 191. AFFORDABLE OR NOT, on the picker and on the line under it.
    --ok and --bad are the palette's own yes/no, already used by the
    proficiency chips, so this reads the same as every other verdict on
    the screen. */

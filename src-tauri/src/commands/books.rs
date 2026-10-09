@@ -189,7 +189,7 @@ pub fn scribe_spell(
 
 /// Everything this character could write into this thing, priced.
 ///
-/// 177. THE ENGINE PRICES IT, NOT THE SCREEN. 176 put the cost on the
+/// 192. THE ENGINE PRICES IT, NOT THE SCREEN. 191 put the cost on the
 /// picker by doing the arithmetic again in JavaScript, which worked and
 /// was one fact in two places - the per-school percentage was the half
 /// that did not make the journey, and the label quietly under-reported
@@ -544,7 +544,7 @@ fn school_pct(token: &str, school: &str) -> Result<i64, String> {
         .unwrap_or(100))
 }
 
-/// 177. EVERY SCHOOL'S RATE IN ONE READ. `school_pct` asks about one
+/// 192. EVERY SCHOOL'S RATE IN ONE READ. `school_pct` asks about one
 /// and is right for one scribing; pricing two hundred candidates with
 /// it would be two hundred round trips.
 fn school_rates(token: &str) -> Result<std::collections::HashMap<String, i64>, String> {

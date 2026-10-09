@@ -141,6 +141,22 @@ fn join_game(state: State<AppState>, code: String) -> Result<Value, String> {
     supabase::rpc(&token, "join_game", &json!({ "p_code": code }))
 }
 
+/// Who is at this table, with their names.
+///
+/// 198. THE NAME IS THE POINT. This asked for `profile_id` alone, which
+/// is a roster only if you already know who everybody is — and until 198
+/// a `profiles` row was readable by nobody but its owner, so the names
+/// could not have been resolved by a second call either. Now a person
+/// may read the profile of anyone they share a game with, and the DM's
+/// three rows come back as three names.
+///
+/// The embed is spelled with its constraint, per 153: `game_members` has
+/// one FK to `profiles` today, so a bare `profiles(...)` would resolve —
+/// and would start failing the day anything else points there. Naming it
+/// costs nothing now and cannot become ambiguous.
+///
+/// Shape, since nothing renders this yet:
+/// `[{ profile_id, role, joined_at, profiles: { display_name } }]`
 #[tauri::command]
 fn list_members(state: State<AppState>, game_id: String) -> Result<Value, String> {
     let token = state.token()?;
@@ -148,8 +164,17 @@ fn list_members(state: State<AppState>, game_id: String) -> Result<Value, String
         &token,
         "game_members",
         &[
-            ("select", "profile_id,role,joined_at"),
+            (
+                "select",
+                "profile_id,role,joined_at,\
+                 profiles!game_members_profile_id_fkey(display_name)",
+            ),
             ("game_id", &format!("eq.{}", game_id)),
+            // The DM first, then the table in the order people joined.
+            // `role` is an enum and an enum sorts by DECLARATION order,
+            // which 001 wrote as `dm < player` — verified, not assumed.
+            // Reordering those labels would quietly reverse this.
+            ("order", "role.asc,joined_at.asc"),
         ],
     )
 }

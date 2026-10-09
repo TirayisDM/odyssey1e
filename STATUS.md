@@ -6159,12 +6159,86 @@ nothing the database does by itself**, so a real account-deletion path is
 a feature that does not exist. Leaked-password protection is still off
 in the Supabase console.
 
-**Noticed in passing, not fixed:** Dave, as DM, can see only **one**
-`game_members` row though his game has two members - so a DM cannot
-currently list their own players. That will matter for the player panel.
+**Noticed in passing:** Dave, as DM, sees only **one** `game_members`
+row. ~~So a DM cannot list their own players.~~ **That conclusion was
+wrong - see 198.** His game has exactly one member. There are two
+games.
 
 1046 tests pass, unchanged - this moved plumbing, and `commands/*.rs`
 has no tests by design.
+
+### 198. A DM can see who is at the table
+
+Dave: *"fix the game_members read so the DM sees their players"*.
+
+**`game_members` was not the problem, and the report that said so was
+mine.** Its SELECT policy is `is_game_member(game_id)`, which already
+shows any member the whole roster of their own game. 197's verification
+noted the DM seeing one membership row and concluded the read was
+broken - without ever looking at the roster. There are **two games**,
+`Test Game 1` and `jec-game-1`, each with exactly one member who is its
+own DM. One row was the right answer.
+
+**That is 159's mistake again** - reading a count and inferring a cause -
+and 168 already wrote it down: knowing the cause is a class of problem is
+not the same as looking at the class. The thing that settled it was
+`select * from games left join game_members`, not reasoning.
+
+**What was actually missing was the names.** The same probe asked for
+the roster *with display names* and got back one: `Dave (DM) (dm)`.
+Three membership rows, one resolvable name. `profiles` had three
+policies and all three said `id = current_profile()` — **a profile was
+readable only by the person it belongs to**, so a DM holding three
+`profile_id`s could look up none of them but his own. A roster built on
+that is a list of UUIDs.
+
+**The rule: sharing a table is what entitles you to a name**, and it is
+symmetric rather than "the DM may read players". A player has to be able
+to name the DM and the others, because an initiative strip that says who
+is up has to say it with a name. `shares_a_game(profile)` is the
+predicate, SECURITY DEFINER for the reason `is_game_member` is - and
+that is also why it cannot recurse, since nothing it reads consults a
+policy, least of all `profiles`.
+
+Verified live and rolled back, with two players added to Dave's game:
+
+| who | sees |
+|---|---|
+| the DM | 3 member rows, 3 profiles, **Dave (dm), Player One, Player Two** |
+| a player | the same 3 named profiles |
+| an outsider | **1 profile — their own** — and cannot see Dave |
+
+Six profiles exist, so nobody sees all six. A profile in no game of
+yours stays unreadable. `profiles: read own` stays, because you must be
+able to read your own profile before joining anything — that is the
+sign-up path and what `me` depends on.
+
+**`list_members` now asks for the name**, which it never did: it
+selected `profile_id` alone, and until 198 a second call could not have
+resolved the names either. The embed is spelled with its constraint per
+153 — `profiles!game_members_profile_id_fkey(display_name)` — because
+`game_members` has one FK to `profiles` today and a bare embed would
+start failing the day anything else points there. Ordered DM-first,
+which works because an enum sorts by declaration order and 001 wrote
+`dm < player`; that was checked rather than assumed, and reordering
+those labels would quietly reverse the roster.
+
+**Nothing renders it yet.** `list_members` is registered and called by
+no JavaScript at all, so the data path is complete and there is no
+roster on screen. The shape is
+`[{ profile_id, role, joined_at, profiles: { display_name } }]`.
+
+**One deliberate behaviour change to know about, from 197 rather than
+198:** policies now call `public.current_profile()`, which `anon` may
+not execute, so an **unauthenticated** read returns `401 permission
+denied for function current_profile` where it used to return an empty
+list. The app always signs in before reading, so nothing hits this. It
+is left loud on purpose — a role that should read nothing getting a
+refusal is better than it getting silence — and `anon` can be granted
+that one function back as a visible line if a pre-sign-in read is ever
+wanted.
+
+1046 tests pass, unchanged.
 
 ## Pick up here
 

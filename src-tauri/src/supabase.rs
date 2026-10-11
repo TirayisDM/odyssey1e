@@ -476,52 +476,6 @@ pub fn refresh(refresh_token: &str) -> Result<Session, String> {
     )
 }
 
-/// Ask Supabase to email a recovery code and link.
-///
-/// 202. RETURNS NOTHING AND SAYS NOTHING ABOUT THE ADDRESS, which is
-/// the point. GoTrue answers 200 whether or not that email has an
-/// account, and this preserves that: an endpoint that distinguished the
-/// two would let anybody enumerate who plays in this campaign by
-/// watching the error.
-///
-/// So the frontend's "check your email" is true in the only sense it can
-/// be - the request was accepted - and is deliberately not a claim that
-/// an email was sent.
-pub fn send_recovery(email: &str) -> Result<(), String> {
-    let resp = http()
-        .post(format!("{}/auth/v1/recover", SUPABASE_URL))
-        .header("apikey", SUPABASE_ANON_KEY)
-        .header("Content-Type", "application/json")
-        .json(&json!({ "email": email }))
-        .send()
-        .map_err(|e| format!("could not reach Supabase: {}", e))?;
-
-    let status = resp.status().as_u16();
-    if (200..300).contains(&status) {
-        return Ok(());
-    }
-    Err(error_message(status, &resp.text().unwrap_or_default()))
-}
-
-/// Spend a recovery code or link for a real session.
-///
-/// 202. THE FIELD NAME DEPENDS ON WHICH KIND IT IS, and getting that
-/// wrong is the trap `recovery.rs` exists to avoid: a `token_hash` sent
-/// as `token` is compared against a six-digit code and refused with a
-/// message about the token rather than about the field.
-///
-/// A code needs the email beside it - six digits are not unique. A hash
-/// does not, and none is sent, so pasting the link works even if the
-/// user types their address wrong.
-pub fn verify_recovery(proof: &crate::recovery::Proof, email: &str) -> Result<Session, String> {
-    use crate::recovery::Proof;
-    let body = match proof {
-        Proof::Code(code) => json!({ "type": "recovery", "token": code, "email": email }),
-        Proof::Hash(hash) => json!({ "type": "recovery", "token_hash": hash }),
-    };
-    auth_call("verify", &body)
-}
-
 /// Write a new password onto the signed-in user.
 ///
 /// 202. `current_password` IS THE WIRE NAME. The Supabase docs show

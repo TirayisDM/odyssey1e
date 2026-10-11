@@ -160,114 +160,9 @@ pub fn forget_pin(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-/* ===================== GETTING BACK IN, 202 ======================= */
+/* ================== CHANGING YOUR PASSWORD, 202 =================== */
 
-use crate::recovery::{self, Proof};
-
-/// Ask for a reset email.
-///
-/// 202. SAYS NOTHING ABOUT WHETHER THAT ADDRESS HAS AN ACCOUNT, because
-/// `send_recovery` cannot and should not. See its comment: an endpoint
-/// that distinguished "sent" from "no such user" would let anyone work
-/// out who plays in this campaign.
-#[tauri::command]
-pub fn begin_reset(email: String) -> Result<(), String> {
-    let email = email.trim();
-    if email.is_empty() {
-        return Err("type the email address you signed up with".to_string());
-    }
-    if !recovery::looks_like_an_email(email) {
-        return Err(format!("\"{}\" is not an email address", email));
-    }
-    supabase::send_recovery(email)
-}
-
-/// Spend the code or link, set the new password, and sign in.
-///
-/// ---------------------------------------------------------------------
-/// THE LOCAL CHECKS COME FIRST, AND THAT IS THE WHOLE ORDERING
-/// ---------------------------------------------------------------------
-///
-/// **A RECOVERY TOKEN IS SINGLE-USE.** Verifying before checking that
-/// the two password boxes match would spend the token on a TYPO - the
-/// user would be told the passwords differ, try again, and find the code
-/// dead. They would then need a second email to recover from a
-/// mistyped character.
-///
-/// So everything that can be known without the network is known first.
-/// `check_new_password` and `read_proof` are both pure, both tested, and
-/// both run before a single request goes out.
-///
-/// ---------------------------------------------------------------------
-/// AND IF THE SECOND HALF FAILS, THE TOKEN IS ALREADY GONE
-/// ---------------------------------------------------------------------
-///
-/// Verify and update are two requests and the first one is irreversible.
-/// If GoTrue accepts the code and then refuses the password - too short,
-/// too simple, 199's rules - the code cannot be used again. That is not
-/// avoidable here, so it is SAID instead: the error names it and tells
-/// the user to ask for a new email.
-///
-/// NO SESSION IS SEATED IN THAT CASE even though a valid one now exists.
-/// Being silently signed in with the old password still set, after being
-/// told the reset failed, is the kind of half-outcome nobody can reason
-/// about later.
-#[tauri::command]
-pub fn finish_reset(
-    app: tauri::AppHandle,
-    state: State<AppState>,
-    email: String,
-    pasted: String,
-    new_password: String,
-    confirm: String,
-) -> Result<Session, String> {
-    recovery::check_new_password(&new_password, &confirm)?;
-    let proof = recovery::read_proof(&pasted)?;
-
-    // A code is not unique on its own and needs the address beside it.
-    // A link carries its own identity, so a wrong address cannot break
-    // it - and demanding one would be a question with no purpose.
-    if matches!(proof, Proof::Code(_)) && email.trim().is_empty() {
-        return Err("type your email address as well as the code".to_string());
-    }
-
-    let session = supabase::verify_recovery(&proof, email.trim())
-        .map_err(|e| format!("that {} was refused: {}", proof.said(), e))?;
-
-    // THE RECOVERY SESSION IS THE AUTHORITY FOR THIS WRITE, and no
-    // current password is sent: the user is here precisely because they
-    // do not have it. GoTrue exempts a recovery session from the
-    // "require current password" guard for that reason.
-    supabase::set_password(&session.access_token, &new_password, None).map_err(|e| {
-        format!(
-            "{} — the {} has now been used up, so ask for a new email before trying again",
-            e,
-            proof.said()
-        )
-    })?;
-
-    // ---------------------------------------------------------------
-    // THE PIN IS FORGOTTEN, AND THIS IS A DECISION RATHER THAN TIDYING
-    // ---------------------------------------------------------------
-    //
-    // The stored refresh token belongs to the session that existed
-    // before the password moved, so it is dead or dying either way and
-    // reseating it from the new session would be easy.
-    //
-    // It is not done because A RESET IS A SECURITY EVENT. Somebody
-    // either forgot their password or is recovering an account they
-    // think was reached by someone else, and `pin.rs` is honest that
-    // the file is "anyone who can read the file can mint a session".
-    // Leaving a four-digit door standing on this machine immediately
-    // after a reset is the wrong trade. Setting a new PIN is two taps
-    // and the panel offers it the moment this returns.
-    if let Ok(path) = pin_file(&app) {
-        let _ = fs::remove_file(path);
-    }
-
-    state.set(Some(session.clone()))?;
-    Ok(session)
-}
+use crate::passwords;
 
 /// Rewrite the PIN file's token, keeping the hash and salt.
 ///
@@ -356,7 +251,7 @@ pub fn change_password(
     if current_password.is_empty() {
         return Err("type your current password".to_string());
     }
-    recovery::check_new_password(&new_password, &confirm)?;
+    passwords::check_new_password(&new_password, &confirm)?;
     if new_password == current_password {
         return Err("that is the password you already have".to_string());
     }

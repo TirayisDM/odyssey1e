@@ -6453,7 +6453,7 @@ Here it is, in the order the work actually wants doing:
 | 2 | Password rules and the two change guards | **done** - 199, console only |
 | 3 | **Token refresh** | **done** - 200, 201 |
 | 4 | Password **change** | **done** - 202, fixed in 203 |
-| 4b | Password **reset** | written (202, 203), **parked** - 204, 205 |
+| 4b | Password **reset** | **removed** - 206; the code is in `c4825c0` |
 | 5 | Email confirmation on sign-up | not checked |
 | 6 | Linking a second sign-in | no UI, no write policy - see 197 |
 | 7 | Refresh token in the OS keychain | not started - item 8 of the work list |
@@ -8246,6 +8246,59 @@ means a bitmap `tile_memory` and a `visible_grid` definer function
 rather than a jsonb column); one map per location; and a diagonal costs
 1, decided by one `step_cost` function because four subsystems ask for
 distance and must agree.
+
+## 206. The reset flow is out
+
+Dave: "done with it for now - remove the email reset." Four `/recover`
+attempts across three config reloads, every one `535 authentication
+rejected`. The code was never the problem and there is nothing more to
+learn from leaving it on screen.
+
+### Committed first, then removed
+
+**`c4825c0` HAS THE WHOLE THING**, deliberately. The work had never been
+committed, so deleting it would have taken the code out of git history
+as well as out of the tree - and the one thing worth keeping is the
+code, because 202's findings are already written down here.
+
+To bring it back when mail works: `git show c4825c0` or revert that
+commit's removal in 206. Nothing needs re-deriving.
+
+### What went and what stayed
+
+| | |
+|---|---|
+| **gone** | `begin_reset`, `finish_reset`, `send_recovery`, `verify_recovery`, `Proof`/`read_proof`, `looks_like_an_email`, the Forgot-password panel and its four handlers, `.err-note` |
+| **stayed** | `change_password` and `set_password` - they need no email and they work |
+| **renamed** | `recovery.rs` is now `passwords.rs`, holding the one function change still needs |
+
+**PASSWORD CHANGE IS UNAFFECTED.** 203 made it independent of mail on
+purpose - it re-signs-in rather than asking for a nonce - so the one
+piece of this that works is the one that survived.
+
+**AND NOBODY CAN RECOVER A FORGOTTEN PASSWORD.** That is a real gap and
+it is now a dashboard job: Supabase console, Authentication, pick the
+user, reset. Five accounts and a DM who owns the project, so it is
+survivable. It would not be with real players, and that is the trigger
+to finish this.
+
+### A doc comment that had moved, found on the way out
+
+`looks_like_an_email` was inserted in 203 at the `pub fn
+check_new_password` anchor - **between that function's doc comment and
+its signature.** So the long "AND IT CHECKS NOTHING ABOUT STRENGTH"
+rationale ended up documenting the email check, and the password check
+shipped undocumented in `c4825c0`.
+
+**THIS IS THE SECOND TIME IN ONE SESSION.** The same fault put
+`list_conditions`'s doc on the wrong function after an insert put two
+`#[tauri::command]` attributes on one fn. The pattern is always the
+same: anchoring an insert on `pub fn <name>` when the thing above it is
+that function's documentation.
+
+**ANCHOR ON THE DOC COMMENT'S FIRST LINE, NOT THE SIGNATURE** - or on
+the blank line before it. Removing the dead function reunited them by
+luck rather than by noticing, which is exactly why it is written down.
 
 ## Pick up here
 

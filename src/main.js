@@ -320,7 +320,6 @@ function say(selector, text, isError) {
   el.hidden = !text;
 }
 
-const resetSay = (t, e) => say("#reset-msg", t, e);
 const changeSay = (t, e) => say("#change-msg", t, e);
 
 function paintUser() {
@@ -9576,75 +9575,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // password with a trailing space that `sign_in` would then trim and
   // refuse - a password you cannot use, set by the app that told you it
   // worked. Matching the existing behaviour is the safe half of a bad
-  // pair; fixing it means stopping the trim in all four places at once.
-
-  document.querySelector("#forgot").addEventListener("click", () => {
-    const panel = document.querySelector("#reset-panel");
-    panel.hidden = !panel.hidden;
-    resetSay("");
-    // 203. PREFILL FROM WHATEVER WE ALREADY KNOW. Signed in, it is the
-    // account's own address; signed out, whatever was typed to sign in
-    // with. An empty box is left empty rather than guessed at.
-    const box = document.querySelector("#reset-email");
-    if (!panel.hidden && !box.value) {
-      box.value = (state.user && state.user.email) || val("#email") || "";
-    }
-  });
-
-  document.querySelector("#cancel-reset").addEventListener("click", () => {
-    document.querySelector("#reset-panel").hidden = true;
-    for (const id of ["#reset-email", "#reset-proof", "#reset-new", "#reset-confirm"]) {
-      document.querySelector(id).value = "";
-    }
-    resetSay("");
-  });
-
-  guarded("#send-reset", async () => {
-    const to = val("#reset-email");
-    const r = await tryCall("begin_reset", { email: to });
-    if (!r.ok) return resetSay(r.error, true);
-    // CAREFULLY WORDED. `send_recovery` cannot tell us whether that
-    // address has an account and must not, so this does not claim an
-    // email was sent - only that the request was taken.
-    //
-    // 204. AND IT NOW SAYS WHAT SILENCE MEANS, because the privacy
-    // decision above has a cost: this message looks exactly the same
-    // for an address with no account, and the user would go hunting
-    // through an inbox for mail that was never going to be sent.
-    //
-    // Said GENERICALLY, every time, so it still reveals nothing about
-    // this particular address.
-    resetSay(
-      "Asked for a reset to " + to + " — check that inbox. " +
-      "Nothing will arrive unless an account uses that exact address."
-    );
-  });
-
-  guarded("#do-reset", async () => {
-    const r = await tryCall("finish_reset", {
-      email: val("#reset-email"),
-      pasted: val("#reset-proof"),
-      newPassword: val("#reset-new"),
-      confirm: val("#reset-confirm"),
-    });
-    if (!r.ok) return resetSay(r.error, true);
-
-    // The boxes go now and not before: a refusal above keeps what was
-    // typed, which is 169's lesson about #new-pin.
-    for (const id of ["#reset-proof", "#reset-new", "#reset-confirm"]) {
-      document.querySelector(id).value = "";
-    }
-    document.querySelector("#reset-panel").hidden = true;
-
-    state.user = r.value;
-    paintUser();
-    clearData();
-    // The PIN was deleted by `finish_reset` - see its comment on why a
-    // reset is a security event - so paintUnlock now offers a new one.
-    await paintUnlock();
-    pinSay("Password changed, and the PIN on this machine was forgotten. Set a new one if you want it.");
-    await loadGames();
-  });
+  // pair; fixing it means stopping the trim in every place at once.
 
   document.querySelector("#show-change").addEventListener("click", () => {
     const f = document.querySelector("#change-form");

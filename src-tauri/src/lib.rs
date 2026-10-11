@@ -49,6 +49,7 @@ mod narrative;
 mod objects;
 mod pin;
 mod casting;
+mod recovery;
 mod resist;
 mod resolution;
 mod reveal;
@@ -1666,6 +1667,9 @@ pub fn run() {
             commands::session::set_pin,
             commands::session::unlock,
             commands::session::forget_pin,
+            commands::session::begin_reset,
+            commands::session::finish_reset,
+            commands::session::change_password,
             list_games,
             create_game,
             join_game,

@@ -1175,3 +1175,8 @@ h2.foldhead.shut{margin-bottom:.15rem}
 .clock-now .clock-part{margin-left:.5rem;font-size:10px;
                        text-transform:uppercase;letter-spacing:.09em;
                        color:var(--fg)}
+
+/* 222. A note that is a warning rather than an aside. */
+.err-note {
+  color: #d98b7a;
+}

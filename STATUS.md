@@ -6269,6 +6269,7 @@ session does not repeat the search, which is what this file is for.
 | Secure password change | off | **on** |
 | Require current password when updating | off | **on** |
 | Secure email change | on | on - already right |
+| Custom SMTP | **none** | **still none** - 204 found this blocks password reset entirely |
 
 **THE TWO CHANGE GUARDS MATTER MORE HERE THAN THE PRO FEATURE WOULD,
 and for a reason particular to this app.** `pin.rs` is honest that it
@@ -6451,16 +6452,421 @@ Here it is, in the order the work actually wants doing:
 | 1 | Profiles separated from sign-ins | **done** - 195-197 |
 | 2 | Password rules and the two change guards | **done** - 199, console only |
 | 3 | **Token refresh** | **done** - 200, 201 |
-| 4 | Password change and reset flow | not started - no call site exists |
+| 4 | Password **change** | **done** - 202, fixed in 203 |
+| 4b | Password **reset** | written (202, 203), **parked** - 204, 205 |
 | 5 | Email confirmation on sign-up | not checked |
 | 6 | Linking a second sign-in | no UI, no write policy - see 197 |
 | 7 | Refresh token in the OS keychain | not started - item 8 of the work list |
+| 7b | **Custom SMTP** | **parked** - 205 has the three fixes, all free |
 | 8 | Leaked-password protection | **Pro only, not available** - 199 |
 
-**ITEM 4 IS THE NEXT ONE AND IT HAS A DEPENDENCY NOW.** "Require
-current password when updating" is on, so the update call has to carry
-`current_password` beside the new one. A reset flow built without it
-will fail against the live project and the error will not say why.
+**ITEM 4 WAS THE NEXT ONE AND IT HAD A DEPENDENCY.** "Require current
+password when updating" is on, so the update call has to carry
+`current_password` beside the new one. 202 built it and found that the
+field name is the trap, not the requirement - see there. **ITEM 5,
+email confirmation, is next, and 202 already needs the answer:** the
+reset flow is only as good as the project's ability to send mail, and
+nothing here has ever sent any.
+
+## 202. Getting back in
+
+Item 4 of 201's login list. Two flows that look like one and are not:
+**reset** knows neither the password nor the session and is gated on
+reaching an inbox; **change** knows both and is a single call. Folding
+them together would make one function whose rules depend on which
+arguments are null.
+
+### The shape of the problem: Supabase's flow is built for a website
+
+`/auth/v1/recover` emails a LINK. The link lands on your site, your
+JavaScript reads the session out of the URL fragment, and it calls
+`updateUser`. **This app is not a website.** There is nowhere for that
+link to land and the `SITE_URL` it points at is not ours to serve.
+
+GoTrue has the other half of the same door: `/auth/v1/verify` with
+`type: "recovery"` takes a six-digit code and hands back a real
+session. That is the desktop-shaped path - read a number off your
+phone, type it in.
+
+**EXCEPT THE DEFAULT EMAIL DOES NOT CONTAIN THE CODE.** `{{ .Token }}`
+is the six digits and the stock "Reset password" template does not use
+it - only `{{ .ConfirmationURL }}`. The code exists for every recovery
+email ever sent; the template simply never prints it.
+
+So a code-only flow would be **a reset button that cannot work until
+somebody edits a template in the console** - and 199 is the entry that
+learned console settings are not in git. Shipping that would be a
+fault wearing the costume of a feature.
+
+### So it takes either, and never asks which you have
+
+The confirmation URL carries the token hash as a query parameter, and
+`/auth/v1/verify` accepts a `token_hash` as happily as a `token`.
+
+| what you paste | what happens |
+|---|---|
+| `123456` | verified as a code, with the email beside it |
+| the whole link from the stock email | the hash is read out of it |
+| a bare token copied out of a link | treated as a hash |
+| a link that has already been opened | told so, by name |
+| five digits | told it should be six, and that it got five |
+
+**Paste the stock email's link and it works today.** Change the
+template to print `{{ .Token }}` and six digits work too, which is
+nicer. Neither choice is load-bearing.
+
+### The trap in the middle: a parameter called `token` holding a hash
+
+```
+.../auth/v1/verify?token={{ .TokenHash }}&type=recovery&redirect_to=...
+```
+
+A parameter spelled `token` whose value is a `TokenHash`. Reading it
+and posting it back as `token` is the obvious, wrong thing: GoTrue
+compares a hash against a six-digit code, refuses it, and the message
+is about an invalid token rather than about the field being wrong.
+**Anything out of a URL is a HASH here, whatever the parameter calls
+itself.** `param()` anchors on `?` or `&` for the same family of
+reason - a careless `contains("token=")` matches inside `token_hash=`.
+Both have tests.
+
+### `current_password` is the wire name, and this was checked
+
+The Supabase docs show `currentPassword`. **That is the JavaScript
+client's spelling, which it converts**; the REST field is snake_case.
+This matters more than a typo normally would: **a misspelt field is
+silently IGNORED by GoTrue.** The update would succeed, the old
+password would never be checked, and 199's "require current password"
+guard would quietly not apply - with nothing anywhere saying so.
+Confirmed against the auth documentation before it was written.
+
+### Local checks run before the network, and that is the whole ordering
+
+**A RECOVERY TOKEN IS SINGLE-USE.** Verifying before checking that the
+two password boxes match would spend the token on a TYPO: told the
+passwords differ, the user tries again and finds the code dead, and
+needs a second email to recover from one mistyped character. So
+`check_new_password` and `read_proof` are both pure, both tested, and
+both run before a single request goes out.
+
+**AND IF THE SECOND HALF FAILS THE TOKEN IS GONE ANYWAY.** Verify and
+update are two requests and the first is irreversible. If GoTrue takes
+the code and then refuses the password - 199's rules - the code cannot
+be reused. That is not avoidable, so it is said: the error names it and
+says to ask for a new email. No session is seated in that case even
+though a valid one now exists, because being silently signed in after
+being told the reset failed is a half-outcome nobody can reason about.
+
+### What it deliberately does NOT check
+
+**STRENGTH.** 199 set ten characters, upper, lower, digits and symbols
+**in the console, and recorded that the console is the only record.**
+Restating them in `recovery.rs` would make it the second place one rule
+lives - the console could be retuned tomorrow and this file would go on
+enforcing last month's policy, refusing passwords the server would take.
+GoTrue's refusal already names the length or the missing class. What is
+checked here is only what is ours to know: that there are two boxes and
+they match, which no server can tell us.
+
+**WHETHER THAT ADDRESS HAS AN ACCOUNT.** GoTrue answers 200 either way
+and this preserves that. An endpoint that distinguished them would let
+anybody enumerate who plays in this campaign by watching the error. So
+"asked for a reset - check that inbox" is true in the only sense it can
+be, and is deliberately not a claim that an email was sent.
+
+### A reset forgets the PIN, on purpose
+
+The stored refresh token belongs to the session that existed before the
+password moved, so reseating it from the new session would be easy.
+
+It is not done because **a reset is a security event** - somebody
+either forgot their password or is recovering an account they think
+someone else reached - and `pin.rs` is honest that the file means
+"anyone who can read it can mint a session". Leaving a four-digit door
+standing on this machine straight after a reset is the wrong trade.
+Setting a new PIN is two taps and the panel offers it the moment the
+reset returns.
+
+A **change** does not touch the PIN: `set_password` answers with a user
+and no tokens, the session continues, and `reseat_pin` goes on keeping
+the file current as it has since 200.
+
+### 199's second guard bites, and the fix is said rather than built
+
+199 turned on TWO guards. "Secure password change" wants the SESSION to
+be recent - created within 24 hours - and **200 made sessions that
+renew indefinitely**, so a session can now be live and old at the same
+time. GoTrue's proper answer is a reauthentication nonce: a second
+email, a second code, a second field.
+
+That is a whole flow for a case fixed by signing out and in again, so
+`change_password` TRANSLATES the error instead - "sign out and sign
+back in, then change it". If it annoys anybody, the nonce is what to
+build.
+
+### Two things that could not be tested from here
+
+**THE RECOVERY SESSION'S EXEMPTION.** `finish_reset` sends no
+`current_password`, on the understanding that GoTrue exempts a recovery
+session from that guard - it must, or reset would be impossible with
+the guard on. Confirming it means sending a real email and changing a
+real password, which is the user's to run. If it is wrong, the error
+will say so plainly and the fix is one argument.
+
+**WHETHER THE BUILT-IN SMTP WILL DELIVER.** Supabase's default email
+service is rate-limited and best-effort, and restricts who it will send
+to. The first real send is the test, and a custom SMTP is the answer if
+it refuses.
+
+### And a latent fault found on the way, not fixed here
+
+**`val()` TRIMS, AND IT IS USED FOR PASSWORDS.** `sign_up` and
+`sign_in` have read their password through it since the beginning, so
+every password Supabase holds is already the trimmed one. The new
+fields match that deliberately: reading them raw would let somebody SET
+a password with a trailing space that `sign_in` would then trim and
+refuse - a password you cannot use, set by the app that said it worked.
+
+Matching is the safe half of a bad pair. The fix is to stop trimming in
+all four places at once, which is its own change and wants a test.
+
+## 203. The first real click, and 202 was wrong twice
+
+202 was built, tested and not yet used. Two clicks found two faults,
+and the first one is the interesting one because **202 predicted it and
+then mis-sized it.**
+
+### "Password update requires reauthentication (400)"
+
+Every single attempt. Not an edge case - the only case.
+
+202 saw this coming and wrote it down: 199's second guard, "secure
+password change", wants the session to have been created recently, and
+200 made sessions that renew indefinitely. It judged that a session
+only goes stale after 24 hours, called that rare, and shipped a
+translated error message instead of a fix.
+
+**THE 24 HOURS NEVER MATTERED.** A PIN unlock spends a refresh token,
+and a refresh EXTENDS a session rather than creating one. Everybody
+who uses the PIN - which is the entire point of the PIN - is carrying a
+session whose creation date never moves, from the first unlock onward.
+The command could not have worked once, for anybody, on any day.
+
+**AND THE ADVICE WAS WRONG TOO.** "Sign out and sign back in" lands on
+the unlock screen, where signing back in means the PIN, which mints the
+same stale session again. The message sent the user in a circle.
+
+This is the house defect in its purest form so far: not a missing
+thought, but a thought that was HAD, written down in a comment, and
+sized wrongly. A guess about frequency is still a guess, and this one
+was load-bearing.
+
+### The fix needs no nonce and no email
+
+GoTrue's documented answer is a reauthentication nonce - a second
+email, a second code, a second field. 202 called that "a whole flow for
+a case fixed by signing out and in again". The case is not fixed that
+way, but the conclusion survives anyway, because **this command already
+demands the current password.**
+
+So it spends it on a fresh `sign_in`, and that one call does three jobs:
+
+| | |
+|---|---|
+| proves the current password | and with a far better error than GoTrue gives for a refused `current_password` |
+| creates a session made SECONDS ago | which is exactly what the guard asks for |
+| needs nothing from the inbox | so it works whether or not this project can send mail - still unverified |
+
+`current_password` still rides along on the update. Both of 199's
+guards are on and both are now satisfied honestly rather than routed
+around.
+
+**IT SIGNS IN ONCE MORE AFTERWARDS.** Changing a password can revoke
+the sessions that lived under the old one, including the one that just
+did the changing. Rather than reason about which survive, it takes the
+certain route: sign in with the NEW password and seat that, reseating
+the PIN file with it.
+
+**AND THAT LAST STEP MAY NOT REPORT FAILURE.** By then the password has
+changed. Returning an error would be the worst available lie - the user
+would go on trying the old one for ever. So the command returns a
+STRING rather than unit, and says what happened.
+
+### "Unable to validate email address: invalid format (400)"
+
+The address box held the single letter `t`.
+
+The reset panel said "sends to the email address above" and borrowed
+the sign-in field at the top of the account panel. **A field you are
+told to look upward for is a field nobody looks at**, and the one that
+was there held a leftover keystroke. It now has its own box, prefilled
+from the signed-in account or from whatever was typed to sign in with.
+
+`looks_like_an_email` catches the rest before the wire. It is
+deliberately almost nothing - an `@` with something either side and no
+spaces - and **it is not a second copy of anybody's email rules.**
+GoTrue still judges every address that gets past it. No dot is
+required, because `dave@localhost` is a real address and the folklore
+check that rejects it is how valid addresses get refused by forms. What
+this catches is the empty box and the half-typed word, which are the
+only two mistakes that actually happen.
+
+### Still unverified, and now the only thing left
+
+**NO EMAIL HAS EVER BEEN SENT BY THIS PROJECT.** 202 flagged it and 203
+has not changed it - both faults found so far were on the near side of
+the wire. `begin_reset` reaching GoTrue without a format error is as
+far as testing has got; whether Supabase's built-in SMTP will actually
+deliver to that address is the next thing to find out, and the first
+real send is the only test there is.
+
+If it refuses, a custom SMTP is the answer, and it is console work -
+which means 199's warning applies and it belongs in that table.
+
+## 204. The reset flow cannot send, and never could
+
+No email arrived. The diagnosis is not "delivery failed" - **nothing was
+ever generated.**
+
+### What the database says
+
+```sql
+select email, recovery_sent_at, recovery_token is not null from auth.users;
+```
+
+`recovery_sent_at` is **NULL on all six accounts** and not one holds a
+recovery token. GoTrue did not create one, so there was never an email
+to lose. The two `/recover` calls returned 200 and did nothing - one of
+them in **1.9 milliseconds**, which is not long enough to have spoken
+to a mail server.
+
+### Why: the built-in email service refuses non-team addresses
+
+From the Supabase SMTP guide, quoted rather than paraphrased:
+
+> "Unless you configure a custom SMTP server for your project, Supabase
+> Auth will refuse to deliver messages to addresses that are not part of
+> the project's team."
+
+And it is capped at **2 messages per hour.**
+
+The project's team address is `tirayis.dm@gmail.com`. **Not one of the
+six odyssey1e accounts is that address:**
+
+| account | team member? |
+|---|---|
+| `tirayis.dm+dm@gmail.com` and `+p1`..`+p4` | no - a plus-address is a distinct string to Supabase |
+| `jecoct19@gmail.com` | no - the second developer's app account |
+
+Gmail would happily deliver a plus-address to one inbox. **Supabase
+never gets that far**, because the check is on the recipient string and
+it fails before SMTP is involved.
+
+So the flow built in 202 and fixed in 203 **cannot send to any account
+this project has.** Item 4 is not done; it is written and untested past
+the first hop.
+
+### The honest status of what 202-203 proved
+
+| | |
+|---|---|
+| parsing, upcasting a pasted code or link | tested, 20 unit tests |
+| the single-use ordering, the PIN decision | written, reviewed, not exercised |
+| `begin_reset` reaching GoTrue | **confirmed** - 200, correct address validation |
+| an email existing at all | **never happened, on this project, ever** |
+| everything after the paste | **completely unexercised** |
+
+`confirmation_sent_at` is NULL on all six accounts too. These users were
+made in the dashboard, which auto-confirms and sends nothing. **This
+project has never sent a single email in its life.**
+
+### Two ways forward, and the cheap one is worth doing first
+
+**TEST IT WITH THE ONE ADDRESS THAT WORKS.** The built-in service will
+deliver to `tirayis.dm@gmail.com`, and that address has **no odyssey1e
+account** - which is the whole reason the reset looked broken. Sign up
+with it in the app, then run the reset against it. That exercises
+recover, the email, the paste, verify, set password and sign-in, with no
+SMTP setup at all. It also finally answers the question 202 left open:
+whether a recovery session is exempt from the "require current
+password" guard. Budget for **2 emails an hour.**
+
+**THEN CUSTOM SMTP, WHICH IS THE REAL ANSWER.** Resend, Brevo, Mailgun
+and SES all have free tiers that cover a table of five. Without it the
+reset flow is unusable by anybody who is not a Supabase team member,
+which is every player.
+
+**AND IT IS CONSOLE WORK, SO 199'S WARNING APPLIES.** It will not be in
+git, no migration will capture it, and a rebuilt project will silently
+go back to refusing everyone. It belongs in 199's table the day it is
+set up.
+
+### What this says about testing
+
+202 wrote down that SMTP was unverified and called it one of two things
+it could not test. That was right, and it was still not enough - the
+entry treated it as a risk to the LAST step when it is a precondition
+for every step after the first. A flow whose second hop has never
+executed is not "built and awaiting a live test"; it is built and
+unproven, and this file should say which.
+
+**THE CHECK THAT SETTLED IT WAS A DATABASE QUERY, NOT A LOG.** The auth
+logs showed two clean 200s and no error, which looked like success. The
+200 is enumeration protection: GoTrue answers the same way for an
+address it will not mail as for one it has mailed. `recovery_sent_at`
+is the column that cannot lie, and 1.9ms was the clue that sent me
+looking for it.
+
+## 205. Parked, and exactly what is left
+
+Dave, 2026-10-09: **park the email work.** Custom SMTP was pointed at a
+Microsoft 365 mailbox, `dm@osgamer.com`, and three separate things were
+wrong with it. None of them is game code and all of them are config, so
+the reset flow stops here until somebody wants to spend an hour on DNS.
+
+**ONE THING TO CORRECT BEFORE ANYBODY REVISITS THIS.** The decision was
+taken believing a paid plan was needed. **It is not.** Custom SMTP is
+available on the free plan - 199's Pro-only finding was about
+LEAKED-PASSWORD PROTECTION and does not extend to this. Every fix below
+is free and is on infrastructure this project already owns. Nothing
+here was blocked by Supabase.
+
+### The three, measured rather than guessed
+
+| | finding | how it was established |
+|---|---|---|
+| **Port** | `smtp-mail.outlook.com:465` opens TCP then **forcibly closes the TLS handshake**. Port **587** answers `220 ... Microsoft ESMTP MAIL Service ready`. | socket test from the laptop |
+| **SPF** | `v=spf1 include:secureserver.net -all` - GoDaddy only, **hard fail**, while MX is `osgamer-com.mail.protection.outlook.com` and autodiscover points at Outlook. Mail sent through Microsoft fails SPF for its own domain. | dig/nslookup against 8.8.8.8 |
+| **SMTP AUTH** | Microsoft 365 disables authenticated SMTP by default and security defaults block it outright. **Not verified** - it needs credentials and would surface as a 535 on the first send. | documented behaviour, flagged not proven |
+
+The SPF one is the dangerous one and the reason this is written down:
+**Supabase would report the send as successful.** The mail would simply
+be rejected or junked at the far end. That is the same failure shape as
+204 - something that looks like success from the sending side - and it
+would have cost another evening.
+
+The record wants: `v=spf1 include:secureserver.net
+include:spf.protection.outlook.com -all`, dropping the GoDaddy include
+if GoDaddy no longer sends.
+
+### What the app does in the meantime
+
+**THE FLOW IS LEFT IN, AND SAYS SO.** The panel carries a visible "Not
+working yet" note pointing at 204 rather than being hidden behind a
+feature flag. A button that promises an inbox and delivers silence is
+worse than one that says what it is waiting for, and a flag would be
+machinery guarding a two-line change. Delete the note the day a reset
+email arrives.
+
+**PASSWORD CHANGE IS UNAFFECTED AND WORKS.** 203 made it independent of
+email on purpose - it re-signs-in rather than asking for a nonce - so
+the account panel is not dead weight. Anyone who knows their password
+can change it today.
+
+**AND NOBODY CAN RECOVER A FORGOTTEN ONE.** Until SMTP works, a lost
+password is a dashboard job: Supabase console, Authentication, the
+user, send a reset or set one directly. Five accounts and a DM who owns
+the project, so this is survivable - it would not be with real players.
 
 ## 202. Four buttons that opened onto nothing
 

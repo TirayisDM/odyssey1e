@@ -386,8 +386,12 @@ fn auth_call(path: &str, body: &Value) -> Result<Session, String> {
     // Signup with email confirmation ON returns a user and no session.
     // That is not an error, but it is not a signed-in state either —
     // say so plainly rather than handing back an empty token.
+    //
+    // 202. WORDED FOR FOUR CALLERS NOW, not one. `verify` joined
+    // signup, signin and refresh here, and a recovery that came back
+    // without a session would have blamed email confirmation.
     let access_token = parsed.access_token.ok_or_else(|| {
-        "signed up, but no session was returned — email confirmation is probably still on"
+        "that succeeded but returned no session - if this was a sign-up,          email confirmation is probably still on"
             .to_string()
     })?;
     let user = parsed
@@ -470,6 +474,92 @@ pub fn refresh(refresh_token: &str) -> Result<Session, String> {
         "token?grant_type=refresh_token",
         &json!({ "refresh_token": refresh_token }),
     )
+}
+
+/// Ask Supabase to email a recovery code and link.
+///
+/// 202. RETURNS NOTHING AND SAYS NOTHING ABOUT THE ADDRESS, which is
+/// the point. GoTrue answers 200 whether or not that email has an
+/// account, and this preserves that: an endpoint that distinguished the
+/// two would let anybody enumerate who plays in this campaign by
+/// watching the error.
+///
+/// So the frontend's "check your email" is true in the only sense it can
+/// be - the request was accepted - and is deliberately not a claim that
+/// an email was sent.
+pub fn send_recovery(email: &str) -> Result<(), String> {
+    let resp = http()
+        .post(format!("{}/auth/v1/recover", SUPABASE_URL))
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Content-Type", "application/json")
+        .json(&json!({ "email": email }))
+        .send()
+        .map_err(|e| format!("could not reach Supabase: {}", e))?;
+
+    let status = resp.status().as_u16();
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+    Err(error_message(status, &resp.text().unwrap_or_default()))
+}
+
+/// Spend a recovery code or link for a real session.
+///
+/// 202. THE FIELD NAME DEPENDS ON WHICH KIND IT IS, and getting that
+/// wrong is the trap `recovery.rs` exists to avoid: a `token_hash` sent
+/// as `token` is compared against a six-digit code and refused with a
+/// message about the token rather than about the field.
+///
+/// A code needs the email beside it - six digits are not unique. A hash
+/// does not, and none is sent, so pasting the link works even if the
+/// user types their address wrong.
+pub fn verify_recovery(proof: &crate::recovery::Proof, email: &str) -> Result<Session, String> {
+    use crate::recovery::Proof;
+    let body = match proof {
+        Proof::Code(code) => json!({ "type": "recovery", "token": code, "email": email }),
+        Proof::Hash(hash) => json!({ "type": "recovery", "token_hash": hash }),
+    };
+    auth_call("verify", &body)
+}
+
+/// Write a new password onto the signed-in user.
+///
+/// 202. `current_password` IS THE WIRE NAME. The Supabase docs show
+/// `currentPassword` because that is the JavaScript client's spelling and
+/// it converts; this goes straight at the REST endpoint, where the field
+/// is snake_case. A misspelt field is simply IGNORED by GoTrue - the
+/// update would succeed without the old password ever being checked,
+/// which is the "require current password" guard quietly not applying.
+/// Confirmed against the Supabase auth documentation before it was
+/// written, not inferred from the client library.
+///
+/// RETURNS THE UNIT, NOT A SESSION. This endpoint answers with a USER
+/// and no tokens, so there is nothing here to seat - whoever calls it
+/// keeps the session they already had.
+pub fn set_password(
+    token: &str,
+    new_password: &str,
+    current_password: Option<&str>,
+) -> Result<(), String> {
+    let mut body = json!({ "password": new_password });
+    if let Some(current) = current_password {
+        body["current_password"] = json!(current);
+    }
+
+    let resp = http()
+        .put(format!("{}/auth/v1/user", SUPABASE_URL))
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .map_err(|e| format!("could not reach Supabase: {}", e))?;
+
+    let status = resp.status().as_u16();
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+    Err(error_message(status, &resp.text().unwrap_or_default()))
 }
 
 /* ============================ POSTGREST ============================ */

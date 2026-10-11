@@ -60,6 +60,73 @@
                and they sit next to each other. -->
           <div id="pin-msg" class="dm-msg" hidden></div>
           <div class="muted pin-note">Convenience, not security &mdash; see pin.rs.</div>
+
+          <!-- 202. Changing a password you KNOW. Folded in beside the
+               PIN because both are "this account on this machine", and
+               both only make sense once signed in. -->
+          <div class="row">
+            <button id="show-change" class="tiny ghost">Change password</button>
+          </div>
+          <div id="change-form" hidden>
+            <input id="change-current" type="password" placeholder="current password" autocomplete="off" />
+            <input id="change-new" type="password" placeholder="new password" autocomplete="off" />
+            <input id="change-confirm" type="password" placeholder="new password again" autocomplete="off" />
+            <div class="row">
+              <button id="do-change">Change it</button>
+              <button id="cancel-change" class="ghost">Cancel</button>
+            </div>
+            <div id="change-msg" class="dm-msg" hidden></div>
+          </div>
+        </div>
+
+        <!-- 202. GETTING BACK IN WITHOUT THE PASSWORD.
+             Hidden behind a link because the common case is signing in,
+             and a six-field reset form sitting above the two boxes that
+             usually work is noise. -->
+        <div class="row">
+          <button id="forgot" class="tiny ghost">Forgot password</button>
+        </div>
+        <div id="reset-panel" hidden>
+          <!-- 203. ITS OWN ADDRESS BOX, prefilled.
+               It used to borrow the one at the top of the panel and say
+               "the address above", and the first real attempt was sent
+               to a box holding the single letter "t". A field you are
+               told to look upward for is a field nobody looks at. -->
+          <input id="reset-email" type="email" placeholder="your email address" autocomplete="off" />
+          <!-- 204. "EXACT" IS LOAD-BEARING. Every account here is a
+               plus-address - tirayis.dm+dm@, +p1@ - and those route to
+               one Gmail inbox, so it is easy to think the base address
+               is the real one. It is not an account; GoTrue matches the
+               whole string and a reset sent to it matches nothing. -->
+          <div class="muted pin-note">
+            The exact address the account uses, plus-suffix and all.
+          </div>
+          <!-- 205. SAID OUT LOUD RATHER THAN HIDDEN BEHIND A FLAG.
+               This flow is written and tested up to the point where an
+               email has to exist, and no email can be sent until SMTP
+               is configured - see STATUS 204. A button that promises
+               an inbox and delivers silence is worse than one that
+               says what it is waiting for. Delete these two lines the
+               day a reset email actually arrives. -->
+          <div class="muted pin-note err-note">
+            <strong>Not working yet:</strong> sending email needs SMTP set
+            up on the project. STATUS 204 has what is left to do.
+          </div>
+          <div class="row">
+            <button id="send-reset" class="ghost">Email me a reset</button>
+          </div>
+          <div class="muted pin-note">
+            Then paste what arrives &mdash; the 6-digit code if the email
+            has one, otherwise the whole link.
+          </div>
+          <input id="reset-proof" type="text" placeholder="6-digit code, or the whole link" autocomplete="off" />
+          <input id="reset-new" type="password" placeholder="new password" autocomplete="off" />
+          <input id="reset-confirm" type="password" placeholder="new password again" autocomplete="off" />
+          <div class="row">
+            <button id="do-reset">Set new password</button>
+            <button id="cancel-reset" class="ghost">Cancel</button>
+          </div>
+          <div id="reset-msg" class="dm-msg" hidden></div>
         </div>
               </div>
 </section>

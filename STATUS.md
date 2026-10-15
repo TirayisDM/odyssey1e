@@ -6462,6 +6462,62 @@ current password when updating" is on, so the update call has to carry
 `current_password` beside the new one. A reset flow built without it
 will fail against the live project and the error will not say why.
 
+## 202. Four buttons that opened onto nothing
+
+The cheap half of the player view, and the first development change
+since the 8th.
+
+**A player signed in and saw eight tabs, four of which opened onto
+blank.** Characters, Run, World and Objects each hid their own PANEL on
+`amDM()` and left their BUTTON on the strip. `loadCreatures` was the
+only one that hid its button - one line, in one loader - which is
+exactly why the other four never got it.
+
+**One list owns the strip now**, for the reason `refreshTab`'s own
+comment gives about itself: *"so a new tab cannot forget to be in it"*.
+Four copies of that line in four loaders is the fault this codebase
+keeps paying for, and it would have been four places to remember when a
+fifth DM tab arrives. `DM_ONLY_TABS` plus `paintTabOffer()`, called from
+the only two moments the answer can change - `selectGame`, after
+`loadGames` because `amDM` reads `state.games`, and `clearData` on
+sign-out. The line came OUT of `loadCreatures`.
+
+**And it does not leave you standing on one.** Hiding a button while its
+pane is the open one would take the tab off the strip and leave the
+blank pane exactly where it was - the same bug with its label removed.
+Switching games is the live case: DM of one, player of the next. The
+open pane moves to Play.
+
+`chars` is in the list and reads like a player tab. It is not: it is the
+campaign ROSTER, and its own loader says so at the top - *"A player has
+their own character on the sheet and no business with the roster."*
+
+**STILL ONLY AN OFFER.** The access rule is 011's policies plus 193's
+guards and Postgres enforces it. This decides what is on the strip, and
+the worst case if the list is wrong is a dead tab rather than a leak.
+
+### Verified in a browser, not by reading it
+
+Per the README's "testing the frontend without the app": the real
+`main.js` served against a stub `window.__TAURI__`, two profiles and one
+game whose `dm_uid` is the DM's. Four cases, no console errors:
+
+| | |
+|---|---|
+| as a player | Play, Spells, Trade - the other five **hidden** |
+| as the DM | all eight shown |
+| DM standing on Run, game changes to one they do not run | five hide **and the pane moves to Play** |
+| DM standing on World, signs out | same |
+
+**THE FIRST ATTEMPT AT THE THIRD CASE PROVED NOTHING AND LOOKED LIKE A
+PASS.** It swapped `window.__TAURI__.core.invoke` after load to change
+the game's DM - but `main.js` line 9 is
+`const { invoke } = window.__TAURI__.core`, destructured at module load,
+so the swap changed nothing, `list_games` kept returning the old answer
+and the tabs correctly stayed shown. A test that cannot move the input
+reports the old behaviour as the new one. The fixture holds a mutable
+`window.__fixture` now, and the comment in it says why.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15
@@ -6489,11 +6545,12 @@ rather than recalled:
 | **Play** | the sheet and the roll path - this works |
 | **Spells** | works |
 | **Trade** | works |
-| Characters, Run, World, Objects | **four buttons that open onto nothing.** Each panel hides itself on `amDM()` and the BUTTON does not |
-| Creatures | correctly absent - the only tab that hides its own button |
+| Characters, Run, World, Objects | ~~four buttons that open onto nothing~~ - **fixed in 202** |
+| Creatures | correctly absent |
 
-There is exactly one `tab.hidden` assignment in the frontend, and it is
-`loadCreatures`. Four more want the same line.
+**202 did the tab half.** `DM_ONLY_TABS` and `paintTabOffer()` own the
+strip, verified in a browser against a stub. What is left below is the
+part that is a feature rather than a one-liner.
 
 **And a player cannot see the fight at all.** There is no player view of
 turn order, no view of their own conditions, nothing that says "you are

@@ -275,6 +275,11 @@ function clearData() {
   for (const id of ["#run-panel", "#world-panel"]) {
     document.querySelector(id).hidden = true;
   }
+  // 202. AND NOT THEIR TAB STRIP EITHER, which is the same thought one
+  // level out: the panels above were already cleared and the BUTTONS
+  // that open them were not. Here rather than higher up because
+  // `amDM` reads `state.games`, which is cleared above.
+  paintTabOffer();
   state.rolls = [];
   document.querySelector("#games").innerHTML = "";
   document.querySelector("#characters").innerHTML = "";
@@ -428,10 +433,51 @@ function amDM() {
   return !!g && !!state.user && g.dm_uid === state.user.profile_id;
 }
 
+// 202. THE FOUR TABS A PLAYER COULD OPEN ONTO NOTHING.
+//
+// Every one of these panes already hid ITSELF on `amDM()` and left its
+// BUTTON on the strip, so a player signed in, saw eight tabs, and four
+// of them opened onto blank. `loadCreatures` was the only one that
+// hid its own button - one line, in one loader, which is why the other
+// four never got it.
+//
+// ONE LIST, for the reason `refreshTab` gives about itself: "so a new
+// tab cannot forget to be in it". Four copies of this line in four
+// loaders is the fault this codebase keeps paying for, and it would
+// have been four places to remember when a fifth DM tab arrives.
+//
+// WHAT EACH OF THEM IS, so the list can be argued with rather than
+// trusted: `run` is the DM's screen, `world` edits the places, `chars`
+// is the campaign ROSTER and not your own sheet - that one reads as a
+// player tab and is not, which is why its loader says so at the top -
+// and `objects` is the loose-object manager.
+//
+// STILL ONLY AN OFFER. The access rule is 011's policies plus 193's
+// guards and Postgres enforces it; this decides what is on the strip.
+// The worst case if it is wrong is a dead tab, not a leak.
+const DM_ONLY_TABS = ["chars", "run", "world", "creatures", "objects"];
+
+function paintTabOffer() {
+  const dm = amDM();
+  for (const b of document.querySelectorAll("#tabs .tab")) {
+    if (DM_ONLY_TABS.includes(b.dataset.tab)) b.hidden = !dm;
+  }
+  // AND DO NOT LEAVE THEM STANDING ON ONE. Hiding the button while its
+  // pane is the open one would take the tab off the strip and leave the
+  // blank pane exactly where it was, which is the bug with its label
+  // removed. Switching games is the case: DM of one, player of the next.
+  if (!dm && DM_ONLY_TABS.includes(state.tab)) showTab("play");
+}
+
 async function selectGame(id) {
   state.gameId = id;
   state.dmEncounterId = null;
   await loadGames();
+  // 202. AFTER loadGames and before anything paints. `amDM` reads
+  // `state.games`, so it cannot be asked until that list is back, and
+  // this is the only place the answer can change - the same person is
+  // DM of one game and a player in the next.
+  paintTabOffer();
   await loadCharacters();
   // 055: twelve rows, so the creation picker is ready before
   // anybody opens it.
@@ -2701,9 +2747,9 @@ function paintResistances(sheet) {
 // case here is a tab whose buttons come back "only the DM of this game
 // can ...".
 async function loadCreatures() {
-  const tab = [...document.querySelectorAll("#tabs .tab")]
-    .find((b) => b.dataset.tab === "creatures");
-  if (tab) tab.hidden = !amDM();
+  // 202. The tab's own button is no longer hidden here - `paintTabOffer`
+  // owns the whole strip, because this line existing in exactly one
+  // loader is why the other four DM tabs never got it.
   if (!state.gameId || !amDM()) return;
 
   // The reference statblocks to import FROM - shared and read-only.

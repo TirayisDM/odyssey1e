@@ -6464,137 +6464,94 @@ will fail against the live project and the error will not say why.
 
 ## Pick up here
 
-### FOR THE DESKTOP, PULLING 2026-10-08
+### FOR DEVELOPMENT, 2026-10-15
 
-A long laptop day and most of it reached the schema. **Pull before
-touching anything**, because the code and the database have moved
-together and either half alone is broken:
+**Three sessions of plumbing are finished and the game did not move.**
+193-198 closed the authorization holes and separated a person from a
+sign-in; 199-201 gave the session password rules and a refresh that
+renews itself. Every bit of it was worth doing. None of it is a feature,
+and the backlog below has not shortened since the 8th.
 
-| migration | what moved |
+Checked on pulling, not remembered: **git and the database agree** - 164
+rows for 154 files, the difference being the five migrations applied in
+parts (026-028, 031, 032, 043); the newest on both sides is **198**;
+`security_doors()` reports **zero holes**; the build is clean with zero
+warnings and **1057 tests pass**. 199-201 touched no schema, which is
+why the numbers did not move.
+
+#### THE THING ALL THAT PLUMBING WAS FOR, AND IT DOES NOT EXIST
+
+**A player can sign in, and then cannot play.** Read out of `main.js`
+rather than recalled:
+
+| tab | what a player actually gets |
 |---|---|
-| 177 | `character_prayers` is now **`character_spells`**, and both `instantiate_*` functions were recreated |
-| 183 | `cast_type` has a fifth value, **`Auto`** |
-| 185 | `spells.at_higher_dice` |
-| 186 | 30 spells carry it |
-| 187 | `spells.imposes`, and 22 spells carry it |
+| **Play** | the sheet and the roll path - this works |
+| **Spells** | works |
+| **Trade** | works |
+| Characters, Run, World, Objects | **four buttons that open onto nothing.** Each panel hides itself on `amDM()` and the BUTTON does not |
+| Creatures | correctly absent - the only tab that hides its own button |
 
-**AND THE RUST MOVED UNDER IT.** `prayers.rs` is `casting.rs`,
-`commands/prayers.rs` is `commands/casting.rs`, and the four commands
-are `list_casting`, `prepare_spell`, `forget_spell`, `cast_spell`. A
-checkout from before 176 pointed at this database will fail on the
-table that no longer exists.
+There is exactly one `tab.hidden` assignment in the frontend, and it is
+`loadCreatures`. Four more want the same line.
 
-The check this file has asked for since 115, run on the laptop before
-pushing: git and the database agree, newest four on both sides are 183,
-185, 186, 187. Nothing applied without a file.
+**And a player cannot see the fight at all.** There is no player view of
+turn order, no view of their own conditions, nothing that says "you are
+up" or "you cannot act". `conditions.rs` and `cannot_act` landed in
+188-190 and only the DM's card renders them. The initiative order exists
+and only the DM can see whose turn it is.
 
-**Be clear about what is and is not done.** The foundation is square
-and the combat loop runs: the access model, the dice, the sheet
-resolver, the prose, equipment, attacks, hit points, dying, the DM's
-screen, and monsters that are individuals rather than views of a type.
+So the next piece is **THE PLAYER'S VIEW OF A FIGHT**, and 197 and 198
+are what unblock it:
 
-Inventory is now real on both sides: a catalogue to pick from, a
-designed way to acquire, and objects that can be named, split, dropped
-and destroyed.
+1. **Turn order with names.** `list_members` has returned real display
+   names since 198 and **is still called by no JavaScript at all.** The
+   roster read is done; nothing renders it.
+2. **Your own line:** hit points, your conditions as chips, and the
+   `cannot act` warning 190 already computes.
+3. **A monster shows a BAND, not a number** - Dave's call, taken before
+   the detour: name, position in the order, conditions, and
+   hurt/bloodied/down. **No hit points, no AC.** That rule does not
+   exist anywhere yet, in SQL or in Rust, and it is a rule, so it wants
+   a tested module rather than a `case` in the frontend.
+4. **Hide the four DM tabs** from a non-DM, which is the one-line half.
 
-**As of 2026-10-03** there is also a game clock, rests that spend and
-return hit dice, feature uses with recharges, effects that expire on a
-tick, the cleric spell list with prepared prayers and slots, casting
-that lands on a target and holds concentration, enchantment as one grant
-vocabulary that reaches the dice, damage resistance with its provenance,
-and saves you can roll from the ability row. The UI is no longer a test
-rig: seven tabs and five sheet subtabs, and nothing on screen computes a
-game number.
+Postgres already refuses a player the DM's data - that is 011 and 193 -
+so this is about what is OFFERED, not about safety. The worst case today
+is a dead tab, not a leak.
 
-**As of 2026-10-06** a creature also knows WHAT IT IS - 5e's fourteen
-types, on species, statblocks and characters, so the fifteen spells that
-name a type can be checked. A monster says what it resists in the same
-grant vocabulary everything else uses. A statblock can be instantiated
-as a template character and copied into an encounter with its kit, which
-is how two goblins off one statblock get their own hit points. A
-creature can be written to a file and read back. And the global
-catalogue holds 134 statblocks carrying 223 kit rows, 45 of them with
-resistance grants. **Spot-check a creature before a session runs on
-it:** those numbers are SRD-derived from memory and were verified as the
-rows intended, not as the numbers printed.
+#### Standing habits, which still apply
 
-Since the last handoff: an object edit now reaches the sheet and not
-just the Objects tab (five other object writes had the same staleness);
-the encumbrance walk applies an object's own `weight_override` instead
-of the catalogue's, which had Hapi showing 25 lb on the item and 19 lb
-on the carry line from the same row; and `items.description` is filled
-on all 89 catalogue rows - the column had existed since 004 and nothing
-had ever written to it until 070 put it on screen. Characters can be
-renamed, can be more than one class, and a bard can play to a room.
+**Write the migration file and apply it in the same breath.** Applying
+first and writing afterwards means never; that is what stranded 101-107
+and four others. `tools/recover_migrations.py` makes recovery one
+command when it happens anyway.
 
-**What AppSheet did that this still does not is *deliver*.**
-`rolls.status` goes `pending -> resolved -> delivered` and nothing in
-this codebase moves a row to `delivered`. There is still no die art, and
-the session still lives in memory - a PIN saves you retyping a password,
-but a restart signs you out and persisting it wants the OS keychain
-rather than a file.
+**A column has readers in two places.** Before dropping or renaming one,
+`grep -rn "<column>" src-tauri/src supabase/migrations` - both halves. A
+function body stored in Postgres is running code that does not look like
+running code, and plpgsql resolves its columns on first execution, so
+nothing fails until a user presses the button. See the correction under
+152, which broke every enrol.
 
-**The migration chain is complete, and was not on 2026-10-03.** Seven
-files - 101 to 107, the spell catalogue and the whole cleric list - had
-been applied to the live project and never committed, the same fault
-0ed7491 fixed for four others. They were recovered from
-`supabase_migrations.schema_migrations`, which keeps the statements it
-ran with the comment headers intact, and every one was MD5-verified
-against that record, so they are the files AS APPLIED.
+**Run `select * from public.security_doors()` after any migration that
+adds a function or a table.** Empty is the passing answer. It has caught
+a false claim in 193's own header and refused 197 outright.
 
-**The 19 remaining gaps are not missing anything.** Every change gets a
-number; only a change that touches the schema gets a migration. 070
-taught the sheet to show a description and 071 filled the column; 099
-is an ability cap in `species.rs`; 111 and 112 gave casting a target in
-JavaScript and Rust. Checked against the database's own record: every
-numbered migration it has, this folder has.
+**006's seeds carry one character's numbers baked in** - spell_atk +7,
+DC 15, 2d8+4 - flagged BAKED in their column comments. Read the 006
+header before trusting a seeded technique's arithmetic.
 
-The habit that caused the gap was applying first and writing the file
-afterwards, which in practice means never. Write the file and apply it
-in the same breath. `tools/recover_migrations.py` makes the recovery one
-command if it happens again.
+#### The rest of the backlog
 
-**And the second migration habit, added 2026-10-07 after 150 broke every
-enrol: a column has readers in two places.** Before dropping or renaming
-one, `grep -rn "<column>" src-tauri/src supabase/migrations` - both
-halves. A function body stored in Postgres is running code that does not
-look like running code, and plpgsql resolves its columns on first
-execution rather than at creation, so nothing fails until a user presses
-the button. See the correction under 152.
-
-006 is applied and every seeded table was checksum-verified against the
-spreadsheet. Read the 006 header: spells and techniques were ported
-AS-IS with one character's numbers baked in (spell_atk +7, DC 15,
-2d8+4), flagged BAKED in their column comments, and the Spellbook
-`Prepared` column was deliberately not ported. `character_dice` is the
-ActorDice junction, with a partial unique index enforcing one equipped
-set per character. `narrative_lines` is wired in; the rest is not.
-
-**The equipment chain is done, and the DM side with it.** The attack
-key landed, `equipment.rs` reads the schema, `dice.rs` carries variable
-crit and fumble thresholds, and 28d5c27 gave the DM a screen for
-encounters, enrolment, challenges and statblocks. A monster attacks
-through the same `swing` a character does.
-
-**A DECISION TAKEN, AND BUILT: proficiency must be visible, not
-just felt.** The Heavy Crossbow comes back at +1 where the Mace comes
-back at +5, and the difference is entirely whether the character is
-trained. A player who cannot see that reads it as the app being wrong.
-`Resolved.modifier` already exists so a UI can explain a number instead
-of printing it; the attack path should carry enough to say WHY - the
-ability used, the proficiency bonus applied or withheld, and the fact
-that it was withheld. Traceable is the requirement, not decorative.
-
-Built, and in three places now. The attack preview says `STR +1,
-prof +3` or `NOT proficient`. The equipment panel says `proficient ·
-derived` against `proficient · flagged`, so an explicit answer from the
-source never looks like a computed one. And an NPC's attack buttons
-carry the same, which is how the goblin's +1 handaxe beside its +4
-scimitar reads as the finesse rule rather than as a mistake.
-
-**That question is now answered.** 009 and `resolution.rs` are in, and
-the attack key is no longer blocked - see "Targets and outcomes" above
-for what was settled, and "Combat" for the shape of what follows.
+The numbered list below is unchanged and still right; items 1-4 are game
+features and 5-11 are the longer tail. **The login list is separate and
+lives in 201** - items 4 (password change and reset, which now needs
+`current_password`), 6 (linking a second sign-in) and 7 (refresh token
+into the OS keychain, which is item 8 below) are the ones still open.
+Two things 197 left that are features rather than faults: there is no
+account-deletion path now that deleting a sign-in no longer deletes the
+person, and linking has no UI and deliberately no write policy.
 
 Roughly in order:
 

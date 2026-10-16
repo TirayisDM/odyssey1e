@@ -6676,6 +6676,10 @@ clicking your own name in the sidebar unhides the sheet.
 
 ### Noticed while fixing it, not fixed
 
+**And the other note here - "any player can write any column on any
+actor row" - was wrong; see 208.** A trigger restricts it and the audit
+only read the policies.
+
 **A player cannot create a character from the UI.** `#new-char-toggle`
 and `#new-char-panel` sit INSIDE `#chars-panel`, which hides itself for
 non-DMs - so the button is gone even though
@@ -6888,6 +6892,59 @@ first error-badge test reported a pass that was nothing of the kind.
 The rig's script tag now carries `?v=<timestamp>`.
 
 1084 tests, zero warnings.
+
+## 208. And your own initiative, once
+
+205's "Roll initiative" button answered
+
+```
+only the DM may change an actor beyond its death saves
+```
+
+**And the note under 204 that said the opposite was wrong.** It read
+"any player can write any column on any actor row: initiative,
+hp_override, dead, even the label", and it was arrived at by reading
+`pg_policy` and stopping there. RLS was never the whole answer for this
+table - **a policy cannot restrict a column**, so the column rule lives
+in `guard_actor_update`, a BEFORE UPDATE trigger, which is the right
+place for it and exactly where nobody looked.
+
+The honest version: a non-DM member may change `death_successes`,
+`death_failures`, `dead`, the two hold columns and the naming columns.
+Wider than the error message claims - `dead` on somebody else's monster
+is not a death save - but nothing like "any column".
+
+**THE LESSON IS WHERE TO LOOK.** Access in this schema is RLS *plus*
+triggers, and the audit under 193-198 only ever walked `pg_policy` and
+`pg_proc`. `security_doors()` has the same blind spot: it reports a
+table with no policy and would say nothing about a table whose column
+rule had been dropped.
+
+### What it opens, and how far
+
+Exactly what `reveal::needs_initiative` already offers, which is the
+point of the two agreeing:
+
+| | |
+|---|---|
+| **yours** | the actor must be a character you own - rolling for somebody else is reordering the fight |
+| **once** | only while unrolled; a re-roll is the same act under a friendlier name |
+
+Not SECURITY DEFINER, deliberately - the trigger never was. It reads
+`characters` as the caller, so RLS applies to the ownership test and a
+row the caller cannot see answers "not mine", which fails closed. The
+owner is compared against `current_profile()`, so it is the PERSON and
+not the sign-in.
+
+Verified live and rolled back, as Player One and then as the DM:
+
+| | |
+|---|---|
+| my own, unrolled | **ok** |
+| my own, again | refused - "already rolled, ask the DM" |
+| somebody else's | refused - "only the DM may roll for somebody else" |
+| my own `hp_override` | still refused |
+| the DM, all four | unchanged |
 
 ## Pick up here
 

@@ -16,7 +16,13 @@
     <button id="signout" class="ghost" hidden>sign out</button>
   </header>
 
-  <div class="cols">
+  <!-- 207. THE LOG IS A DRAWER NOW, and `logshut` on this row is what
+       decides. Closed, the right column is a tab's width and the left
+       one takes the rest; open, the old 46/54 split comes back. The
+       class lives up here rather than on the column because BOTH have
+       to change, and two elements toggling each other is how they end
+       up disagreeing. -->
+  <div class="cols logshut" id="cols">
     <div class="left">
 
 
@@ -1123,7 +1129,20 @@
     </div>
 
     <div class="right">
-      <h2>Log <button id="clear-log" class="tiny ghost">clear</button></h2>
+      <!-- THE TAB, and the only thing visible while the drawer is shut.
+           It carries a count when something has gone wrong, because the
+           log is the ONLY place an error is reported - closing it by
+           default would otherwise make a failed roll look like a button
+           that did nothing. -->
+      <button id="log-tab" class="logtab" type="button" aria-expanded="false"
+              title="Show the log">
+        <span class="logtab-word">LOG</span>
+        <span class="logtab-count" id="log-badge" hidden></span>
+      </button>
+      <h2>Log
+        <button id="clear-log" class="tiny ghost">clear</button>
+        <button id="hide-log" class="tiny ghost">hide</button>
+      </h2>
       <div id="log"></div>
     </div>
   </div>

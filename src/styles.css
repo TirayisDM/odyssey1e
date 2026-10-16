@@ -1090,3 +1090,36 @@ button.wide{width:100%}
                            max-width:11rem}
 .strip li.stripacts .at{font-size:11px;color:var(--muted)}
 .strip li.stripacts .muted{font-size:11px}
+
+/* 207. The log as a drawer.
+
+   IT IS A DEVELOPER SURFACE ON A PLAYER'S SCREEN. Every command's raw
+   JSON, down the whole right-hand column, on the one layout that is
+   meant to end up on a phone. Shut by default; the tab opens it. */
+.logtab{display:none}
+.cols.logshut .left{width:auto;flex:1;border-right:0}
+.cols.logshut .right{flex:0 0 auto;width:1.9rem;padding:.5rem 0;
+                     border-left:1px solid var(--line);align-items:center}
+.cols.logshut .right h2,
+.cols.logshut .right #log{display:none}
+/* THE WHOLE STRIP IS THE BUTTON, not the three letters at the top of
+   it. A 15x33 target on the edge of a 700px column is a thing you aim
+   at; the full height is a thing you hit, which matters more on the
+   touch screen this layout is headed for. */
+.cols.logshut .logtab{display:flex;flex:1;width:100%;
+                      justify-content:flex-start;padding-top:.55rem}
+
+/* Vertical, because a tab down the edge of a column is the one place
+   sideways text costs nothing and saves the whole width. */
+.logtab{flex-direction:column;align-items:center;gap:.4rem;
+        background:none;border:0;cursor:pointer;padding:.3rem 0;
+        color:var(--muted);font:inherit;font-size:10px;
+        letter-spacing:.14em;text-transform:uppercase}
+.logtab:hover{color:var(--fg)}
+.logtab .logtab-word{writing-mode:vertical-rl}
+/* The count of things that went wrong while nobody was looking. */
+.logtab .logtab-count{writing-mode:horizontal-tb;letter-spacing:0;
+                      background:var(--bad);color:#fff;border-radius:999px;
+                      min-width:1.1em;padding:0 .25em;text-align:center;
+                      font-size:9px;line-height:1.5}
+.logtab.alert{color:var(--bad)}

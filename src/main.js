@@ -111,6 +111,75 @@ function log(cmd, value, isError) {
 
   el.append(head, body);
   logEl().prepend(el);
+
+  // 207. AND IF NOBODY IS LOOKING, SAY SO ON THE TAB.
+  //
+  // The log is the only place an error is reported, so a shut drawer
+  // would turn a refused roll into a button that did nothing. The
+  // count is not a notification - it does not steal the screen, it
+  // just stops the failure being silent, and opening the drawer
+  // clears it.
+  if (isError) noteLogError();
+}
+
+/* ---------- the log drawer (207) ---------- */
+
+// Per-device and not per-game, which is why it is the one thing in this
+// app that uses localStorage: whether YOU want the raw command log open
+// on THIS machine is a preference, not state anybody else shares. It
+// can throw in a webview with storage disabled, so every touch is
+// wrapped and the default - shut - is what a failure falls back to.
+const LOG_OPEN_KEY = "odyssey1e.log.open";
+
+function logIsOpen() {
+  try {
+    return localStorage.getItem(LOG_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setLogOpen(open) {
+  const cols = document.querySelector("#cols");
+  const tab = document.querySelector("#log-tab");
+  if (!cols) return;
+  cols.classList.toggle("logshut", !open);
+  if (tab) tab.setAttribute("aria-expanded", open ? "true" : "false");
+  try {
+    localStorage.setItem(LOG_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    // A preference that cannot be remembered is still a preference for
+    // this session. Nothing else depends on it.
+  }
+  if (open) clearLogAlert();
+}
+
+let logErrors = 0;
+
+function noteLogError() {
+  const cols = document.querySelector("#cols");
+  // Open already? Then it is on screen and there is nothing to flag.
+  if (!cols || !cols.classList.contains("logshut")) return;
+  logErrors += 1;
+  const tab = document.querySelector("#log-tab");
+  const badge = document.querySelector("#log-badge");
+  if (tab) tab.classList.add("alert");
+  if (badge) {
+    badge.hidden = false;
+    badge.textContent = String(logErrors);
+    badge.title = logErrors + " error" + (logErrors === 1 ? "" : "s") + " in the log";
+  }
+}
+
+function clearLogAlert() {
+  logErrors = 0;
+  const tab = document.querySelector("#log-tab");
+  const badge = document.querySelector("#log-badge");
+  if (tab) tab.classList.remove("alert");
+  if (badge) {
+    badge.hidden = true;
+    badge.textContent = "";
+  }
 }
 
 // A button that WRITES is not allowed to be re-entrant.
@@ -9875,5 +9944,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.querySelector("#clear-log").addEventListener("click", () => {
     logEl().innerHTML = "";
+    clearLogAlert();
   });
+
+  // 207. The drawer. Shut unless this device says otherwise, and the
+  // state is applied here rather than in the markup so there is one
+  // answer to "is it open" - `logshut` in index.html is only the
+  // default the page paints before this runs.
+  setLogOpen(logIsOpen());
+  const logTab = document.querySelector("#log-tab");
+  if (logTab) logTab.addEventListener("click", () => setLogOpen(true));
+  const hideLog = document.querySelector("#hide-log");
+  if (hideLog) hideLog.addEventListener("click", () => setLogOpen(false));
 });

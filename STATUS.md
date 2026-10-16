@@ -6834,6 +6834,61 @@ picker carries names only, their own character still carries its
 numbers, and the attack goes out with `targetValue: null` and a
 `targetId` the engine resolves for itself.
 
+## 207. The log is a drawer
+
+Dave: *"can we have the Log expand from a tab so its closed by
+default"*.
+
+It was the whole right-hand column - every command's raw JSON, half
+the window, on the one layout that is meant to end up on a phone. Now
+it is a tab down the right edge and the left column takes the width:
+**335px of app instead of 168**, at the pane width this was measured
+at. Click the strip to open it, `hide` to shut it.
+
+`logshut` lives on the ROW rather than on either column, because both
+have to change together and two elements toggling each other is how
+they end up disagreeing. The whole 29px strip is the button, not the
+three letters at the top of it - a 15x33 target on the edge of a 700px
+column is a thing you aim at, and the full height is a thing you hit,
+which will matter more on a touch screen than it does now.
+
+### The part that is not layout
+
+**THE LOG IS THE ONLY PLACE AN ERROR IS REPORTED.** `tryCall` catches
+every failure and calls `log(cmd, e, true)`, and nothing else shows it
+- so shutting the drawer by default would have turned a refused roll
+into a button that did nothing. That is the fault this project keeps
+paying for, arriving by way of a layout change.
+
+So the tab counts them: shut, a failure turns it red and puts a number
+on it; opening clears both. **It does not open itself.** A drawer that
+jumps open on a transient network error is worse than a number you can
+choose to look at, and the failure is no longer silent either way.
+
+### The one localStorage in this app
+
+Whether YOU want the raw command log open on THIS machine is a
+preference, not state anybody shares - which is exactly what
+localStorage is for, and why this is the first use of it here. Every
+touch is wrapped, because it throws in a webview with storage
+disabled, and the fallback is the default: shut. The class in
+`index.html` is only what the page paints before the script runs;
+`setLogOpen` is the one answer to "is it open".
+
+Verified in the browser rig: shut on a first visit, the tab opens it,
+`hide` shuts it, the choice survives a reload, two failures while shut
+leave the tab reading **2** with "2 errors in the log", and opening
+clears the badge with both errors waiting.
+
+**A cache trap worth remembering for the rig**, which cost a wrong
+conclusion here: `python -m http.server` serves `stub.js` with a
+`Last-Modified` the browser will happily reuse, so an edited fixture
+can keep running the OLD code while every measurement looks real. The
+first error-badge test reported a pass that was nothing of the kind.
+The rig's script tag now carries `?v=<timestamp>`.
+
+1084 tests, zero warnings.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

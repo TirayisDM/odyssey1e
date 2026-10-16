@@ -2142,34 +2142,31 @@ async function fillTurnActions(host, line, enc) {
   const targets = (state.targets || []).filter((t) => t.id !== line.actor_id);
 
   if (Array.isArray(attacks) && attacks.length && targets.length) {
-    const weapon = document.createElement("select");
-    weapon.className = "tiny";
-    for (const a of attacks) {
-      const o = document.createElement("option");
-      o.value = a.request;
-      o.textContent = a.label || a.request;
-      // Carried over from the DM's card, because a player is the person
-      // most likely to read a low number as the app being broken.
-      if (a.proficient === false) o.textContent += " (not proficient)";
-      weapon.append(o);
-    }
-
+    // 209. THE SAME BLOCKS THE DM SEES. This was one flat `<select>`
+    // of every attack, which read as "longbow" and hid the techniques
+    // behind a control nobody would think to open - Bryn's own log
+    // already had Full Draw and Bodkin Point in it. `attackLines` is
+    // the DM card's renderer, so the grouping, the technique styling
+    // and the not-proficient warning come across with it.
     const at = document.createElement("select");
     at.className = "tiny";
     for (const t of targets) {
       const o = document.createElement("option");
       o.value = t.id;
-      // NO HIT POINTS IN THIS LIST. The DM's version of this picker
-      // prints "12/26hp" beside each name, which would hand back in a
-      // dropdown exactly what `reveal.rs` keeps off the strip.
+      // NO NUMBERS IN THIS LIST. 206 takes them off the payload for a
+      // player; this would print them if they were there.
       o.textContent = t.label;
       at.append(o);
     }
 
-    const go = document.createElement("button");
-    go.className = "tiny";
-    go.textContent = "Attack";
-    guard(go, async () => {
+    const aim = labelledControl(line.name + " attacks", at, "wide aim");
+    host.append(aim);
+
+    for (const el of attackLines(attacks, swingAt, () => !!at.value)) {
+      host.append(el);
+    }
+
+    async function swingAt(atk) {
       const t = (state.targets || []).find((x) => x.id === at.value);
       if (!t) return log("roll_named", "that target has left the fight", true);
       const r = await call("roll_named", {
@@ -2179,7 +2176,7 @@ async function fillTurnActions(host, line, enc) {
         // caught this sending `characterId: null`, which `roll_named`
         // refuses with "select a character first".
         characterId: line.your_character_id || state.characterId,
-        request: weapon.value,
+        request: atk.request,
         mode: "normal",
         targetValue: t.value,
         targetKind: t.target_kind,
@@ -2194,9 +2191,7 @@ async function fillTurnActions(host, line, enc) {
       await loadRolls();
       await loadTargets();
       await loadFightStrip();
-    });
-
-    host.append(weapon, sEl("span", "at", "at"), at, go);
+    }
   } else if (!targets.length) {
     host.append(sEl("span", "muted", "nothing to aim at"));
   } else {
@@ -8679,6 +8674,83 @@ async function castRow(actor, encounterId) {
   return wrap;
 }
 
+// 209. ONE RENDERER FOR BOTH SCREENS' ATTACK BUTTONS.
+//
+// The DM's card has grouped these since 007 - a block per weapon per
+// mode, the plain swing beside its techniques, and the caption marked
+// when the swinger is not proficient - and the player's strip shipped
+// in 205 with a flat `<select>` of the same list. One screen said
+// "Longbow", "Full Draw", "Bodkin Point" under a heading; the other
+// said "longbow", and the techniques were options nobody would think
+// to open.
+//
+// So the grouping, the captions, the technique styling and the
+// proficiency warning live here once. What differs between the two
+// screens is only WHAT A PRESS DOES - `npc_attack` for the DM,
+// `roll_named` for a player - so that is the argument.
+//
+// `isReady` is asked at press time rather than at build time, because
+// the target picker it usually consults is filled by the same caller
+// a moment later.
+// A separator that cannot occur in a weapon's name. Written as an
+// escape rather than typed, because a literal control character in a
+// source file is invisible in every diff it ever appears in.
+const ATTACK_KEY_SEP = "\u0000";
+
+function attackLines(attacks, onPick, isReady) {
+  const groups = [];
+  for (const atk of attacks) {
+    const key = atk.weapon + ATTACK_KEY_SEP + atk.mode;
+    let g = groups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, weapon: atk.weapon, mode: atk.mode, attacks: [] };
+      groups.push(g);
+    }
+    g.attacks.push(atk);
+  }
+
+  return groups.map((g) => {
+    const line = document.createElement("div");
+    line.className = "attack-line";
+
+    const cap = document.createElement("span");
+    cap.className = "attack-of";
+    // The mode only when it is not the ordinary one - "Light Hammer"
+    // and "Light Hammer thrown" rather than "Light Hammer melee".
+    cap.textContent = g.weapon + (g.mode === "melee" ? "" : " " + g.mode);
+    // The plain swing carries the proficiency; a technique inherits it
+    // from the same weapon, so asking the first is asking all of them.
+    if (g.attacks.some((a) => a.proficient === false)) {
+      cap.classList.add("warn");
+      cap.title = "not proficient — no proficiency bonus";
+    }
+    line.append(cap);
+
+    for (const atk of g.attacks) {
+      const b = document.createElement("button");
+      b.className = "tiny" + (atk.technique ? " technique" : "");
+      b.textContent = atk.label || atk.request;
+      if (atk.proficient === false) {
+        b.title = "not proficient — no proficiency bonus";
+      }
+      let busy = false;
+      b.addEventListener("click", async () => {
+        if (busy || (isReady && !isReady())) return;
+        busy = true;
+        b.disabled = true;
+        try {
+          await onPick(atk);
+        } finally {
+          busy = false;
+          b.disabled = false;
+        }
+      });
+      line.append(b);
+    }
+    return line;
+  });
+}
+
 async function attackRow(actor, encounterId) {
   const wrap = document.createElement("div");
   wrap.className = "attacks";
@@ -8736,86 +8808,38 @@ async function attackRow(actor, encounterId) {
   // both ends of that sentence.
   wrap.append(labelledControl(actor.label + " attacks", pick, "wide aim"));
 
-  // ONE BLOCK PER WEAPON PER MODE. A goblin with a light hammer has
-  // fifteen buttons, and they are one weapon in two modes - 007 exists
-  // because that hammer carries seven melee techniques and six thrown.
-  // In one undivided row they read as fifteen unrelated verbs.
-  //
-  // Grouped on what the command now says rather than on a guess:
-  // `weapon` used to carry the TECHNIQUE'S name, so every button
-  // claimed a different weapon and no grouping was possible.
-  const groups = [];
-  for (const atk of attacks) {
-    const key = atk.weapon + "\u0000" + atk.mode;
-    let g = groups.find((x) => x.key === key);
-    if (!g) {
-      g = { key, weapon: atk.weapon, mode: atk.mode, attacks: [] };
-      groups.push(g);
-    }
-    g.attacks.push(atk);
-  }
-
-  for (const g of groups) {
-    const line = document.createElement("div");
-    line.className = "attack-line";
-
-    const cap = document.createElement("span");
-    cap.className = "attack-of";
-    // The mode only when it is not the ordinary one - "Light Hammer"
-    // and "Light Hammer thrown" rather than "Light Hammer melee".
-    cap.textContent = g.weapon + (g.mode === "melee" ? "" : " " + g.mode);
-    // The plain swing carries the proficiency; a technique inherits it
-    // from the same weapon, so asking the first is asking all of them.
-    if (g.attacks.some((a) => a.proficient === false)) {
-      cap.classList.add("warn");
-      cap.title = "not proficient — no proficiency bonus";
-    }
-    line.append(cap);
-
-    for (const atk of g.attacks) line.append(buildAttackButton(atk));
+  // 209. GROUPED BY `attackLines`, which the player's fight strip uses
+  // too. The rule - one block per weapon per mode, because a goblin
+  // with a light hammer has fifteen buttons that are one weapon in two
+  // modes - now lives in one place and both screens read the same.
+  for (const line of attackLines(attacks, swingAt, () => !pick.disabled)) {
     wrap.append(line);
   }
 
-  // A closure over the picker and the actor, which is why it is nested
-  // rather than a sibling of attackRow.
-  function buildAttackButton(atk) {
-    const b = document.createElement("button");
-    b.className = "tiny" + (atk.technique ? " technique" : "");
-    b.textContent = atk.label || atk.request;
-    if (atk.proficient === false) b.title = "not proficient — no proficiency bonus";
-    let busy = false;
-    b.addEventListener("click", async () => {
-      if (busy || pick.disabled) return;
-      busy = true;
-      b.disabled = true;
-      try {
-        const t = JSON.parse(pick.value);
-        dmSay("");
-        const r = await tryCall("npc_attack", {
-          actorId: actor.id,
-          request: atk.request,
-          mode: "normal",
-          targetValue: t.value,
-          targetKind: t.kind,
-          targetLabel: t.label,
-          encounterId,
-          targetId: t.id,
-          targetRow: t.row,
-          targetCharacterId: t.characterId || null,
-        });
-        if (!r.ok) dmSay(r.error, true);
-        else dmSay(actor.label + " attacks " + t.label);
-        await loadRolls();
-        await loadTargets();
-        await selectEncounter(encounterId);
-      } finally {
-        busy = false;
-        b.disabled = false;
-      }
+  // WHAT A PRESS DOES, which is the only part that differs. The DM
+  // swings AS the creature through `npc_attack`; the player's strip
+  // hands the same builder a `roll_named` instead.
+  async function swingAt(atk) {
+    const t = JSON.parse(pick.value);
+    dmSay("");
+    const r = await tryCall("npc_attack", {
+      actorId: actor.id,
+      request: atk.request,
+      mode: "normal",
+      targetValue: t.value,
+      targetKind: t.kind,
+      targetLabel: t.label,
+      encounterId,
+      targetId: t.id,
+      targetRow: t.row,
+      targetCharacterId: t.characterId || null,
     });
-    return b;
+    if (!r.ok) dmSay(r.error, true);
+    else dmSay(actor.label + " attacks " + t.label);
+    await loadRolls();
+    await loadTargets();
+    await selectEncounter(encounterId);
   }
-
   return wrap;
 }
 

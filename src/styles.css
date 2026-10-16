@@ -1081,9 +1081,17 @@ button.wide{width:100%}
 /* The controls sit under your own line rather than in its state cell:
    two selects and a button do not belong in a column sized for the
    word "bloodied". Full width, wrapping on a narrow screen. */
-.strip li.stripacts{display:flex;flex-wrap:wrap;align-items:center;
-                    gap:.3rem .4rem;padding:.1rem 0 .35rem 1.4rem;
+/* 209. A BLOCK, NOT A ROW. It held a select and a button; it now holds
+   the same stacked weapon blocks the DM's card does, so the attacks
+   need to run down the panel rather than along it. */
+.strip li.stripacts{display:block;padding:.15rem 0 .45rem 1.4rem;
                     border-bottom:1px solid var(--line)}
+.strip li.stripacts .cell{margin-bottom:.25rem}
+.strip li.stripacts .attack-line{margin-bottom:.15rem}
+/* The caption column is 8.5rem on the DM's wide panel; a player's strip
+   is narrower and the weapon name can have the room back. */
+.strip li.stripacts .attack-of{flex-basis:5.5rem}
+.strip li.stripacts > button{margin-top:.25rem}
 .strip li.stripacts select{font-size:11px;padding:.05rem .2rem;
                            background:var(--bg);color:var(--fg);
                            border:1px solid var(--line);border-radius:3px;

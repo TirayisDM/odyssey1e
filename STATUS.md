@@ -6946,6 +6946,59 @@ Verified live and rolled back, as Player One and then as the DM:
 | my own `hp_override` | still refused |
 | the DM, all four | unchanged |
 
+## 209. The same attack buttons on both screens
+
+Dave: *"the player's view should show the detailed info on the attack
+options like it does in DM view for the active character"*.
+
+205 built the strip's attacks as a flat `<select>` of whatever
+`list_npc_attacks` returned. It read **"longbow"**. The DM's card has
+grouped the same list since 007 - a block per weapon per mode, the
+plain swing beside its techniques, the caption marked when the swinger
+is not proficient - and Bryn's own roll log already had **Full Draw**
+and **Bodkin Point** in it, which were options nobody would think to
+open a dropdown to find.
+
+```
+Bryn attacks  [ Lich 0001 v ]
+LONGBOW RANGED   [Longbow] [Full Draw] [Bodkin Point]
+SHORTSWORD       [Shortsword]
+GREATAXE         [Greataxe]            <- caption marked, not proficient
+```
+
+**`attackLines` is the DM card's own renderer, extracted rather than
+copied.** The grouping, the captions, the technique styling and the
+proficiency warning now live once and both screens read the same.
+What differs between them is only WHAT A PRESS DOES - `npc_attack` for
+the DM, `roll_named` for a player - so that is the argument it takes.
+
+The DM's path is otherwise untouched, and the diff is the proof: the
+removed block is exactly the old grouping plus `buildAttackButton`, and
+the `npc_attack` payload is unchanged.
+
+`isReady` is asked at press time rather than at build time, because the
+target picker it consults is filled by the same caller a moment later.
+
+### A literal NUL went into the source and nearly stayed
+
+The group key is `weapon + "\u0000" + mode` - a separator that cannot
+occur in a name. Writing it through a shell heredoc collapsed the
+escape and put **an actual NUL byte in `main.js`**. It worked: the key
+still joined, the page still ran, and the tests still passed. What it
+broke was the tooling - `grep` began answering *"Binary file
+src/main.js matches"* and silently stopped reporting line numbers,
+which is how a search starts lying to you rather than failing.
+
+Now a named constant written as an escape, with the reason on it: a
+control character in source is invisible in every diff it ever appears
+in.
+
+Verified in the rig: three groups off a fixture carrying two
+techniques and one untrained weapon, the technique buttons styled, the
+Greataxe caption warned, and pressing **Full Draw** sending
+`roll_named` with that request, the right target and the character off
+the line.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

@@ -6999,6 +6999,98 @@ Greataxe caption warned, and pressing **Full Draw** sending
 `roll_named` with that request, the right target and the character off
 the line.
 
+## 210. Your line opens into what you can do
+
+Dave: *"a character's view just like in the DM view when a character is
+selected - a view that allows attacks / spell casting / special
+abilities"*, expanding **in place**, with a player able to **end their
+own conditions** and the DM free to override. Class and species
+abilities deferred to a phase 2.
+
+```
+  Lich 0001                        hurt
+  Luci          bloodied   cannot act - paralysed
+v Bryn          YOUR TURN   you - 36/36   [x] poisoned
+  | Bryn attacks [ Lich 0001 v ]
+  | LONGBOW RANGED  [Longbow] [Full Draw] [Bodkin Point]
+  | SHORTSWORD      [Shortsword]
+  | Cast Bryn ...                       <- the real panel, moved here
+  | [Roll initiative]
+```
+
+### What I had wrong when I said "the view exists"
+
+I told Dave `castRow` was close to a drop-in for a player. **It is
+not, and it is also not what a player should get.** `castRow` is the
+DM's row: it reads `state.dmTargets`, reports through `dmSay` and
+refreshes with `selectEncounter`.
+
+**The player already had a casting panel** - `#cast-panel`, from 110,
+with `loadCastable` filling it, `doCast` spending the slot, and
+`#pending-save` inside it where a save spell waits to be resolved. It
+was simply in a section further down the Play column. So the job was
+never to borrow the DM's; it was to bring the player's own to where
+the fight is.
+
+### The panel is LENT, not rebuilt
+
+The node moves. Rebuilding casting inside the strip would have been a
+second copy of the list, the slot picker and the cast call - and
+**`#pending-save` is the half that would have been forgotten**: cast
+Hold Person from a panel that does not carry it and the prompt to roll
+the save appears in a section nobody is looking at.
+
+So `lendCastPanel` moves the element into the open row and
+`stowCastPanel` puts it back. One panel, one loader, one pending save,
+and everything already writing to those ids keeps working untouched.
+
+**AND IT IS BROUGHT HOME BEFORE EVERY RENDER, which is not a detail.**
+The panel is a CHILD of the row it is lent to, and the next render
+does `list.innerHTML = ""` - which deletes it along with the row.
+The rig caught it on the first collapse: `#cast-panel` was gone from
+the document for the rest of the session. Stowing first makes the
+invariant trivial.
+
+### Three more things the rig caught
+
+**The strip could be blanked by a sheet read.** Your own character is
+now selected automatically when the strip finds your line and nothing
+is chosen - `state.characterId` is what the sheet, the casting list
+and `performerActorId` all hang off, and a player who goes straight to
+the fight has clicked nothing. But `selectCharacter` loads the sheet,
+and an empty sheet threw and took the whole strip down with it. It is
+awaited, so the casting panel is filled before it is lent, and
+**guarded**, because it is the one call in there that loads something
+the strip does not own.
+
+**The caret vanished on your turn.** The marker column showed the turn
+arrow when `is_current`, which took the open/shut control away at the
+one moment you are certain to want it. Your turn is already shouted by
+the frame and the chip, so the caret wins on your own line and the
+arrow is for everybody else.
+
+**A condition you may end reads off `state.effects`, not off the
+strip.** The engine sends condition KEYS, which is all a reader needs;
+ending one needs the EFFECT'S ID, and `conditionsOn` has the whole row
+because `list_effects` already loaded it. So your chips are clickable
+and nobody else's are - which is also exactly the policy,
+`effects: dm or bearer ends`. The DM can re-apply, as Dave asked.
+
+**No access changes were needed.** Checked before building rather than
+after: `character_slots` and `character_uses` are owner-or-DM writable,
+and `effects` is dm-or-bearer for ending. Nothing like 208 was lurking.
+
+Verified in the rig: the line opens and shuts, the panel goes
+lent -> home -> lent without being lost, the caret reads correctly in
+both states, and clicking the poisoned chip sent `end_effect` and
+logged "Bryn is no longer poisoned".
+
+**Phase 2, as agreed:** class features and species traits in the
+fight. They are on the sheet today (Characters -> Skills & Talents,
+with the spend button working), and `loadFeatures` renders into fixed
+ids, so moving them wants the same host-taking treatment `attackLines`
+got in 209.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

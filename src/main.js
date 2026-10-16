@@ -1999,6 +1999,7 @@ async function loadFightStrip() {
   if (!panel || !list) return;
   if (!state.gameId) {
     panel.hidden = true;
+    stowCastPanel();
     return;
   }
 
@@ -2008,12 +2009,38 @@ async function loadFightStrip() {
   // ago under a message nobody will see - so it leaves the list alone.
   if (!r.ok) {
     panel.hidden = true;
+    stowCastPanel();
     return;
   }
   const strip = r.value;
   if (!strip || !(strip.order || []).length) {
     panel.hidden = true;
+    stowCastPanel();
     return;
+  }
+
+  // 210. THE CHARACTER YOU ARE PLAYING IS THE ONE YOU HAVE SELECTED.
+  //
+  // `state.characterId` is set by clicking your name in the sidebar,
+  // and everything a player acts with hangs off it - the sheet, the
+  // casting list, `performerActorId`. A player who signs in and goes
+  // straight to the fight has clicked nothing, so their own panel was
+  // empty for a reason that had nothing to do with the fight.
+  //
+  // ONLY WHEN NOTHING IS CHOSEN. Somebody with two characters who has
+  // picked one keeps that pick.
+  const mine = strip.order.find((l) => l.yours && l.your_character_id);
+  if (mine && !state.characterId) {
+    // AWAITED, so the casting panel below is filled before it is lent -
+    // but GUARDED, because this is the one call in here that loads
+    // something the strip does not own. A sheet read that throws must
+    // not take the fight strip down with it; the rig caught exactly
+    // that, with an empty sheet blanking the whole panel.
+    try {
+      await selectCharacter(mine.your_character_id);
+    } catch (e) {
+      log("select character", e, true);
+    }
   }
 
   panel.hidden = false;
@@ -2022,7 +2049,19 @@ async function loadFightStrip() {
   document.querySelector("#strip-round").textContent =
     "round " + (enc.round || 0);
 
+  // 210. HOME BEFORE CLEARING, ALWAYS. The casting panel is LENT to a
+  // row, so it is a child of that row - and `innerHTML = ""` on the
+  // next render would delete it along with the row it was sitting in.
+  // The rig caught that: collapse your line once and `#cast-panel` was
+  // gone from the document for the rest of the session.
+  //
+  // So every render starts by taking it back, and lends it again
+  // below if the line is open. The invariant is then trivial: the
+  // panel is at home except while a row is actually on screen holding
+  // it.
+  stowCastPanel();
   list.innerHTML = "";
+  let lent = false;
   for (const line of strip.order) {
     const li = document.createElement("li");
     if (line.is_current) li.classList.add("up");
@@ -2034,11 +2073,30 @@ async function loadFightStrip() {
     const yourTurn = line.yours && line.is_current;
     if (yourTurn) li.classList.add("yourturn");
 
-    // The marker is its own cell so every name starts at the same x
-    // whether or not it is their turn.
-    const mark = document.createElement("span");
-    mark.className = "turnmark";
-    mark.textContent = line.is_current ? "►" : "";
+    // 210. YOUR OWN LINE OPENS. The marker cell carries the caret on
+    // your line and the turn arrow on everybody's, because they are
+    // the same column and a row cannot have two.
+    const key = "strip:" + line.actor_id;
+    const open = line.yours ? state.openLevels[key] !== false : false;
+
+    // THE CARET WINS ON YOUR OWN LINE. It first showed the turn arrow
+    // when `is_current`, which took the open/shut affordance away on
+    // your turn - the one moment you are certain to want it. Your turn
+    // is already shouted by the frame and the chip, so the marker
+    // column can be the control on your line and the arrow on
+    // everybody else's.
+    const mark = document.createElement(line.yours ? "button" : "span");
+    mark.className = "turnmark" + (line.yours ? " opener" : "");
+    mark.textContent = line.yours
+      ? (open ? "▾" : "▸")
+      : line.is_current ? "►" : "";
+    if (line.yours) {
+      mark.title = open ? "hide what you can do" : "show what you can do";
+      mark.addEventListener("click", () => {
+        state.openLevels[key] = !open;
+        loadFightStrip();
+      });
+    }
 
     const name = document.createElement("span");
     name.className = "stripname";
@@ -2046,28 +2104,24 @@ async function loadFightStrip() {
 
     // EVERYTHING KNOWN ABOUT THEIR STATE GOES IN ONE CELL, which is
     // what makes the row read as "Lich 0001 · bloodied · frightened"
-    // rather than a name with a column of chips hanging under it. The
-    // row is a three-column grid and a chip appended to the LI itself
-    // lands in a fourth cell, which wraps to a new line - so they are
-    // appended in here instead.
+    // rather than a name with a column of chips hanging under it.
     const how = document.createElement("span");
     how.className = "striphow";
 
-    // YOUR NUMBERS, OR SOMEBODY ELSE'S WORD, and never both - the
-    // engine sends exactly one of them and this does not choose.
     if (yourTurn) {
       const t = chip("your turn", "yes");
       t.classList.add("turnchip");
       how.append(t);
     }
 
+    // YOUR NUMBERS, OR SOMEBODY ELSE'S WORD, and never both - the
+    // engine sends exactly one of them and this does not choose.
     if (line.yours && line.hp_max) {
       const n = document.createElement("span");
       n.className = "yours";
       n.textContent = "you · " + line.hp_current + "/" + line.hp_max;
       how.append(n);
     } else if (line.yours) {
-      // Yours, but nothing ever set a maximum. Still say it is yours.
       const n = document.createElement("span");
       n.className = "yours";
       n.textContent = "you";
@@ -2079,30 +2133,50 @@ async function loadFightStrip() {
       how.append(b);
     }
 
-    // The chips come off the catalogue `list_conditions` already sent,
-    // looked up by the key the engine chose, so no name, glyph or
-    // tooltip is typed into this file.
-    //
-    // THE NAME IS ON THE CHIP, not only in the hover, and that is the
-    // one place this differs from the DM's card. That card shows a bare
-    // glyph because "the hover has to carry the whole meaning" - but
-    // THIS panel is the phone and tablet surface, and a touch screen
-    // has no hover. A symbol nobody can decode and nobody can hover is
-    // a symbol. The glyph leads, the word follows, which is what the
-    // condition picker already does.
-    for (const key of line.conditions || []) {
-      const c = (state.conditions || []).find((x) => x.key === key);
-      if (!c) continue;
-      // Not twice. When a condition is the reason for the `cannot act`
-      // warning below, that warning already names it.
-      if (line.cannot_act && c.name === line.cannot_act) continue;
-      const ch = chip(c.glyph + " " + c.name.toLowerCase(), "no cond");
-      ch.title = c.said || c.name;
-      how.append(ch);
+    // 210. YOUR OWN CONDITIONS COME OFF `state.effects`, NOT OFF THE
+    // STRIP. The engine sends condition KEYS, which is all a reader
+    // needs; ending one needs the EFFECT'S ID, and `conditionsOn` has
+    // the whole row because `list_effects` already loaded it. So your
+    // chips are clickable and everybody else's are not - which is also
+    // the rule: `effects: dm or bearer ends`.
+    if (line.yours) {
+      for (const e of conditionsOn(line.your_character_id)) {
+        const ch = chip(e.condition.glyph + " " + e.condition.name.toLowerCase(), "no cond");
+        ch.title = (e.condition.said || e.condition.name) +
+          (e.left != null ? " · " + e.said : "") + " — click to end it";
+        ch.classList.add("endable");
+        guard(ch, async () => {
+          const res = await tryCall("end_effect", {
+            gameId: state.gameId,
+            effectId: e.id,
+          });
+          if (!res.ok) return log("end_effect", res.error, true);
+          log("end_effect", line.name + " is no longer " +
+            e.condition.name.toLowerCase());
+          await loadEffects();
+          await loadFightStrip();
+        });
+        how.append(ch);
+      }
+    } else {
+      // The chips come off the catalogue `list_conditions` already
+      // sent, looked up by the key the engine chose, so no name, glyph
+      // or tooltip is typed into this file.
+      //
+      // THE NAME IS ON THE CHIP, not only in the hover: this panel is
+      // the phone and tablet surface and a touch screen has no hover.
+      for (const k of line.conditions || []) {
+        const c = (state.conditions || []).find((x) => x.key === k);
+        if (!c) continue;
+        if (line.cannot_act && c.name === line.cannot_act) continue;
+        const ch = chip(c.glyph + " " + c.name.toLowerCase(), "no cond");
+        ch.title = c.said || c.name;
+        how.append(ch);
+      }
     }
 
-    // 190's warning, on a player's screen for the first time. It SAYS,
-    // it does not refuse - the same decision 051 took about turn order.
+    // 190's warning, on a player's screen. It SAYS, it does not refuse
+    // - the same decision 051 took about turn order.
     if (line.cannot_act) {
       const w = chip("cannot act · " + line.cannot_act.toLowerCase(), "no");
       w.title = "A creature that cannot act takes no actions or reactions.";
@@ -2112,42 +2186,68 @@ async function loadFightStrip() {
     li.append(mark, name, how);
     list.append(li);
 
-    // 205. AND ON YOUR OWN LINE, WHAT YOU CAN DO ABOUT IT.
+    // 205/210. AND ON YOUR OWN LINE, WHAT YOU CAN DO ABOUT IT.
     //
-    // ON YOUR LINE, NOT ON YOUR TURN. The frame above says whose turn
-    // it is loudly; the controls stay put either way, because 051
-    // settled that this app SAYS and does not REFUSE - a DM waving
-    // somebody in early is normal, and a button that vanishes is the
-    // app overruling the table.
-    if (line.yours) {
+    // ON YOUR LINE, NOT ON YOUR TURN. 051 settled that this app SAYS
+    // and does not REFUSE - a DM waving somebody in early is normal,
+    // and a control that vanishes is the app overruling the table.
+    if (line.yours && open) {
       const acts = document.createElement("li");
       acts.className = "stripacts" + (yourTurn ? " yourturn" : "");
       await fillTurnActions(acts, line, strip.encounter);
       list.append(acts);
+      lent = true;
     }
+  }
+
+  // Shut, or not yours at all: the casting panel goes back where the
+  // markup put it rather than disappearing with the line.
+  if (!lent) stowCastPanel();
+}
+
+// 210. THE CASTING PANEL IS LENT TO THE STRIP, NOT COPIED INTO IT.
+//
+// `#cast-panel` is the player's own casting surface and has been since
+// 110 - `loadCastable` fills it, `doCast` spends the slot, and
+// `#pending-save` inside it is where a save spell waits to be
+// resolved. Rebuilding that inside the strip would be a second copy of
+// all three, and the pending save is the half that would have been
+// forgotten: cast Hold Person from a panel that does not carry it and
+// the prompt to roll the save appears in a section nobody is looking
+// at.
+//
+// So the NODE MOVES. One panel, one loader, one pending save, and
+// everything that already writes to those ids keeps working.
+let castPanelHome = null;
+
+function lendCastPanel(host) {
+  const p = document.querySelector("#cast-panel");
+  if (!p) return;
+  if (!castPanelHome) {
+    castPanelHome = { parent: p.parentNode, next: p.nextSibling };
+  }
+  if (p.parentNode !== host) host.append(p);
+}
+
+function stowCastPanel() {
+  const p = document.querySelector("#cast-panel");
+  if (!p || !castPanelHome) return;
+  if (p.parentNode !== castPanelHome.parent) {
+    castPanelHome.parent.insertBefore(p, castPanelHome.next);
   }
 }
 
-// 205. The controls that sit under your own line in the strip.
-//
-// NOTHING NEW IS DECIDED HERE. The weapons come from the same
-// `list_npc_attacks` the DM's card uses - since 022 an actor is a
-// character, so it answers for a player exactly as it does for a goblin
-// - the targets come from `state.targets`, which `loadTargets` has
-// always filled for players, and the swing goes through `roll_named`,
-// which is the command the Roll box below already uses. A second attack
-// path would be a second place for a swing to be wrong.
+// What a player can do on their own line: swing, cast, and roll for
+// position. Everything here already existed somewhere else on this
+// screen - the point is that it is HERE, where the fight is.
 async function fillTurnActions(host, line, enc) {
   const attacks = await call("list_npc_attacks", { actorId: line.actor_id });
   const targets = (state.targets || []).filter((t) => t.id !== line.actor_id);
 
   if (Array.isArray(attacks) && attacks.length && targets.length) {
-    // 209. THE SAME BLOCKS THE DM SEES. This was one flat `<select>`
-    // of every attack, which read as "longbow" and hid the techniques
-    // behind a control nobody would think to open - Bryn's own log
-    // already had Full Draw and Bodkin Point in it. `attackLines` is
-    // the DM card's renderer, so the grouping, the technique styling
-    // and the not-proficient warning come across with it.
+    // 209. THE SAME BLOCKS THE DM SEES. `attackLines` is the DM card's
+    // renderer, so the grouping, the technique styling and the
+    // not-proficient warning come across with it.
     const at = document.createElement("select");
     at.className = "tiny";
     for (const t of targets) {
@@ -2159,8 +2259,7 @@ async function fillTurnActions(host, line, enc) {
       at.append(o);
     }
 
-    const aim = labelledControl(line.name + " attacks", at, "wide aim");
-    host.append(aim);
+    host.append(labelledControl(line.name + " attacks", at, "wide aim"));
 
     for (const el of attackLines(attacks, swingAt, () => !!at.value)) {
       host.append(el);
@@ -2170,11 +2269,7 @@ async function fillTurnActions(host, line, enc) {
       const t = (state.targets || []).find((x) => x.id === at.value);
       if (!t) return log("roll_named", "that target has left the fight", true);
       const r = await call("roll_named", {
-        // OFF THE LINE, not off the sidebar. `state.characterId` is set
-        // by clicking your name in the CHARACTERS list, which a player
-        // arriving straight at a fight has not done - and the rig
-        // caught this sending `characterId: null`, which `roll_named`
-        // refuses with "select a character first".
+        // OFF THE LINE, not off the sidebar - see 205.
         characterId: line.your_character_id || state.characterId,
         request: atk.request,
         mode: "normal",
@@ -2197,6 +2292,11 @@ async function fillTurnActions(host, line, enc) {
   } else {
     host.append(sEl("span", "muted", "no weapon in hand"));
   }
+
+  // AND WHAT THEY CAN CAST, beside what they can swing - the panel
+  // itself, moved here. It hides itself for anybody who casts nothing,
+  // so a ranger sees no empty heading.
+  lendCastPanel(host);
 
   // Only while it is unrolled, which the engine decided - see
   // `reveal::Line::needs_initiative`.

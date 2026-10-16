@@ -1131,3 +1131,19 @@ button.wide{width:100%}
                       min-width:1.1em;padding:0 .25em;text-align:center;
                       font-size:9px;line-height:1.5}
 .logtab.alert{color:var(--bad)}
+
+/* 210. The opener on your own line, and the panel it opens.
+
+   The caret shares the marker column with the turn arrow, because a
+   row cannot have two first cells - on your turn the arrow wins and
+   the whole line is already shouting. */
+.strip .turnmark.opener{background:none;border:0;cursor:pointer;
+                        color:var(--muted);font:inherit;padding:0}
+.strip .turnmark.opener:hover{color:var(--fg)}
+/* A condition you may end reads as a control rather than a label. */
+.strip .chip.endable{cursor:pointer}
+.strip .chip.endable:hover{color:var(--bad);border-color:var(--bad)}
+/* The casting panel is lent to this row, so it must not keep the
+   section margin that spaced it out in the Play column. */
+.strip li.stripacts > section#cast-panel{margin:.3rem 0 0}
+.strip li.stripacts > section#cast-panel h2{margin-bottom:.3rem}

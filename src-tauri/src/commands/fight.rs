@@ -171,6 +171,9 @@ pub fn fight_strip(state: State<AppState>, game_id: String) -> Result<Value, Str
             dead: t
                 .and_then(|t| t.condition)
                 .is_some_and(|c| c == crate::death::Condition::Dead),
+            // Straight off the actor row, which is where `roll_initiative`
+            // writes it and where `ordered_actors` reads it to sort.
+            initiative: r.get("initiative").and_then(|v| v.as_i64()),
         };
 
         let line = reveal::reveal(&owned, &facts);
@@ -185,6 +188,8 @@ pub fn fight_strip(state: State<AppState>, game_id: String) -> Result<Value, Str
             "cannot_act": line.cannot_act,
             "is_current": line.is_current,
             "takes_turns": line.takes_turns,
+            "your_character_id": line.your_character_id,
+            "needs_initiative": line.needs_initiative,
         }));
     }
 

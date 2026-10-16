@@ -1949,6 +1949,12 @@ async function loadFightStrip() {
     const li = document.createElement("li");
     if (line.is_current) li.classList.add("up");
     if (line.yours) li.classList.add("mine");
+    // 205. THE ONE STATE A PLAYER MUST NOT MISS. "Whose turn it is" and
+    // "which line is me" are two quiet marks that a person glancing at
+    // a phone reads as neither; together they are the only thing on
+    // this panel worth shouting.
+    const yourTurn = line.yours && line.is_current;
+    if (yourTurn) li.classList.add("yourturn");
 
     // The marker is its own cell so every name starts at the same x
     // whether or not it is their turn.
@@ -1971,6 +1977,12 @@ async function loadFightStrip() {
 
     // YOUR NUMBERS, OR SOMEBODY ELSE'S WORD, and never both - the
     // engine sends exactly one of them and this does not choose.
+    if (yourTurn) {
+      const t = chip("your turn", "yes");
+      t.classList.add("turnchip");
+      how.append(t);
+    }
+
     if (line.yours && line.hp_max) {
       const n = document.createElement("span");
       n.className = "yours";
@@ -2021,6 +2033,111 @@ async function loadFightStrip() {
 
     li.append(mark, name, how);
     list.append(li);
+
+    // 205. AND ON YOUR OWN LINE, WHAT YOU CAN DO ABOUT IT.
+    //
+    // ON YOUR LINE, NOT ON YOUR TURN. The frame above says whose turn
+    // it is loudly; the controls stay put either way, because 051
+    // settled that this app SAYS and does not REFUSE - a DM waving
+    // somebody in early is normal, and a button that vanishes is the
+    // app overruling the table.
+    if (line.yours) {
+      const acts = document.createElement("li");
+      acts.className = "stripacts" + (yourTurn ? " yourturn" : "");
+      await fillTurnActions(acts, line, strip.encounter);
+      list.append(acts);
+    }
+  }
+}
+
+// 205. The controls that sit under your own line in the strip.
+//
+// NOTHING NEW IS DECIDED HERE. The weapons come from the same
+// `list_npc_attacks` the DM's card uses - since 022 an actor is a
+// character, so it answers for a player exactly as it does for a goblin
+// - the targets come from `state.targets`, which `loadTargets` has
+// always filled for players, and the swing goes through `roll_named`,
+// which is the command the Roll box below already uses. A second attack
+// path would be a second place for a swing to be wrong.
+async function fillTurnActions(host, line, enc) {
+  const attacks = await call("list_npc_attacks", { actorId: line.actor_id });
+  const targets = (state.targets || []).filter((t) => t.id !== line.actor_id);
+
+  if (Array.isArray(attacks) && attacks.length && targets.length) {
+    const weapon = document.createElement("select");
+    weapon.className = "tiny";
+    for (const a of attacks) {
+      const o = document.createElement("option");
+      o.value = a.request;
+      o.textContent = a.label || a.request;
+      // Carried over from the DM's card, because a player is the person
+      // most likely to read a low number as the app being broken.
+      if (a.proficient === false) o.textContent += " (not proficient)";
+      weapon.append(o);
+    }
+
+    const at = document.createElement("select");
+    at.className = "tiny";
+    for (const t of targets) {
+      const o = document.createElement("option");
+      o.value = t.id;
+      // NO HIT POINTS IN THIS LIST. The DM's version of this picker
+      // prints "12/26hp" beside each name, which would hand back in a
+      // dropdown exactly what `reveal.rs` keeps off the strip.
+      o.textContent = t.label;
+      at.append(o);
+    }
+
+    const go = document.createElement("button");
+    go.className = "tiny";
+    go.textContent = "Attack";
+    guard(go, async () => {
+      const t = (state.targets || []).find((x) => x.id === at.value);
+      if (!t) return log("roll_named", "that target has left the fight", true);
+      const r = await call("roll_named", {
+        // OFF THE LINE, not off the sidebar. `state.characterId` is set
+        // by clicking your name in the CHARACTERS list, which a player
+        // arriving straight at a fight has not done - and the rig
+        // caught this sending `characterId: null`, which `roll_named`
+        // refuses with "select a character first".
+        characterId: line.your_character_id || state.characterId,
+        request: weapon.value,
+        mode: "normal",
+        targetValue: t.value,
+        targetKind: t.target_kind,
+        targetLabel: t.label,
+        encounterId: enc && enc.id ? enc.id : state.encounterId || null,
+        targetId: t.id,
+        targetRow: t.row,
+        targetCharacterId: t.character_id || null,
+        actorId: line.actor_id,
+      });
+      if (r && r.resisted) log("roll_named", r.resisted);
+      await loadRolls();
+      await loadTargets();
+      await loadFightStrip();
+    });
+
+    host.append(weapon, sEl("span", "at", "at"), at, go);
+  } else if (!targets.length) {
+    host.append(sEl("span", "muted", "nothing to aim at"));
+  } else {
+    host.append(sEl("span", "muted", "no weapon in hand"));
+  }
+
+  // Only while it is unrolled, which the engine decided - see
+  // `reveal::Line::needs_initiative`.
+  if (line.needs_initiative) {
+    const init = document.createElement("button");
+    init.className = "tiny ghost";
+    init.textContent = "Roll initiative";
+    guard(init, async () => {
+      const r = await tryCall("roll_initiative", { actorId: line.actor_id });
+      if (!r.ok) return log("roll_initiative", r.error, true);
+      await loadFightStrip();
+      await loadRolls();
+    });
+    host.append(init);
   }
 }
 

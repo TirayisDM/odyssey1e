@@ -6684,6 +6684,85 @@ policy has permitted it since 001. Pre-existing and not 202's doing.
 Whether a player should roll their own character up is Dave's call; the
 schema already says yes.
 
+## 205. Your turn, and what you can do about it
+
+Dave, as a player: *"it's not my turn so I don't appear to be able to
+do anything"*. Two separate things were true and only one was the one
+he meant.
+
+**NOTHING WAS BLOCKING HIM.** `turn_actor_id` is read for display and
+nothing else - no roll, no attack and no command consults it. That is
+051's rule, the same decision taken about the action budget: the app
+SAYS and does not REFUSE. What actually stopped him was that **Bryn had
+no weapon**, which was an omission in the test character, not a rule.
+
+So 205 is the half that was missing: say whose turn it is loudly, and
+put the things a player may already do where the fight is.
+
+```
+    Lich 0001                       hurt
+    Luci         bloodied   cannot act - paralysed
+  > Bryn         YOUR TURN            you - 36/36
+    [ Longbow v ] at [ Lich 0001 v ] [ Attack ]  [ Roll initiative ]
+```
+
+**THE CONTROLS ARE ON YOUR LINE, NOT ON YOUR TURN.** The frame is loud
+when the turn reaches you and the buttons stay put either way, because
+a control that vanishes is the app overruling the table - and 051
+settled that. Verified both ways.
+
+### Nothing new is decided here
+
+| the strip asks | which is what already answers it |
+|---|---|
+| what can I swing? | `list_npc_attacks` - the DM's card's own reader, and since 022 an actor is a character, so it answers for a player unchanged |
+| at what? | `state.targets`, which `loadTargets` has filled for players all along |
+| then what happens? | `roll_named` - the command the Roll box below already uses |
+| may I roll initiative? | `reveal::needs_initiative` - yours, and only while it is unrolled |
+
+A second attack path would be a second place for a swing to be wrong.
+`roll_initiative` needed no new access: the `encounter_actors` member
+UPDATE policy already permits it, which is the same over-broad policy
+noted under 204.
+
+### Two faults the rig caught, and one of them was already shipped
+
+**`characterId: null`.** The strip's Attack took the character from
+`state.characterId`, which is set by clicking your name in the SIDEBAR
+- a selection a player arriving at a fight has not made. Every swing
+would have come back "select a character first". The line now carries
+`your_character_id`, set only on your own line, so the panel does not
+depend on an unrelated click.
+
+**AND THE ROLL BOX WAS PRINTING THE NUMBERS 203 HAD JUST HIDDEN.**
+Reading the two side by side in the rig:
+
+```
+strip    :  Lich 0001                      hurt
+roll box :  Lich 0001 - AC 17 - 106/135 hp
+```
+
+`list_targets` feeds BOTH the DM's attack card and the player's roll
+box, and `loadTargets` prints hit points into every option. So 203's
+band was decoration from the day it shipped, and only putting a second
+picker beside the first made it visible. `reveal::hide_other_hit_points`
+now takes them off server-side, for a caller who is neither the DM nor
+the owner - one rule, both pickers, asked of the DATABASE rather than
+of the frontend's `amDM()`, which is an offer and not an answer.
+
+**THE ARMOUR CLASS IS STILL THERE AND THAT IS NOT AN OVERSIGHT.**
+`roll_named` is handed `targetValue` by the client, so the number a
+roll resolves against has to reach the client to be sent back.
+Removing it means `roll_named` looking the target up from `targetId`
+server-side, which is a change to the roll path and not this one.
+Dave's rule was "no hit points and no AC"; this is the first half,
+and the second is written down rather than quietly dropped.
+
+1084 tests, zero warnings. Verified in the browser rig: the frame and
+chip appear only on your turn, the controls persist off it, Attack
+sends a complete `roll_named` with the snapshot and link halves, and
+the initiative button disappears once it has been rolled.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15
@@ -6738,9 +6817,10 @@ are what unblock it:
    done.
 4. ~~Hide the four DM tabs~~ - **202.**
 
-**What the strip still does not do:** it READS. Only the DM can advance
-the turn, and a player cannot roll initiative, end their own condition
-or act from it. Whether any of that belongs to a player is Dave's call.
+**What the strip still does not do:** ~~it READS~~ - **205** gave it
+attack and initiative. Only the DM can advance the turn (`encounters`
+UPDATE is DM-only), and a player still cannot end their own condition.
+Whether either belongs to a player is Dave's call.
 
 Postgres already refuses a player the DM's data - that is 011 and 193 -
 so this is about what is OFFERED, not about safety. The worst case today

@@ -121,6 +121,8 @@ pub struct Facts {
     pub is_current: bool,
     pub takes_turns: bool,
     pub dead: bool,
+    /// What they rolled for initiative, or `None` if nobody has.
+    pub initiative: Option<i64>,
 }
 
 /// One line of a player's fight strip, with nothing in it they may not
@@ -153,6 +155,24 @@ pub struct Line {
     pub cannot_act: Option<String>,
     pub is_current: bool,
     pub takes_turns: bool,
+    /// The character behind this line, and ONLY when it is yours.
+    ///
+    /// 205. A strip that can offer an attack has to be able to say who
+    /// is swinging, and the frontend's `state.characterId` is set by
+    /// clicking your name in the SIDEBAR - a selection that has nothing
+    /// to do with this panel and is empty until you make it. Carrying
+    /// it here means the strip depends on itself. `None` for everybody
+    /// else, because nothing on their line is actionable.
+    pub your_character_id: Option<String>,
+    /// Whether to OFFER this viewer the initiative roll for this line.
+    ///
+    /// YOURS, AND ONLY WHILE IT IS UNROLLED. Offering it again mid-fight
+    /// would put a button on screen whose honest label is "reorder the
+    /// turn", which is the DM's call and not a player's. Nothing here
+    /// REFUSES a re-roll - `roll_initiative` and the member UPDATE
+    /// policy on `encounter_actors` both still allow it - this decides
+    /// what is on offer, the way `amDM` does.
+    pub needs_initiative: bool,
 }
 
 /// Decide one line for one viewer.
@@ -206,6 +226,52 @@ pub fn reveal(owned: &[String], f: &Facts) -> Line {
             .map(|c| c.name.to_string()),
         is_current: f.is_current,
         takes_turns: f.takes_turns,
+        your_character_id: if yours { f.character_id.clone() } else { None },
+        needs_initiative: yours && f.initiative.is_none(),
+    }
+}
+
+/// Take the hit points off a target list for somebody not entitled to
+/// them.
+///
+/// 205. THE SAME RULE, APPLIED WHERE IT WAS LEAKING. `list_targets`
+/// feeds two pickers - the DM's card and the PLAYER'S OWN ROLL BOX -
+/// and the player's one prints `106/135 hp` beside every creature it
+/// offers. So the strip above it said "hurt" while the dropdown two
+/// inches below gave the exact number, which makes 203 decoration.
+///
+/// Applied here rather than in the frontend because that is where the
+/// band already lives, and a threshold written twice is this project's
+/// most expensive habit.
+///
+/// WHAT IT DOES NOT TAKE: the armour class. `roll_named` is handed
+/// `targetValue` BY THE CLIENT, so the number a roll is resolved
+/// against has to reach the client to be sent back. Removing it means
+/// `roll_named` looking the target up from `targetId` server-side,
+/// which is a real change to the roll path and not this one. Written
+/// down rather than quietly left - Dave's rule was "no hit points and
+/// no AC", and this delivers the first half.
+///
+/// The death condition and the save tally stay too: "down" is a band
+/// the strip already shows, and a dying creature's tally is the thing
+/// the whole table is watching.
+pub fn hide_other_hit_points(
+    targets: &mut [crate::encounter::Target],
+    am_dm: bool,
+    owned: &[String],
+) {
+    if am_dm {
+        return;
+    }
+    for t in targets.iter_mut() {
+        let mine = t
+            .character_id
+            .as_deref()
+            .is_some_and(|c| owned.iter().any(|o| o == c));
+        if !mine {
+            t.hp_current = None;
+            t.hp_max = None;
+        }
     }
 }
 
@@ -226,6 +292,7 @@ mod tests {
             is_current: false,
             takes_turns: true,
             dead: false,
+            initiative: None,
         }
     }
 
@@ -363,6 +430,92 @@ mod tests {
             line.cannot_act.is_some(),
             "paralysed is one of the five that stop a turn"
         );
+    }
+
+    fn target(id: &str, character: Option<&str>) -> crate::encounter::Target {
+        crate::encounter::Target {
+            id: id.into(),
+            row: "actor",
+            target_kind: "ac",
+            label: id.into(),
+            value: 17,
+            source: String::new(),
+            character_id: character.map(String::from),
+            hp_current: Some(106),
+            hp_max: Some(135),
+            condition: None,
+            death_successes: 0,
+            death_failures: 0,
+        }
+    }
+
+    #[test]
+    fn a_player_is_not_told_a_monsters_hit_points() {
+        let mut ts = vec![target("lich", Some("lich-char"))];
+        hide_other_hit_points(&mut ts, false, &["c1".to_string()]);
+        assert_eq!(ts[0].hp_current, None);
+        assert_eq!(ts[0].hp_max, None);
+        // and the number the roll is resolved against survives
+        assert_eq!(ts[0].value, 17);
+    }
+
+    #[test]
+    fn a_player_still_counts_their_own() {
+        let mut ts = vec![target("bryn", Some("c1"))];
+        hide_other_hit_points(&mut ts, false, &["c1".to_string()]);
+        assert_eq!(ts[0].hp_current, Some(106));
+    }
+
+    #[test]
+    fn the_dm_is_told_everything() {
+        let mut ts = vec![target("lich", Some("lich-char"))];
+        hide_other_hit_points(&mut ts, true, &[]);
+        assert_eq!(ts[0].hp_current, Some(106));
+    }
+
+    /// A challenge - a lock, a door - has no character and no hit
+    /// points to take, and must not be mistaken for somebody's.
+    #[test]
+    fn a_target_with_no_character_is_nobodys() {
+        let mut ts = vec![target("iron lock", None)];
+        hide_other_hit_points(&mut ts, false, &["c1".to_string()]);
+        assert_eq!(ts[0].hp_current, None);
+    }
+
+    #[test]
+    fn your_own_line_carries_its_character_and_others_do_not() {
+        let f = facts();
+        assert_eq!(
+            reveal(&["c1".to_string()], &f).your_character_id,
+            Some("c1".to_string())
+        );
+        assert_eq!(reveal(&["someone-else".to_string()], &f).your_character_id, None);
+    }
+
+    #[test]
+    fn your_own_unrolled_initiative_is_offered() {
+        let f = facts();
+        assert!(reveal(&["c1".to_string()], &f).needs_initiative);
+    }
+
+    #[test]
+    fn once_rolled_it_is_not_offered_again() {
+        let mut f = facts();
+        f.initiative = Some(14);
+        assert!(!reveal(&["c1".to_string()], &f).needs_initiative);
+    }
+
+    /// The case that matters: a monster's initiative is never a
+    /// player's to roll, rolled or not.
+    #[test]
+    fn somebody_elses_initiative_is_never_offered() {
+        let mut f = facts();
+        f.character_id = None;
+        assert!(!reveal(&[], &f).needs_initiative);
+
+        let mut g = facts();
+        g.initiative = None;
+        assert!(!reveal(&["not-mine".to_string()], &g).needs_initiative);
     }
 
     #[test]

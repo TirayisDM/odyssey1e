@@ -1066,3 +1066,27 @@ button.wide{width:100%}
 .strip .band-bloodied{color:var(--accent)}
 .strip .band-down{color:var(--bad)}
 
+
+/* 205. Your turn, and what you can do about it.
+
+   THE FRAME IS THE LOUD PART. Whose turn it is and which line is yours
+   are two quiet marks on their own; a player glancing at a phone needs
+   one unmistakable thing, so the two together get an accent edge and
+   carry it down onto the row of controls beneath. */
+.strip li.yourturn{background:var(--panel);
+                   box-shadow:inset 2px 0 0 var(--accent)}
+.strip li.yourturn .stripname{color:var(--fg);font-weight:600}
+.strip .chip.turnchip{letter-spacing:.06em;text-transform:uppercase}
+
+/* The controls sit under your own line rather than in its state cell:
+   two selects and a button do not belong in a column sized for the
+   word "bloodied". Full width, wrapping on a narrow screen. */
+.strip li.stripacts{display:flex;flex-wrap:wrap;align-items:center;
+                    gap:.3rem .4rem;padding:.1rem 0 .35rem 1.4rem;
+                    border-bottom:1px solid var(--line)}
+.strip li.stripacts select{font-size:11px;padding:.05rem .2rem;
+                           background:var(--bg);color:var(--fg);
+                           border:1px solid var(--line);border-radius:3px;
+                           max-width:11rem}
+.strip li.stripacts .at{font-size:11px;color:var(--muted)}
+.strip li.stripacts .muted{font-size:11px}

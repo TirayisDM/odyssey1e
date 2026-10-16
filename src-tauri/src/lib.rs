@@ -1538,8 +1538,61 @@ fn list_targets(
     state: State<AppState>,
     encounter_id: String,
 ) -> Result<Vec<encounter::Target>, String> {
-    let token = state.token()?;
-    encounter::load_targets(&token, &encounter_id)
+    let session: supabase::Session = state.current()?.ok_or("not signed in")?;
+    let token = &session.access_token;
+    let mut targets = encounter::load_targets(token, &encounter_id)?;
+
+    // 205. AND THEN TAKE OFF WHAT THIS CALLER MAY NOT COUNT.
+    //
+    // This list feeds BOTH pickers - the DM's attack card and the
+    // player's roll box - which is why the redaction is here and not in
+    // either screen. The player's box printed `106/135 hp` beside every
+    // creature while the fight strip above it said "hurt".
+    //
+    // Asking the database who the DM is rather than trusting the
+    // frontend's `amDM()`, which is an offer and not an answer.
+    let game_id = supabase::rest_get(
+        token,
+        "encounters",
+        &[
+            ("select", "game_id"),
+            ("id", &format!("eq.{}", encounter_id)),
+        ],
+    )?
+    .as_array()
+    .and_then(|a| a.first())
+    .and_then(|r| r.get("game_id"))
+    .and_then(|v| v.as_str())
+    .map(String::from)
+    .unwrap_or_default();
+
+    let am_dm = supabase::rpc(token, "is_game_dm", &json!({ "p_game_id": game_id }))?
+        .as_bool()
+        .unwrap_or(false);
+
+    let owned: Vec<String> = if am_dm {
+        Vec::new()
+    } else {
+        supabase::rest_get(
+            token,
+            "characters",
+            &[
+                ("select", "id"),
+                ("game_id", &format!("eq.{}", game_id)),
+                ("owner_uid", &format!("eq.{}", session.profile_id)),
+            ],
+        )?
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+    };
+
+    reveal::hide_other_hit_points(&mut targets, am_dm, &owned);
+    Ok(targets)
 }
 
 /* ============================ ENTRY ============================ */

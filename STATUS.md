@@ -7091,6 +7091,53 @@ with the spend button working), and `loadFeatures` renders into fixed
 ids, so moving them wants the same host-taking treatment `attackLines`
 got in 209.
 
+## 211. Character, and a catalogue only a caster needs
+
+Dave: the player's tab should read **Character**; the **Spells** tab
+should not appear unless they are a spell-using class; Trade stays.
+
+| | DM | player |
+|---|---|---|
+| `chars` | **Characters** - the campaign roster | **Character** - their own sheet |
+| `spells` | always | only when `sheet.caster` |
+
+One pane answering two questions gets the two names. The DM keeps the
+catalogue whatever is selected, because that tab is the CATALOGUE -
+find, class, level, school - rather than a character's own list, and
+authoring a creature's spells needs it with no "my character" to key
+it off.
+
+**`sheet.caster` IS THE ENGINE'S ANSWER AND THE ONLY ONE.** 176 paid
+for the alternative: the Prayers subtab asked whether the character
+had a CLERIC class by name, so a wizard's sheet never showed it, and
+the rule for who casts lived in two places with one of them in a
+language that has no compiler. `casting::caster` resolves it once and
+`list_casting`, `castable` and `cast_spell` all go through it - so
+this asks the same field and adds no second opinion.
+
+### Where the call goes, which the rig had to teach me twice
+
+It first went at the END of `loadSheet`, after `loadInventory`,
+`loadFeatures`, `loadPrayers` and `loadCastable`. **One throw in
+`loadPrayers` and the catalogue stayed hidden for a wizard**, with no
+error that looked related - the tab strip had been made to depend on
+four unrelated loaders all succeeding.
+
+It now runs the line after `state.sheet = sheet`, which is where the
+fact arrives. Same lesson as 210's guarded `selectCharacter`: a panel
+should not be able to be blanked by something it does not own.
+
+And the "do not leave them standing on a hidden tab" test is now asked
+of the BUTTON rather than of `DM_ONLY_TABS`, so a tab hidden for any
+reason is covered once. Standing on Spells and picking up a fighter
+drops you on Play.
+
+Verified in the rig: a player with a fighter sees **Play, Character,
+Trade**; the same player on a caster sees **Play, Character, Spells,
+Trade**; switching back takes it away again; standing on Spells when
+it goes bounces to Play with the pane following; and the DM still sees
+all eight with **Characters** plural.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

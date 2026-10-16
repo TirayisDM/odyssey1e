@@ -548,11 +548,41 @@ function paintTabOffer() {
   for (const b of document.querySelectorAll("#tabs .tab")) {
     if (DM_ONLY_TABS.includes(b.dataset.tab)) b.hidden = !dm;
   }
+
+  // 211. THE SPELL CATALOGUE IS FOR SOMEBODY WHO CASTS.
+  //
+  // That tab is the CATALOGUE - find, class, level, school - and not a
+  // character's own list, which is why the DM keeps it whatever is
+  // selected: authoring a creature's spells needs it and the DM has no
+  // "my character" to key it off.
+  //
+  // `sheet.caster` IS THE ENGINE'S ANSWER AND THE ONLY ONE. 176 paid
+  // for the alternative: the Prayers subtab asked whether the
+  // character had a CLERIC class by name, so a wizard never saw it,
+  // and the rule for who casts lived in two places with one of them in
+  // a language that has no compiler. `casting::caster` resolves it
+  // once and `list_casting`, `castable` and `cast_spell` all go
+  // through it.
+  const casts = !!(state.sheet && state.sheet.caster);
+  const spells = document.querySelector('#tabs .tab[data-tab="spells"]');
+  if (spells) spells.hidden = !(dm || casts);
+
+  // 211. "CHARACTERS" IS A ROSTER; A PLAYER HAS ONE. The pane is the
+  // DM's list of everybody in the campaign and, for a player, their
+  // own sheet - the same pane answering two different questions, so
+  // it gets the two names.
+  const chars = document.querySelector('#tabs .tab[data-tab="chars"]');
+  if (chars) chars.textContent = dm ? "Characters" : "Character";
+
   // AND DO NOT LEAVE THEM STANDING ON ONE. Hiding the button while its
   // pane is the open one would take the tab off the strip and leave the
   // blank pane exactly where it was, which is the bug with its label
-  // removed. Switching games is the case: DM of one, player of the next.
-  if (!dm && DM_ONLY_TABS.includes(state.tab)) showTab("play");
+  // removed. Switching games is the case: DM of one, player of the
+  // next - and now also picking up a fighter while the catalogue is
+  // open. Asked of the BUTTON rather than of a list, so a tab hidden
+  // for any reason is covered by one test.
+  const here = document.querySelector('#tabs .tab[data-tab="' + state.tab + '"]');
+  if (state.tab !== "play" && here && here.hidden) showTab("play");
 }
 
 async function selectGame(id) {
@@ -2679,6 +2709,13 @@ async function loadSheet() {
   const sheet = await call("get_sheet", { characterId: state.characterId });
   if (!sheet) { panel.hidden = true; return; }
   state.sheet = sheet;
+  // 211. AS SOON AS THE FACT ARRIVES, not at the end of this function.
+  // The Spells tab turns on `sheet.caster` and that is known now;
+  // putting it last made the tab strip depend on `loadInventory`,
+  // `loadFeatures`, `loadPrayers` and `loadCastable` all succeeding,
+  // and the rig proved it - one throw in `loadPrayers` and the
+  // catalogue stayed hidden for a wizard with no explanation.
+  paintTabOffer();
   panel.hidden = false;
 
   const pb = Math.floor((sheet.level - 1) / 4) + 2;

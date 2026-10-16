@@ -841,6 +841,41 @@ pub(crate) fn swing(session: &Session, sheet: &Sheet, s: Swing) -> Result<Value,
         actor_id,
     } = s;
 
+    // 206. THE NUMBER A ROLL IS BEATEN BY IS NOT THE CALLER'S TO STATE.
+    //
+    // `target_value` arrives from the frontend, so until now THE CLIENT
+    // DECIDED THE AC IT WAS ROLLING AGAINST - send 1 and everything
+    // hits. Nobody chose that as a trust boundary; it fell out of the
+    // pickers reading the number out of `list_targets` and handing it
+    // straight back, and it sat behind a desktop app where the only
+    // person who could exploit it was the person it belonged to. It
+    // does not survive a player on their own phone.
+    //
+    // So a target NAMED BY ID is resolved here, out of the encounter,
+    // and what the caller sent is discarded. That is also what makes
+    // 205's other half possible: `list_targets` can stop telling a
+    // player the AC, because the number no longer has to reach the
+    // client in order to come back.
+    //
+    // A HAND-TYPED TARGET IS STILL THE CALLER'S. "type a number…" has
+    // no id, and somebody stating a DC out loud is deciding it rather
+    // than reading one off a screen.
+    let (target_value, target_kind, target_label) = match (&target_id, &encounter_id) {
+        (Some(tid), Some(eid)) => {
+            let found = encounter::load_targets(&session.access_token, eid)?
+                .into_iter()
+                .find(|t| &t.id == tid);
+            match found {
+                Some(t) => (t.value, Some(t.target_kind.to_string()), Some(t.label)),
+                // Named something this encounter does not contain.
+                // Refused rather than falling back on what the caller
+                // claimed, which is the whole point of asking.
+                None => return Err("that target is not in this encounter".to_string()),
+            }
+        }
+        _ => (target_value, target_kind, target_label),
+    };
+
     // Refused before any dice are thrown: a half-supplied target is a
     // caller bug, and rolling first would leave a resolved row that
     // cannot record what it was for.
@@ -1591,7 +1626,7 @@ fn list_targets(
         .unwrap_or_default()
     };
 
-    reveal::hide_other_hit_points(&mut targets, am_dm, &owned);
+    reveal::hide_other_numbers(&mut targets, am_dm, &owned);
     Ok(targets)
 }
 

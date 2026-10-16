@@ -58,7 +58,10 @@ pub struct Target {
     /// resolver makes.
     pub target_kind: &'static str,
     pub label: String,
-    pub value: i64,
+    /// The number to beat, or `None` when this caller may not be told
+    /// it - see `reveal::hide_other_numbers`. `swing` no longer takes
+    /// the caller's word for this, so withholding it costs nothing.
+    pub value: Option<i64>,
     /// Where the number came from, in words, so a DM can see why a
     /// goblin is 15 and Rodnar is 16 without opening the database.
     pub source: String,
@@ -271,7 +274,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
                 row: "actor",
                 target_kind: "ac",
                 label,
-                value: death::effective_ac(value, condition),
+                value: Some(death::effective_ac(value, condition)),
                 source: match death::label_suffix(condition) {
                     Some(word) => format!("{} · {}, so AC 0", source, word),
                     None => source,
@@ -321,7 +324,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
                 Some(name) => format!("{} — {}", as_str(r, "label"), name),
                 None => as_str(r, "label"),
             },
-            value: r.get("dc").and_then(|x| x.as_i64()).unwrap_or(10),
+            value: Some(r.get("dc").and_then(|x| x.as_i64()).unwrap_or(10)),
             source: match (skill, thing) {
                 (Some(k), Some(_)) => format!("DM-set on a thing here, suggests {}", k),
                 (Some(k), None) => format!("DM-set, suggests {}", k),

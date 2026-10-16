@@ -595,8 +595,17 @@ async function loadTargets() {
         t.condition === "down" && (t.death_successes || t.death_failures)
           ? " · " + t.death_successes + "✓ " + t.death_failures + "✗"
           : "";
-      o.textContent =
-        t.label + cond + " · " + t.target_kind.toUpperCase() + " " + t.value + hp + saves;
+      // 206. THE NUMBER ONLY WHEN THIS ACCOUNT IS ALLOWED IT. A player
+      // gets `value: null` for anything that is not theirs, so the
+      // option reads "Lich 0001" where the DM's reads
+      // "Lich 0001 · AC 17". The decision is the engine's - see
+      // `reveal::hide_other_numbers` - and this prints what it is sent
+      // rather than asking `amDM()` a second time.
+      const beat =
+        t.value === null || t.value === undefined
+          ? ""
+          : " · " + t.target_kind.toUpperCase() + " " + t.value;
+      o.textContent = t.label + cond + beat + hp + saves;
       // Why this number is this number, on hover. Same instinct as the
       // proficiency badges: never show a figure with no account of it.
       o.title = t.source;
@@ -8446,8 +8455,13 @@ async function castRow(actor, encounterId) {
       id: t.id, row: t.row, kind: t.target_kind,
       value: t.value, label: t.label, characterId: t.character_id,
     });
+    // Defensive since 206 made these optional: the DM is told
+    // everything, but this is the same payload a player's picker gets.
     o.textContent =
-      t.label + " · " + String(t.target_kind).toUpperCase() + " " + t.value +
+      t.label +
+      (t.value === null || t.value === undefined
+        ? ""
+        : " · " + String(t.target_kind).toUpperCase() + " " + t.value) +
       (t.hp_current !== null && t.hp_current !== undefined
         ? " · " + t.hp_current + "/" + t.hp_max + "hp" : "");
     pick.append(o);
@@ -8627,8 +8641,13 @@ async function attackRow(actor, encounterId) {
       id: t.id, row: t.row, kind: t.target_kind,
       value: t.value, label: t.label, characterId: t.character_id,
     });
+    // Defensive since 206 made these optional: the DM is told
+    // everything, but this is the same payload a player's picker gets.
     o.textContent =
-      t.label + " · " + String(t.target_kind).toUpperCase() + " " + t.value +
+      t.label +
+      (t.value === null || t.value === undefined
+        ? ""
+        : " · " + String(t.target_kind).toUpperCase() + " " + t.value) +
       (t.hp_current !== null && t.hp_current !== undefined
         ? " · " + t.hp_current + "/" + t.hp_max + "hp" : "");
     pick.append(o);

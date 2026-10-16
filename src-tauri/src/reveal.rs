@@ -255,7 +255,7 @@ pub fn reveal(owned: &[String], f: &Facts) -> Line {
 /// The death condition and the save tally stay too: "down" is a band
 /// the strip already shows, and a dying creature's tally is the thing
 /// the whole table is watching.
-pub fn hide_other_hit_points(
+pub fn hide_other_numbers(
     targets: &mut [crate::encounter::Target],
     am_dm: bool,
     owned: &[String],
@@ -271,6 +271,11 @@ pub fn hide_other_hit_points(
         if !mine {
             t.hp_current = None;
             t.hp_max = None;
+            // 206. AND THE NUMBER TO BEAT. This stayed until `swing`
+            // stopped taking the caller's word for it - the client used
+            // to send `targetValue` back, so the AC had to reach the
+            // client to make a roll at all. It does not any more.
+            t.value = None;
         }
     }
 }
@@ -438,7 +443,7 @@ mod tests {
             row: "actor",
             target_kind: "ac",
             label: id.into(),
-            value: 17,
+            value: Some(17),
             source: String::new(),
             character_id: character.map(String::from),
             hp_current: Some(106),
@@ -452,25 +457,26 @@ mod tests {
     #[test]
     fn a_player_is_not_told_a_monsters_hit_points() {
         let mut ts = vec![target("lich", Some("lich-char"))];
-        hide_other_hit_points(&mut ts, false, &["c1".to_string()]);
+        hide_other_numbers(&mut ts, false, &["c1".to_string()]);
         assert_eq!(ts[0].hp_current, None);
         assert_eq!(ts[0].hp_max, None);
-        // and the number the roll is resolved against survives
-        assert_eq!(ts[0].value, 17);
+        // 206. and the number to beat goes with them
+        assert_eq!(ts[0].value, None);
     }
 
     #[test]
     fn a_player_still_counts_their_own() {
         let mut ts = vec![target("bryn", Some("c1"))];
-        hide_other_hit_points(&mut ts, false, &["c1".to_string()]);
+        hide_other_numbers(&mut ts, false, &["c1".to_string()]);
         assert_eq!(ts[0].hp_current, Some(106));
     }
 
     #[test]
     fn the_dm_is_told_everything() {
         let mut ts = vec![target("lich", Some("lich-char"))];
-        hide_other_hit_points(&mut ts, true, &[]);
+        hide_other_numbers(&mut ts, true, &[]);
         assert_eq!(ts[0].hp_current, Some(106));
+        assert_eq!(ts[0].value, Some(17));
     }
 
     /// A challenge - a lock, a door - has no character and no hit
@@ -478,7 +484,7 @@ mod tests {
     #[test]
     fn a_target_with_no_character_is_nobodys() {
         let mut ts = vec![target("iron lock", None)];
-        hide_other_hit_points(&mut ts, false, &["c1".to_string()]);
+        hide_other_numbers(&mut ts, false, &["c1".to_string()]);
         assert_eq!(ts[0].hp_current, None);
     }
 

@@ -6758,10 +6758,81 @@ server-side, which is a change to the roll path and not this one.
 Dave's rule was "no hit points and no AC"; this is the first half,
 and the second is written down rather than quietly dropped.
 
+**DONE IN 206**, which found that the client deciding its own target
+number was an integrity hole and not only a disclosure one.
+
 1084 tests, zero warnings. Verified in the browser rig: the frame and
 chip appear only on your turn, the controls persist off it, Attack
 sends a complete `roll_named` with the snapshot and link halves, and
 the initiative button disappears once it has been rolled.
+
+## 206. The number a roll is beaten by is not the caller's to state
+
+205 took the hit points off a player's target picker and left the
+armour class, because `roll_named` is handed `targetValue` BY THE
+CLIENT - the number had to reach the screen in order to be sent back.
+Dave: *"fix the AC half too"*. Fixing it meant fixing why it was there.
+
+### It was never only a disclosure problem
+
+**THE CLIENT DECIDED THE NUMBER IT WAS ROLLING AGAINST.** Send
+`targetValue: 1` and everything hits. Nobody chose that as a trust
+boundary - it fell out of the pickers reading the value out of
+`list_targets` and handing it straight back, and it was invisible for
+as long as the only person who could exploit it was the person whose
+campaign it was. **It does not survive a player on their own phone**,
+which is the thing 197 through 205 have been building toward.
+
+So `swing` resolves it. A target NAMED BY ID is looked up in the
+encounter and the caller's claim is discarded:
+
+| | |
+|---|---|
+| named target (an actor, a challenge) | **resolved server-side**, caller's value discarded |
+| named target not in this encounter | **refused** - not fallen back on |
+| hand-typed number ("type a number…") | still the caller's, because stating a DC out loud is deciding one rather than reading one |
+
+`swing` is the single place a character and a monster meet - both
+`roll_named` and `npc_attack` go through it - so this lands once for
+the player's roll box, the player's strip and the DM's card together.
+
+**AND THAT IS WHAT MADE WITHHOLDING THE NUMBER POSSIBLE.**
+`encounter::Target::value` is now `Option<i64>` and
+`reveal::hide_other_numbers` clears it alongside the hit points, for a
+caller who is neither the DM nor the owner. A player's picker reads
+
+```
+  Lich 0001                        <- nothing
+  Luci                             <- nothing
+  Bryn - AC 14 - 36/36 hp          <- their own, in full
+```
+
+where the DM's still reads `Lich 0001 · AC 17 · 106/135 hp`. Note
+`swing` calls `encounter::load_targets` DIRECTLY rather than the
+`list_targets` command, so the authority it resolves against is never
+the redacted copy.
+
+### What is still visible, and why it is not an oversight
+
+**THE ROLL LOG SAYS `HIT vs Luci (AC 11) — by 8`.** A roll is a record
+(001) and the margin gives the number away regardless, so hiding it
+afterwards would be theatre on top of arithmetic anybody can do. Dave's
+rule was about what a player is shown BEFORE choosing - which is the
+strip and the picker, and both are now quiet.
+
+### Cost, named rather than discovered
+
+A swing that names a target now reads the encounter's targets as well
+as both sheets. `load_targets` is three requests, not three per
+creature, but this is on the hot path and the latency note at the foot
+of the handoff now has one more entry under it. The alternative was a
+second, cheaper AC derivation, which is the fault this codebase keeps
+paying for.
+
+1084 tests, zero warnings. Verified in the browser rig: a player's
+picker carries names only, their own character still carries its
+numbers, and the attack goes out with `targetValue: null` and a
+`targetId` the engine resolves for itself.
 
 ## Pick up here
 

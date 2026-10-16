@@ -6518,6 +6518,105 @@ and the tabs correctly stayed shown. A test that cannot move the input
 reports the old behaviour as the new one. The fixture holds a mutable
 `window.__fixture` now, and the comment in it says why.
 
+## 203. A player can see the fight
+
+The feature 202 cleared the way for. At the top of Play, only while an
+encounter is running - Dave's call on placement, because a player keeps
+one screen and that is what the phone and tablet target wants.
+
+```
+Tavern  round 1
+  > Luci            you - 41/52
+    Goblin 0001     hurt
+    Lich 0001       bloodied   frightened
+    Tarren          cannot act - paralysed
+    Webbys          down
+```
+
+**Your own character carries real numbers. Everybody else carries a
+WORD** - hurt, bloodied, down - which is Dave's option B taken back in
+the login discussion: name, place in the order, conditions, a band, and
+no hit points or armour class.
+
+### IT IS A COURTESY, NOT A GUARD, AND THE MODULE SAYS SO AT THE TOP
+
+**A player who is a member of the game can already read every monster's
+`hp_max` and `ac_override` out of `characters`, and every row of
+`hp_events`.** Probed against the live database before a line was
+written: as a player in Dave's game, 18 character rows, 14 of them NPCs
+with their maxima, 25 hp events.
+
+So this decides what the app SHOWS, exactly as `amDM()` decides what the
+app OFFERS. Neither is a security boundary; RLS is, and RLS currently
+lets a member read those columns. **Making it real is a separate and
+bigger piece** - a narrowed `characters` SELECT policy plus a read path
+that returns the band from SQL, so a player never RECEIVES the numbers.
+Worth doing before anyone plays with a stranger. Not done.
+
+### The rule is `reveal.rs`, with 19 tests
+
+Because "at or below half" is a game number, and nothing on screen
+computes a game number. `band()` answers Untouched, Hurt, Bloodied or
+Down, and `reveal()` decides who gets numbers and who gets the word.
+
+| | |
+|---|---|
+| `Down` | decided on the current value ALONE, so a creature at zero reads down even when nothing knows its maximum |
+| `Bloodied` | at or below half, and `* 2` rather than `/ 2` - integer division would call 13 of 27 "hurt" |
+| `Untouched` | renders as **nothing at all**, because a word against every unhurt line teaches people to stop reading them |
+| no maximum | **no band**, rather than an invented one |
+| `dead` | the DM's explicit answer outranks the arithmetic |
+
+### What it reuses rather than rebuilds
+
+Three readers already existed and all three are the authority for what
+they answer, so the strip has no second opinion about anything:
+
+- **the order** - `initiative::ordered_actors`, extracted from
+  `turn_order` so the DM's card and the player's strip sort once. The
+  player's strip showing a different order from the DM's screen is the
+  worst way this feature could fail.
+- **the vitals** - `load_targets`, already batched and already what the
+  attack path aims with, so the numbers behind a band are the numbers a
+  swing resolves against.
+- **what is still running** - `effects::active`, against the game's own
+  tick.
+
+### Two faults the browser caught that reading would not have
+
+**The condition chips would have rendered as nothing.** `list_conditions`
+sends keys WITH the `cond.` prefix and the first version of `reveal`
+returned them bare, so every lookup in the frontend catalogue would have
+missed and every creature would have looked unafflicted - an answer
+that looks like good news. The rule now emits `key_for(c)`, which is
+also the canonical spelling, so `cond.paralyzed` comes back as
+`cond.paralysed`.
+
+**And a test that asserted nothing.** `conditions::of_key` does
+`strip_prefix(PREFIX)?`, so a bare key answers `None` to every question.
+The first test passed `paralysed` instead of `cond.paralysed`; the
+assertion it happened to make was `cannot_act.is_some()`, which failed
+and exposed it. **Had it asserted `is_none()` it would have passed on
+the mistake.** `Facts` now documents the prefix and why.
+
+### Verified in a browser, against a stub
+
+The real `main.js` against a fake `window.__TAURI__`, per the README.
+Every line single-height, chips inline beside the band, the panel
+hidden when the fight ends and back when it returns, and the tab strip
+still a player's three.
+
+**Two layout faults it found, both diverging from the shape Dave
+approved:** chips appended to the row landed in a fourth grid cell and
+wrapped onto their own line, and a chip showed only its glyph with the
+meaning in a TOOLTIP - on the one panel built for touch screens, which
+have no hover. The chips now sit in the state cell and carry the word,
+and a condition that is already named by the `cannot act` warning is not
+repeated beside it.
+
+1076 tests, zero warnings. **Still only the DM can advance the turn** -
+the strip reads, it does not act.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15
@@ -6561,17 +6660,19 @@ and only the DM can see whose turn it is.
 So the next piece is **THE PLAYER'S VIEW OF A FIGHT**, and 197 and 198
 are what unblock it:
 
-1. **Turn order with names.** `list_members` has returned real display
-   names since 198 and **is still called by no JavaScript at all.** The
-   roster read is done; nothing renders it.
-2. **Your own line:** hit points, your conditions as chips, and the
-   `cannot act` warning 190 already computes.
-3. **A monster shows a BAND, not a number** - Dave's call, taken before
-   the detour: name, position in the order, conditions, and
-   hurt/bloodied/down. **No hit points, no AC.** That rule does not
-   exist anywhere yet, in SQL or in Rust, and it is a rule, so it wants
-   a tested module rather than a `case` in the frontend.
-4. **Hide the four DM tabs** from a non-DM, which is the one-line half.
+1. ~~Turn order with names~~ - **203.** Not via `list_members`, which
+   still has no caller: the strip names creatures from the actor rows,
+   because a fight contains monsters and `game_members` holds people.
+2. ~~Your own line~~ - **203.**
+3. ~~A monster shows a band~~ - **203**, `reveal.rs`, 19 tests. **But a
+   courtesy and not a guard** - a member can still read the numbers
+   directly. The guard is a narrowed `characters` policy and is not
+   done.
+4. ~~Hide the four DM tabs~~ - **202.**
+
+**What the strip still does not do:** it READS. Only the DM can advance
+the turn, and a player cannot roll initiative, end their own condition
+or act from it. Whether any of that belongs to a player is Dave's call.
 
 Postgres already refuses a player the DM's data - that is 011 and 193 -
 so this is about what is OFFERED, not about safety. The worst case today

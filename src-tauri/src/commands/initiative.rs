@@ -38,6 +38,20 @@ fn denied(e: String, what: &str) -> String {
 #[tauri::command]
 pub fn turn_order(state: State<AppState>, encounter_id: String) -> Result<Value, String> {
     let token = state.token()?;
+    ordered_actors(&token, &encounter_id)
+}
+
+/// The same answer, for a caller that already holds a token.
+///
+/// 203. EXTRACTED SO THE PLAYER'S STRIP CAN REUSE IT RATHER THAN SORT
+/// THE FIGHT A SECOND TIME. `commands/fight.rs` decorates this with hit
+/// points and conditions and then redacts it; the ORDER has to be the
+/// same order the DM is looking at, and two sorts that agree today are
+/// two sorts to keep in agreement. `turn_order` above is now a wrapper
+/// and its behaviour is unchanged.
+pub(crate) fn ordered_actors(token: &str, encounter_id: &str) -> Result<Value, String> {
+    let token = token.to_string();
+    let encounter_id = encounter_id.to_string();
 
     let enc = supabase::rest_get(
         &token,

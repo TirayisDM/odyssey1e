@@ -379,7 +379,7 @@ pub(crate) fn drop_concentration(
 /// is in the way and needs to see everything to be sure nothing is;
 /// filtering here would mean the rule could not tell "nothing there"
 /// from "nothing shown".
-fn load_for_game(token: &str, game_id: &str) -> Result<Vec<Effect>, String> {
+pub(crate) fn load_for_game(token: &str, game_id: &str) -> Result<Vec<Effect>, String> {
     let rows = supabase::rest_get(
         token,
         "effects",

@@ -51,6 +51,7 @@ mod pin;
 mod casting;
 mod resist;
 mod resolution;
+mod reveal;
 mod scribe;
 mod size;
 mod slots;
@@ -1612,6 +1613,8 @@ pub fn run() {
             commands::effects::list_effects,
             commands::effects::list_conditions,
             commands::effects::halting_conditions,
+            // 203. The player's own view of the fight.
+            commands::fight::fight_strip,
             commands::effects::apply_effect,
             commands::effects::end_effect,
             commands::time::game_clock,

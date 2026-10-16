@@ -1033,3 +1033,36 @@ button.wide{width:100%}
    important thing in it. */
 .condpick{font-size:11px;padding:1px 2px;margin-left:4px;
   width:6.5rem;max-width:6.5rem;flex:0 0 auto}
+
+/* 203. The player's fight strip. One row per creature, at the top of
+   Play while a fight is running.
+
+   A GRID so the three cells line up down the column: the turn marker,
+   the name, and the one thing this player is allowed to know about
+   their state. Chips flow after it. */
+.strip{list-style:none;margin:0;padding:0}
+.strip li{display:grid;grid-template-columns:1rem minmax(0,1fr) auto;
+          align-items:center;gap:.4rem;padding:.2rem 0;
+          border-bottom:1px solid var(--line)}
+.strip li:last-child{border-bottom:0}
+.strip .turnmark{color:var(--accent);font-size:11px;text-align:center}
+.strip .stripname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Everything known about a creature's state, in one cell, so a row
+   reads as one sentence and chips never push the name about. Wraps
+   under itself on a narrow screen rather than widening the row. */
+.strip .striphow{display:flex;align-items:center;justify-content:flex-end;
+                 gap:.3rem;flex-wrap:wrap;font-size:11px;color:var(--muted)}
+.strip .striphow .yours{color:var(--fg);white-space:nowrap}
+/* Whose turn it is, and which line is yours. The turn is the louder of
+   the two: you already know which one you are. */
+.strip li.up{background:var(--panel)}
+.strip li.up .stripname{color:var(--fg)}
+.strip li.mine .stripname{font-weight:600}
+.strip li.mine .striphow{color:var(--fg)}
+/* The bands. Three words and only three, so they are coloured rather
+   than explained - and `down` is the only one that gets the alarm
+   colour, because hurt is ordinary and bloodied is most of a fight. */
+.strip .band-hurt{color:var(--muted)}
+.strip .band-bloodied{color:var(--accent)}
+.strip .band-down{color:var(--bad)}
+

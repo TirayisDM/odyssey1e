@@ -123,6 +123,23 @@
 
       </section>
 
+      <!-- 203. THE PLAYER'S VIEW OF THE FIGHT.
+
+           AT THE TOP OF PLAY AND ONLY WHILE ONE IS RUNNING - Dave's
+           call on placement. A player keeps ONE screen, which is what
+           the phone and tablet target wants, and a panel that sat here
+           saying "no fight" would cost the sheet a screenful on every
+           session that never rolls initiative.
+
+           WHAT IT MAY SAY IS NOT THIS FILE'S BUSINESS. `reveal.rs`
+           decides who gets numbers and who gets a word; `fight_strip`
+           hands over lines that already have nothing in them a player
+           may not see. Nothing here computes a game number. -->
+      <section id="strip-panel" hidden>
+        <h2><span id="strip-name"></span> <span id="strip-round" class="muted"></span></h2>
+        <ol id="strip-order" class="strip"></ol>
+      </section>
+
       <!-- 110. WHAT A CASTER CAN DO ON THEIR TURN. Beside the roll
            box rather than buried on the sheet: a cleric in initiative
            needs their prepared list where the rolling happens, and

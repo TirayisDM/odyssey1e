@@ -493,6 +493,10 @@ async function selectGame(id) {
   await loadSpecies();
   await loadRolls();
   await loadTargets();
+  // 203. AFTER loadConditions, because the strip renders its chips out
+  // of that catalogue, and a strip painted before it arrived would show
+  // a creature as unafflicted rather than empty-handed.
+  await loadFightStrip();
   // BEFORE loadDM, and outside it. The places are member-readable by
   // 033's policy and a player's own screen needs them: the drop
   // confirmation names the room they are standing in, and it can only
@@ -1881,6 +1885,126 @@ async function loadEffects() {
   if (!got) return;
   state.effects = got.effects || [];
   for (const where of CLOCK_PANES) paintEffects(where);
+}
+
+// 203. THE PLAYER'S FIGHT STRIP.
+//
+// ONE READ, AND IT HAS ALREADY DECIDED EVERYTHING. `fight_strip` hands
+// back lines with nothing in them this player may not see: their own
+// character carries real hit points, everybody else carries a WORD -
+// hurt, bloodied, down - and `reveal.rs` owns which. So this function
+// renders what it is given and never asks a question about a number.
+// "Nothing on screen computes a game number" is the whole point here,
+// because the alternative is a threshold written twice.
+//
+// NULL MEANS NO FIGHT, and the panel goes away rather than saying so.
+async function loadFightStrip() {
+  const panel = document.querySelector("#strip-panel");
+  const list = document.querySelector("#strip-order");
+  if (!panel || !list) return;
+  if (!state.gameId) {
+    panel.hidden = true;
+    return;
+  }
+
+  const r = await tryCall("fight_strip", { gameId: state.gameId });
+  // A REFUSAL IS NOT "NO FIGHT". Both end up hiding the panel, but a
+  // failed read must not also clear a strip that was right a second
+  // ago under a message nobody will see - so it leaves the list alone.
+  if (!r.ok) {
+    panel.hidden = true;
+    return;
+  }
+  const strip = r.value;
+  if (!strip || !(strip.order || []).length) {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  const enc = strip.encounter || {};
+  document.querySelector("#strip-name").textContent = enc.name || "Fight";
+  document.querySelector("#strip-round").textContent =
+    "round " + (enc.round || 0);
+
+  list.innerHTML = "";
+  for (const line of strip.order) {
+    const li = document.createElement("li");
+    if (line.is_current) li.classList.add("up");
+    if (line.yours) li.classList.add("mine");
+
+    // The marker is its own cell so every name starts at the same x
+    // whether or not it is their turn.
+    const mark = document.createElement("span");
+    mark.className = "turnmark";
+    mark.textContent = line.is_current ? "►" : "";
+
+    const name = document.createElement("span");
+    name.className = "stripname";
+    name.textContent = line.name;
+
+    // EVERYTHING KNOWN ABOUT THEIR STATE GOES IN ONE CELL, which is
+    // what makes the row read as "Lich 0001 · bloodied · frightened"
+    // rather than a name with a column of chips hanging under it. The
+    // row is a three-column grid and a chip appended to the LI itself
+    // lands in a fourth cell, which wraps to a new line - so they are
+    // appended in here instead.
+    const how = document.createElement("span");
+    how.className = "striphow";
+
+    // YOUR NUMBERS, OR SOMEBODY ELSE'S WORD, and never both - the
+    // engine sends exactly one of them and this does not choose.
+    if (line.yours && line.hp_max) {
+      const n = document.createElement("span");
+      n.className = "yours";
+      n.textContent = "you · " + line.hp_current + "/" + line.hp_max;
+      how.append(n);
+    } else if (line.yours) {
+      // Yours, but nothing ever set a maximum. Still say it is yours.
+      const n = document.createElement("span");
+      n.className = "yours";
+      n.textContent = "you";
+      how.append(n);
+    } else if (line.band) {
+      const b = document.createElement("span");
+      b.className = "band-" + line.band;
+      b.textContent = line.band;
+      how.append(b);
+    }
+
+    // The chips come off the catalogue `list_conditions` already sent,
+    // looked up by the key the engine chose, so no name, glyph or
+    // tooltip is typed into this file.
+    //
+    // THE NAME IS ON THE CHIP, not only in the hover, and that is the
+    // one place this differs from the DM's card. That card shows a bare
+    // glyph because "the hover has to carry the whole meaning" - but
+    // THIS panel is the phone and tablet surface, and a touch screen
+    // has no hover. A symbol nobody can decode and nobody can hover is
+    // a symbol. The glyph leads, the word follows, which is what the
+    // condition picker already does.
+    for (const key of line.conditions || []) {
+      const c = (state.conditions || []).find((x) => x.key === key);
+      if (!c) continue;
+      // Not twice. When a condition is the reason for the `cannot act`
+      // warning below, that warning already names it.
+      if (line.cannot_act && c.name === line.cannot_act) continue;
+      const ch = chip(c.glyph + " " + c.name.toLowerCase(), "no cond");
+      ch.title = c.said || c.name;
+      how.append(ch);
+    }
+
+    // 190's warning, on a player's screen for the first time. It SAYS,
+    // it does not refuse - the same decision 051 took about turn order.
+    if (line.cannot_act) {
+      const w = chip("cannot act · " + line.cannot_act.toLowerCase(), "no");
+      w.title = "A creature that cannot act takes no actions or reactions.";
+      how.append(w);
+    }
+
+    li.append(mark, name, how);
+    list.append(li);
+  }
 }
 
 // 187. WHAT IS TRUE OF ONE CREATURE, out of everything running.
@@ -4070,6 +4194,11 @@ async function refreshTab(name) {
   if (!state.gameId) return;
   try {
     if (name === "play") {
+      // 203. IN THE DISPATCH, which this function's own comment asks
+      // for - "so a new tab cannot forget to be in it". Arriving at
+      // Play is how a player sees the fight has moved, and clicking
+      // Play while already on it is the refresh.
+      await loadFightStrip();
       await loadRolls();
       if (state.characterId) await loadSheet();
     } else if (name === "chars") {

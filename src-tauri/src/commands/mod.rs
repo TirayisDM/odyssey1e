@@ -84,6 +84,7 @@ pub mod creatures;
 pub mod dm;
 pub mod effects;
 pub mod features;
+pub mod fight;
 pub mod initiative;
 pub mod inventory;
 pub mod log;

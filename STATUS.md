@@ -6473,6 +6473,10 @@ blank.** Characters, Run, World and Objects each hid their own PANEL on
 only one that hid its button - one line, in one loader - which is
 exactly why the other four never got it.
 
+**AND CHARACTERS SHOULD NEVER HAVE BEEN IN THAT LIST - see 204.** It
+is the tab the character SHEET lives on. Hiding it took a player's main
+screen away, and this entry's confidence is the reason nobody checked.
+
 **One list owns the strip now**, for the reason `refreshTab`'s own
 comment gives about itself: *"so a new tab cannot forget to be in it"*.
 Four copies of that line in four loaders is the fault this codebase
@@ -6617,6 +6621,69 @@ repeated beside it.
 1076 tests, zero warnings. **Still only the DM can advance the turn** -
 the strip reads, it does not act.
 
+## 204. 202 hid the character sheet
+
+Dave, signed in as a player: *"there also is not a visible way from
+character log in to access the character sheet"*. He was right, and it
+was 202's fault.
+
+**`#sheet-panel` LIVES ON THE CHARACTERS TAB**, which 202 hid from
+non-DMs. So a player could see their name in the sidebar, click it,
+select the character - and the sheet had nowhere to appear. The one
+page a player needs most.
+
+### How a correct comment produced a wrong conclusion
+
+`loadChars` opens by saying
+
+> A DM TOOL, and behind the same gate as Run and World. A player has
+> their own character on the sheet and no business with the roster.
+
+Every word of that is true, and 202 read it as "the Characters TAB is a
+DM tool". **It is a statement about `#chars-panel`, which is one of
+three panels in that pane:**
+
+| | |
+|---|---|
+| `#chars-panel` | the campaign roster - DM only, and it hides itself |
+| `#sheet-panel` | **the character sheet** - a player's main screen |
+| `#new-char-panel` | making a character, which `characters: owner creates own` lets any member do |
+
+The sentence even says where the sheet is - *"their own character on the
+sheet"* - and it was read as though the sheet were somewhere else.
+
+**THE CHECK IS COUNTING THE PANELS, NOT READING ONE COMMENT.** A pane
+is a DM pane only when everything in it is. Run, World and Objects hold
+exactly one panel each and it is the DM's, so those three were right.
+Creatures hides its own button and always did.
+
+### What 202's verification missed, and why
+
+202 was tested in a browser and the test passed. It asserted the right
+tabs were hidden - which they were - and **never asked whether anything
+a player needed was behind one of them.** A test written from the same
+mistaken premise as the code confirms the premise. The DOM probe would
+have caught it in one line:
+
+```js
+document.querySelector('#chars-panel').contains(document.querySelector('#sheet-panel'))
+// false - siblings, so the roster can hide without taking the sheet
+```
+
+Verified now: as a player, the strip is Play, **Characters**, Spells,
+Trade; opening Characters shows the pane with the roster hidden; and
+clicking your own name in the sidebar unhides the sheet.
+
+### Noticed while fixing it, not fixed
+
+**A player cannot create a character from the UI.** `#new-char-toggle`
+and `#new-char-panel` sit INSIDE `#chars-panel`, which hides itself for
+non-DMs - so the button is gone even though
+`characters: owner creates own` permits a member to make one, and the
+policy has permitted it since 001. Pre-existing and not 202's doing.
+Whether a player should roll their own character up is Dave's call; the
+schema already says yes.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15
@@ -6644,7 +6711,8 @@ rather than recalled:
 | **Play** | the sheet and the roll path - this works |
 | **Spells** | works |
 | **Trade** | works |
-| Characters, Run, World, Objects | ~~four buttons that open onto nothing~~ - **fixed in 202** |
+| Run, World, Objects | ~~buttons that open onto nothing~~ - **fixed in 202** |
+| Characters | 202 hid it **wrongly** - the sheet lives there. **Fixed in 204** |
 | Creatures | correctly absent |
 
 **202 did the tab half.** `DM_ONLY_TABS` and `paintTabOffer()` own the

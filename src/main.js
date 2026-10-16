@@ -447,15 +447,32 @@ function amDM() {
 // have been four places to remember when a fifth DM tab arrives.
 //
 // WHAT EACH OF THEM IS, so the list can be argued with rather than
-// trusted: `run` is the DM's screen, `world` edits the places, `chars`
-// is the campaign ROSTER and not your own sheet - that one reads as a
-// player tab and is not, which is why its loader says so at the top -
-// and `objects` is the loose-object manager.
+// trusted: `run` is the DM's screen, `world` edits the places,
+// `creatures` is the statblock library and `objects` is the
+// loose-object manager. Each of those panes holds exactly ONE panel and
+// that panel is the DM's.
+//
+// `chars` IS NOT ON THIS LIST AND WAS, WHICH BROKE A PLAYER'S SHEET.
+// 202 put it here on the strength of `loadChars`'s own comment - "a
+// player has their own character on the sheet and no business with the
+// roster" - and read that as "the tab is a DM tool". The tab holds
+// THREE panels and only the first is:
+//
+//   #chars-panel      the campaign roster - DM only, and it hides itself
+//   #sheet-panel      THE CHARACTER SHEET, which is a player's main screen
+//   #new-char-panel   making a character, which `characters: owner
+//                     creates own` lets any member do
+//
+// So hiding the button took away the one page a player needs most, and
+// clicking your own name in the sidebar selected a character whose
+// sheet had nowhere to appear. A pane is only a DM pane if EVERYTHING
+// in it is - counting the panels is the check, not reading one comment.
 //
 // STILL ONLY AN OFFER. The access rule is 011's policies plus 193's
 // guards and Postgres enforces it; this decides what is on the strip.
-// The worst case if it is wrong is a dead tab, not a leak.
-const DM_ONLY_TABS = ["chars", "run", "world", "creatures", "objects"];
+// The worst case if it is wrong is a dead tab - or, as 202 proved, a
+// live one that somebody needed.
+const DM_ONLY_TABS = ["run", "world", "creatures", "objects"];
 
 function paintTabOffer() {
   const dm = amDM();

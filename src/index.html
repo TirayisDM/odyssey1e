@@ -38,7 +38,10 @@
       </section>
 
       <section id="auth-panel">
-        <h2>Account</h2>
+        <!-- 213. A HEADER YOU CAN FOLD. Signed in, this is a wall of
+             forms nobody needs again until they sign out. -->
+        <h2 class="foldhead" data-fold="auth"><span class="caret">▾</span>Account</h2>
+        <div class="foldbody" data-fold-body="auth">
         <input id="email" type="email" placeholder="tirayis.dm+p1@gmail.com" autocomplete="off" />
         <input id="password" type="password" placeholder="password" autocomplete="off" />
         <input id="display" type="text" placeholder="display name (sign-up only)" autocomplete="off" />
@@ -58,18 +61,21 @@
           <div id="pin-msg" class="dm-msg" hidden></div>
           <div class="muted pin-note">Convenience, not security &mdash; see pin.rs.</div>
         </div>
-      </section>
+              </div>
+</section>
 
       <!-- WHO AND WHERE, always visible. Nothing below works without a
            game and a character, so these do not belong behind a tab. -->
-      <section>
-        <h2>Games <button id="refresh-games" class="tiny ghost">refresh</button></h2>
+      <section id="games-panel">
+        <h2 class="foldhead" data-fold="games"><span class="caret">▾</span>Games <button id="refresh-games" class="tiny ghost">refresh</button></h2>
+        <div class="foldbody" data-fold-body="games">
         <ul id="games" class="list"></ul>
         <input id="game-name" placeholder="new game name" />
         <button id="create-game">Create game</button>
         <input id="join-code" placeholder="join code" />
         <button id="join-game" class="ghost">Join by code</button>
-      </section>
+              </div>
+</section>
 
       <!-- The PICKER, not the manager. Who you are playing decides
            what every tab below shows, so it stays in the strip; making

@@ -311,17 +311,67 @@ function unlockSay(text, isError) {
 function paintUser() {
   const who = document.querySelector("#who");
   const out = document.querySelector("#signout");
-  const auth = document.querySelector("#auth-panel");
   if (state.user) {
     who.textContent = state.user.email + "  ·  " + state.user.user_id.slice(0, 8);
     who.classList.remove("muted");
     out.hidden = false;
-    auth.style.opacity = ".45";
+    // 213. SIGNED IN, THESE TWO FOLD AWAY. Account is a wall of forms
+    // nobody needs again until they sign out, and Games is a list you
+    // use once. The dimming that used to stand in for this is gone -
+    // a faded heading reads as disabled, and a folded one reads as
+    // folded.
+    //
+    // HERE BECAUSE THIS IS THE ONE PLACE THAT KNOWS. All four doors -
+    // sign in, sign up, PIN unlock, sign out - come through
+    // `paintUser`, and it is called on nothing else, so folding here
+    // cannot stamp on a section somebody just opened.
+    setFold("auth", false);
+    setFold("games", false);
   } else {
     who.textContent = "not signed in";
     who.classList.add("muted");
     out.hidden = true;
-    auth.style.opacity = "1";
+    // Signed out, the only thing you can do is sign in.
+    setFold("auth", true);
+    setFold("games", false);
+  }
+}
+
+/* ---------- folding headers (213) ---------- */
+
+// A section that folds to its heading.
+//
+// NOT REMEMBERED ACROSS A SIGN-IN, on purpose. The rule Dave asked for
+// is "after a successful log in they collapse", which is an event and
+// not a preference - storing the last state would mean a section you
+// opened once stayed open through every future sign-in and the fold
+// would never happen again. Within a session they stay where you put
+// them.
+function setFold(name, open) {
+  const head = document.querySelector('h2.foldhead[data-fold="' + name + '"]');
+  const body = document.querySelector('.foldbody[data-fold-body="' + name + '"]');
+  if (!head || !body) return;
+  body.hidden = !open;
+  head.classList.toggle("shut", !open);
+  const caret = head.querySelector(".caret");
+  if (caret) caret.textContent = open ? "▾" : "▸";
+}
+
+function foldIsOpen(name) {
+  const body = document.querySelector('.foldbody[data-fold-body="' + name + '"]');
+  return !!body && !body.hidden;
+}
+
+function wireFoldingHeaders() {
+  for (const head of document.querySelectorAll("h2.foldhead")) {
+    head.addEventListener("click", (e) => {
+      // A CONTROL IN THE HEADING IS ITS OWN THING. "refresh" lives in
+      // the Games heading, and pressing it must not also fold the
+      // section it is asking to refresh.
+      if (e.target.closest("button")) return;
+      const name = head.dataset.fold;
+      setFold(name, !foldIsOpen(name));
+    });
   }
 }
 
@@ -10116,6 +10166,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     dmSay(r.ok ? "moved" : r.error, !r.ok);
     await loadWorld();
   });
+
+  wireFoldingHeaders();
 
   document.querySelector("#clear-log").addEventListener("click", () => {
     logEl().innerHTML = "";

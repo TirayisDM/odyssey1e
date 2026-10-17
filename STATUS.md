@@ -7247,6 +7247,57 @@ character stays wounded by the same amount.
 the hit points are derived once, with the species already known, and
 none of the above is ever needed again.
 
+## 213. Account and Games fold away once you are in
+
+Dave: *"after successful log in I would like the Account and Games
+sections to collapse to headers with the option to expand"*.
+
+They are a wall of forms you need once. Signed in, the sidebar now
+opens on **Characters** instead of on an email box.
+
+```
+  > ACCOUNT
+  > GAMES  [refresh]
+  CHARACTERS
+    Bryn                     MINE
+```
+
+**`paintUser` is the one place that knows**, which is why the folding
+lives there. All four doors - sign in, sign up, PIN unlock, sign out -
+come through it, and it is called on nothing else, so folding there
+cannot stamp on a section somebody just opened. Signed out, Account
+opens again, because then it is the only thing you can do.
+
+**Not remembered across a sign-in, deliberately.** The rule asked for
+is an EVENT - "after a successful log in they collapse" - and not a
+preference. Storing the last state would mean a section opened once
+stayed open through every future sign-in and the fold would never
+happen again. Within a session they stay where you put them. That is
+the opposite of 207's log drawer, where "do I want the raw command log
+open on this machine" genuinely is a preference, and the difference is
+worth naming.
+
+**The heading is the target, not just the arrow** - the word "Account"
+is as clickable as the caret. The one control that is NOT the fold is
+`refresh`, which lives inside the Games heading, and the handler lets
+a click on any button through rather than folding the section it was
+asked to refresh.
+
+The dimming is gone with it. `paintUser` used to set
+`auth.style.opacity = .45` when signed in, which was the same thought
+with a worse answer: a faded heading reads as disabled, and a folded
+one reads as folded.
+
+Verified in the rig across the whole cycle: signed out Account is open
+and Games shut; signing in shuts both; clicking the Games heading
+opens it and flips the caret; `refresh` leaves it open; picking a game
+leaves it open; signing out gives Account back.
+
+**ONE COST, NAMED:** nothing auto-selects a game, so a fold on login
+puts one click between signing in and having a game. If that grates,
+the alternative is to fold Games when a game is CHOSEN rather than
+when you sign in - say the word.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

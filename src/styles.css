@@ -1147,3 +1147,17 @@ button.wide{width:100%}
    section margin that spaced it out in the Play column. */
 .strip li.stripacts > section#cast-panel{margin:.3rem 0 0}
 .strip li.stripacts > section#cast-panel h2{margin-bottom:.3rem}
+
+/* 213. A heading that folds its section away.
+
+   The caret sits in the heading rather than beside it, so the whole
+   line is the target and the word "Account" is as clickable as the
+   arrow - the one control in there that is NOT this is `refresh`, and
+   the handler lets it through. */
+h2.foldhead{cursor:pointer;user-select:none}
+h2.foldhead:hover{color:var(--fg)}
+h2.foldhead .caret{display:inline-block;width:.85rem;color:var(--accent);
+                   font-size:10px;letter-spacing:0}
+/* Shut, the heading is the whole section, so it should not keep the
+   margin that separated it from a body that is no longer there. */
+h2.foldhead.shut{margin-bottom:.15rem}

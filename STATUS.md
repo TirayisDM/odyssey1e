@@ -7211,10 +7211,41 @@ change onto Ny'ook would have reported Strength, which caps at 13.
 Bryn's natural 13/16/14/10/14/8 are untouched; `con +2, int +1` are
 derived, so the sheet reads CON 16 and INT 11.
 
-**TARREN STILL HAS NO SPECIES, and now there is no way to give him
-one through the app** - which is the honest cost of "no editor". He
-predates this and needs a line of SQL, the same as Bryn, once Dave
-says which people he is.
+**Tarren is Unt'gar too**, which closes the retrofit: all five player
+characters now have a people.
+
+### And the retrofit found one more stored thing: HIT POINTS
+
+`characters.hp_max` is STORED, and `rederive_hp_max` reads
+`species_key` - so the people's Constitution bonus is baked into the
+maximum at the moment it is derived. **Giving a character a species
+afterwards leaves their hit points short**, and nothing says so.
+
+| | class | CON | was | now |
+|---|---|---|---|---|
+| Bryn | ranger 4, d10 | 14 -> **16** | 36 | **40** |
+| Tarren | wizard 6, d6 | 10 -> **12** | 26 | **32** |
+
+**The arithmetic was validated before it was trusted.** The rule is
+`multiclass::hp`: `hit_die + con_mod + (level-1) * (hit_die/2 + 1 +
+con_mod)`. Rather than take a hand-copy of that on faith, the fix ran
+it at each character's OLD Constitution and required it to reproduce
+the stored maximum exactly - 36 for Bryn and 26 for Tarren, both
+matched - which is the proof the number was derived rather than typed.
+Only a maximum that passed that test was rewritten.
+
+**Falon's 43 does not match the formula at any Constitution and was
+left alone**, which is the whole reason for the test: a hand-set value
+is somebody's decision and re-deriving it would be this app overruling
+the person who made it.
+
+Raising the maximum is the right operation rather than a heal, per
+013: hit points are a log, so Luci stays at 1 of 52 and a wounded
+character stays wounded by the same amount.
+
+**THIS IS THE BAGGAGE 212 EXISTS TO AVOID.** Asking at creation means
+the hit points are derived once, with the species already known, and
+none of the above is ever needed again.
 
 ## Pick up here
 

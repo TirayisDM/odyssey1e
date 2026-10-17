@@ -418,50 +418,7 @@
             <div id="pc-chosen" class="chosen" hidden></div>
             <ul id="pc-list" class="list"></ul>
 
-            <!-- 068. A LINK, NOT A PERMANENT FORM. Making a character is
-                 rare and reading one is constant, so the form that does
-                 the rare thing should not be the tallest thing on the
-                 tab. -->
-            <button id="new-char-toggle" class="linky">+ New character</button>
-            <div id="new-char-panel" hidden>
-            <input id="char-name" placeholder="character name" />
-            <!-- 055. A class is where a character's hit die comes from,
-                 so picking one here is what makes the character arrive
-                 with hit points instead of a null where their life
-                 goes. "No class" stays available because a blank sheet
-                 is a real thing to want. -->
-            <select id="char-class">
-              <option value="">no class yet</option>
-            </select>
-            <div class="muted" id="char-class-note"></div>
-            <!-- 056. The species decides size and the ability bonuses,
-                 so it belongs at creation beside the class rather than
-                 as an edit afterwards. -->
-            <select id="char-species">
-              <option value="">no species yet</option>
-            </select>
-            <div class="muted" id="char-species-note"></div>
-
-            <!-- 066. ROLLED HERE, BEFORE THE CHARACTER EXISTS. Seven
-                 scores of 3d6 with every 1 rerolled, and six of them
-                 assigned - the spare is the point, so the worst of the
-                 seven need not be lived with.
-
-                 Each picker offers only what is still unspent, so a
-                 duplicate is impossible by construction. The rule is in
-                 generation::complete anyway, because the next screen
-                 will not have a dropdown. -->
-            <div class="sub">Ability scores</div>
-            <div class="row">
-              <button id="roll-stats" class="ghost">Roll 3d6 (reroll 1s) &times;7</button>
-              <button id="lock-abilities" class="ghost" disabled>Lock abilities</button>
-            </div>
-            <div id="stat-pool" class="pool"></div>
-            <div id="stat-picks" class="picks"></div>
-            <div id="stat-msg" class="dm-msg" hidden></div>
-
-            <button id="create-char">Create character</button>
-            </div>
+            
           </div>
 
           <div class="chars-pane" data-chars="npcs" hidden>
@@ -540,7 +497,63 @@
           </div>
         </section>
 
-        <!-- 067. THE SHEET LIVES HERE NOW, not in Play. It is a
+              <!-- 212. THE BUILDER IS A SIBLING OF #chars-panel, for the same
+           reason written over the sheet below it. #chars-panel is the
+           DM's roster and hides itself for anybody who is not the DM,
+           so a builder nested inside it was a builder no player could
+           reach - they could read a character and never make one.
+
+           A PLAYER BUILDING THEIR OWN IS THE SAME ACT THE DM PERFORMS,
+           so it is the same form rather than a second one. Nothing
+           DM-only travels with it: the statblock author and the
+           creatures note are siblings of this block and stay inside
+           the roster where they belong. -->
+<!-- 068. A LINK, NOT A PERMANENT FORM. Making a character is
+                 rare and reading one is constant, so the form that does
+                 the rare thing should not be the tallest thing on the
+                 tab. -->
+            <button id="new-char-toggle" class="linky">+ New character</button>
+            <div id="new-char-panel" hidden>
+            <input id="char-name" placeholder="character name" />
+            <!-- 055. A class is where a character's hit die comes from,
+                 so picking one here is what makes the character arrive
+                 with hit points instead of a null where their life
+                 goes. "No class" stays available because a blank sheet
+                 is a real thing to want. -->
+            <select id="char-class">
+              <option value="">no class yet</option>
+            </select>
+            <div class="muted" id="char-class-note"></div>
+            <!-- 056. The species decides size and the ability bonuses,
+                 so it belongs at creation beside the class rather than
+                 as an edit afterwards. -->
+            <select id="char-species">
+              <option value="">no species yet</option>
+            </select>
+            <div class="muted" id="char-species-note"></div>
+
+            <!-- 066. ROLLED HERE, BEFORE THE CHARACTER EXISTS. Seven
+                 scores of 3d6 with every 1 rerolled, and six of them
+                 assigned - the spare is the point, so the worst of the
+                 seven need not be lived with.
+
+                 Each picker offers only what is still unspent, so a
+                 duplicate is impossible by construction. The rule is in
+                 generation::complete anyway, because the next screen
+                 will not have a dropdown. -->
+            <div class="sub">Ability scores</div>
+            <div class="row">
+              <button id="roll-stats" class="ghost">Roll 3d6 (reroll 1s) &times;7</button>
+              <button id="lock-abilities" class="ghost" disabled>Lock abilities</button>
+            </div>
+            <div id="stat-pool" class="pool"></div>
+            <div id="stat-picks" class="picks"></div>
+            <div id="stat-msg" class="dm-msg" hidden></div>
+
+            <button id="create-char">Create character</button>
+            </div>
+
+<!-- 067. THE SHEET LIVES HERE NOW, not in Play. It is a
              SIBLING of #chars-panel rather than a child, and that is
              load-bearing: #chars-panel is hidden for anybody who is
              not the DM, so nesting the sheet inside it would have

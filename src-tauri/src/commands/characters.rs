@@ -172,16 +172,37 @@ pub fn create_character(
         None => None,
     };
 
-    // Same treatment as the class: named means it must exist, because
-    // a key pointing at nothing produces a character whose bonuses
-    // nothing can find and 056 cannot use a foreign key to stop it.
+    // 212. REQUIRED, WHICH IS WHAT LETS THERE BE NO EDITOR.
+    //
+    // 056 put the species at creation because it decides size and the
+    // ability bonuses, and left it optional. Optional is what made an
+    // editor necessary: a character built without one has to be able
+    // to acquire one later, and CHANGING a species afterwards is the
+    // expensive question - the bonuses are derived and re-derive for
+    // free, but the size, the granted skills and any natural score now
+    // over a new ceiling are stored, and nothing records which
+    // proficiency a species gave.
+    //
+    // Asking once, at the only moment the answer is free, removes all
+    // of that. It also matches what the form already said in 056's own
+    // words: "it belongs at creation beside the class rather than as
+    // an edit afterwards."
+    //
+    // REFUSED HERE AND NOT ONLY ON THE FORM. The frontend asks nicely;
+    // this is the rule.
     let people = match species_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(key) => match crate::character::load_species(token, &game_id, key)? {
-            Some(sp) => Some(sp),
+            Some(sp) => sp,
+            // Same treatment as the class: named means it must exist,
+            // because a key pointing at nothing produces a character
+            // whose bonuses nothing can find and 056 cannot use a
+            // foreign key to stop it.
             None => return Err(format!("no such species: {}", key)),
         },
-        None => None,
+        None => return Err("choose a species — it decides size and the ability bonuses,                             and it cannot be changed afterwards"
+            .to_string()),
     };
+    let people = Some(people);
 
     // THE SPECIES DECIDES THE SIZE unless somebody says otherwise. An
     // Unt'garoth is Large, and that is a fact about the people rather

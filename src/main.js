@@ -805,7 +805,11 @@ async function loadSpecies() {
   if (sel) {
     const keep = sel.value;
     sel.innerHTML = "";
-    sel.append(new Option("no species yet", ""));
+    // 212. A PROMPT, NOT AN ANSWER. "no species yet" was selectable and
+    // produced a character with none, which is what made an editor
+    // necessary. The engine refuses an empty key now; this says so
+    // before the round trip.
+    sel.append(new Option("choose a species…", ""));
     // PLAYABLE ONLY. The Imiear are semi-intelligent and are not PCs,
     // which is a fact about the species - 057 puts it on the row. They
     // still appear in the viewer below, because a DM wants to read them.
@@ -9315,6 +9319,16 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   document.querySelector("#create-char").addEventListener("click", async () => {
     if (!state.gameId) return log("create_character", "select a game first", true);
+    // 212. REQUIRED. The engine refuses it too - this is the courtesy
+    // that saves a round trip and says it beside the control rather
+    // than in the log.
+    if (!val("#char-species")) {
+      return statSay(
+        "choose a species — it decides size and the ability bonuses, " +
+        "and it cannot be changed afterwards",
+        true,
+      );
+    }
     const c = await call("create_character", {
       gameId: state.gameId,
       name: val("#char-name") || "Unnamed",
@@ -9323,7 +9337,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // command reads it as "no class decided" and leaves hp_max null
       // rather than inventing a d8.
       classKey: val("#char-class") || null,
-      speciesKey: val("#char-species") || null,
+      speciesKey: val("#char-species"),
       // Left to the command, which takes the SPECIES' size when there
       // is one - an Unt'garoth is Large - and medium otherwise.
       size: null,

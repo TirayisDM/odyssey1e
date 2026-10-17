@@ -7138,6 +7138,84 @@ Trade**; switching back takes it away again; standing on Spells when
 it goes bounces to Play with the pane following; and the DM still sees
 all eight with **Characters** plural.
 
+## 212. A player builds their own character, and picks a people
+
+Dave: the sheet should be a **character builder** for a PC with the
+same capability the DM has, and **species required at creation** so
+there is no editor and none of its baggage. Bryn to be Unt'gar.
+
+### Required, which is what removes the editor
+
+056 put the species at creation *"because it decides size and the
+ability bonuses"* and left it optional - and optional is exactly what
+made an editor necessary, because a character built without one has to
+be able to acquire one later.
+
+**Changing a species afterwards is the expensive question, and asking
+once at creation deletes it.** What the investigation found:
+
+| | |
+|---|---|
+| ability bonuses and ceilings | **derived** - the sheet keeps `a.base` and computes `effective_score(base, bonus, maximum)` at read time |
+| unarmoured AC, resistances, spell-save bonus, creature type, traits, languages | **derived**, read off the species row as the sheet builds |
+| `characters.size` | **stored**, copied at creation, and deliberately overridable |
+| `character_skills` from `skill_profs` | **stored rows**, and `prof` does not record WHERE it came from |
+| a natural score above a NEW people's ceiling | nothing would notice - `within_natural_cap` guards writes only |
+
+So the cheap two-thirds re-derive for free and the expensive third has
+no clean answer. Not having to ask is better than any of the answers.
+
+Refused in `create_character` and not only on the form: the frontend
+says it beside the control and saves a round trip, the engine is the
+rule. The picker's first option is a prompt now - `choose a species…`
+with an empty value - rather than the selectable `no species yet`.
+
+### The builder was somewhere a player could not reach
+
+`#new-char-toggle` and `#new-char-panel` sat INSIDE `#chars-panel`,
+which is the DM's roster and hides itself for anybody who is not the
+DM. So a player could read a character and never make one.
+
+**The markup already carried the rule, written over the sheet:**
+*"SIBLING of #chars-panel rather than a child, and that is
+load-bearing: #chars-panel is hidden for anybody who is not the DM, so
+nesting the sheet inside it would have taken every player's own
+character sheet away."* The builder is now a sibling for the same
+reason. 204 was the same mistake one level up.
+
+**Nothing DM-only travelled with it.** I expected to have to split the
+form, because the statblock author and the creatures note live under
+the same `data-chars` subtabs - they are SIBLINGS of
+`#new-char-panel`, not children, so the move took the PC builder
+alone. Checked rather than assumed: the extracted block asserts it
+contains `create-char` and does not contain `create-npc`.
+
+Verified in the rig. As a player: the toggle is there, the roster and
+the statblock author are not, the builder opens with the class picker,
+the ability roller and the species list - **Imiear excluded, because
+`playable` is false and that is a fact about the people (057)**.
+Pressing create with no species shows the refusal and **sends
+nothing**; choosing one sends it. As the DM: roster, all three
+subtabs, builder and sheet, unchanged.
+
+### Bryn is Unt'gar
+
+`species_key = untgar`, size `med` (which Unt'gar is, and Bryn already
+was), and the History proficiency the people grant.
+
+**The scores needed no adjustment and the probe is why that is known
+rather than assumed.** Unt'gar states `ability_maxima: {}` - no
+ceilings at all - so the fix checked every natural score against the
+new people's maxima before writing and found nothing over. The same
+change onto Ny'ook would have reported Strength, which caps at 13.
+Bryn's natural 13/16/14/10/14/8 are untouched; `con +2, int +1` are
+derived, so the sheet reads CON 16 and INT 11.
+
+**TARREN STILL HAS NO SPECIES, and now there is no way to give him
+one through the app** - which is the honest cost of "no editor". He
+predates this and needs a line of SQL, the same as Bryn, once Dave
+says which people he is.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

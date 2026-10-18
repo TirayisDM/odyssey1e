@@ -2523,8 +2523,30 @@ function paintClock(where, got) {
   const steps = document.querySelector("#steps-" + where);
   if (!now || !steps) return;
 
-  now.textContent = got.reading;
-  now.title = "tick " + got.tick + " - six seconds each";
+  // 214. THE DATE, AND THE SEASON BESIDE IT. The reading is one line
+  // read at a glance - "Luhnstag, 1 Aiberhan SA 2240 · 00:00" - and
+  // the season is what the year is FOR, so it sits next to it in its
+  // own colour rather than being crammed onto the end.
+  now.textContent = "";
+  now.append(sEl("span", "clock-date", got.reading));
+  if (got.season) {
+    const sn = sEl("span", "clock-season", got.season.name);
+    // The working name and the sentence, for somebody meeting this
+    // calendar for the first time.
+    sn.title = got.season.epithet + " — " + got.season.about;
+    now.append(sn);
+  }
+
+  // WHAT THE NAMES MEAN, on the date itself. A DM should be able to
+  // find out that Luhnstag is Monday by pointing at it.
+  const g = got.gloss;
+  now.title = g
+    ? [
+        g.weekday.name + " is " + g.weekday.earth + ", " + g.weekday.means,
+        g.month.name + " is " + g.month.earth + ", " + g.month.days + " days",
+        g.age + " · tick " + got.tick + ", six seconds each",
+      ].join(" · ")
+    : "tick " + got.tick + " - six seconds each";
 
   steps.innerHTML = "";
   for (const step of got.steps || []) {

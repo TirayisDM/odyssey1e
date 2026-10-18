@@ -7298,6 +7298,100 @@ puts one click between signing in and having a game. If that grates,
 the alternative is to fold Games when a game is CHOSEN rather than
 when you sign in - say the word.
 
+## 214. The calendar of Tirayis
+
+The clock said **"day 3, 14:30"**. It now says
+
+```
+Luhnstag, 1 Aiberhan SA 2240 · 00:00        EHRRACH
+```
+
+**A CALENDAR IS A WAY OF READING THE TICK, NOT A SECOND CLOCK.** This
+is the whole reason it was cheap: every rule in `clock.rs` - durations,
+expiry, the rest cycle, the twenty-four hours between long rests - is
+arithmetic on one integer and **not one line of it changed**. The
+integer learned to say its name and nothing else moved.
+
+### What Dave settled
+
+| | |
+|---|---|
+| world | Planet Tirayis |
+| year | Earth's, **flat 365, no leap** |
+| months | twelve, Earth's lengths, Irish-derived names |
+| week | seven days |
+| era | 2240th year of the **Second Age**, counted from the cataclysm after the Leviathan |
+
+```
+Ennahr  Faebrach  Märtak  Aiberhan  Baldtann  Meithkamm
+Jüll    Lunnatz   Mehnfohrm  Dreidfohrm  Samhkarn  Nollagg
+```
+
+**The seasons are whole months, not solstices** - the Gaelic division,
+and I had assumed the astronomical one when Dave first said "same as
+Earth". It is the better answer and a simpler one: a season becomes a
+property of the month rather than a calculation, so `Ehrrach` is a
+lookup. It also means **winter wraps the year end** - Samhkarn,
+Nollagg, Ennahr - which is the one case worth its own test.
+
+| | | |
+|---|---|---|
+| **Ehrrach** | Thaw-time | Faebrach, Märtak, Aiberhan |
+| **Sammradt** | High-forge | Baldtann, Meithkamm, Jüll |
+| **Fohrm** | Forge-harvest | Lunnatz, Mehnfohrm, Dreidfohrm |
+| **Gaimradt** | Deep-hold | Samhkarn, Nollagg, Ennahr |
+
+**Tick zero is 1 Aiberhan, SA 2240** - the first week of spring, when
+Ehrrach and the planting are celebrated. The WEEKDAY is the one thing
+Dave did not state and it had to be something, so it is Luhnstag: the
+first day of the week on the first day of the month. One constant if
+the world says otherwise.
+
+### The tests that matter
+
+**The twelve months have to come to the year.** Earth's lengths with
+Faebrach at 28 and no leap day sum to exactly 365, and a test asserts
+it - that single equality is what holds the whole calendar together,
+because every date is `days_before(month)` arithmetic off it.
+
+**365 is fifty-two weeks and a day**, so a year on is the same date and
+the NEXT weekday, exactly as Earth does it. Nothing corrects the drift
+because there is nothing to correct, and a test pins it so nobody
+later "fixes" it.
+
+Also pinned: every month belongs to exactly one season and each season
+holds three; a month ends where its length says and the next begins
+the next day; and a negative tick reads as the beginning rather than
+as a date in 2239, because time only goes forward and rendering a
+negative would hide a bug somewhere else.
+
+### On screen
+
+The season sits beside the date in its own colour rather than on the
+end of it - the reading is one line somebody takes at a glance, and
+"Ehrrach · Thaw-time · the passes open and the surface crews go out"
+is the part they would stop reading. The sentence is the hover.
+
+And the names explain themselves. Pointing at the date says
+**"Luhnstag is Monday, day of the moon · Aiberhan is April, 30 days ·
+Second Age"**. That is also why `earth` and `means` are on the
+constants at all: they were dead fields and a warning, and the honest
+fix was to use them rather than to silence them.
+
+### What this opens, and is not done
+
+- **"Once per day" still means "on a long rest."** There is a real
+  dawn now for it to mean instead.
+- **The jumps are still +10 min / +1 hr / +4 / +8 / +24.** With a
+  calendar, *"to dawn"* and *"to the next day"* are the ones people
+  want.
+- **Combat still costs no game time** - 092's gap, unchanged by this.
+- **The First Age is prose.** `AGE` is a label on the year, not
+  arithmetic; nothing spans an age boundary because nothing has been
+  asked to.
+
+1093 tests, zero warnings.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

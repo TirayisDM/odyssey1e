@@ -1161,3 +1161,10 @@ h2.foldhead .caret{display:inline-block;width:.85rem;color:var(--accent);
 /* Shut, the heading is the whole section, so it should not keep the
    margin that separated it from a body that is no longer there. */
 h2.foldhead.shut{margin-bottom:.15rem}
+
+/* 214. The date and the season it falls in. The season is the quieter
+   of the two - it tells you what the year is for, not what day it is. */
+.clock-now .clock-date{color:var(--accent)}
+.clock-now .clock-season{margin-left:.5rem;font-size:10px;
+                         text-transform:uppercase;letter-spacing:.09em;
+                         color:var(--muted);cursor:help}

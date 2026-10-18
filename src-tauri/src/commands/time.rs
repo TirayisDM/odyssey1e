@@ -26,11 +26,47 @@ pub fn game_clock(state: State<AppState>, game_id: String) -> Result<Value, Stri
     Ok(json!({
         "tick": tick,
         "reading": clock::reading(tick),
+        "season": season(tick),
+        "gloss": gloss(tick),
         "steps": clock::STEPS
             .iter()
             .map(|(label, ticks)| json!({ "label": label, "ticks": ticks }))
             .collect::<Vec<_>>(),
     }))
+}
+
+/// 214. What the clans call this stretch of the year.
+///
+/// BESIDE THE DATE RATHER THAN IN IT. `clock::reading` is one line
+/// somebody reads at a glance and "Ehrrach · Thaw-time" on the end of
+/// it is the part they would stop reading. The screen puts the season
+/// where it has room and the sentence in the hover.
+///
+/// Three callers return a clock - this one, `advance_time` and
+/// `take_rest` - and all three go through here, so a date and its
+/// season cannot disagree about which tick they are describing.
+fn season(tick: i64) -> Value {
+    let s = clock::season_of(tick);
+    json!({ "name": s.name, "epithet": s.epithet, "about": s.about })
+}
+
+/// 214. What today's names MEAN, for the hover.
+///
+/// The months and weekdays carry the Earth name they answer to and, for
+/// a weekday, what it was named after - "Luhnstag, Monday, day of the
+/// moon". A DM meeting this calendar for the first time should be able
+/// to find that out by pointing at the date rather than by reading a
+/// table somewhere else, and it is the reason those fields are on the
+/// constants at all.
+fn gloss(tick: i64) -> Value {
+    let d = clock::date(tick);
+    let w = clock::WEEKDAYS[d.weekday];
+    let m = clock::MONTHS[d.month];
+    json!({
+        "weekday": { "name": w.name, "earth": w.earth, "means": w.means },
+        "month": { "name": m.name, "earth": m.earth, "days": m.days },
+        "age": clock::AGE,
+    })
 }
 
 /// Move the clock forward.
@@ -46,6 +82,8 @@ pub fn advance_time(state: State<AppState>, game_id: String, ticks: i64) -> Resu
     Ok(json!({
         "tick": then,
         "reading": clock::reading(then),
+        "season": season(then),
+        "gloss": gloss(then),
         "passed": clock::said(ticks),
     }))
 }
@@ -171,6 +209,8 @@ pub fn take_rest(state: State<AppState>, game_id: String, long: bool) -> Result<
         "kind": kind.as_str(),
         "tick": then,
         "reading": clock::reading(then),
+        "season": season(then),
+        "gloss": gloss(then),
         "rested": rested,
         "refused": refused,
     }))

@@ -79,16 +79,12 @@
 -- a claim on it besides the bearer, and no more.
 --
 --
--- ON THE LEDGER, BECAUSE A DIGEST CHECK WILL FLAG THIS ONE.
---
--- Every other migration's `schema_migrations.statements` holds the
--- whole file, header and all, so `md5(statements)` matches the file on
--- disk. THIS ONE'S DOES NOT: it was applied with the SQL alone, before
--- this header was written, and rewriting the ledger afterwards is not a
--- thing to do to a ledger. **The SQL below is what ran** - the function
--- bodies in the database were re-read from this file and carry these
--- comments - and the only difference is that the row does not contain
--- the prose above `begin;`. Compare the body, not the file, for 217.
+-- ON THE LEDGER. This one was first applied with the SQL alone,
+-- before this header was written, so its `schema_migrations` row held
+-- less than the file and a digest check would have flagged it. The row
+-- was then set to this file and the digest compared against it, which
+-- is the only way that check is worth having - the check IS that the
+-- file and the row agree.
 
 begin;
 

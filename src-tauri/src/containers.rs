@@ -185,6 +185,14 @@ pub fn fits(
 
 /// The container facts for one item key, or None if it is not a
 /// container at all.
+///
+/// 218. A FIXTURE ANSWERS THE SAME QUESTIONS. A crate accepts what it
+/// accepts, takes a thing of a certain size and has so much room left,
+/// and those are `accepts`, `holds_size` and `capacity_slots` on the
+/// same table. The one thing that differs about scenery is that it
+/// cannot be carried, and that is a trigger's business rather than
+/// this loader's - so a fixture with no profile here would be a crate
+/// nothing could be put into.
 pub fn load_profile(
     token: &str,
     game_id: &str,
@@ -207,7 +215,10 @@ pub fn load_profile(
     let Some(r) = rows.as_array().and_then(|a| a.first()) else {
         return Ok(None);
     };
-    if r.get("kind").and_then(|x| x.as_str()) != Some("container") {
+    if !matches!(
+        r.get("kind").and_then(|x| x.as_str()),
+        Some("container") | Some("fixture")
+    ) {
         return Ok(None);
     }
     Ok(Some(Profile {

@@ -4877,6 +4877,38 @@ async function loadScene() {
   paintPeople(roster || [], id);
   paintSceneEncounters(fights || []);
   paintThings(things || []);
+  await paintStock(id, things || []);
+}
+
+// The two pickers under the Things list: what to place, and where in
+// this room to put it.
+//
+// 218. `stock-into` IS THE ROOM PLUS WHATEVER IN IT HOLDS THINGS, read
+// off the list that was just painted rather than asked for again. A
+// crate appears here the moment it is placed, which is what makes
+// "put the crate down, then fill it" two clicks instead of a reload.
+async function paintStock(locationId, things) {
+  const what = document.querySelector("#stock-what");
+  if (!what) return;
+  if (!what.options.length) await fillCatalogue(what, state.gameId);
+
+  const into = document.querySelector("#stock-into");
+  const keep = into.value;
+  into.innerHTML = "";
+  const here = document.createElement("option");
+  here.value = locationId;
+  here.textContent = "on the floor";
+  into.append(here);
+  for (const o of things) {
+    // Anything that holds things - a fixture, or an ordinary chest
+    // somebody left standing here.
+    if (!o.item || !["fixture", "container"].includes(o.item.kind)) continue;
+    const op = document.createElement("option");
+    op.value = o.id;
+    op.textContent = "in " + (o.name || o.item.name || o.item_key);
+    into.append(op);
+  }
+  if (keep) into.value = keep;
 }
 
 function setCount(sel, n) {
@@ -4973,6 +5005,21 @@ function paintSceneEncounters(fights) {
 // What is lying on the floor. One step, not a search: a chest in the
 // room holds its own contents, and opening it is the container panel's
 // job.
+// WHAT IS IN THIS ROOM, and what can be done about it.
+//
+// 218. THIS WAS A LIST AND NOTHING MORE - a name and a count, no way
+// to act on any of it. Two things changed under it. `location_contents`
+// now answers in the same shape as what is in a bag, so this can read
+// `item.kind`; and a FIXTURE is scenery that holds things, so a room
+// has two sorts of row in it and they want different offers.
+//
+//     a crate     opens, and what is inside it can be taken
+//     a sword     is taken
+//
+// OPEN IS A READ AND IT IS NOT CACHED. `list_contents` is one request
+// and the contents change the moment somebody takes something; holding
+// a copy here would be a second answer to "what is in the crate" and
+// this file has paid for that before. Shut and reopen is the refresh.
 function paintThings(things) {
   const ul = document.querySelector("#scene-things");
   ul.innerHTML = "";
@@ -4982,10 +5029,84 @@ function paintThings(things) {
     return;
   }
   for (const o of things) {
-    ul.append(
-      row(o.name || o.item_key, o.quantity > 1 ? "x" + o.quantity : "", null)
-    );
+    const label = o.name || (o.item && o.item.name) || o.item_key;
+    const count = o.quantity > 1 ? "x" + o.quantity : "";
+    const fixture = o.item && o.item.kind === "fixture";
+
+    const li = row(label, fixture ? "fixture" : count, null);
+    if (fixture) {
+      // The caret says it opens, and the row is the control - a
+      // separate button beside a thing whose whole purpose is to be
+      // opened is a button nobody looks for.
+      li.classList.add("openable");
+      const inside = document.createElement("ul");
+      inside.className = "list inside";
+      inside.hidden = true;
+      const mark = sEl("button", "opener", "›");
+      mark.title = "open it";
+      guard(mark, async () => {
+        inside.hidden = !inside.hidden;
+        mark.textContent = inside.hidden ? "›" : "‹";
+        if (inside.hidden) return;
+        await fillFixture(inside, o);
+      });
+      li.prepend(mark);
+      ul.append(li, inside);
+    } else {
+      li.append(takeButton(o));
+      ul.append(li);
+    }
   }
+}
+
+// What is inside a crate, with a way to take each of it.
+async function fillFixture(host, fixture) {
+  host.innerHTML = "";
+  const got = await tryCall("list_contents", { containerId: fixture.id });
+  if (!got.ok) {
+    host.append(row(got.error, "", null));
+    return;
+  }
+  if (!got.value.length) {
+    host.append(row("empty", "", null));
+    return;
+  }
+  for (const it of got.value) {
+    const li = row(
+      it.name || (it.item && it.item.name) || it.item_key,
+      it.quantity > 1 ? "x" + it.quantity : "",
+      null
+    );
+    li.append(takeButton(it, () => fillFixture(host, fixture)));
+    host.append(li);
+  }
+}
+
+// Pick it up, into whoever is selected.
+//
+// THE CHARACTER IS THE SELECTED ONE, not a picker on every row. A take
+// goes into the hands of whoever this screen is about, and the DM
+// selecting a character is how they say whose hands those are. With
+// nobody selected this says so rather than guessing at the first PC.
+function takeButton(o, after) {
+  const b = sEl("button", "tiny ghost", "take");
+  b.title = "pick it up";
+  guard(b, async () => {
+    if (!state.characterId) {
+      return dmSay("select a character first - a take goes into somebody's hands", true);
+    }
+    const r = await tryCall("take_object", {
+      objectId: o.id,
+      characterId: state.characterId,
+      quantity: null,
+    });
+    if (!r.ok) return dmSay(r.error, true);
+    dmSay((o.name || (o.item && o.item.name) || o.item_key) + " taken");
+    if (after) await after();
+    await loadScene();
+    if (state.characterId) await loadSheet();
+  });
+  return b;
 }
 
 // Point the Where picker at the place this encounter is actually in.
@@ -9819,6 +9940,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (box) box.value = "";
     log("import_statblock", "imported - edit it on the character sheet");
     await loadCreatures();
+  });
+
+  // 218. Put a new thing into this room, or into something standing
+  // in it. The only other door into the world is give_item, and that
+  // one puts things in a person's hands.
+  guarded("#stock-here", async () => {
+    if (!state.placeId) return dmSay("open a place first", true);
+    const key = val("#stock-what");
+    if (!key) return dmSay("nothing selected to place", true);
+    const r = await tryCall("stock_here", {
+      gameId: state.gameId,
+      into: val("#stock-into") || state.placeId,
+      itemKey: key,
+      quantity: Number(val("#stock-count")) || 1,
+    });
+    if (!r.ok) return dmSay(r.error, true);
+    dmSay(r.value.said);
+    await loadScene();
   });
 
   guarded("#add-item", async () => {

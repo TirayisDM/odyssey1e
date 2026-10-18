@@ -260,6 +260,31 @@ pub fn take_from_container(
 /// A NAMED THING CANNOT BE SPLIT and needs no guard here: `may_name`
 /// refuses a name on a stack of more than one, so a named row is always
 /// a single thing and every split of it takes the whole.
+///
+/// 218. AND EVERY WRITE ASKS WHETHER IT HAPPENED. This is the shared
+/// write under every drop, every take and every put, which makes it
+/// the one 217's pass cared most about: `objects` is reachable by a
+/// player, and an UPDATE their policy filters matches no row and
+/// raises nothing. A move that silently did not happen is an item that
+/// quietly stayed where it was - or, in the merge pair, one that was
+/// added nowhere and then deleted from somewhere.
+///
+/// The refusal names the thing rather than the policy, because the
+/// only way to match no row here is to be reaching for something that
+/// is not yours.
+/// Why a move matched no row, in a sentence somebody can act on.
+///
+/// There is only one reason: the `objects` policy did not admit this
+/// caller for that row. Rather than say so in those words, this names
+/// the thing and what could not be done with it.
+fn refused(obj: &objects::ObjectRow, verb: &str) -> String {
+    format!(
+        "cannot {} {} - it is not yours to move, and only the DM or          whoever is holding it can",
+        verb,
+        obj.name.clone().unwrap_or_else(|| obj.item_key.clone())
+    )
+}
+
 pub(crate) fn move_into(
     token: &str,
     obj: &objects::ObjectRow,
@@ -278,32 +303,46 @@ pub(crate) fn move_into(
                 .find(|s| s.id == id)
                 .map(|s| s.quantity)
                 .unwrap_or(0);
-            let merged = supabase::rest_update(
+            // THE DESTINATION FIRST, and the source is not touched
+            // unless it landed. 217 found this exact pair in `trade`
+            // deleting the giver's row after a filtered update had
+            // added nothing - the goods simply vanished.
+            let merged = supabase::rest_update_if(
                 token,
                 "objects",
                 &[("id", &format!("eq.{}", id))],
                 &json!({ "quantity": have + moved }),
             )?;
+            if !merged {
+                return Err(refused(obj, "add to what is already there"));
+            }
             // The row that moved is gone, because it was never a thing
             // in its own right - the same reasoning `take_object` uses.
             supabase::rest_delete(token, "objects", &[("id", &format!("eq.{}", object_id))])?;
-            return Ok(merged);
+            return Ok(json!({ "moved": moved, "merged_into": id }));
         }
-        return supabase::rest_update(
+        let went = supabase::rest_update_if(
             token,
             "objects",
             &[("id", &format!("eq.{}", object_id))],
             &json!({ "holder_id": holder }),
-        );
+        )?;
+        if !went {
+            return Err(refused(obj, "move"));
+        }
+        return Ok(json!({ "moved": moved }));
     }
 
     // Part of it. The source keeps the remainder whatever happens next.
-    supabase::rest_update(
+    let kept = supabase::rest_update_if(
         token,
         "objects",
         &[("id", &format!("eq.{}", object_id))],
         &json!({ "quantity": keep }),
     )?;
+    if !kept {
+        return Err(refused(obj, "take any of"));
+    }
 
     if let Some(id) = target {
         let have = destination_contents
@@ -311,12 +350,16 @@ pub(crate) fn move_into(
             .find(|s| s.id == id)
             .map(|s| s.quantity)
             .unwrap_or(0);
-        return supabase::rest_update(
+        let merged = supabase::rest_update_if(
             token,
             "objects",
             &[("id", &format!("eq.{}", id))],
             &json!({ "quantity": have + moved }),
-        );
+        )?;
+        if !merged {
+            return Err(refused(obj, "add to what is already there"));
+        }
+        return Ok(json!({ "moved": moved, "merged_into": id }));
     }
 
     supabase::rest_insert(

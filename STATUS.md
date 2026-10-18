@@ -7664,6 +7664,149 @@ control** proving the rig can tell the difference.
   the DM. Whether to grant that is a rules decision: a trade has two
   consenting sides and RLS can only express one at a time.
 
+## 218. Scenery you can open
+
+A crate in the corner. Dave's line: scenery that can be **examined,
+searched or looted from**. Three interactions are planned - Normal,
+Find Traps, Search - the last two being rolls. **Only Normal is built:**
+open it, see what is inside, take it.
+
+### A fixture is a container that cannot be carried
+
+That one sentence is why this is a `kind` and not a new table. Every
+question a container answers - what it accepts, how big a thing it
+takes, how much room is left - is the same question for a crate, and
+`accepts`, `holds_size` and `capacity_slots` are already on `items`.
+One fact differs, and it is a trigger.
+
+**THE QUESTION THAT DECIDED THE SHAPE:** `container_gets_an_entity`
+fired on `kind = 'container'` alone, and without an entity nothing can
+point at a thing, so nothing can be inside it. A fixture as a *kind*
+would have been scenery that could not be looted - the one thing it is
+for. The gate widens to both. The ENTITY stays `kind = 'container'`,
+because `entities.kind` says what a thing DOES in the holder chain and
+a crate holds things exactly as a sack does.
+
+### A crate is a particular thing, not a stack
+
+`objects_stack_idx` is unique on `(holder_id, item_key)` where the name
+is null, and **a floor is a holder** - which is the whole reason two
+dropped rations merge on the ground. For a crate that is wrong: two
+crates hold different things and have different entities.
+
+So a fixture is **named when it arrives** and forced to quantity 1. A
+named row is outside that index and `merge_into` refuses a named thing
+in either direction, so two crates stand side by side and never become
+each other. Renaming one "the broken crate" is the same mechanism used
+deliberately.
+
+### Take was broken, and had been since 033
+
+**`take_object` had not noticed that floors exist.** It opened with
+*"if the holder is not null, somebody is holding it"* - true when a
+dropped thing went into limbo. 033 gave rooms an entity and taught
+`drop_object` to drop into one; its own header records the change. The
+inverse was never told, so **it refused to pick up anything a drop had
+put down.** Live data agreed: 0 objects lying in any location, 2 still
+in the pre-033 limbo, and those two were the only things it could lift.
+
+It also hand-rolled its merge - the exact bug `drop_object`'s header
+describes fixing, which loses `size_override` and walks into the stack
+index - and took no `quantity`, so it was all seven rations or none.
+Both gone: it goes through `move_into` now.
+
+### And loot in a room was unreachable, however shallow
+
+Found while building this and **proved before anything was touched:**
+
+```
+a chest standing in a room, rations inside it
+  holder_character(chest entity)     = null
+  holder_is_a_location(chest entity) = false
+  a player taking the rations        = 0 rows, REFUSED
+```
+
+037's third write clause asks about the IMMEDIATE holder. `holder_character`
+right beside it walks the whole chain; it was only ever the location half
+that stopped at the first step. So nobody owned the rations and nobody
+could take them.
+
+`loose_in_the_world` is that walk. It is deliberately **not** called
+`holder_roots_in_a_location`, because it answers true for a null holder
+too, and a name that said "location" while returning true for nowhere is
+the kind of small lie this codebase keeps paying for. It joins
+`security_doors`' allowlist with its reason stated - like the other two,
+it is what the policies themselves call, so it is the one thing that
+cannot check its caller.
+
+### The door that was not there
+
+Until now the only way to bring an object into the world was
+`give_item`, which puts it in a person's hands - **so furnishing a room
+meant handing somebody a crate, and a crate refuses to be held.**
+Everything else moves a thing that already exists.
+
+`stock_here` is that door, and it takes a location OR something standing
+in one, because "a crate in the cellar" and "a sword in the crate" are
+the same act and splitting them would be two commands with one body.
+Capacity is checked only for the container: a room has no capacity, 036
+having given slots to containers and not to places.
+
+### On screen
+
+The Things list was a name and a count with nothing to click.
+`location_contents` now answers in the **same shape as what is in a
+bag** - so the screen can read `item.kind` and the two lists cannot
+describe one object differently.
+
+```
+a crate     opens, and what is inside it can be taken
+a sword     is taken
+```
+
+Opening is a read and **is not cached**: contents change the moment
+somebody takes something, and a copy held here would be a second answer
+to "what is in the crate". Shut and reopen is the refresh.
+
+### What it cost to be sure
+
+The migration's own check refused the first run - and caught **my
+probe**, not the schema: step (d) had already given Bryn unnamed
+rations, so step (e) collided on the stack index. A raw UPDATE does not
+merge the way `move_into` does. That is the index doing its job, and it
+is recorded in the file rather than quietly worked around.
+
+Six things proved inside the migration before it was allowed to commit:
+a crate gets an entity, a name and a quantity of one; a second plain
+crate stands beside the first; it refuses to be carried; a player takes
+loot out of it; the same works for a portable chest in a room; and
+somebody else's pack is still nobody else's business.
+
+The screen went through a rig driving the real `paintThings`,
+`fillFixture` and `paintStock`: **15 assertions and a negative
+control** - the same crate called a weapon loses its opener and gains a
+take.
+
+`security_doors()` reports 0. 1099 tests, zero warnings. **The ledger
+row matches the file**, checked by digest on the way in rather than
+afterwards this time.
+
+### Still open
+
+- **A player cannot see any of this.** The scene view is on the World
+  tab, which is DM-only. Where a player sees the room they are standing
+  in is the open design question, and it is a UI decision rather than a
+  data one - the policies already admit them.
+- **Find Traps and Search** are the two rolls, deliberately not built.
+  052's challenge-on-an-object is the shape waiting for them.
+- **Reach is not asked.** Nothing checks that the taker is standing in
+  the room the thing is lying in. `holders::within_reach` exists but
+  asks "same root", which would refuse this case - the taker is a
+  character root and the thing is a location root. The Take rule is its
+  sibling and wants its own tests.
+- **A fixture cannot be destroyed or attacked.** Backlog item 1's
+  "attacking a thing", unchanged.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

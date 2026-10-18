@@ -254,47 +254,68 @@ fn place(token: &str, location_id: &str) -> Result<(String, String), String> {
     ))
 }
 
-/// Pick up something nobody is holding, merging it if it stacks.
+/// Pick something up off the floor, merging it if it stacks.
 ///
 /// The inverse of a drop, and it goes through the same stacking rule:
 /// three rations picked up by someone carrying four become seven, and
 /// the row that was on the floor is gone because it was never a thing
 /// in its own right.
+///
+/// 218. THIS HAD NOT NOTICED THAT FLOORS EXIST, and had been wrong
+/// since 033. It used to open with "if the holder is not null, somebody
+/// is holding it" - which was true when a dropped thing had NO holder
+/// and went into limbo. 033 gave rooms an entity and `drop_object` was
+/// taught to drop INTO one; its own header records the change. This,
+/// the inverse, was not, so **it refused to pick up anything a drop
+/// had put down.** The only things it could still lift were the two
+/// pre-033 rows left lying in nowhere.
+///
+/// THE QUESTION IS NOT "IS ANYBODY HOLDING IT" but "is this loose in
+/// the world" - lying in a room, in a crate in a room, or nowhere at
+/// all - and that is `loose_in_the_world` in the database, which the
+/// `objects` policy already asks on every write. So this does not ask
+/// it a second time: it moves, and `move_into` reports a move that
+/// matched no row. One answer, in the place that owns it.
+///
+/// AND IT GOES THROUGH `move_into` NOW. The hand-rolled merge it used
+/// to carry is the bug `drop_object`'s header describes being fixed -
+/// it loses `size_override` on a split and walks into
+/// `objects_stack_idx` - and it could not take PART of a stack at all.
 #[tauri::command]
 pub fn take_object(
     state: State<AppState>,
     object_id: String,
     character_id: String,
+    quantity: Option<i64>,
 ) -> Result<Value, String> {
     let token = state.token()?;
     let obj = objects::load_object(&token, &object_id)?;
-    if obj.holder_id.is_some() {
-        return Err("somebody is already holding that".to_string());
+
+    // A COURTESY, NOT THE GUARD. The guard is the policy, and it
+    // answers for cases this cannot see - a bag inside a bag on
+    // somebody else. This one is here because "Falon is carrying that"
+    // is a better sentence than "it is not yours to move", and it is
+    // the case that actually happens.
+    let (world, holder_rows, _) = crate::holders::load_world(&token, &obj.game_id)?;
+    if let crate::holders::Root::Character { name, .. } =
+        crate::holders::root_of(obj.holder_id.as_deref(), &world, &holder_rows)
+    {
+        return Err(format!("{} is carrying that - it is not lying about", name));
     }
 
     let taker = crate::character::load_profile(&token, &character_id)?;
     let held = objects::load_held(&token, &taker.entity_id)?;
-    if let Some(id) = objects::merge_into(&held, &obj.item_key, obj.name.as_deref()) {
-        let have = held
-            .iter()
-            .find(|s| s.id == id)
-            .map(|s| s.quantity)
-            .unwrap_or(0);
-        let merged = supabase::rest_update(
-            &token,
-            "objects",
-            &[("id", &format!("eq.{}", id))],
-            &json!({ "quantity": have + obj.quantity }),
-        )?;
-        supabase::rest_delete(&token, "objects", &[("id", &format!("eq.{}", object_id))])?;
-        return Ok(merged);
-    }
-
-    supabase::rest_update(
+    // NOTHING TO CHECK ON THE WAY IN, the same reasoning
+    // `take_from_container` states: a person is not a container with a
+    // capacity, and encumbrance is a rule about what they can CARRY
+    // that does not exist yet.
+    crate::commands::containers::move_into(
         &token,
-        "objects",
-        &[("id", &format!("eq.{}", object_id))],
-        &json!({ "holder_id": taker.entity_id }),
+        &obj,
+        &object_id,
+        &held,
+        Some(&taker.entity_id),
+        quantity,
     )
 }
 
@@ -1202,4 +1223,93 @@ pub fn set_object_grants(
         &[("id", &format!("eq.{}", object_id))],
         &json!({ "grants": grants }),
     )
+}
+
+/// Put a NEW thing into a place, or into something standing in one.
+///
+/// 218. THE DOOR THAT WAS NOT THERE. Until now the only way to bring an
+/// object into the world was `give_item`, which puts it in a
+/// character's hands - so furnishing a room meant handing a crate to
+/// somebody and making them drop it, and a crate refuses to be held.
+/// Everything else - `drop_here`, `place_object`, `put_in_container` -
+/// MOVES a thing that already exists.
+///
+/// ONE COMMAND FOR BOTH DESTINATIONS, because "a crate in the cellar"
+/// and "a sword in the crate" are the same act of stocking a scene and
+/// splitting them would be two commands with one body. `into` names a
+/// LOCATION or an OBJECT that holds things; which one it is, is a
+/// lookup rather than a flag the caller has to get right.
+///
+/// THE CAPACITY QUESTION IS ASKED ONLY OF A CONTAINER. A room has no
+/// capacity - 036 chose slots as the "how much fits" measure and gave
+/// it to containers, not to places - so filling a crate is checked and
+/// filling a cellar is not.
+#[tauri::command]
+pub fn stock_here(
+    state: State<AppState>,
+    game_id: String,
+    into: String,
+    item_key: String,
+    quantity: Option<i64>,
+    name: Option<String>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let quantity = objects::check_quantity(quantity.unwrap_or(1))?;
+    let name = name.as_deref().and_then(objects::clean_name);
+
+    // The same rule `give_item` states: a named thing is one thing.
+    if name.is_some() && quantity != 1 {
+        return Err("only one thing can carry a name - stock it singly".to_string());
+    }
+
+    // 174's rule applies here as everywhere: a key with no catalogue row
+    // would be a row the sheet skips, present and invisible.
+    if crate::equipment::load_item(&token, &game_id, &item_key)?.is_none() {
+        return Err(format!("no item with key '{}' in this game", item_key));
+    }
+
+    // A PLACE, OR A THING STANDING IN ONE. The location's own entity is
+    // tried first because that is the common case and the cheaper read.
+    let (holder, where_) = match place(&token, &into) {
+        Ok((entity, name)) => (entity, name),
+        Err(_) => {
+            let con = objects::load_object(&token, &into)?;
+            let entity = con
+                .entity_id
+                .ok_or_else(|| "that is not a place, and not something that holds things".to_string())?;
+            let going = quantity;
+            crate::commands::containers::guard_capacity(
+                &token, Some(&entity), &game_id, &item_key, going, None,
+            )?;
+            (entity, con.name.clone().unwrap_or_else(|| con.item_key.clone()))
+        }
+    };
+
+    let there = objects::load_held(&token, &holder)?;
+    if let Some(id) = objects::merge_into(&there, &item_key, name.as_deref()) {
+        let have = there.iter().find(|s| s.id == id).map(|s| s.quantity).unwrap_or(0);
+        let grew = supabase::rest_update_if(
+            &token,
+            "objects",
+            &[("id", &format!("eq.{}", id))],
+            &json!({ "quantity": have + quantity }),
+        )?;
+        if !grew {
+            return Err(format!("nothing can be added to {}", where_));
+        }
+        return Ok(json!({ "said": format!("{} x{} added to {}", item_key, quantity, where_) }));
+    }
+
+    supabase::rest_insert(
+        &token,
+        "objects",
+        &json!({
+            "game_id": game_id,
+            "holder_id": holder,
+            "item_key": item_key,
+            "quantity": quantity,
+            "name": name,
+        }),
+    )?;
+    Ok(json!({ "said": format!("{} is now in {}", name.unwrap_or(item_key), where_) }))
 }

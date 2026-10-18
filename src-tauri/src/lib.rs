@@ -1744,6 +1744,7 @@ pub fn run() {
             commands::inventory::give_item,
             commands::inventory::drop_object,
             commands::inventory::take_object,
+            commands::inventory::stock_here,
             commands::inventory::rename_object,
             commands::inventory::set_object_proficient,
             commands::inventory::object_techniques,

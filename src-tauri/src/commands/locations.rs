@@ -177,24 +177,39 @@ pub fn delete_location(state: State<AppState>, location_id: String) -> Result<()
 pub fn location_contents(
     state: State<AppState>,
     location_id: String,
-) -> Result<Vec<objects::Stack>, String> {
+) -> Result<Vec<crate::equipment::Owned>, String> {
     let token = state.token()?;
     let rows = supabase::rest_get(
         &token,
         "locations",
         &[
-            ("select", "entity_id"),
+            ("select", "entity_id,game_id"),
             ("id", &format!("eq.{}", location_id)),
         ],
     )?;
-    let entity = rows
+    let r = rows
         .as_array()
         .and_then(|a| a.first())
-        .and_then(|r| r.get("entity_id"))
-        .and_then(|v| v.as_str())
         .ok_or_else(|| "no such place, or it is not visible to you".to_string())?;
+    let entity = r
+        .get("entity_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "that place has no holder identity".to_string())?;
+    let game_id = r.get("game_id").and_then(|v| v.as_str()).unwrap_or_default();
 
-    objects::load_held(&token, entity)
+    // 218. THE SAME SHAPE AS WHAT IS IN A BAG, which is what "a floor
+    // is a holder like any other" has to mean on the screen as well as
+    // in the table. The bare stack it used to answer with carried an
+    // id, a key and a count, and no way to tell a crate from the sword
+    // lying beside it - so the screen could not offer "open" on one and
+    // "take" on the other. `load_loadout` is the read `list_contents`
+    // already makes, so the two lists cannot describe one object
+    // differently.
+    //
+    // NO PROFICIENCIES PASSED. They decide whether a WIELDER is trained
+    // with a thing, and a floor is not training with anything; the
+    // empty slices give the honest answer rather than a flattering one.
+    crate::equipment::load_loadout(&token, entity, game_id, &[], &[], &[], false)
 }
 
 /// Put a LOOSE thing into a place.

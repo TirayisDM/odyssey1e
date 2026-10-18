@@ -1129,6 +1129,20 @@
 
           <div class="scene-pane" data-scene="things" hidden>
             <ul id="scene-things" class="list"></ul>
+            <!-- 218. STOCKING THE ROOM. Until now the only door into
+                 the world was give_item, which puts a thing in a
+                 character's hands - and a crate refuses to be held,
+                 so a scene could not be furnished at all. The second
+                 picker is the inside of something already standing
+                 here, so a crate and the coin in it are two uses of
+                 one control. -->
+            <div class="row">
+              <select id="stock-what"></select>
+              <select id="stock-into"></select>
+              <input id="stock-count" type="number" min="1" value="1"
+                     class="narrow" />
+              <button id="stock-here" class="tiny ghost">Place</button>
+            </div>
           </div>
         </div>
         </div>

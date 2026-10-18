@@ -55,7 +55,7 @@
 //!   dm.rs                create encounter, enrol actor, add
 //!                        challenge, write a statblock     (item 2) DONE
 //!   inventory.rs         list the catalogue, give, drop, take,
-//!                        name and destroy an object                DONE
+//!                        stock a room, name and destroy an object  DONE
 //!   containers.rs        what is inside, put in, take out          DONE
 //!   store.rs             what it costs here, and buying it         DONE
 //!   locations.rs         build the world, and put things down in it DONE

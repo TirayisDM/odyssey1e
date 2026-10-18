@@ -2552,7 +2552,25 @@ function paintClock(where, got) {
       ].join(" · ")
     : "tick " + got.tick + " - six seconds each";
 
+  // 216. THE CLOCK IS EVERYBODY'S; MOVING IT IS THE DM'S.
+  //
+  // 092 settled that - "THE DM MOVES TIME, NOT THE ENGINE" - and the
+  // `games` policy agrees: only the DM may update the row the tick
+  // lives on. A player pressing "+4 hours" was writing nothing and
+  // being told four hours had passed.
+  //
+  // THE READING STAYS FOR EVERYONE. A player wants to know it is
+  // Morning; what they cannot do is make it Afternoon. Same shape as
+  // every other offer on this screen - Postgres is the rule and this
+  // decides what is worth showing.
+  const mine = amDM();
+  steps.hidden = !mine;
+  for (const b of document.querySelectorAll('[data-rest][data-clock="' + where + '"]')) {
+    b.hidden = !mine;
+  }
+
   steps.innerHTML = "";
+  if (!mine) return;
   for (const step of got.steps || []) {
     const b = sEl("button", "ghost tiny", "+" + step.label);
     b.title = step.ticks + " ticks";

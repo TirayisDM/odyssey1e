@@ -639,12 +639,36 @@ fn read_tick(token: &str, game_id: &str) -> Result<i64, String> {
         .ok_or_else(|| "no such game".to_string())
 }
 
+/// Write the clock, and REFUSE IF IT DID NOT TAKE.
+///
+/// 216. AN RLS-FILTERED UPDATE IS NOT AN ERROR. `games` may be updated
+/// by the DM alone, and a player's write does not fail - it matches no
+/// row, returns two hundred and changes nothing. So this reported
+/// success, `advance_time` reported success, and the screen said
+/// "4 hours passes" over a clock still reading 11:00.
+///
+/// Proven before it was fixed: as Player One, `update games set tick`
+/// touched **0 rows and raised nothing**.
+///
+/// This is 016's lesson arriving somewhere new - that migration exists
+/// because an RLS-blocked UPDATE on death saves failed silently too.
+/// `rest_update_if` was written for exactly this shape (120) and says
+/// whether anything matched, so the only correct answer here is to
+/// ask.
+///
+/// WHY THE MESSAGE NAMES THE DM rather than saying "nothing happened":
+/// the only way to match no row here is to not be the DM of a game
+/// that exists, and a refusal that does not say why is the thing this
+/// whole function is being fixed for.
 fn write_tick(token: &str, game_id: &str, tick: i64) -> Result<(), String> {
-    supabase::rest_update(
+    let moved = supabase::rest_update_if(
         token,
         "games",
         &[("id", &format!("eq.{}", game_id))],
         &json!({ "tick": tick }),
     )?;
+    if !moved {
+        return Err("only the DM of this game can move the clock".to_string());
+    }
     Ok(())
 }

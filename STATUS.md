@@ -7462,6 +7462,67 @@ round is the one span the engine does know.
   the DM's button. Whether any of those should carry a cost is a
   rules decision, not a gap.
 
+## 216. "4 hours passes", over a clock that had not moved
+
+Dave, signed in as a player, pressed **+4 hours**. The message line
+said *"4 hours passes"*. The clock still read **11:00 MORNING**.
+
+### An RLS-filtered UPDATE is not an error
+
+`games` may be updated by the DM alone. A player's write does not
+fail - **it matches no row, returns two hundred and changes nothing.**
+So `write_tick` returned Ok, `advance_time` returned Ok, and the
+screen reported four hours it had not been given.
+
+Proven before anything was changed, as Player One:
+
+```
+update public.games set tick = tick + 2400 where id = <game>;
+-> rows touched: 0     tick before: 0   after: 0     no error raised
+```
+
+**THIS IS 016 ARRIVING SOMEWHERE NEW.** That migration exists because
+an RLS-blocked UPDATE on death saves failed silently in exactly this
+way, and `rest_update_if` was written in 120 for exactly this shape -
+it reports whether anything matched. The only correct answer here was
+to ask it. `write_tick` now refuses with *"only the DM of this game
+can move the clock"* rather than lying.
+
+The refusal names the DM on purpose: the only way to match no row is
+to not be the DM of a game that exists, and a refusal that does not
+say why is the thing being fixed.
+
+### And the button should not have been there
+
+092 settled it - *"THE DM MOVES TIME, NOT THE ENGINE"* - and the
+policy agrees. The clock bar offered a player five jumps and two rests
+that could only ever fail.
+
+**The reading stays for everyone.** A player wants to know it is
+Morning; what they cannot do is make it Afternoon. Same shape as every
+other offer on screen: Postgres is the rule and `amDM` decides what is
+worth showing.
+
+Verified in the rig: as a player the clock reads in full with no jumps
+and no rest buttons; as the DM both come back.
+
+### The part that is bigger than this bug
+
+**54 calls to `rest_update` against 3 to `rest_update_if`.** Every one
+of those 54 is a write that cannot tell "it worked" from "RLS filtered
+it out", and the ones that matter are the writes a non-DM might
+reach - `advance_turn`'s own update to `encounters` is DM-only and
+would no-op the same silent way if a player's screen ever offered it.
+
+Most are unreachable today because the UI does not offer them, which
+is exactly how this one hid: the control was offered by mistake and
+the engine had no second line of defence. **Worth a pass of its own** -
+not "convert all 54", but find the writes a player can reach and make
+those ask.
+
+1096 tests, zero warnings. No migration: the policy was always right,
+the app was lying about it.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

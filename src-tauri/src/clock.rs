@@ -276,6 +276,21 @@ const EPOCH_MONTH: usize = 3; // Aiberhan, zero-based
 const EPOCH_DAY: i64 = 1;
 const EPOCH_WEEKDAY: usize = 0; // Luhnstag
 
+/// 215. AND THE HOUR IT OPENS AT: eleven in the morning.
+///
+/// A campaign does not begin at midnight. Eleven is late morning with
+/// the day's work already started and the whole of it still ahead,
+/// which is where a session actually opens.
+///
+/// IT MOVES THE DAY BOUNDARY TOO, which is the part worth saying out
+/// loud: tick zero is 11:00 on the first of Aiberhan, so midnight -
+/// and the next date - arrives thirteen hours in rather than
+/// twenty-four. The whole of `date` runs off one addition for exactly
+/// that reason; shifting only the displayed hour would have put the
+/// date change in the wrong place and nothing would have caught it.
+const EPOCH_HOUR: i64 = 11;
+const EPOCH_TIME: i64 = EPOCH_HOUR * HOUR;
+
 /// A moment, read off the tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Date {
@@ -313,7 +328,10 @@ fn days_before(month: usize) -> i64 {
 /// clock has never gone backwards - a negative would be a bug
 /// elsewhere, and rendering it as a date in 2239 would hide it.
 pub fn date(tick: i64) -> Date {
-    let t = tick.max(0);
+    // 215. The hour the campaign opens at is an offset on the tick
+    // itself, so the date rolls over at midnight rather than at the
+    // hour play began.
+    let t = tick.max(0) + EPOCH_TIME;
     let days = t / DAY;
     let rest = t % DAY;
 
@@ -361,6 +379,42 @@ pub fn reading(tick: i64) -> String {
         d.hour,
         d.minute
     )
+}
+
+/// 215. WHAT PART OF THE DAY IT IS.
+///
+/// The hours are exact and nobody reads them that way. A DM pressing
+/// "+4 hours" twice wants to see the afternoon become night, not
+/// 11:00 become 19:00 and work it out - which is what Dave means by
+/// time SHOWING rather than being reflected.
+///
+/// SIX BANDS, AND THEY ARE A READING OF THE HOUR rather than a fact
+/// about the world. Re-cutting them is changing this table and
+/// nothing else - no stored row says "it is dusk", and nothing
+/// mechanical turns on them yet.
+///
+/// DAWN IS A REAL MOMENT NOW, which is the one with a use waiting for
+/// it: a feature that recharges "at dawn" is currently recharged by a
+/// long rest because there was no sunrise to point at.
+pub const DAY_PARTS: [(&str, i64, i64); 6] = [
+    ("Dawn", 5, 7),
+    ("Morning", 7, 12),
+    ("Midday", 12, 14),
+    ("Afternoon", 14, 18),
+    ("Dusk", 18, 21),
+    // Night wraps midnight, so it is the one that is not a plain
+    // range - everything outside the five above.
+    ("Night", 21, 5),
+];
+
+pub fn part_of_day(tick: i64) -> &'static str {
+    let h = date(tick).hour;
+    for (name, from, to) in DAY_PARTS {
+        if from < to && h >= from && h < to {
+            return name;
+        }
+    }
+    "Night"
 }
 
 /// The season this tick falls in.
@@ -550,25 +604,53 @@ mod tests {
     }
 
     #[test]
-    fn the_campaign_opens_in_the_first_week_of_spring() {
-        assert_eq!(reading(0), "Luhnstag, 1 Aiberhan SA 2240 · 00:00");
+    fn the_campaign_opens_at_eleven_in_the_first_week_of_spring() {
+        assert_eq!(reading(0), "Luhnstag, 1 Aiberhan SA 2240 · 11:00");
         assert_eq!(season_of(0).name, "Ehrrach");
         assert_eq!(season_of(0).epithet, "Thaw-time");
+        assert_eq!(part_of_day(0), "Morning");
     }
 
     #[test]
     fn the_hours_still_run_inside_the_day() {
-        assert_eq!(reading(HOUR), "Luhnstag, 1 Aiberhan SA 2240 · 01:00");
+        assert_eq!(reading(HOUR), "Luhnstag, 1 Aiberhan SA 2240 · 12:00");
         assert_eq!(
-            reading(14 * HOUR + 30 * MINUTE),
+            reading(3 * HOUR + 30 * MINUTE),
             "Luhnstag, 1 Aiberhan SA 2240 · 14:30"
         );
     }
 
+    /// 215. The opening hour moves the DATE boundary, not just the
+    /// clock face: from eleven, midnight is thirteen hours away.
     #[test]
-    fn a_day_on_is_the_next_date_and_the_next_weekday() {
+    fn the_date_turns_over_at_midnight_and_not_at_the_opening_hour() {
+        let before = date(12 * HOUR + 59 * MINUTE);
+        assert_eq!((before.day, before.hour), (1, 23));
+        let after = date(13 * HOUR);
+        assert_eq!((after.day, after.hour, after.weekday_name()), (2, 0, "Märtstag"));
+    }
+
+    #[test]
+    fn a_day_on_is_the_next_date_and_the_same_hour() {
         let d = date(DAY);
-        assert_eq!((d.day, d.month_name(), d.weekday_name()), (2, "Aiberhan", "Märtstag"));
+        assert_eq!(
+            (d.day, d.month_name(), d.weekday_name(), d.hour),
+            (2, "Aiberhan", "Märtstag", 11)
+        );
+    }
+
+    #[test]
+    fn the_day_has_a_name_at_every_hour_of_it() {
+        for h in 0..24 {
+            let p = part_of_day(h * HOUR - EPOCH_TIME + DAY);
+            assert!(!p.is_empty(), "hour {} has no part of day", h);
+        }
+        assert_eq!(part_of_day(DAY - EPOCH_TIME + 6 * HOUR), "Dawn");
+        assert_eq!(part_of_day(DAY - EPOCH_TIME + 13 * HOUR), "Midday");
+        assert_eq!(part_of_day(DAY - EPOCH_TIME + 19 * HOUR), "Dusk");
+        // the two sides of midnight are both night
+        assert_eq!(part_of_day(DAY - EPOCH_TIME + 23 * HOUR), "Night");
+        assert_eq!(part_of_day(DAY - EPOCH_TIME + 2 * HOUR), "Night");
     }
 
     /// Aiberhan has thirty, so the thirtieth is its last.
@@ -578,6 +660,17 @@ mod tests {
         let over = date(30 * DAY);
         assert_eq!((over.day, over.month_name()), (1, "Baldtann"));
         assert_eq!(over.season().name, "Sammradt");
+    }
+
+    /// Aiberhan has thirty days and the campaign opens on the first of
+    /// them at eleven, so the month is over thirty days later minus
+    /// the eleven hours already spent.
+    #[test]
+    fn the_opening_hour_does_not_lose_a_day_over_a_month() {
+        let last = date(29 * DAY + 12 * HOUR);
+        assert_eq!((last.day, last.month_name(), last.hour), (30, "Aiberhan", 23));
+        let next = date(29 * DAY + 13 * HOUR);
+        assert_eq!((next.day, next.month_name(), next.hour), (1, "Baldtann", 0));
     }
 
     /// 365 is fifty-two weeks and a day, so a year on is the same date

@@ -7392,6 +7392,76 @@ fix was to use them rather than to silence them.
 
 1093 tests, zero warnings.
 
+## 215. Eleven in the morning, and a clock that moves when the fight does
+
+```
+Luhnstag, 1 Aiberhan SA 2240 · 11:00    MORNING    EHRRACH
+```
+
+### The campaign opens at eleven
+
+A campaign does not begin at midnight. Eleven is late morning with the
+day's work started and the whole of it still ahead.
+
+**IT MOVES THE DATE BOUNDARY, NOT JUST THE CLOCK FACE**, and that is
+the part that could have gone quietly wrong. From eleven, midnight is
+thirteen hours away - so the offset is added to the TICK before any
+date arithmetic rather than to the displayed hour afterwards. Shifting
+only the hour would have left the date turning over at 11:00 and
+nothing would have caught it. Two tests pin it: the date turns at
+midnight thirteen hours in, and a month's end does not lose a day to
+the opening hour.
+
+### A part of the day, because that is what people track
+
+Six bands - Dawn, Morning, Midday, Afternoon, Dusk, Night - and
+pressing "+4 hours" twice now visibly carries you from Morning into
+Night rather than leaving somebody to subtract 11:00 from 19:00. Night
+is the one that wraps midnight, so it is what is left over rather than
+a range.
+
+They are **a reading of the hour and not a fact about the world**:
+re-cutting them is changing one table, no row says "it is dusk", and
+nothing mechanical turns on them yet. **Dawn is now a real moment**,
+which is the one with a use waiting - a feature that recharges "at
+dawn" is currently recharged by a long rest because there was no
+sunrise to point at.
+
+### And the clock moves when a round does
+
+**This is 092's gap, closed.** The tick was built as a round and the
+one place that counts rounds could not touch it: a ten-round fight
+cost no game time, so an hour-long song cast in round one was still
+running after it, and Luci's paralysis - expiring at tick 10 - could
+never run out by fighting. The Tavern sat at round 2 with the clock
+reading 11:00.
+
+| | |
+|---|---|
+| **one tick per ROUND** | six seconds is what a round costs however many creatures act in it - charging per turn would make a crowded fight pass time faster than an empty one |
+| **the turn still wins** | a failed clock write does not undo a turn that already happened; losing six seconds is the smaller wrong |
+| **and it says so** | `advance_turn` now answers `{round, new_round, tick}` where it used to answer the raw update - both callers only checked `ok`, and a turn that quietly aged the world while the clock read the old time is exactly the "reflection" Dave asked to be rid of |
+
+So the screen re-reads the clock and whatever just expired, through
+the same `afterTimePasses` the DM's own buttons use.
+
+**OUT OF COMBAT NOTHING CHANGED, deliberately.** 092 decided the DM
+moves time because outside a fight nothing can know how long anything
+took, and an engine that inferred it would be confidently wrong. A
+round is the one span the engine does know.
+
+1096 tests, zero warnings.
+
+### Still open
+
+- **"Once per day" still means "on a long rest."** Now that dawn
+  exists, it could mean dawn.
+- **The jumps are still +10 min / +1 hr / +4 / +8 / +24** - "to dawn"
+  and "to the next day" are the ones a calendar makes obvious.
+- **Nothing else costs time.** A search, a march, a watch - all still
+  the DM's button. Whether any of those should carry a cost is a
+  rules decision, not a gap.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

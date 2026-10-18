@@ -27,6 +27,7 @@ pub fn game_clock(state: State<AppState>, game_id: String) -> Result<Value, Stri
         "tick": tick,
         "reading": clock::reading(tick),
         "season": season(tick),
+        "part": clock::part_of_day(tick),
         "gloss": gloss(tick),
         "steps": clock::STEPS
             .iter()
@@ -69,6 +70,20 @@ fn gloss(tick: i64) -> Value {
     })
 }
 
+/// 215. Move the clock on by `by` ticks, for a caller that already
+/// knows how long something took.
+///
+/// `advance_time` is the DM saying how much time passed; this is the
+/// engine saying so, and the only thing that knows is a round turning
+/// over. It goes through `clock::advance` like everything else, so a
+/// nonsense value is refused by the same rule.
+pub(crate) fn tick_on(token: &str, game_id: &str, by: i64) -> Result<i64, String> {
+    let now = read_tick(token, game_id)?;
+    let then = clock::advance(now, by)?;
+    write_tick(token, game_id, then)?;
+    Ok(then)
+}
+
 /// Move the clock forward.
 ///
 /// FORWARD ONLY, and clock::advance says so rather than this - the
@@ -83,6 +98,7 @@ pub fn advance_time(state: State<AppState>, game_id: String, ticks: i64) -> Resu
         "tick": then,
         "reading": clock::reading(then),
         "season": season(then),
+        "part": clock::part_of_day(then),
         "gloss": gloss(then),
         "passed": clock::said(ticks),
     }))
@@ -210,6 +226,7 @@ pub fn take_rest(state: State<AppState>, game_id: String, long: bool) -> Result<
         "tick": then,
         "reading": clock::reading(then),
         "season": season(then),
+        "part": clock::part_of_day(then),
         "gloss": gloss(then),
         "rested": rested,
         "refused": refused,

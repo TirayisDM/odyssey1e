@@ -271,7 +271,47 @@ pub fn advance_turn(state: State<AppState>, encounter_id: String) -> Result<Valu
             "round": if new_round { round + 1 } else { round },
         }),
     )
-    .map_err(|e| denied(e, "run the turn order"))
+    .map_err(|e| denied(e, "run the turn order"))?;
+
+    // 215. AND THE CLOCK MOVES, because a round IS six seconds.
+    //
+    // 092 built the tick as a round and then left the one place that
+    // counts rounds unable to touch it: a ten-round fight cost no game
+    // time at all, so an hour-long song cast in round one was still
+    // running after it, and Luci's paralysis - expiring at tick 10 -
+    // could never run out by fighting. The clock read day 1, 11:00
+    // through the whole Tavern brawl.
+    //
+    // ONE TICK PER ROUND, NOT PER TURN. Six seconds is what a ROUND
+    // costs however many creatures act in it - charging per turn would
+    // make a crowded fight pass time faster than an empty one, which
+    // is not a rule anybody has.
+    //
+    // A FAILURE HERE DOES NOT UNDO THE TURN. The order has already
+    // moved and that is the thing the table is watching; losing six
+    // seconds off the clock is the smaller wrong, and saying so is
+    // better than refusing a turn that already happened.
+    let mut moved_to: Option<i64> = None;
+    if new_round {
+        if let Some(game_id) = state_now
+            .get("encounter")
+            .and_then(|e| e.get("game_id"))
+            .and_then(|v| v.as_str())
+        {
+            moved_to = crate::commands::time::tick_on(&token, game_id, crate::clock::ROUND).ok();
+        }
+    }
+
+    // AND SAY WHETHER IT MOVED, so the screen knows to re-read the
+    // clock and whatever just expired. Both callers only checked `ok`
+    // before; a turn that quietly aged the world and left the clock
+    // reading the old time would be the reflection Dave is asking to
+    // be rid of.
+    Ok(json!({
+        "round": if new_round { round + 1 } else { round },
+        "new_round": new_round,
+        "tick": moved_to,
+    }))
 }
 
 /// Clear every hold in this fight.

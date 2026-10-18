@@ -1168,3 +1168,10 @@ h2.foldhead.shut{margin-bottom:.15rem}
 .clock-now .clock-season{margin-left:.5rem;font-size:10px;
                          text-transform:uppercase;letter-spacing:.09em;
                          color:var(--muted);cursor:help}
+
+/* 215. The part of the day, between the hour and the season: louder
+   than the season because it changes within a session, quieter than
+   the date because the date is the answer to "when". */
+.clock-now .clock-part{margin-left:.5rem;font-size:10px;
+                       text-transform:uppercase;letter-spacing:.09em;
+                       color:var(--fg)}

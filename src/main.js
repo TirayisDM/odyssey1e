@@ -2529,6 +2529,10 @@ function paintClock(where, got) {
   // own colour rather than being crammed onto the end.
   now.textContent = "";
   now.append(sEl("span", "clock-date", got.reading));
+  // 215. THE PART OF THE DAY, which is the half a reader actually
+  // tracks. "+4 hours" twice should visibly carry you from morning
+  // into night rather than leaving somebody to subtract.
+  if (got.part) now.append(sEl("span", "clock-part", got.part));
   if (got.season) {
     const sn = sEl("span", "clock-season", got.season.name);
     // The working name and the sentence, for somebody meeting this
@@ -10032,6 +10036,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!r.ok) return dmSay(r.error, true);
     state.fightFocus = null;
     await selectEncounter(state.dmEncounterId);
+    // 215. A ROUND IS SIX SECONDS OF GAME TIME. When one turns over
+    // the engine moves the clock, so the clock on screen - and
+    // anything that just expired - has to be re-read.
+    if (r.value && r.value.new_round) await afterTimePasses();
   });
 
   guarded("#next-turn", async () => {
@@ -10039,6 +10047,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const r = await tryCall("advance_turn", { encounterId: state.dmEncounterId });
     if (!r.ok) return dmSay(r.error, true);
     await selectEncounter(state.dmEncounterId);
+    if (r.value && r.value.new_round) await afterTimePasses();
   });
 
   guarded("#reset-order", async () => {

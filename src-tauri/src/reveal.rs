@@ -268,6 +268,12 @@ pub fn hide_other_numbers(
             .character_id
             .as_deref()
             .is_some_and(|c| owned.iter().any(|o| o == c));
+        // 217. AND WHOSE IT IS, which this loop was already deciding
+        // and throwing away. The player's death save button was offered
+        // for every creature in the fight and the write behind it is
+        // owner-or-DM, so pressing it on somebody else's character
+        // logged a roll whose counters never moved.
+        t.yours = mine;
         if !mine {
             t.hp_current = None;
             t.hp_max = None;
@@ -451,6 +457,7 @@ mod tests {
             condition: None,
             death_successes: 0,
             death_failures: 0,
+            yours: true,
         }
     }
 
@@ -486,6 +493,41 @@ mod tests {
         let mut ts = vec![target("iron lock", None)];
         hide_other_numbers(&mut ts, false, &["c1".to_string()]);
         assert_eq!(ts[0].hp_current, None);
+        assert!(!ts[0].yours);
+    }
+
+    /* ---- 217. AND WHOSE IT IS ---- */
+    //
+    // The same `mine` that decides whether to withhold hit points also
+    // decides whether a screen may offer an action for this creature.
+    // It is asserted separately from the numbers because the two will
+    // be read by different callers and a change to one must not quietly
+    // move the other.
+
+    #[test]
+    fn a_player_may_act_for_their_own_and_not_for_a_monster() {
+        let mut ts = vec![target("bryn", Some("c1")), target("lich", Some("lich-char"))];
+        hide_other_numbers(&mut ts, false, &["c1".to_string()]);
+        assert!(ts[0].yours);
+        assert!(!ts[1].yours);
+    }
+
+    /// Two characters, one player. The strip's `yours` works off the
+    /// SELECTED character and this does not - a second character you
+    /// own is still yours to roll a death save for.
+    #[test]
+    fn a_player_may_act_for_every_character_they_own() {
+        let mut ts = vec![target("bryn", Some("c1")), target("tarren", Some("c2"))];
+        hide_other_numbers(&mut ts, false, &["c1".to_string(), "c2".to_string()]);
+        assert!(ts[0].yours);
+        assert!(ts[1].yours);
+    }
+
+    #[test]
+    fn the_dm_may_act_for_anybody() {
+        let mut ts = vec![target("lich", Some("lich-char"))];
+        hide_other_numbers(&mut ts, true, &[]);
+        assert!(ts[0].yours);
     }
 
     #[test]

@@ -7523,6 +7523,147 @@ those ask.
 1096 tests, zero warnings. No migration: the policy was always right,
 the app was lying about it.
 
+## 217. The pass on writes a player can reach
+
+216 found one write that lied and promised this: *"not convert all 54,
+but find the writes a player can actually reach and make those ask."*
+
+**It found four, and one of them was destroying things.**
+
+### The shape, restated because everything here follows from it
+
+```
+a blocked INSERT          raises 42501
+a blocked UPDATE/DELETE   matches no row and returns success
+```
+
+So an insert cannot lie and an update always can. 78 call sites, of
+which the tables a non-DM can be filtered on are `characters`,
+`effects`, `objects`, `encounter_actors`, `games`, `encounters`. That
+narrowed to what the player's four tabs actually offer.
+
+**`encounter_actors` turned out to be safe and the reason is worth
+keeping:** its UPDATE policy admits any member and `guard_actor_update`
+then RAISES on a column they may not touch. A trigger refuses out loud
+where a policy filters in silence. That is the pattern that should have
+been everywhere.
+
+### ONE. A trade destroyed the goods
+
+`trade_move`'s merge branch is two statements that only make sense
+together, and it counted neither:
+
+```sql
+update objects set quantity = quantity + n where id = dst;  -- the receiver
+delete from objects where id = src.id;                      -- the giver
+```
+
+Bryn's player hands three potions to Falon, who already has one. The
+first is filtered - Falon is not theirs - and matches nothing. The
+second is their own row and succeeds.
+
+```
+Bryn  3 -> row deleted
+Falon 1 -> 1
+*** THE POTIONS WERE DESTROYED ***
+```
+
+**NOT AN RLS BUG.** The policy did exactly what it says. The function
+read "no error" as "it worked" across a pair.
+
+The fix counts rows; **it does not restate the policy in PL/pgSQL.** A
+function that decides for itself who may trade is a second copy of the
+rule, and the day the policy moves the two disagree. The RPC is one
+transaction, so a raise anywhere in the loop rolls back every move in
+it - there is no half-trade. And the refusal names the side:
+*"nothing can be put into Falon's keeping"*.
+
+### TWO. A death save that never counted
+
+`write_action`'s vitals clause updates `characters`, which is
+owner-or-DM. A player pressing **death save** for a dying character
+that is not theirs wrote the ROLL - `rolls` is open to members - and
+silently failed to move the counters. **The log fills with failed saves
+against a character who never gets closer to dying.**
+
+**THIS IS 016 ARRIVING FOR THE THIRD TIME.** That migration exists
+because a death save write failed silently. 216 was the same shape on
+the clock. This is the same shape on the same subject.
+
+### THREE. You could start it and not stop it
+
+`effects: members apply` lets anyone in the game put an effect on
+anyone. `effects: dm or bearer ends` let only the DM or the person
+WEARING it take it off. Those two do not meet, and concentration falls
+through the gap:
+
+```
+Bryn casts Bless on Falon, then drops concentration
+  cast (INSERT on someone else): ALLOWED
+  drop (UPDATE on someone else): 0 rows
+  *** THE SPELL RUNS ON FOREVER, SILENTLY ***
+```
+
+Unlike the other two **this one IS the policy being wrong**, so it is
+the policy that changed. The rule it was missing: *you may end what you
+are sustaining.* `source_character_id` had been on the row since the
+table was built and nothing had ever asked it who it was.
+
+Note which half was already right - a player still cannot end a
+stranger's effect they had no hand in, and a probe asserts it.
+
+### FOUR. And the × should not have been there
+
+`paintEffects` drew the end button beside **every effect in the game**,
+on a bar that is on the player's screen. Clicking somebody else's took
+the chip away until the next read put it back.
+
+Same with the death save button, offered for every creature in the
+fight.
+
+**THE ENGINE ANSWERS, THE SCREEN DOES NOT INFER.** `list_effects` now
+sends `yours` and `list_targets` sends it on every target, both decided
+against the same rule Postgres holds. A guess in the frontend would
+have got the interesting case backwards: a concentration spell running
+on an ally IS the caster's to drop. And `yours` on a target is set by
+`reveal::hide_other_numbers`, which was already working out exactly
+that `mine` to decide whose hit points to withhold and throwing it
+away - one verdict, not two that drift.
+
+### What it cost to be sure
+
+Every one of the four was proved on live data inside a rolled-back
+block before anything changed, and re-proved after:
+
+| | |
+|---|---|
+| player's trade | refuses by name, **the potions survive** |
+| the DM's same trade | completes, Falon has 4 |
+| concentration | the caster drops their own |
+| a stranger's effect | still refused |
+| someone else's death save | refuses by name |
+| your own death save | still counts |
+| `security_doors()` | **0 faults** |
+
+And the two screen changes went through a rig driving the real
+`paintEffects` and `paintDeathSave`: **11 assertions, and a negative
+control** proving the rig can tell the difference.
+
+1099 tests, zero warnings.
+
+### Still open
+
+- **54 uncounted `rest_update` calls remain**, and that is the right
+  number to leave. They are DM-only paths; the lesson of this pass is
+  not "convert them all" but that **a control offered by mistake has no
+  second line of defence** behind it. The ones a player can reach now
+  have one.
+- **The trade tab still offers two sides a player cannot both write.**
+  It refuses honestly now instead of destroying things, but a
+  player-to-player trade, and a player buying from a shop, still need
+  the DM. Whether to grant that is a rules decision: a trade has two
+  consenting sides and RLS can only express one at a time.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

@@ -772,10 +772,25 @@ async function loadTargets() {
 
 // The death save button belongs to whatever is selected and dying.
 // Nothing that is conscious, stable or already dead has one to roll.
+// 217. DOWN, AND YOURS TO ROLL FOR.
+//
+// This button is in the player's roll box and it was offered for every
+// creature in the fight. The write behind it goes through
+// `write_action`'s vitals clause into `characters`, which is
+// owner-or-DM - so pressing it on somebody else's character wrote the
+// ROLL, which members may write, and silently failed to move the
+// counters. The log filled with failed saves against a character who
+// never got closer to dying.
+//
+// `yours` IS THE ENGINE'S ANSWER (`reveal::hide_other_numbers`), not a
+// comparison against the selected character: a player with two
+// characters may roll for either, and only the engine knows which they
+// own. The DM gets it on everything, which is how a goblin dies.
 function paintDeathSave() {
   const picked = document.querySelector("#target-pick").value;
   const t = (state.targets || []).find((x) => x.id === picked);
-  document.querySelector("#death-save").hidden = !(t && t.condition === "down");
+  document.querySelector("#death-save").hidden =
+    !(t && t.condition === "down" && t.yours);
 }
 
 // This character's row in the active encounter, if they are enrolled.
@@ -2493,14 +2508,29 @@ function paintEffects(where) {
     chip.append(sEl("span", "when", fx.said));
     if (fx.magnitude) chip.title = "d" + fx.magnitude;
 
-    const stop = sEl("button", "", "×");
-    stop.title = "end it now";
-    guard(stop, async () => {
-      const r = await tryCall("end_effect", { gameId: state.gameId, effectId: fx.id });
-      if (!r.ok) return log("end_effect", r.error, true);
-      await loadEffects();
-    });
-    chip.append(stop);
+    // 217. THE × ONLY WHERE IT CAN WORK.
+    //
+    // This bar is on the player's screen as well as the DM's and it
+    // offered the button beside every effect in the game. Clicking
+    // somebody else's took the chip off the screen, because the write
+    // was filtered by RLS and a filtered UPDATE matches no row and
+    // raises nothing - so the click looked like it worked until the
+    // next read put the chip back.
+    //
+    // `yours` IS THE ENGINE'S ANSWER, not this file's guess: the rule
+    // is `effects: dm, bearer or source ends` and `list_effects` reads
+    // it. A concentration spell running on an ally is the caster's to
+    // drop, which is the case a guess here would have got wrong.
+    if (fx.yours) {
+      const stop = sEl("button", "", "×");
+      stop.title = "end it now";
+      guard(stop, async () => {
+        const r = await tryCall("end_effect", { gameId: state.gameId, effectId: fx.id });
+        if (!r.ok) return log("end_effect", r.error, true);
+        await loadEffects();
+      });
+      chip.append(stop);
+    }
     host.append(chip);
   }
 }

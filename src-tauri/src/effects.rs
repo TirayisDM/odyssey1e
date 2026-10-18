@@ -89,6 +89,11 @@ pub struct Effect {
     pub name: String,
     /// Whose it is.
     pub character_id: String,
+    /// WHO IS HOLDING IT UP, where anybody is. A spell somebody is
+    /// concentrating on sits on the person it was cast at, and the
+    /// caster is the only other person with a claim on when it stops -
+    /// 217 made that the policy and this is the field it reads.
+    pub source_character_id: Option<String>,
     /// How strong, where strength means anything. The bard's song
     /// carries the die size; a bonus carries the bonus. None where the
     /// effect is simply on or off.
@@ -226,6 +231,7 @@ mod tests {
             key: key.into(),
             name: key.into(),
             character_id: who.into(),
+            source_character_id: None,
             magnitude: None,
             started_at: 0,
             expires_at: Some(clock::HOUR),

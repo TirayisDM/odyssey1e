@@ -85,6 +85,15 @@ pub struct Target {
     /// Death saves so far, for a card that wants to show the tally.
     pub death_successes: i64,
     pub death_failures: i64,
+    /// WHETHER THIS CALLER MAY ACT FOR THIS CREATURE. True for the DM
+    /// on everything, and for a player on the characters they own.
+    ///
+    /// 217. Built true and taken away by `reveal::hide_other_numbers`,
+    /// which is the one place that already knows the answer - it works
+    /// out the same `mine` to decide whose hit points to withhold. One
+    /// verdict, read by whatever screen needs it, rather than two
+    /// places deciding separately and drifting.
+    pub yours: bool,
 }
 
 /* ============================ RULES ============================ */
@@ -285,6 +294,7 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
                 condition: Some(condition),
                 death_successes: successes,
                 death_failures: failures,
+                yours: true,
             }),
             // Skipped rather than shown at a made-up number. An actor
             // with no resolvable AC is a data fault, and a target nobody
@@ -338,6 +348,10 @@ pub fn load_targets(token: &str, encounter_id: &str) -> Result<Vec<Target>, Stri
             condition: None,
             death_successes: 0,
             death_failures: 0,
+            // Nobody's, because there is nobody. A door is attempted
+            // rather than acted for, and the one thing reading this
+            // asks about a creature that is dying.
+            yours: false,
         });
     }
 

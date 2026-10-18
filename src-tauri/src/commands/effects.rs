@@ -17,9 +17,23 @@ use crate::supabase::{self, AppState};
 /// one per person.
 #[tauri::command]
 pub fn list_effects(state: State<AppState>, game_id: String) -> Result<Value, String> {
-    let token = state.token()?;
+    let session = state.current()?.ok_or("not signed in")?;
+    let token = session.access_token.clone();
     let now = read_tick(&token, &game_id)?;
     let all = load_for_game(&token, &game_id)?;
+
+    // 217. AND WHETHER THIS ONE IS YOURS TO END.
+    //
+    // THE ENGINE ANSWERS IT, the screen does not work it out. The rule
+    // is `effects: dm, bearer or source ends` and it lives in Postgres;
+    // a frontend deciding for itself who may click the `×` is a second
+    // copy of a policy, and the copy that was there offered the button
+    // on every effect in the game. Same argument as `line.yours` on the
+    // strip and `c.creature` on the roster: ask, do not infer.
+    //
+    // Asking the database who the DM is rather than trusting `amDM()`,
+    // which is an offer and not an answer.
+    let claim = Claim::of(&token, &game_id, &session.profile_id)?;
 
     let live: Vec<Value> = effects::active(&all, now)
         .iter()
@@ -29,6 +43,7 @@ pub fn list_effects(state: State<AppState>, game_id: String) -> Result<Value, St
                 "key": e.key,
                 "name": e.name,
                 "character_id": e.character_id,
+                "yours": claim.may_end(e),
                 "magnitude": e.magnitude,
                 "started_at": e.started_at,
                 "expires_at": e.expires_at,
@@ -181,6 +196,7 @@ pub(crate) fn apply_inner(
         key: key.trim().to_string(),
         name: name.trim().to_string(),
         character_id: character_id.clone(),
+        source_character_id: None,
         magnitude,
         started_at: now,
         expires_at: effects::ends_at(now, ticks),
@@ -247,18 +263,84 @@ pub fn end_effect(
 
 /* ======================== THE WORKING PARTS ======================== */
 
+/// Who the caller is, as far as ending an effect goes.
+///
+/// 217. THE THREE THE POLICY NAMES - the DM, the bearer, the one
+/// sustaining it - read once for the whole list rather than per row.
+struct Claim {
+    dm: bool,
+    /// The characters in this game this person owns. Empty for the DM,
+    /// who does not need it.
+    mine: Vec<String>,
+}
+
+impl Claim {
+    fn of(token: &str, game_id: &str, profile_id: &str) -> Result<Self, String> {
+        let dm = supabase::rpc(token, "is_game_dm", &json!({ "p_game_id": game_id }))?
+            .as_bool()
+            .unwrap_or(false);
+        let mine = if dm {
+            Vec::new()
+        } else {
+            supabase::rest_get(
+                token,
+                "characters",
+                &[
+                    ("select", "id"),
+                    ("game_id", &format!("eq.{}", game_id)),
+                    ("owner_uid", &format!("eq.{}", profile_id)),
+                ],
+            )?
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+        };
+        Ok(Self { dm, mine })
+    }
+
+    /// The same three clauses as the policy, in the same order.
+    fn may_end(&self, e: &Effect) -> bool {
+        self.dm
+            || self.mine.contains(&e.character_id)
+            || e.source_character_id
+                .as_ref()
+                .is_some_and(|s| self.mine.contains(s))
+    }
+}
+
 /// Cut one short.
 ///
 /// `ended_at` AND `expires_at` BOTH, because the two say different
 /// things: when it was going to end, and when it actually did. Keeping
 /// only the second would lose the fact that it was cut short at all.
+///
+/// 217. AND IT ASKS WHETHER IT HAPPENED. `effects: dm, bearer or source
+/// ends` is a policy, and a policy that filters an UPDATE does not fail
+/// - it matches no row and returns success. This was the second of the
+/// four writes that pass found a player could reach and be lied to by:
+/// the `×` on the effects bar was offered beside every effect in the
+/// game, and clicking somebody else's cleared the chip off the screen
+/// until the next read put it back.
+///
+/// THE REFUSAL NAMES WHO MAY, because the only way to match no row here
+/// is to be none of the three, and a refusal that does not say why is
+/// the thing being fixed.
 pub(crate) fn end_one(token: &str, effect_id: &str, now: i64) -> Result<(), String> {
-    supabase::rest_update(
+    let ended = supabase::rest_update_if(
         token,
         "effects",
         &[("id", &format!("eq.{}", effect_id))],
         &json!({ "ended_at": now, "expires_at": now }),
     )?;
+    if !ended {
+        return Err("only the DM, whoever is under it, or whoever is \
+                    sustaining it can end that"
+            .into());
+    }
     Ok(())
 }
 
@@ -386,7 +468,7 @@ pub(crate) fn load_for_game(token: &str, game_id: &str) -> Result<Vec<Effect>, S
         &[
             (
                 "select",
-                "id,key,name,character_id,magnitude,started_at,expires_at,stacks",
+                "id,key,name,character_id,source_character_id,magnitude,                 started_at,expires_at,stacks",
             ),
             ("game_id", &format!("eq.{}", game_id)),
             ("ended_at", "is.null"),
@@ -401,6 +483,7 @@ pub(crate) fn load_for_game(token: &str, game_id: &str) -> Result<Vec<Effect>, S
             key: as_str(r, "key"),
             name: as_str(r, "name"),
             character_id: as_str(r, "character_id"),
+            source_character_id: as_opt_str(r, "source_character_id"),
             magnitude: r.get("magnitude").and_then(|v| v.as_i64()),
             started_at: r.get("started_at").and_then(|v| v.as_i64()).unwrap_or(0),
             expires_at: r.get("expires_at").and_then(|v| v.as_i64()),
@@ -424,4 +507,13 @@ pub(crate) fn read_tick(token: &str, game_id: &str) -> Result<i64, String> {
 
 fn as_str(r: &Value, key: &str) -> String {
     r.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+}
+
+/// The same read, for a column that is allowed to be empty. A missing
+/// source and a source of "" are the same answer and both mean nobody.
+fn as_opt_str(r: &Value, key: &str) -> Option<String> {
+    r.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }

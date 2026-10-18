@@ -7807,6 +7807,40 @@ afterwards this time.
 - **A fixture cannot be destroyed or attacked.** Backlog item 1's
   "attacking a thing", unchanged.
 
+## The map and the play surface - see MAP.md
+
+2026-10-18. A standing plan now lives in **`MAP.md`**, written after
+reading all three previous attempts at this: the OSDUNGEON Apps Script
+prototype on the G: drive, the odyssey-engine Rust port, and what is
+here.
+
+**The finding that matters:** in every previous generation the doors,
+locks, traps and secret-doors axis was authored and never consumed.
+Apps Script generated lock-and-key pairs with DCs and persisted them,
+and nothing ever checked a lock. The Rust port's `DoorState` carries no
+lock id, so its 36 lock tests have never had a caller. **218 is the
+first thing in any generation that could be the consumer** - scenery
+that stands in a place, holds things, refuses to be carried, and is
+reachable through RLS.
+
+The other finding: **the odyssey-engine tactical layer is already
+pure.** 3,761 lines, 262 tests, zero persistence, zero SQLite, zero
+async. The persistence rewrite inside those six modules is about zero
+lines, because they never knew about SQLite. This is a port, not a
+build.
+
+And a correction worth recording: **the 8-bit look was never achieved
+in any generation.** Both renderers draw flat colours; RoomViewer's
+texture path is dead code that never fires; the 16x16 SVG tiles have
+never been wired to anything.
+
+Three decisions settled, in MAP.md with their reasoning: a player
+cannot READ a tile they have not seen (205/206 applied to space, which
+means a bitmap `tile_memory` and a `visible_grid` definer function
+rather than a jsonb column); one map per location; and a diagonal costs
+1, decided by one `step_cost` function because four subsystems ask for
+distance and must agree.
+
 ## Pick up here
 
 ### FOR DEVELOPMENT, 2026-10-15

@@ -108,13 +108,20 @@ client - unreadable. This is 205/206's principle applied to space
 instead of to hit points: the engine decides what you may see and hands
 back a filtered answer.
 
-**One map per location.** A nullable grid on `locations`, not a
-separate "scene" concept. A second hierarchy beside the location tree is
-the thing we would regret.
+**One map per location.** Not a separate "scene" concept. A second
+hierarchy beside the location tree is the thing we would regret.
 
 **A diagonal costs 1, and one function says so.** 5e PHB default;
 the DMG's alternating 1-2-1 variant is a later arm of the same
 function, not a second system.
+
+**A tile is a row.** Not a jsonb grid on `locations`. This reverses an
+earlier draft of this file; the reasoning is in section 4, and the
+short version is that the fog decision above argues against a blob
+because RLS cannot filter inside one.
+
+**z is a height, in the same unit as x and y.** One z is one square is
+five feet. Not a layer index, not a bounded range. Negative is legal.
 
 The third needs its reasoning recorded, because three answers currently
 coexist in the old code and they contradict each other:
@@ -142,28 +149,122 @@ A* becomes 8-directional.
 
 ## 4. The data model
 
-### Storage: keep both models, because they answer different questions
+### Storage: a tile is a row
 
-The Apps Script insight was not "do not store tiles" - it was **"the
-recipe is worth keeping"**. So store the explicit grid *and* the recipe
-that produced it.
+**This reverses an earlier draft of this file, which put the grid in a
+`jsonb` column on `locations`.** That was carried over from OSDUNGEON,
+where it made sense for a reason that no longer applies: the prototype
+never STORED tiles at all - it regenerated them from `scene.id` on
+every load, so there was nothing to contend over. The moment we decided
+to store the grid so that a hand-edit survives, the argument for the
+blob evaporated. It survived into the first draft only because
+`TileGrid` already had serde derives, which is optimising for the port
+rather than for the game.
+
+**The fog decision is what settles it.** RLS is row-level and cannot
+filter inside a jsonb value, so a blob would need a `SECURITY DEFINER`
+function to redact it per character. With rows, the policy IS the
+redaction:
+
+| | a jsonb blob | tiles as rows |
+|---|---|---|
+| fog | a definer function filters and rebuilds | **RLS does it; the function disappears** |
+| what a player downloads | the whole map, always | only what they have seen - fifty rows, not sixteen hundred |
+| two people writing | read-modify-write, last writer wins | each tile its own row, no collision |
+| realtime | the whole grid per door opening | one row |
+| merge step on read | yes | none |
+
+Note which way the payload goes: **RLS makes a player's read smaller,
+not larger.** A party entering a dark room pulls a handful of rows.
+
+It is also what this codebase already is. 001 made a roll a record; 013
+made hit points a log of deltas; 218 made a crate a row. A tile is a
+row is the same instinct.
+
+```sql
+tiles
+  location_id  uuid     not null
+  x, y         int      not null
+  z            smallint not null default 0
+  terrain      text     not null
+  is_wall      boolean
+  integrity    int
+  is_revealed  boolean
+  is_trapped   boolean
+  ...
+  unique (location_id, z, y, x)
+```
+
+Read it back with `order by z, y, x` - layer, then row-major within it,
+because `TileGrid` wants one contiguous row-major `Vec` per layer.
+
+### What stays jsonb, and why that is not a special case
 
 ```sql
 locations
-  + grid         jsonb   -- TileGrid: {width, height, tiles[], exits[]}
   + recipe       jsonb   -- floorType, wallType, lighting, hazardZones[], seed
-  + px_per_grid  int     -- geometry in SQUARES, never pixels
+  + px_per_grid  int
 ```
 
-The grid is the record; the recipe is the provenance. A room can be
-regenerated, re-rolled or hand-edited without those being three
-features. **This is 001 again** - the thing that happened is kept, and
-what produced it is kept beside it.
+The rule that decides it:
+
+> **jsonb for what the DM authors and play does not change.
+> Rows for anything two people can change at once.**
+
+`recipe` is authored in the editor and untouched during play, so it has
+no contention and never needs filtering. It is worth keeping at all for
+the OSDUNGEON reason: **the recipe is the provenance.** The rows are
+the record of what the map IS; the recipe is the account of what
+produced it, so a room can be regenerated or re-rolled without those
+being three separate features. This is 001 again.
 
 `px_per_grid` is UVTT's one genuinely good idea: every position and
 size is in grid squares, and exactly one number knows about the image.
 Re-render the map at a different resolution and not one stored
 coordinate changes.
+
+### z is a height, not a layer
+
+One z = one square = five feet, exactly like x and y.
+
+```
+floor       z=0      bridge deck 10 ft up    z=2
+pit bottom  z=-1     flying creature 30 ft   z=6
+```
+
+Three different things could have been meant by "z", and **two were
+already solved**:
+
+| | answered by |
+|---|---|
+| dungeon LEVELS (floor 1, 2, 3) | the location tree - each level is its own location |
+| ELEVATION within a room (a ledge, water depth) | `Tile.elevation: i8`, already in the ported struct |
+| two things at one (x,y) at different heights - **a bridge over a chasm, a balcony, a flying creature** | nothing. this is the gap z fills |
+
+**What makes it cheap: tiles are sparse, things are free.** A tile row
+exists only where there is a surface, so a bridge over a chasm is
+twenty rows above sixteen hundred, and the air between them is nothing
+at all. A flying creature needs no tile to be at `z=6`; it simply has a
+z.
+
+**Negative is legal** - a pit bottom, a lower vault, depth below a
+water surface. A 0-to-99 range would have forbidden all three.
+
+**Movement mapping comes free later** because z is in the same unit as
+x and y: a climb of two is two squares, the same arithmetic as moving
+two squares sideways, and `MovementMode::Fly` in `movement.rs` already
+contemplates it. A layer index would have needed a conversion, and the
+conversion is where the bug would have lived.
+
+**The schema takes z now; the Rust stays 2D for now.** That asymmetry
+is deliberate. Retrofitting a dimension into the schema is expensive -
+every index, the unique constraint, every stored row, a migration over
+live data. Retrofitting it into the Rust is cheap, precisely because
+the Rust is pure and tested: adding z to `line_of_sight(x1,y1,x2,y2)`
+today means rewriting ported code and invalidating the 262 tests that
+were the entire reason to port instead of rebuild. So phases 1-5 load
+`where z = 0`, and when bridges are wanted the data has not moved and
+the ground-layer tests still pass.
 
 ### Position goes on rows that are already in a place
 
@@ -171,36 +272,41 @@ No token table. The things that can stand somewhere already have a row
 saying which place they are in.
 
 ```sql
-objects           + x, y   -- holder_id already points at the location's entity
-characters        + x, y   -- location_id already says which room
-encounter_actors  + x, y   -- live combat position, already checkpoints by round
+objects           + x, y, z   -- holder_id already points at the location's entity
+characters        + x, y, z   -- location_id already says which room
+encounter_actors  + x, y, z   -- live combat position, already checkpoints by round
 ```
 
 Note the existing asymmetry this rides on, recorded so nobody trips on
 it: **a character references a location by `id`; an object is held by
-its `entity_id`.** `drop_object` already walks that translation and a
+its `entity_id`.** `drop_object` already walks that translation, and a
 take runs it backwards.
 
-### Fog, given that it must be unreadable rather than hidden
-
-RLS is row-level, so **a `grid jsonb` column cannot be filtered inside**.
-Either tiles become rows - 1,600 of them for a 40x40 room - or players
-never read the column. The second is right and matches `reveal.rs`:
+### Fog
 
 ```sql
-locations.grid                      -- the whole map, DM-readable
-tile_memory                         -- what each character has seen
-visible_grid(location, character)   -- SECURITY DEFINER, returns the subset
+tile_memory  (character_id, location_id, seen)   -- what each character has seen
 ```
 
-**`tile_memory` should be a bitmap**, not a row per tile: 40x40 is 1,600
-bits, 200 bytes, one row per character per room, and "mark seen" is a
-bit set. A row per discovered tile is 1,600 rows doing the work of 200
-bytes.
+With tiles as rows this needs no definer function. The `tiles` SELECT
+policy is `is_game_dm(...) or seen_by(current_profile(), location_id,
+x, y, z)`, and a player simply cannot read a row they have not
+uncovered.
 
-This also fixes something the prototype got wrong: Apps Script reset fog
-to `{}` on every room load, so re-entering a room re-fogged it.
-Persisting per character fixes that for free and makes "what has the
+**`seen` should be a bitmap**, not a row per tile: a 40x40 layer is
+1,600 bits - 200 bytes, one row per character per location. A row per
+discovered tile is 1,600 rows doing the work of 200 bytes.
+
+**The one number to measure before Phase 4 commits to this** is that
+policy at scale: a bit-test function called once per row, for 1,600
+rows. It should be microseconds, and it is cheap to test - but it is a
+measurement rather than an assumption, and the fallback (`tile_memory`
+as rows, so the policy is an EXISTS join Postgres optimises well) is a
+different trade rather than a worse one.
+
+This also fixes something the prototype got wrong: Apps Script reset
+fog to `{}` on every room load, so re-entering a room re-fogged it.
+Persisting per character fixes that for free, and makes "what has the
 party actually mapped" a question the DM can answer.
 
 ### Doors are fixtures with geometry
@@ -218,7 +324,8 @@ UVTT imports along that same split: `portals` become fixture objects,
 
 1 tile = 5 ft, 6 tiles = 30 ft per round, 1 round = 6 seconds = 1 tick.
 Stated three times in the old code and already true of our clock since
-215. Nothing to reconcile.
+215. Nothing to reconcile - and z is the same unit, so a climb of two
+is two squares by the same arithmetic as walking two.
 
 ---
 
@@ -232,10 +339,10 @@ screen, and a STATUS entry.
 | # | Phase | What lands | Risk |
 |---|---|---|---|
 | **0** | **Port the rules cold** | Six modules plus `challenge.rs` into `src/`, as unused code. **262 tests must pass here.** No UI, no migration. | very low |
-| **1** | **A location can have a map** | The migration above. UVTT import. Read-only render, DM only. | low |
-| **2** | **Things have positions** | `x, y` on objects and characters. Fixtures and creatures drawn on the map; clicking a crate opens 218's panel. **The map stops being a picture.** | low |
+| **1** | **A location can have a map** | The `tiles` table, `recipe`, `px_per_grid`. UVTT import. Read-only render, DM only. | low |
+| **2** | **Things have positions** | `x, y, z` on objects and characters. Fixtures and creatures drawn on the map; clicking a crate opens 218's panel. **The map stops being a picture.** | low |
 | **3** | **Doors, locks, traps** | Doors as fixtures. Wire `lock.rs` and `trap.rs` - the first consumer they have ever had. | medium |
-| **4** | **Sight and light** | Bresenham LOS, the Apps Script lighting model, `tile_memory`, `visible_grid`. | medium |
+| **4** | **Sight and light** | Bresenham LOS, the Apps Script lighting model, `tile_memory` and the fog policy on `tiles`. | medium |
 | **5** | **Movement** | `step_cost`, budget, 8-directional A*, into initiative and 051's action economy. | medium |
 | **6** | **The editor** | RoomDesigner's UX on the new model, and the 16x16 SVG tiles wired for the first time. | medium |
 
@@ -309,7 +416,9 @@ than as working features**.
 - **Whether `encounter_actors.x, y` or `characters.x, y` is the truth
   during a fight.** Both, probably, with the encounter row winning while
   one is running - but the checkpoint rule needs stating.
-- **Scale.** A 45x45 room is 2,025 tiles. Nothing here has been measured
-  against a REST round trip, and `visible_grid` runs per character.
+- **Scale.** A 45x45 layer is 2,025 tile rows. Nothing here has been
+  measured against a REST round trip, and the fog policy runs a
+  per-row test for every one of them. See the note in section 4 - this
+  is the one number to get before Phase 4.
 - **Whether a fixture should be destroyable** - backlog item 1's
   "attacking a thing", unchanged by any of this.

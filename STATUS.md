@@ -7843,6 +7843,93 @@ distance and must agree.
 
 ## Pick up here
 
+### HANDOFF, 2026-10-19 - written for a pull onto the laptop
+
+**Everything is pushed and the two sides agree.** Checked rather than
+remembered, on the machine this was written from:
+
+| | |
+|---|---|
+| `git` | clean, nothing unpushed, HEAD = `origin/master` = **f2c9ca3** |
+| migrations | **157 files, 167 ledger rows** - the difference is the five applied in parts (026-028, 031, 032, 043) |
+| newest migration | **218** on both sides, and its ledger row matches the file by digest |
+| `security_doors()` | **0 faults** |
+| build / tests | **zero warnings, 1,099 tests pass** |
+| the app | rebuilt and relaunched after 218 |
+
+**`odyssey-engine` is a SEPARATE REPO and it is also clean and pushed**
+(`github.com/TirayisDM/odyssey-engine`). MAP.md's Phase 0 ports six
+modules out of it, so the laptop needs that clone too, not just this
+one.
+
+**The OSDUNGEON material is on Google Drive**, at
+`G:\My Drive\osdungeon` - the Apps Script prototype, the 16x16 SVG art,
+and the scanned notes. It is not in either repo, so it reaches the
+laptop through Drive rather than through git.
+
+#### What changed since the 2026-10-15 block below, which is now history
+
+**Read that block as a record of what was true on the 15th, not as the
+backlog.** Its headline - "a player can sign in, and then cannot play" -
+has been answered. 202-213 built the player's view of a fight, the
+character sheet, the builder and the species picker; 214-216 built the
+calendar and the clock; 217-218 are the two below.
+
+- **217. The pass on writes a player can reach.** Found four writes
+  that lied, one of which was destroying items: `trade_move`'s merge
+  branch added to a stack it could not write and then deleted the
+  source. Also a death save that never counted, concentration that
+  could not be dropped, and two controls that should not have been
+  offered.
+- **218. Scenery you can open.** `items.kind = 'fixture'` - a container
+  that cannot be carried. Found and fixed two older faults on the way:
+  `take_object` had not noticed that floors exist since 033, and loot
+  inside a chest standing in a room was unreachable by anybody because
+  037's policy only checked the immediate holder.
+
+#### The next piece is MAP.md
+
+**`MAP.md` is new and is the plan for the visual map and the play
+surface.** It is a standing document rather than a log - edit it as
+decisions change. It was written after reading all three previous
+attempts at this, and it records what exists, what to port, what NOT to
+port, and seven phases.
+
+**Start with Phase 0:** port the six tactical modules from
+odyssey-engine into `src/` as unused code and make their **262 tests**
+pass here. No schema, no UI, no risk. It turns "262 tests exist
+somewhere" into a number in our own `cargo test`, which every later
+phase depends on.
+
+Decisions already settled and recorded there with their reasoning: a
+tile is a row (not a jsonb grid); a player cannot READ a tile they have
+not seen; one map per location; a diagonal costs 1 by one function; and
+z is a height in the same unit as x and y, taken into the schema now
+while the Rust stays 2D.
+
+**Nothing in MAP.md is built.** No migration is written and no schema
+has been touched for it - the database is exactly where 218 left it.
+
+#### Still open, and not in MAP.md
+
+Carried forward from the list below because these are app faults rather
+than map work:
+
+- **Class features and species traits are missing from the fight
+  panel.** 210's agreed phase 2; `loadFeatures` renders to the sheet
+  only and needs the host-taking treatment `attackLines` got.
+- **Only the DM can advance the turn.** `#next-turn` is on the Run
+  pane; a player cannot say they are done.
+- **Death saves still happen on a button rather than on the turn.**
+- **A player cannot see what is lying in the room they are in** - the
+  scene view is on the DM-only World tab. 218 built the take; the
+  player has no window onto it yet.
+- **Reach is not asked on a take.** Nothing checks that the taker is
+  standing where the thing is lying.
+- `rename_location`, `move_location`, `copy_from_scroll` and
+  `remove_class` are registered with no caller.
+
+
 ### FOR DEVELOPMENT, 2026-10-15
 
 **Three sessions of plumbing are finished and the game did not move.**

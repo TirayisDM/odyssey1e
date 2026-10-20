@@ -160,13 +160,13 @@ pub fn forget_pin(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-/* ================== CHANGING YOUR PASSWORD, 202 =================== */
+/* ================== CHANGING YOUR PASSWORD, 219 =================== */
 
 use crate::passwords;
 
 /// Rewrite the PIN file's token, keeping the hash and salt.
 ///
-/// 203. The same three lines `unlock` has always had, lifted out now
+/// 220. The same three lines `unlock` has always had, lifted out now
 /// that a second caller needs them. Best effort and silent, for 200's
 /// reason: a PIN that cannot be rewritten is a recoverable nuisance,
 /// and failing the operation the user actually asked for because of it
@@ -187,20 +187,20 @@ fn reseat_stored(app: &tauri::AppHandle, session: &Session) {
 
 /// Change the password while signed in and knowing the old one.
 ///
-/// 202. A DIFFERENT FLOW FROM `finish_reset`, not a special case of it.
+/// 219. A DIFFERENT FLOW FROM `finish_reset`, not a special case of it.
 /// This one knows the current password and has no email round trip;
 /// that one knows neither and is gated on reaching the inbox. Folding
 /// them together would mean one function whose rules depend on which
 /// arguments are null.
 ///
 /// ---------------------------------------------------------------------
-/// 203. IT SIGNS IN AGAIN FIRST, AND THAT IS THE WHOLE TRICK
+/// 220. IT SIGNS IN AGAIN FIRST, AND THAT IS THE WHOLE TRICK
 /// ---------------------------------------------------------------------
 ///
-/// 202 shipped this sending only `current_password`, and every single
+/// 219 shipped this sending only `current_password`, and every single
 /// attempt came back `Password update requires reauthentication (400)`.
 /// 199's OTHER guard - "secure password change" - wants the SESSION to
-/// have been created recently, and 202 guessed that would be a rare
+/// have been created recently, and 219 guessed that would be a rare
 /// edge case after 24 hours. **It is the normal case and always was.**
 ///
 /// A PIN unlock spends a refresh token, and a refresh EXTENDS a session
@@ -210,7 +210,7 @@ fn reseat_stored(app: &tauri::AppHandle, session: &Session) {
 /// session is permanently live and permanently old, and this command
 /// could never once have worked for its most likely user.
 ///
-/// 202's advice was wrong as well as its code: "sign out and sign back
+/// 219's advice was wrong as well as its code: "sign out and sign back
 /// in" lands on the unlock screen, where signing back in means the PIN,
 /// which produces exactly the same stale session again.
 ///
@@ -223,7 +223,7 @@ fn reseat_stored(app: &tauri::AppHandle, session: &Session) {
 ///   - it creates a session made SECONDS ago, which is what the guard
 ///     is actually asking for
 ///   - it needs nothing from the inbox, so it works whether or not this
-///     project can send mail - which 202 noted is still unverified
+///     project can send mail - which 219 noted is still unverified
 ///
 /// `current_password` still rides along on the update. Both guards are
 /// on and both are now satisfied honestly rather than worked around.

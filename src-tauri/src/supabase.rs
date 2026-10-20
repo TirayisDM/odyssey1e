@@ -387,7 +387,7 @@ fn auth_call(path: &str, body: &Value) -> Result<Session, String> {
     // That is not an error, but it is not a signed-in state either —
     // say so plainly rather than handing back an empty token.
     //
-    // 202. WORDED FOR FOUR CALLERS NOW, not one. `verify` joined
+    // 219. WORDED FOR FOUR CALLERS NOW, not one. `verify` joined
     // signup, signin and refresh here, and a recovery that came back
     // without a session would have blamed email confirmation.
     let access_token = parsed.access_token.ok_or_else(|| {
@@ -478,7 +478,7 @@ pub fn refresh(refresh_token: &str) -> Result<Session, String> {
 
 /// Write a new password onto the signed-in user.
 ///
-/// 202. `current_password` IS THE WIRE NAME. The Supabase docs show
+/// 219. `current_password` IS THE WIRE NAME. The Supabase docs show
 /// `currentPassword` because that is the JavaScript client's spelling and
 /// it converts; this goes straight at the REST endpoint, where the field
 /// is snake_case. A misspelt field is simply IGNORED by GoTrue - the

@@ -1,9 +1,9 @@
 //! What this app is allowed to decide about a password.
 //!
-//! 206. ONE FUNCTION, AND THE INTERESTING PART IS WHAT IS NOT HERE.
+//! 223. ONE FUNCTION, AND THE INTERESTING PART IS WHAT IS NOT HERE.
 //!
 //! This was `recovery.rs` until the reset flow was taken out - see
-//! STATUS 206 for why, and commit `c4825c0` for the code, which was
+//! STATUS 223 for why, and commit `158effd` for the code, which was
 //! complete and tested and failed on CONFIGURATION rather than on
 //! anything it did. What survived is the half password CHANGE needs.
 

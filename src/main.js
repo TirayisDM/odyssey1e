@@ -308,7 +308,7 @@ function unlockSay(text, isError) {
   el.hidden = !text;
 }
 
-// 202. The same pattern again, for the two password forms.
+// 219. The same pattern again, for the two password forms.
 //
 // THEY GET THEIR OWN LINES RATHER THAN SHARING ONE, because the reset
 // form and the change form can both be open, and a single message box
@@ -9564,7 +9564,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     await paintUnlock();
   });
 
-  /* ------------------- 202. passwords ------------------- */
+  /* ------------------- 219. passwords ------------------- */
 
   // NOTE ON `val`: it TRIMS, and these fields are passwords.
   //
@@ -9602,7 +9602,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       document.querySelector(id).value = "";
     }
     document.querySelector("#change-form").hidden = true;
-    // 203. THE COMMAND SAYS WHAT HAPPENED, rather than this guessing.
+    // 220. THE COMMAND SAYS WHAT HAPPENED, rather than this guessing.
     // It signs in again afterwards and that last step can fail with the
     // password ALREADY CHANGED - a case only it knows about.
     state.user = await call("me");

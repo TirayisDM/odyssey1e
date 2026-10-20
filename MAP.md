@@ -19,7 +19,7 @@ whole reason a fourth is worth starting.
 
 | | OSDUNGEON (Apps Script) | odyssey-engine (Rust) | odyssey1e (today) |
 |---|---|---|---|
-| where | `G:\My Drive\osdungeon` | `C:\Users\tiray\Dev\odyssey-engine` | here |
+| where | `G:\My Drive\osdungeon` | desktop `C:\Users\tiray\Dev\odyssey-engine`, laptop `C:\Users\tiray\odyssey-engine` | here |
 | **has** | the lighting and fog UX, an authoring flow, prose→recipe AI | **3,761 lines of pure rules, 262 tests** | contents, identity, RLS, the clock, initiative |
 | **lacks** | any rules engine | any UI worth keeping | any geometry at all |
 
@@ -61,6 +61,18 @@ whole reason a fourth is worth starting.
   randomness surface is one call site each and they drop into our roll
   path rather than fighting it.
 - **262 tests**, all in-file, no fixtures, no database, no tokio.
+- **Verified on the laptop, 2026-10-20**, against the clone at
+  `2551f1e` rather than taken on trust: the six are `tile`, `scene`,
+  `movement`, `lock`, `trap` and `light`, and their `#[test]` count is
+  **262 exactly**. 3,767 lines sit above `#[cfg(test)]` in them, which
+  is the 3,761 above give or take where the line is drawn.
+- **AND THEY ARE 8% OF THE REPO**, which is the point. The whole of
+  odyssey-engine is 47,009 lines and 1,329 tests; the six are a
+  deliberate extract. `G:\My Drive\osdungeon\rust` holds 23 loose
+  `.rs` files with the same NAMES - no `Cargo.toml`, no git, 38,745
+  lines, 1,150 tests, and a `persistence.rs`. **It is the ancestor, not
+  this.** Porting from it would discard the curation that makes "262
+  tests must pass here" mean anything.
 
 ### The thing nobody mentions, so it is said here
 

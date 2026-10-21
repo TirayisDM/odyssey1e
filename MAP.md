@@ -350,7 +350,7 @@ screen, and a STATUS entry.
 
 | # | Phase | What lands | Risk |
 |---|---|---|---|
-| **0** | **Port the rules cold** | Six modules plus `challenge.rs` into `src/`, as unused code. **262 tests must pass here.** No UI, no migration. | very low |
+| **0** | ~~Port the rules cold~~ **SUPERSEDED - see STATUS 225** | The baseline ran: 262 pass in the engine at `2551f1e`, 0 ignored. It also showed the engine resolves on PERCENTILE and this project on d20 vs DC, so the engine is now a REFERENCE. `grid.rs` and `terrain.rs` are written here instead. | — |
 | **1** | **A location can have a map** | The `tiles` table, `recipe`, `px_per_grid`. UVTT import. Read-only render, DM only. | low |
 | **2** | **Things have positions** | `x, y, z` on objects and characters. Fixtures and creatures drawn on the map; clicking a crate opens 218's panel. **The map stops being a picture.** | low |
 | **3** | **Doors, locks, traps** | Doors as fixtures. Wire `lock.rs` and `trap.rs` - the first consumer they have ever had. | medium |

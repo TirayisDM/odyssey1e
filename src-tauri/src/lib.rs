@@ -36,6 +36,23 @@ mod conditions;
 mod effects;
 mod encounter;
 mod equipment;
+// 225. THE MAP'S RULES, AHEAD OF THEIR CALLER.
+//
+// `grid` and `terrain` are Step 1 of the map work: the geometry and the
+// physics, decided and tested, so that the `tiles` migration has a
+// settled domain to express. Nothing reads them yet, and the build runs
+// at zero warnings, so the two would otherwise add ten.
+//
+// THE SUPPRESSION IS DATED, WHICH IS WHAT MAKES IT A DECISION. The
+// ported engine carried `#[allow(dead_code)]` on code that had never had
+// a caller and had no prospect of one; this names its caller - the
+// `tiles` commands in Step 2 - and comes off when they land. If these
+// attributes are still here when tiles can be read and written, they are
+// hiding something.
+#[allow(dead_code)]
+mod grid;
+#[allow(dead_code)]
+mod terrain;
 mod grants;
 mod features;
 mod generation;

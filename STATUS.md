@@ -8535,6 +8535,246 @@ attributes named no caller and had no prospect of one. A dated
 suppression is a decision; an undated one is a habit. If these are still
 here when a tile can be read and written, they are hiding something.
 
+## 226. A square in three layers, and the first table the map has
+
+225 gave a square ONE terrain. Dave reviewed it, I flagged four
+weaknesses in my own work, and he acted on all four - the vocabulary
+grew from 22 words to 33, gained a layer model, and now has a table.
+
+### The two things one layer could not say
+
+**IT SNOWED.** `Snow` was a terrain, so a winter map was a DIFFERENT
+MAP: you could not say "it snowed" without rewriting every square and
+losing the road beneath it. The calendar has named four seasons since
+214, so this was a season-shaped hole in a world that has seasons.
+
+**A WALL FELL DOWN.** Destroying it left `Rubble`, which erased the
+floor it had stood on. 225 wrote that down as a LIMITATION - "Rubble is
+the debris, not the floor underneath" - because with one layer both
+cannot be true at once.
+
+### Dave's answer, which is better than the one I proposed
+
+**A WALL SITS ON A FLOOR.** With the wall as a COVER over a SURFACE,
+the square is blocked while it stands and the floor is still there when
+it comes down. I had not seen it and it dissolved the limitation rather
+than working around it.
+
+The same move puts grass on dirt - so burning a field leaves dirt - and
+trees on ground, **which retires `Forest` as a word entirely.** A wood
+is ground with trees on it.
+
+### The layers are not equals, and that is the useful part
+
+| layer | affects crossing | read when |
+|---|---|---|
+| `surface` | yes, it is the ground | always |
+| `cover` | yes - snow slows, a wall stops | always |
+| `sub` | **no** | only when the surface is destroyed |
+
+**`sub` TAKES NO PART IN `footing` AT ALL.** Water under ice changes
+nothing about walking on the ice.
+
+That asymmetry decided the sequence: `cover` had to go into the rules
+at once, because every rule asking "what does this square cost" must
+consider two layers and retrofitting that touches all of them. `sub`
+could have waited - it changes no rule - and went in only because the
+table was being written anyway.
+
+### sub is at the same height. z is not.
+
+**THESE ANSWER DIFFERENT QUESTIONS AND NEITHER REPLACES THE OTHER.**
+`sub` is the substrate of THIS square, at the same height as its
+surface. `z - 1` is a genuinely lower place.
+
+So there is **no `height` and no `depth` column**, which Dave asked
+about directly. A ten-foot wall is cover at z = 0 and again at z = 1; a
+foundation two squares down is z = -1 and z = -2. A second number
+saying how tall a thing is would be two ways to state one vertical
+fact, which is the fault this whole session has been removing.
+
+### Hills and ramps, which fall out of the same decision
+
+**A HILLSIDE IS TERRACED AND THAT IS CORRECT.** z is whole five-foot
+steps, so a slope of less than five feet is not representable - and 5e
+has no mechanic for one, so nothing is lost. Stepping up five feet of
+open hill is a CLIMB, which 5e already prices at one extra foot per
+foot: our `Difficult`. The cost comes out right with no new rule.
+
+**A RAMP IS CONNECTIVITY, NOT GEOMETRY.** The map cannot tilt a square.
+What a ramp actually answers is "is this z-transition a climb or a
+walk", which is a property of the square. `Ramp` and `Stairs` carry
+`links_levels()`, and a test asserts nothing else in the 33 does.
+
+**AND THE RENDERER CAN SMOOTH IT.** Given z = 0,0,1,1,2,2 a renderer
+draws a continuous hillside. Lifting the renderer out of the reference
+engine's `tile.rs` is what keeps that an option rather than a conflict.
+
+### Doors
+
+Dave: doors are fixtures - and he was right that 218 already built the
+shape, `items.kind = 'fixture'`, which stays put in a location.
+
+**BUT THE FIVE STATES ARE NOT ONE ENUM.** Open/Closed/Broken are
+exclusive positions; LOCKED is not a third position but a closed door
+with a lock on it; TRAPPED is orthogonal to all of them. A single
+five-value state cannot say what a dungeon door usually is - closed AND
+locked AND trapped.
+
+So: three cover words carry the POSITION, and a fixture carries the
+EXCEPTIONS. Most doors need no fixture at all. That inverts what I
+proposed first and is better - opening a door is one row write, line of
+sight reads the tile with no join, and fog gets the door state for free.
+
+**A BROKEN DOOR STILL BLOCKS**, confirmed by Dave and asserted by a
+test. A door at a tenth of its hit points is JAMMED, not open. The
+obvious wrong answer is that breaking a door opens it, which would make
+smashing strictly better than picking the lock and retire every locked
+door in the game.
+
+**`Doorway` CAME BACK AS A SURFACE** for a reason stronger than the one
+I had removed it for: it is where a creature LEAVES one location for
+another, and nothing else can mark that. The reference engine carried
+the same idea as `ExitPoint { x, y, link, width }`. Where it leads is a
+FACT and lives on the row; that the square is a threshold is a RULE and
+lives in the word.
+
+### AC and HP for terrain
+
+Dave asked for it, which changed my answer in 225 that integrity had no
+consumer.
+
+**AC IS QUOTED FROM THE DMG SUBSTANCE TABLE** - ice 13, wood 15, stone
+17, iron 19. **HP AND THRESHOLD ARE TUNED AND SAY SO**: the DMG sizes
+objects, not five-foot wall sections.
+
+**THE THRESHOLD IS THE POINT.** Damage below it does nothing AT ALL
+rather than being reduced, which is what stops a dagger felling a stone
+wall over twenty patient rounds. `Integrity::lands(damage)` is the one
+place that applies it.
+
+**BROKEN IS DERIVED, NOT STORED.** "Ninety per cent down" is ONE RULE,
+so it is one division - `hp / 10` - rather than a number written beside
+every door that would eventually disagree with the rule it came from.
+
+**AND IT ONLY APPLIES TO MECHANISMS.** A wall at a tenth of its hit
+points is a BREACH, which is passable; a door at a tenth is JAMMED,
+which is not. `IronGrate` deliberately has no mechanism - it is barred,
+not hinged, so it is cut out rather than broken.
+
+### The table
+
+`tiles`, applied. Three layer columns, sparse nullable hit points, and
+a `leads_to` for doorways.
+
+**THE VOCABULARY IS A CHECK, NOT A LOOKUP TABLE.** A `terrain_words`
+table would be the tidier-looking answer and would put a RULE in
+Postgres. 23 surface words, 15 cover words, 33 distinct; the five walls
+are in both lists and are the only overlap.
+
+**AND A TEST READS THE MIGRATION FILE.**
+`the_migration_and_the_enum_cannot_drift` pulls the three CHECK lists
+out of the .sql with `include_str!` and compares them to `terrain::ALL`.
+That guard is what makes a literal list safe instead of a second copy
+nobody checks.
+
+**IT CAUGHT ME ON ITS FIRST RUN.** My parser sliced from the first `(`
+after `check`, which opens `(surface in (...))`, so `'rock'` was glued
+to the wrapper and silently dropped - the guard reported a drift that
+was in the guard. Fixed, commented at the site, and then PROVEN by
+removing `'rock'` from the SQL, watching it fail, and restoring.
+
+### What is deliberately absent from the table
+
+`is_wall` - derived from `cover` now. `is_revealed` - **a boolean
+cannot express fog**, because what one player has seen is not what
+another has; fog is Phase 4 and already has `tile_memory` planned.
+`is_trapped` - Phase 3, and it belongs on a fixture.
+
+**A MISSING ROW MEANS UNMAPPED, NOT EMPTY FLOOR.** When falling is
+built, an absent tile is empty air rather than ground.
+
+### RLS, and what it promises
+
+**THE DM, AND ONLY THE DM.** Phase 1 is a read-only render on the DM's
+screen, so the policy is the promise that is actually true today, and
+the fog policy REPLACES it in Phase 4 rather than extending it. Writing
+the player half now would mean a policy against a fog model that does
+not exist, and policies describing intentions rather than behaviour are
+how 204 came to hide a character sheet.
+
+`tiles` does **not** denormalise `game_id`; the policies join through
+`locations`, and `is_game_dm` is STABLE so the subquery hoists.
+
+### And the two columns a map needs on its location
+
+`locations.recipe jsonb` and `locations.px_per_grid int`, both
+nullable, both settled by MAP.md.
+
+**THE RECIPE IS THE PROVENANCE** - the rows are what the map IS, the
+recipe is the account of what produced it, so a room can be regenerated
+without that being a separate feature. **It is deliberately
+unconstrained:** MAP.md sketched it before a square had three layers,
+and pinning the shape down now would be guessing at a generator nobody
+has written.
+
+**`px_per_grid` IS THE ONLY NUMBER IN THIS SCHEMA THAT KNOWS ABOUT
+PIXELS.** Every coordinate is in squares, so re-rendering at another
+resolution changes nothing stored.
+
+### The debt, now owed to four words
+
+`links_levels` has no reader. Neither does falling off a `Ledge`,
+dropping into a `Pit`, or breaking through a floor. **Four separate
+words all owe their meaning to one unwritten module**, which is a
+strong signal that the z-transition rule is the next real piece.
+
+## 227. The half revoke was the worst of three
+
+226 ended with `revoke select, insert, update, delete on public.tiles
+from anon` and left `anon` holding REFERENCES, TRIGGER and TRUNCATE.
+
+**THAT IS THE WORST AVAILABLE STATE**, because the table looks locked
+down and two of the survivors do not answer to RLS at all.
+
+### Why RLS does not cover them
+
+Postgres checks a GRANT first and RLS second: the grant is the door,
+RLS is the lock on each room. Supabase grants `anon` everything on a
+new table by default and relies on RLS to stop it, which works because
+every policy here needs `current_profile()` and `anon` has none.
+
+**TRUNCATE IS NOT A ROW OPERATION.** It empties the table without
+consulting a single row, so there is nothing for a policy to filter and
+RLS is never asked. For that privilege the grant is the ONLY gate.
+TRIGGER is the same shape - a trigger is code that runs on somebody
+else's write, and no policy is consulted about its existence.
+
+**NEITHER IS REACHABLE TODAY.** PostgREST cannot issue a TRUNCATE or a
+CREATE TRIGGER; there is no HTTP request that produces one. A gap in
+the wall with no road to it, which is why this is a tidy-up and not an
+incident.
+
+### Only `tiles`, and the rest is written down rather than swept
+
+**EVERY OTHER TABLE HAS THE SAME GRANTS.** `locations` gives `anon`
+DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE and UPDATE, and
+so does everything else, because that is Supabase's default and nothing
+has ever swept it.
+
+Sweeping it is real work with a real chance of breaking something that
+quietly depends on a grant, and it wants its own entry and its own
+verification. **193 did exactly that for EXECUTE on functions and
+deliberately did not touch tables.**
+
+So 227 finishes the table 226 half-finished and claims nothing about
+the rest. The inconsistency is known and recorded, which is the
+difference between a decision and an oversight.
+
+**Verified after applying:** `anon` no longer appears in
+`role_table_grants` for `tiles` at all; `authenticated` keeps its seven
+with RLS as the gate.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

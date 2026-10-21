@@ -1,0 +1,51 @@
+-- 227. THE HALF REVOKE WAS THE WORST OF THREE.
+--
+-- 226 ended with:
+--
+--     revoke select, insert, update, delete on public.tiles from anon;
+--
+-- and left `anon` holding REFERENCES, TRIGGER and TRUNCATE. That is the
+-- worst available state: the table LOOKS locked down and two of the
+-- three survivors do not answer to RLS at all.
+--
+-- ---------------------------------------------------------------------
+-- WHY RLS DOES NOT COVER THEM
+-- ---------------------------------------------------------------------
+--
+-- Postgres checks a GRANT first and RLS second. The grant is the door;
+-- RLS is the lock on each room. Supabase grants `anon` everything on a
+-- new table by default and relies on RLS to stop it, which works
+-- because every policy here needs `current_profile()` and `anon` has
+-- none - it matches zero rows.
+--
+-- **TRUNCATE IS NOT A ROW OPERATION.** It empties the table without
+-- consulting a single row, so there is nothing for a policy to filter
+-- and RLS is never asked. For that privilege the grant is the ONLY
+-- gate. TRIGGER is the same shape: a trigger is code that runs on
+-- somebody else's write, and no policy is consulted about its
+-- existence.
+--
+-- NEITHER IS REACHABLE TODAY. PostgREST cannot issue a TRUNCATE or a
+-- CREATE TRIGGER - there is no HTTP request that produces one. This is
+-- a gap in the wall with no road leading to it, which is why it is a
+-- tidy-up and not an incident.
+--
+-- ---------------------------------------------------------------------
+-- AND IT IS ONLY `tiles`, DELIBERATELY
+-- ---------------------------------------------------------------------
+--
+-- EVERY OTHER TABLE IN THIS SCHEMA HAS THE SAME GRANTS. `locations`
+-- gives `anon` DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE
+-- and UPDATE, and so does everything else, because that is Supabase's
+-- default and nothing has ever swept it.
+--
+-- Sweeping it is a real piece of work with a real chance of breaking
+-- something that quietly depends on a grant, and it wants its own
+-- entry, its own reasoning and its own verification - 193 did exactly
+-- that for EXECUTE on functions and deliberately did not touch tables.
+--
+-- So this finishes the table 226 half-finished and claims nothing
+-- about the rest. **THE INCONSISTENCY IS KNOWN AND WRITTEN DOWN**,
+-- which is the difference between a decision and an oversight.
+
+revoke all on public.tiles from anon;

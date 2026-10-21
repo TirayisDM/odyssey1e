@@ -93,6 +93,7 @@ pub mod perform;
 pub mod casting;
 pub mod session;
 pub mod store;
+pub mod tiles;
 pub mod time;
 
 /// Everything a command needs from the session, resolved once.

@@ -36,19 +36,26 @@ mod conditions;
 mod effects;
 mod encounter;
 mod equipment;
-// 225. THE MAP'S RULES, AHEAD OF THEIR CALLER.
+// 229. THE MAP'S RULES, STILL AHEAD OF THEIR CALLER.
 //
-// `grid` and `terrain` are Step 1 of the map work: the geometry and the
-// physics, decided and tested, so that the `tiles` migration has a
-// settled domain to express. Nothing reads them yet, and the build runs
-// at zero warnings, so the two would otherwise add ten.
+// `grid` and `terrain` hold the geometry and the physics. 229 gave
+// `terrain` its first real consumer - `commands/tiles` reads `Stack`,
+// `Terrain::of_key`, `may` and `legal` to check a batch before it is
+// written - and the build still had 26 unused items without these
+// attributes, every one of them a RULE rather than a word.
 //
-// THE SUPPRESSION IS DATED, WHICH IS WHAT MAKES IT A DECISION. The
-// ported engine carried `#[allow(dead_code)]` on code that had never had
-// a caller and had no prospect of one; this names its caller - the
-// `tiles` commands in Step 2 - and comes off when they land. If these
-// attributes are still here when tiles can be read and written, they are
-// hiding something.
+// **225 DATED THIS SUPPRESSION TO THE WRONG EVENT.** It said the
+// attributes came off "when the `tiles` commands land", and they have
+// landed. Storing a map uses the VOCABULARY; it does not ask what a
+// square costs to cross, what it blocks, how far away it is, or what
+// is left when it breaks. `footing`, `integrity`, `destruction`,
+// `wear`, `lands`, `links_levels` and the whole of `grid` are waiting
+// on movement, line of sight and damage.
+//
+// SO THE CONDITION IS RESTATED, NOT RENEWED: these come off when the
+// RULES have a caller, which is the z-transition and movement work -
+// the module four terrain words already owe their meaning to. If they
+// are still here after that, they are hiding something.
 #[allow(dead_code)]
 mod grid;
 #[allow(dead_code)]
@@ -1678,6 +1685,9 @@ pub fn run() {
             sign_out,
             // A path registers exactly like a bare name, and the command
             // is still "me" on the wire. See commands/mod.rs.
+            commands::tiles::list_tiles,
+            commands::tiles::paint_tiles,
+            commands::tiles::erase_tiles,
             commands::session::me,
             // Fast login. Convenience, not security - see pin.rs.
             commands::session::pin_status,

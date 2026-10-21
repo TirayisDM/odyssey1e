@@ -4803,6 +4803,8 @@ async function loadWorld() {
   }
 
   fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
+  // 229. The dev hook's picker. Same tree, same call.
+  fillPlaces(document.querySelector("#map-where"), "— pick a place —");
   // The detail picker too. Its value is set by selectEncounter rather
   // than kept: it shows where THIS encounter is, not what was last
   // chosen on the create form.
@@ -9608,6 +9610,63 @@ window.addEventListener("DOMContentLoaded", async () => {
     state.user = await call("me");
     paintUser();
     changeSay(r.value);
+  });
+
+  /* ---------------- 229. tiles, a dev hook ----------------
+
+     THE THREE COMMANDS HAVE NO SCREEN YET. Phase 1's render is its own
+     piece of work, and until it exists a command nobody can call is a
+     command nobody has watched fail. This paints four squares, reads
+     them back and erases them.
+
+     THE FOUR SQUARES ARE CHOSEN, not arbitrary. A bare floor; a wall
+     STANDING ON a floor, which is the whole point of layers; a shut
+     door in a doorway; and stairs carrying a link with an arrival,
+     which 226's constraint would have refused and 228 allows.
+
+     DELETE THIS the day there is a real map surface. */
+
+  const PATCH = (loc) => [
+    { x: 0, y: 0, z: 0, surface: "wood_floor" },
+    { x: 1, y: 0, z: 0, surface: "wood_floor", cover: "timber_wall" },
+    { x: 2, y: 0, z: 0, surface: "doorway", cover: "door_closed" },
+    { x: 3, y: 0, z: 0, surface: "stairs", leadsTo: loc, toX: 0, toY: 9, toZ: 1 },
+  ];
+
+  const mapSay = (t, isErr) => say("#map-say", t, isErr);
+
+  const mapWhere = () => {
+    const id = document.querySelector("#map-where").value;
+    if (!id) mapSay("pick a place first", true);
+    return id || null;
+  };
+
+  guarded("#map-paint", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const r = await tryCall("paint_tiles", { locationId: loc, tiles: PATCH(loc) });
+    mapSay(r.ok ? `painted ${r.value}` : r.error, !r.ok);
+  });
+
+  guarded("#map-list", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const r = await tryCall("list_tiles", { locationId: loc });
+    if (!r.ok) return mapSay(r.error, true);
+    // SAY WHAT IS THERE, not just how many - the layers are the thing
+    // being proved, and a count would hide them.
+    const said = r.value
+      .map((t) => `(${t.x},${t.y},${t.z}) ${t.surface}${t.cover ? " + " + t.cover : ""}`)
+      .join("  ·  ");
+    mapSay(r.value.length ? said : "nothing mapped here");
+  });
+
+  guarded("#map-erase", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const spots = PATCH(loc).map(({ x, y, z }) => ({ x, y, z }));
+    const r = await tryCall("erase_tiles", { locationId: loc, spots });
+    mapSay(r.ok ? `erased ${r.value}` : r.error, !r.ok);
   });
 
   document.querySelector("#refresh-games").addEventListener("click", loadGames);

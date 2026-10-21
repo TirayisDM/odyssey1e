@@ -8848,6 +8848,124 @@ locations and none handles falling. They are here because the
 alternative is a migration against live rows later, and because
 `leads_to` already existed in a shape that could not work.
 
+## 229. The first door into `tiles`
+
+226 built the table and 228 fixed its links, and until now nothing
+could put a row in either. Three commands, and a map that has actually
+held squares.
+
+| | |
+|---|---|
+| `list_tiles(location_id)` | the whole location, `order=z,y,x` |
+| `paint_tiles(location_id, tiles)` | bulk upsert, chunked at 1000 |
+| `erase_tiles(location_id, spots)` | points, back to unmapped |
+
+### Validation happens twice, and that is not a mistake
+
+The CHECK constraints stay - they are the backstop for anything
+reaching the table by any route, psql included. But a constraint
+violation comes back as Postgres prose with a row dump in it, and this
+project's standard is that a refusal arrives as a sentence.
+
+So the batch is checked in Rust FIRST, in full, before a single row
+goes out. **AND THE ERROR NAMES THE SQUARE**, which the constraint
+cannot do because it does not know which of nine hundred rows you
+meant. Proved live:
+
+```
+(0, 0, 0): grass cannot be a surface
+```
+
+### The same square twice is refused, not quietly deduped
+
+Postgres will not let one `insert ... on conflict do update` touch the
+same key twice - "cannot affect row a second time" - so a batch
+painting (3,4) twice fails as a whole, obscurely, after the round trip.
+
+**SILENTLY KEEPING THE LAST ONE WOULD HIDE THE BUG IN WHATEVER DREW THE
+BATCH.** An editor that sends a square twice has a fault in its brush,
+and the second value may not be the one the user drew last. Named and
+refused.
+
+### 217 applies here, and I had it wrong
+
+217: **"a blocked UPDATE or DELETE matches no row and returns
+success."** `erase_tiles` first returned the count it was ASKED for, so
+a player erasing the DM's map would have been filtered by RLS, deleted
+nothing, and been told "erased 40".
+
+That is exactly the lie 217 swept this codebase for, written fresh
+eighteen entries later.
+
+Both commands now count **what came back**. `rest_upsert` already
+returns the representation; `rest_delete_counted` is new beside
+`rest_delete` for the other side. A shortfall is an ERROR rather than a
+number to inspect - half a map drawn is not a success with a caveat, it
+is a map in a state nobody asked for.
+
+**ERASING IS THE ONE EXCEPTION.** A square that was never mapped is a
+no-op a brush does constantly, so erase only complains when nothing at
+all went, which is the shape of a refusal rather than of a miss.
+
+### Painting carries no damage
+
+`row()` omits `surface_hp` and `cover_hp` entirely, which leaves them
+untouched on an update rather than nulling them. **PAINTING IS
+AUTHORING AND DAMAGE IS PLAY** - an editor passing over a chipped wall
+should not silently repair the dungeon.
+
+The cost, stated: a wall repainted from stone to timber keeps stone's
+damage. Wrong in a different way, and the lesser of the two until
+something can repair.
+
+### The dev hook, which is marked for deletion
+
+The three commands have no screen - Phase 1's render is its own piece
+of work - and **a command nobody can call is a command nobody has
+watched fail.** So the Run tab carries a collapsed `Tiles (dev hook)`:
+a place picker and Paint 4 / List / Erase 4.
+
+**THE FOUR SQUARES ARE CHOSEN, NOT ARBITRARY.** A bare floor; a wall
+STANDING ON a floor, which is the whole point of layers; a shut door in
+a doorway; and stairs carrying a link with an arrival, which 226 would
+have refused and 228 allows.
+
+`List` prints what is in each square rather than a count, because the
+layers are the thing being proved and a number would hide them.
+
+Both the markup and the handlers say to delete it the day there is a
+real map surface. It proves the round trip; it is not the map.
+
+### Proved live rather than reasoned about
+
+```
+(0,0,0) wood_floor · (1,0,0) wood_floor + timber_wall ·
+(2,0,0) doorway + door_closed · (3,0,0) stairs
+erased 4
+```
+
+Two things that had never run came good with it: **the PostgREST
+`or=(and(..),and(..))` delete filter**, which was syntax I had reasoned
+about and not exercised, and **217's counting**, which said 4 because
+four rows actually went. The table is back to zero.
+
+### And a dated suppression that was dated to the wrong event
+
+225 put `#[allow(dead_code)]` on `grid` and `terrain` and said it came
+off "when the `tiles` commands land". **They have landed, and removing
+the attributes leaves 26 unused items.**
+
+Storing a map uses the VOCABULARY - `Stack`, `of_key`, `may`, `legal`.
+It never asks what a square costs to cross, what it blocks, how far
+away it is, or what is left when it breaks. `footing`, `integrity`,
+`destruction`, `wear`, `lands`, `links_levels` and the whole of `grid`
+are waiting on movement, line of sight and damage.
+
+**THE CONDITION IS RESTATED, NOT RENEWED**: they come off when the
+RULES have a caller - the z-transition and movement work that four
+terrain words already owe their meaning to. A suppression that quietly
+renews itself is the habit 225 claimed to be avoiding.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

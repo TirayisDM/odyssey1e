@@ -285,6 +285,25 @@
         </div>
         <ul id="encounters" class="list"></ul>
 
+        <!-- 229. A HOOK, NOT A MAP. The three tile commands have no
+             screen yet - Phase 1's render is its own piece of work -
+             and a command nobody can call is a command nobody has
+             watched fail. This paints a four-square patch, reads it
+             back and erases it, against the place chosen beside it.
+
+             DELETE THIS BLOCK the day there is a real map surface. It
+             exists to prove the round trip, not to author anything. -->
+        <details id="map-hook">
+          <summary class="muted">Tiles (dev hook)</summary>
+          <div class="row">
+            <select id="map-where"></select>
+            <button id="map-paint" class="ghost tiny">Paint 4</button>
+            <button id="map-list" class="ghost tiny">List</button>
+            <button id="map-erase" class="ghost tiny danger">Erase 4</button>
+          </div>
+          <div id="map-say" class="dm-msg" hidden></div>
+        </details>
+
         <div id="enc-detail" hidden>
           <div id="enc-editing" class="editing" hidden></div>
 

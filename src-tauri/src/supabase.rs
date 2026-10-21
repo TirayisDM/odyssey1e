@@ -719,6 +719,42 @@ pub fn rpc(token: &str, func: &str, body: &Value) -> Result<Value, String> {
 
 /// DELETE. Same refusal as rest_update: an unfiltered delete would take
 /// every row RLS allows, which is never what anyone meant.
+/// DELETE, and say how many rows actually went.
+///
+/// 229. 217'S RULE, WITH A RETURN VALUE. "A blocked UPDATE or DELETE
+/// matches no row and returns success" - so a caller that reports what
+/// it ASKED for rather than what happened is the lie 217 swept this
+/// codebase for. `Prefer: return=representation` makes PostgREST hand
+/// back the rows it removed, and counting them is the difference
+/// between "erased forty squares" and "erased none of your forty
+/// squares, because they are not yours".
+pub fn rest_delete_counted(
+    token: &str,
+    path: &str,
+    filter: &[(&str, &str)],
+) -> Result<usize, String> {
+    if filter.is_empty() {
+        return Err("refusing to delete without a filter".to_string());
+    }
+    let resp = http()
+        .delete(rest_url(path))
+        .header("apikey", SUPABASE_ANON_KEY)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Prefer", "return=representation")
+        .query(filter)
+        .send()
+        .map_err(|e| format!("could not reach Supabase: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let text = resp.text().unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(error_message(status, &text));
+    }
+    let rows: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("unexpected delete response: {}", e))?;
+    Ok(rows.as_array().map(Vec::len).unwrap_or(0))
+}
+
 pub fn rest_delete(token: &str, path: &str, filter: &[(&str, &str)]) -> Result<(), String> {
     if filter.is_empty() {
         return Err("refusing to delete without a filter".to_string());

@@ -8775,6 +8775,79 @@ difference between a decision and an oversight.
 `role_table_grants` for `tiles` at all; `authenticated` keeps its seven
 with RLS as the gate.
 
+## 228. A link from any square, and somewhere to arrive
+
+226's `a_link_needs_a_doorway` was wrong three ways, and the third
+corrects a claim 226's own entry made.
+
+### One: stairs
+
+**THE COMMONEST INTER-LOCATION LINK THERE IS, AND THE CONSTRAINT
+FORBADE IT.** A flight down to a cellar modelled as a child location
+could not carry a link - the first thing anybody would try to build.
+
+### Two: a breached wall
+
+When two areas are separate locations and the wall between them is
+knocked through, the link has to appear AT THE MOMENT THE WALL COMES
+DOWN, written onto a square whose cover is then `rubble`. The
+constraint refused exactly that write.
+
+**A passage that exists because somebody made it is the most
+interesting kind, and the schema would only have allowed the ones an
+architect drew.**
+
+### Three: up and down is not merely z, and 226 said it was
+
+226 argued that a ledge, a cliff or a hole needs no link because the
+place below is `z - 1` in the same coordinate space. **Dave pushed
+back, and he is right.**
+
+A location is one coordinate space with ONE ORIGIN AND ONE SCALE. Two
+adjacent places are two maps, and the Valley's (0,0) has nothing to do
+with the Highlands'. Nobody draws one grid spanning a mountain - they
+draw a map per area and join them. So falling off a cliff lands you in
+a DIFFERENT LOCATION at coordinates that location chose, and no amount
+of decrementing z will find them.
+
+z keeps what MAP.md gave it: height WITHIN one coordinate space, a
+bridge deck over its own floor, a pit under it. The moment the place
+below is its own map, it needs a link like anywhere else.
+
+### And a link needed somewhere to arrive
+
+`leads_to` named a location and dropped you nowhere in it. The
+destination has its own origin, so there was nothing to infer an
+arrival from. `to_x`, `to_y`, `to_z` now sit beside it.
+
+**EXPLICIT COORDINATES RATHER THAN PAIRING.** Two linked squares could
+find each other by convention, which is tidier while every passage is
+symmetric and breaks the first time one is not. A chute you slide down
+and cannot climb, a trapdoor that shuts above you, a one-way portal -
+dungeons do this constantly, and a convention that cannot express it is
+a convention somebody works around.
+
+**ALL OR NOTHING.** A link is four facts, and a partial one is a
+passage to a location at no particular place. The constraint makes the
+incoherent state unstorable rather than leaving it to whoever writes
+the first mover.
+
+### Proven rather than assumed
+
+Both halves exercised against the live table and the rows removed:
+
+| | |
+|---|---|
+| a `ledge` carrying a full link | **accepted** - refused before 228 |
+| a `doorway` with `leads_to` and no coordinates | **refused**, `a_link_is_all_or_nothing` |
+
+### Nothing walks through one yet
+
+These columns are storable and unread. No rule moves a creature between
+locations and none handles falling. They are here because the
+alternative is a migration against live rows later, and because
+`leads_to` already existed in a shape that could not work.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

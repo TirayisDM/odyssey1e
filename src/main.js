@@ -2809,6 +2809,18 @@ async function loadCharacters() {
   if (!state.gameId) return;
   const chars = await call("list_characters", { gameId: state.gameId });
   if (!Array.isArray(chars)) return;
+  // 230. The dev hook's picker. EVERY character, not only your own -
+  // placing a monster is the commonest reason to use it.
+  const who = document.querySelector("#map-who");
+  if (who) {
+    who.innerHTML = "";
+    for (const c of chars) {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      who.append(o);
+    }
+  }
   for (const c of chars) {
     const mine = state.user && c.owner_uid === state.user.profile_id;
     // Only your own character is selectable — the sheet editor writes,
@@ -9659,6 +9671,55 @@ window.addEventListener("DOMContentLoaded", async () => {
       .map((t) => `(${t.x},${t.y},${t.z}) ${t.surface}${t.cover ? " + " + t.cover : ""}`)
       .join("  ·  ");
     mapSay(r.value.length ? said : "nothing mapped here");
+  });
+
+  /* 230. Somebody standing on it. `place_character` is dumb by
+     design, so this can put Tarren inside a wall - that is the seam
+     working, not a bug. Judging legality is `stride::step`'s job and
+     nothing calls it yet. */
+
+  const whoSay = (t, isErr) => say("#map-whosay", t, isErr);
+  const num = (id) => Number(document.querySelector(id).value);
+
+  // A position needs a location - 230's constraint - so the hook can
+  // put them in the place first. `move_character` is 035's, not new.
+  guarded("#map-send", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const r = await tryCall("move_character", {
+      characterId: document.querySelector("#map-who").value,
+      locationId: loc,
+    });
+    whoSay(r.ok ? "moved to this place (position cleared by the trigger)" : r.error, !r.ok);
+  });
+
+  guarded("#map-place", async () => {
+    const r = await tryCall("place_character", {
+      characterId: document.querySelector("#map-who").value,
+      x: num("#map-x"),
+      y: num("#map-y"),
+      z: num("#map-z"),
+    });
+    whoSay(r.ok ? "placed" : r.error, !r.ok);
+  });
+
+  guarded("#map-lift", async () => {
+    const r = await tryCall("place_character", {
+      characterId: document.querySelector("#map-who").value,
+      x: null,
+      y: null,
+      z: null,
+    });
+    whoSay(r.ok ? "lifted off the map" : r.error, !r.ok);
+  });
+
+  guarded("#map-who-here", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const r = await tryCall("standing_in", { locationId: loc });
+    if (!r.ok) return whoSay(r.error, true);
+    const said = r.value.map((c) => `${c.name} (${c.x},${c.y},${c.z})`).join("  ·  ");
+    whoSay(r.value.length ? said : "nobody is standing on this map");
   });
 
   guarded("#map-erase", async () => {

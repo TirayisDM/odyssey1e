@@ -8966,6 +8966,152 @@ RULES have a caller - the z-transition and movement work that four
 terrain words already owe their meaning to. A suppression that quietly
 renews itself is the habit 225 claimed to be avoiding.
 
+## 230. One step, and a creature standing on a square
+
+Two pieces that only mean anything together: a rule that says what
+moving costs, and somewhere for a creature to move from.
+
+### `stride.rs` - what one step costs
+
+Deliberately ONE STEP. No budget, no path, no falling damage, no
+`leads_to`. This is the module four terrain words have owed their
+meaning to since 226.
+
+```rust
+step(from: &Stack, at: Point, to: &Stack, onto: Point, can: &[Mode])
+    -> Result<Step { cost, peril }, String>
+```
+
+**A CLIMB ADDS ONE SQUARE AND DOES NOT DOUBLE.** 5e reads "1 extra foot
+for every foot (2 extra feet in difficult terrain)", so ordinary ground
+is 1 + 1 = 2 and scree is 2 + 1 = 3. I proposed doubling and corrected
+it while building: **doubling gets the ordinary case right by
+coincidence and the difficult case wrong, which is the worst way to be
+wrong - it looks correct everywhere anybody checks first.** Both cases
+have tests.
+
+**`links_levels` FINALLY HAS A READER.** A ramp or stairs makes a climb
+an ordinary step, and EITHER square counts - you walk up a ramp and you
+walk onto one, and a flight is no use if only the bottom step counts.
+
+**STEPPING DOWN ONE SQUARE IS FREE.** Five feet is a drop anybody takes
+without thinking. Two or more is a fall and is refused, in feet: "that
+is 15 feet down - a fall, not a step".
+
+### Deep water is not a wall, which Dave corrected
+
+I had `Mode::Swim` as a GATE - no swim speed, no entry. Dave: *"should
+not refuse move to deep water - if character cannot swim they will
+begin drowning without magical intervention"*.
+
+He is right, and it is the shape lava already had: **enterable, and a
+terrible idea.** Refusing would be the engine playing the game for
+them. So a step into deep water without a swim speed succeeds and
+comes back carrying `Peril::Drowning`.
+
+**A HAZARD AND A PERIL ARE DIFFERENT THINGS**, and the distinction is
+now load-bearing:
+
+| | |
+|---|---|
+| **hazard** | hurts ANYBODY in the square - lava burns the fire-swimmer and the fool alike. Lives on the terrain |
+| **peril** | what the square does to YOU because of what you cannot do |
+
+A test asserts lava is a hazard and NOT a peril, so the two cannot
+blur.
+
+### `characters` + x, y, z
+
+`stride` had no caller because nothing knew where anybody was standing.
+`characters` has had a `location_id` since 035 - which ROOM - and no
+idea where in it.
+
+**`location_id` IS ALREADY THE MAP.** No new identifier:
+`characters.location_id`, `encounters.location_id` and
+`tiles.location_id` all point at the same row, and 226 put `recipe` and
+`px_per_grid` on it. These three columns say WHERE ON IT.
+
+### One table, not the three MAP.md names
+
+MAP.md puts x, y, z on `objects`, `characters` AND `encounter_actors`.
+
+**`characters.x` AND `encounter_actors.x` WOULD BOTH ANSWER "WHERE IS
+BRYN".** During a fight they would disagree and afterwards somebody has
+to copy one into the other - the two-places fault with a round counter
+attached. The want behind it is real, but it is PER-ROUND HISTORY
+rather than a second present, and it will know what shape it wants when
+something needs to rewind a round.
+
+Objects are deferred rather than rejected: 031's holder chain means
+only an object held BY A LOCATION has a position at all.
+
+### No unique constraint on (location, x, y, z)
+
+The obvious index, deliberately absent. **5e puts two creatures in one
+square routinely** - squeezing, a swarm, a mount and rider, somebody
+prone under a brawl.
+
+Occupancy is a RULE WITH EXCEPTIONS; a unique index is a schema fact
+with none, and it would forbid forever and silently what the rulebook
+allows.
+
+### And a trigger, which is the one piece of real groundwork
+
+Walk from the inn to the outhouse and your coordinates are suddenly
+about a map you are not on. **A CHECK cannot catch it because it is
+about a TRANSITION rather than a row.**
+
+It CLEARS rather than refuses: moving between rooms is ordinary and
+must not require the caller to null three columns first.
+
+**THE CASE THAT MATTERED WAS THE ONE THAT MUST NOT FIRE.** A trigger
+that wiped the position on every update would make the feature
+unusable. `is distinct from` on `location_id` is what keeps it to
+actual map changes. Proved in a rolled-back block:
+
+```
+placed (3,4,1) | stepped (4,4,1) | left the map (null,null,null)
+| partial refused | mapless refused
+```
+
+An existing guard fired during the first attempt -
+`character_location_same_game()` refused moving Tarren to the outhouse,
+which belongs to another game. 033-era integrity, still working.
+
+### `place_character` is dumb, and that is a seam
+
+It does not ask whether the square exists, whether a wall is there, or
+who else is standing on it. **NOT AN OVERSIGHT.** "May this creature be
+here" is a rules question with a growing number of answers - `stride`
+already knows what blocks a step, and occupancy has exceptions the
+schema deliberately does not encode. A DM placing a monster
+mid-sentence should not be argued with by a writer.
+
+### 217 caught me a second time
+
+`place_character` first returned `Ok(())` unconditionally. A blocked
+UPDATE matches no row and returns success, so a player placing somebody
+else's character would have been told it worked. It counts the returned
+rows now.
+
+That is twice in two entries. **The pattern is that a write command
+written quickly reports its INTENT**, and the habit has to be to reach
+for the count first.
+
+### Proved through the app
+
+Tarren, through the real commands and then read off the database:
+
+```
+Tarren | Test Inn 1 | (1,0,0) | unmapped square
+```
+
+**"unmapped square" IS THE SCHEMA BEING HONEST.** The tiles had been
+erased, so he is standing on ground with no row - and 226 says a
+missing row means unmapped, not empty floor. Nothing invented a floor
+under him, and `place_character` did not care, which is the seam
+working.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

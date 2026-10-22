@@ -314,6 +314,85 @@ pub fn erase_tiles(
     }
 }
 
+/* ================== 230. WHO IS STANDING WHERE ================== */
+
+/// A creature on a map, and where.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Standing {
+    pub id: String,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub z: i16,
+}
+
+/// Put a creature on a square, or lift them off it.
+///
+/// 230. DELIBERATELY DUMB. It does not ask whether the square exists,
+/// whether a wall is there, or who else is standing on it.
+///
+/// NOT AN OVERSIGHT - A SEAM. "May this creature be here" is a rules
+/// question with a growing number of answers: `stride.rs` already
+/// knows what blocks a step, occupancy has exceptions the schema
+/// deliberately does not encode (230 says why), and a DM placing a
+/// monster mid-sentence should not be argued with by a writer.
+///
+/// So the write is a write. Whatever is judging legality calls
+/// `stride::step` first and this second, and the two stay separable.
+///
+/// PASSING NO COORDINATES LIFTS THEM OFF THE MAP, which is a thing a
+/// DM does constantly - a creature that has left, or was never placed.
+#[tauri::command]
+pub fn place_character(
+    state: State<AppState>,
+    character_id: String,
+    x: Option<i32>,
+    y: Option<i32>,
+    z: Option<i16>,
+) -> Result<(), String> {
+    // THE SAME ALL-OR-NOTHING THE CONSTRAINT HOLDS, said here so the
+    // refusal is a sentence rather than a row dump.
+    let given = [x.is_some(), y.is_some(), z.is_some()];
+    if given.iter().any(|g| *g) && !given.iter().all(|g| *g) {
+        return Err("a position is x, y and z - give all three or none".to_string());
+    }
+    let token = state.token()?;
+    let back = supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "x": x, "y": y, "z": z }),
+    )
+    .map_err(|e| denied(e, "move a creature about the map"))?;
+
+    // 217 AGAIN: a blocked UPDATE matches no row and returns success.
+    match back.as_array().map(Vec::len).unwrap_or(0) {
+        0 => Err("that creature did not move - it is not yours to place".to_string()),
+        _ => Ok(()),
+    }
+}
+
+/// Everyone standing on one map.
+///
+/// ONLY THE PLACED. A character in the room without coordinates is in
+/// the room and not on the map, and a renderer asking "what do I draw"
+/// should not have to filter them out itself.
+#[tauri::command]
+pub fn standing_in(state: State<AppState>, location_id: String) -> Result<Vec<Standing>, String> {
+    let token = state.token()?;
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "id,name,x,y,z"),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("x", "not.is.null"),
+            ("order", "name.asc"),
+        ],
+    )?;
+    serde_json::from_value(rows).map_err(|e| format!("could not read who is standing here: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,6 +528,18 @@ mod tests {
     #[test]
     fn an_empty_batch_is_a_mistake_and_not_a_no_op() {
         assert!(check_batch(&[]).is_err());
+    }
+
+    #[test]
+    fn a_position_is_three_facts_or_none() {
+        // The constraint says this too; this says it as a sentence.
+        let all = [true, true, true];
+        let none = [false, false, false];
+        let part = [true, false, true];
+        let whole = |g: [bool; 3]| g.iter().any(|x| *x) && !g.iter().all(|x| *x);
+        assert!(!whole(all));
+        assert!(!whole(none));
+        assert!(whole(part), "two of three must be refused");
     }
 
     #[test]

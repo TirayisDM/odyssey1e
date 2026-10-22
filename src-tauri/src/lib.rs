@@ -83,6 +83,8 @@ mod slots;
 mod species;
 mod spellcast;
 mod spent;
+#[allow(dead_code)]
+mod stride;
 mod store;
 mod supabase;
 mod uses;
@@ -1688,6 +1690,8 @@ pub fn run() {
             commands::tiles::list_tiles,
             commands::tiles::paint_tiles,
             commands::tiles::erase_tiles,
+            commands::tiles::place_character,
+            commands::tiles::standing_in,
             commands::session::me,
             // Fast login. Convenience, not security - see pin.rs.
             commands::session::pin_status,

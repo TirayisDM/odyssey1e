@@ -36,26 +36,28 @@ mod conditions;
 mod effects;
 mod encounter;
 mod equipment;
-// 229. THE MAP'S RULES, STILL AHEAD OF THEIR CALLER.
+// 231. TWO OF THE MAP'S RULES ARE STILL AHEAD OF THEIR CALLER.
 //
-// `grid` and `terrain` hold the geometry and the physics. 229 gave
-// `terrain` its first real consumer - `commands/tiles` reads `Stack`,
-// `Terrain::of_key`, `may` and `legal` to check a batch before it is
-// written - and the build still had 26 unused items without these
-// attributes, every one of them a RULE rather than a word.
+// `stride` LOST ITS SUPPRESSION HERE and that is the point of keeping
+// these dated: 231 gave `step` a caller and the attribute came off the
+// same hour, rather than quietly outliving the condition that put it
+// there. 225 set it, 229 restated it when the first date proved wrong,
+// and one of the three has now earned its way out.
 //
-// **225 DATED THIS SUPPRESSION TO THE WRONG EVENT.** It said the
-// attributes came off "when the `tiles` commands land", and they have
-// landed. Storing a map uses the VOCABULARY; it does not ask what a
-// square costs to cross, what it blocks, how far away it is, or what
-// is left when it breaks. `footing`, `integrity`, `destruction`,
-// `wear`, `lands`, `links_levels` and the whole of `grid` are waiting
-// on movement, line of sight and damage.
+// WHAT IS LEFT IS NO LONGER "THE RULES" - it is twelve items waiting on
+// two specific things:
 //
-// SO THE CONDITION IS RESTATED, NOT RENEWED: these come off when the
-// RULES have a caller, which is the z-transition and movement work -
-// the module four terrain words already owe their meaning to. If they
-// are still here after that, they are hiding something.
+//   grid     `neighbours`, `in_radius`, `line`, `Line`, `within`,
+//            `squares`, `distance_in_feet`  -> line of sight and areas
+//   terrain  `Integrity`, `Wear`, `breaks_at`, `wear`, `lands`,
+//            `Mode::Climb`, `Mode::Fly`     -> something that can
+//                                              attack terrain
+//
+// THE COST OF A MODULE-WIDE ALLOW, SAID PLAINLY: it hides NEW dead code
+// too, so a function added here tomorrow and never called would not
+// warn. Putting the attribute on each of the twelve items instead would
+// fix that, at twelve attributes. It is worth doing the day either list
+// stops shrinking; today both did shrink, from twenty-six.
 #[allow(dead_code)]
 mod grid;
 #[allow(dead_code)]
@@ -83,7 +85,6 @@ mod slots;
 mod species;
 mod spellcast;
 mod spent;
-#[allow(dead_code)]
 mod stride;
 mod store;
 mod supabase;
@@ -1692,6 +1693,7 @@ pub fn run() {
             commands::tiles::erase_tiles,
             commands::tiles::place_character,
             commands::tiles::standing_in,
+            commands::tiles::step_to,
             commands::session::me,
             // Fast login. Convenience, not security - see pin.rs.
             commands::session::pin_status,

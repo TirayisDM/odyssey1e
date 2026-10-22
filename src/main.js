@@ -9703,6 +9703,22 @@ window.addEventListener("DOMContentLoaded", async () => {
     whoSay(r.ok ? "placed" : r.error, !r.ok);
   });
 
+  // 231. The join: reads the ground either side, asks stride::step,
+  // and writes the position only if the ground allowed it. The cost
+  // comes back and nothing is deducted - there is no budget yet.
+  guarded("#map-step", async () => {
+    const r = await tryCall("step_to", {
+      characterId: document.querySelector("#map-who").value,
+      x: num("#map-x"),
+      y: num("#map-y"),
+      z: num("#map-z"),
+    });
+    if (!r.ok) return whoSay(r.error, true);
+    whoSay(
+      `stepped - cost ${r.value.cost}` + (r.value.peril ? ` · ${r.value.peril}!` : "")
+    );
+  });
+
   guarded("#map-lift", async () => {
     const r = await tryCall("place_character", {
       characterId: document.querySelector("#map-who").value,

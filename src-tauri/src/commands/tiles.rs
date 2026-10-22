@@ -38,10 +38,11 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 
 use crate::supabase::{self, AppState};
+use crate::grid::Point;
 use crate::terrain::{Stack, Terrain};
 
 /// How many rows go out in one request.
@@ -391,6 +392,165 @@ pub fn standing_in(state: State<AppState>, location_id: String) -> Result<Vec<St
         ],
     )?;
     serde_json::from_value(rows).map_err(|e| format!("could not read who is standing here: {}", e))
+}
+
+/* ===================== 231. TAKING A STEP ====================== */
+
+/// What a step actually did.
+#[derive(Debug, Clone, Serialize)]
+pub struct Moved {
+    /// Squares of movement it cost.
+    pub cost: i64,
+    /// What the creature has got itself into, as a word the screen can
+    /// show. `null` for an ordinary step.
+    pub peril: Option<String>,
+}
+
+/// Fetch the squares at these exact coordinates, and nothing else.
+///
+/// NOT THE WHOLE MAP. A step reads two squares, and pulling sixteen
+/// hundred rows to look at two is the kind of thing that is invisible
+/// until a map is large.
+fn squares_at(
+    token: &str,
+    location_id: &str,
+    spots: &[Spot],
+) -> Result<HashMap<(i32, i32, i16), Stack>, String> {
+    let clauses: Vec<String> = spots
+        .iter()
+        .map(|s| format!("and(x.eq.{},y.eq.{},z.eq.{})", s.x, s.y, s.z))
+        .collect();
+    let rows = supabase::rest_get(
+        token,
+        "tiles",
+        &[
+            ("select", COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("or", &format!("({})", clauses.join(","))),
+        ],
+    )?;
+    let tiles: Vec<Tile> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the ground: {}", e))?;
+
+    let mut out = HashMap::new();
+    for t in &tiles {
+        out.insert((t.x, t.y, t.z), t.stack()?);
+    }
+    Ok(out)
+}
+
+/// Where a creature is, as far as the map is concerned.
+#[derive(Debug, Deserialize)]
+struct Standpoint {
+    name: String,
+    location_id: Option<String>,
+    x: Option<i32>,
+    y: Option<i32>,
+    z: Option<i16>,
+}
+
+/// Move a creature one square, if the ground allows it.
+///
+/// 231. THE JOIN. `stride::step` has known what a step costs since 230
+/// and had no caller; `characters` has known where a creature stands
+/// and nothing read it against the ground. This is the seam closing.
+///
+/// ---------------------------------------------------------------------
+/// IT COSTS SOMETHING AND SPENDS NOTHING
+/// ---------------------------------------------------------------------
+///
+/// The cost comes back and no budget is deducted, because **there is no
+/// budget**. How much movement a creature has left is a question about
+/// the creature and the round, and 051's action economy is where it
+/// will live. Inventing a second one here would be the two-places fault
+/// before the first place exists.
+///
+/// ---------------------------------------------------------------------
+/// BOTH SQUARES MUST BE DRAWN
+/// ---------------------------------------------------------------------
+///
+/// 226 is explicit that a missing row means UNMAPPED, not empty floor.
+/// So stepping onto nothing is refused rather than treated as a step
+/// onto ordinary ground - inventing a floor is exactly what that
+/// decision forbids.
+///
+/// AND THE SQUARE BEING LEFT MUST BE DRAWN TOO, which is the stricter
+/// half and deliberate. The departure square decides whether this is a
+/// ramp, so guessing it is guessing the cost of a climb. A creature
+/// standing on undrawn ground is somewhere the map does not describe,
+/// and the honest answer is to draw it rather than to let the engine
+/// assume a floor.
+#[tauri::command]
+pub fn step_to(
+    state: State<AppState>,
+    character_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+) -> Result<Moved, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "name,location_id,x,y,z"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let mut who: Vec<Standpoint> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the creature: {}", e))?;
+    let who = who.pop().ok_or("no such creature")?;
+
+    let Some(location_id) = who.location_id else {
+        return Err(format!("{} is not anywhere", who.name));
+    };
+    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
+        return Err(format!("{} is not on the map - place them first", who.name));
+    };
+
+    let from_spot = Spot { x: fx, y: fy, z: fz };
+    let to_spot = Spot { x, y, z };
+    let ground = squares_at(&token, &location_id, &[from_spot, to_spot])?;
+
+    let from = ground
+        .get(&(fx, fy, fz))
+        .ok_or_else(|| format!("{} is standing on ground nobody has drawn", who.name))?;
+    let to = ground
+        .get(&(x, y, z))
+        .ok_or("nothing is drawn there - a missing square is unmapped, not open floor")?;
+
+    // No modes yet: nothing records a swim or fly speed, so every
+    // creature walks and deep water perils all of them equally. When
+    // speeds exist this is where they arrive.
+    let taken = crate::stride::step(
+        from,
+        Point::new(fx, fy, fz),
+        to,
+        Point::new(x, y, z),
+        &[],
+    )?;
+
+    let back = supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "x": x, "y": y, "z": z }),
+    )
+    .map_err(|e| denied(e, "move a creature about the map"))?;
+
+    // 217, for the third time in three entries. A blocked UPDATE
+    // matches no row and returns success.
+    if back.as_array().map(Vec::len).unwrap_or(0) == 0 {
+        return Err(format!("{} did not move - not yours to move", who.name));
+    }
+
+    Ok(Moved {
+        cost: taken.cost,
+        peril: taken.peril.map(|p| match p {
+            crate::stride::Peril::Drowning => "drowning".to_string(),
+        }),
+    })
 }
 
 #[cfg(test)]

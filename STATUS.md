@@ -9112,6 +9112,99 @@ missing row means unmapped, not empty floor. Nothing invented a floor
 under him, and `place_character` did not care, which is the seam
 working.
 
+## 231. The join, and a wall that stopped somebody
+
+`stride::step` had known what a step costs since 230 and had no caller.
+`characters` had known where a creature stands and nothing read it
+against the ground. `step_to` closes that seam:
+
+```
+read both squares  ->  stride::step  ->  write the position
+```
+
+### It costs something and spends nothing
+
+The cost comes back and no budget is deducted, **because there is no
+budget.** How much movement a creature has left is a question about the
+creature and the round, and 051's action economy is where it will live.
+
+Inventing a second one here would be the two-places fault BEFORE THE
+FIRST PLACE EXISTS.
+
+### Both squares must be drawn, and the departure one is the stricter half
+
+226 is explicit that a missing row means UNMAPPED, not empty floor. So
+stepping onto nothing is refused rather than treated as a step onto
+ordinary ground - inventing a floor is exactly what that decision
+forbids.
+
+**AND THE SQUARE BEING LEFT MUST BE DRAWN TOO.** That one decides
+whether this is a ramp, so guessing it is guessing the cost of a climb.
+Proved immediately: Bryn was placed at (2,2) on a map drawn only along
+y=0, and got *"Bryn is standing on ground nobody has drawn"* rather
+than a step priced off an assumption.
+
+### Two squares, not sixteen hundred
+
+`squares_at` fetches the two coordinates a step needs. Pulling a whole
+map to look at two rows is the kind of thing that is invisible until a
+map is large.
+
+### The first time terrain stopped anybody
+
+```
+a timber wall is in the way
+```
+
+**IT NAMES THE COVER AND NOT THE SURFACE.** The square is `wood_floor +
+timber_wall`; "a wood floor is in the way" would have been a true
+sentence about the wrong thing. There is a test for exactly that, and
+this is it happening in front of somebody.
+
+**AND THE REFUSAL REFUSED.** Bryn stayed at (0,0,0) - the position was
+not written. A rule that reports a problem and then writes anyway is
+worse than no rule.
+
+### Placement and movement are different questions
+
+Tarren is standing at (1,0,0), which is INSIDE the timber wall,
+because `place_character` is dumb by design. Bryn cannot walk into the
+same square.
+
+That is the seam from 230 visible in the data: a DM may put a creature
+anywhere, and only MOVEMENT consults the ground. If placement had
+refused, a writer would have started holding rules.
+
+### 217, a third time, and it is now a named habit
+
+`step_to` counts the rows its update returned. That is three entries in
+a row where a write command first reported its INTENT rather than its
+EFFECT - `erase_tiles`, `place_character`, and this.
+
+**THE HABIT IS TO REACH FOR THE COUNT FIRST**, not to remember 217
+afterwards.
+
+### `stride` earned its way out of the dead-code list
+
+225 put `#[allow(dead_code)]` on `grid` and `terrain`, 229 added
+`stride` and restated the condition when the first date proved wrong,
+and **231 removed `stride`'s the same hour `step` got a caller.** That
+is what dating a suppression is for - it came off because the condition
+was met, not because somebody noticed.
+
+The other two shrank from twenty-six unused items to twelve, and they
+now wait on two specific things rather than "the rules":
+
+| | |
+|---|---|
+| `grid` - `neighbours`, `in_radius`, `line`, `within` | line of sight and areas |
+| `terrain` - `Integrity`, `Wear`, `breaks_at`, `lands` | something that can attack terrain |
+
+**AND THE COST OF A MODULE-WIDE ALLOW IS WRITTEN DOWN**: it hides NEW
+dead code too, so a function added tomorrow and never called would not
+warn. Twelve item-level attributes would fix that, and it is worth
+doing the day either list stops shrinking. Today both shrank.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

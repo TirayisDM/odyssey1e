@@ -55,6 +55,12 @@ pub struct Bounds {
 
 impl Bounds {
     /// A map nobody has measured.
+    ///
+    /// 234. ITEM-LEVEL RATHER THAN A MODULE-WIDE ALLOW, now that the
+    /// list is down to two: a whole-module suppression would also hide
+    /// the NEXT unused thing added here, and these two are expressive
+    /// enough to keep while only the tests want them.
+    #[allow(dead_code)]
     pub const UNMEASURED: Bounds = Bounds {
         width: None,
         height: None,
@@ -65,6 +71,7 @@ impl Bounds {
     }
 
     /// Has anybody said how big this is?
+    #[allow(dead_code)]
     pub fn measured(&self) -> bool {
         self.width.is_some() || self.height.is_some()
     }

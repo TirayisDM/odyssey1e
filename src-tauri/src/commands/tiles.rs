@@ -587,20 +587,27 @@ pub fn step_to(
     let to_spot = Spot { x, y, z };
     let ground = squares_at(&token, &location_id, &[from_spot, to_spot])?;
 
-    let from = ground
-        .get(&(fx, fy, fz))
+    // 234. THROUGH `ground::at`, SO A DEFAULT COUNTS AS GROUND. A room
+    // that declares stone floor has stone floor everywhere inside it
+    // that nobody has drawn otherwise - which is the whole point of a
+    // recipe, and why a wall needs a row and a floor does not.
+    let (bounds, default) = map_of(&token, &location_id)?;
+    let resolve = |sx: i32, sy: i32, sz: i16| {
+        crate::ground::at(ground.get(&(sx, sy, sz)).copied(), default, bounds, sx, sy)
+    };
+
+    let from = resolve(fx, fy, fz)
         .ok_or_else(|| format!("{} is standing on ground nobody has drawn", who.name))?;
-    let to = ground
-        .get(&(x, y, z))
+    let to = resolve(x, y, z)
         .ok_or("nothing is drawn there - a missing square is unmapped, not open floor")?;
 
     // No modes yet: nothing records a swim or fly speed, so every
     // creature walks and deep water perils all of them equally. When
     // speeds exist this is where they arrive.
     let taken = crate::stride::step(
-        from,
+        &from,
         Point::new(fx, fy, fz),
-        to,
+        &to,
         Point::new(x, y, z),
         &[],
     )?;
@@ -625,6 +632,145 @@ pub fn step_to(
             crate::stride::Peril::Drowning => "drowning".to_string(),
         }),
     })
+}
+
+/* ============== 234. WHAT A ROOM IS MADE OF BY DEFAULT ============== */
+
+/// The shape of `locations.recipe`, as stored.
+///
+/// 226 left the column deliberately unconstrained and said what it was
+/// waiting for: "the shape it actually wants is defaults for `surface`
+/// and `cover` per region". This is that shape, and it is the same
+/// three words a tile row carries:
+///
+/// ```json
+/// { "surface": "stone_floor", "cover": null, "sub": null }
+/// ```
+///
+/// **IT IS STILL jsonb AND STILL UNCONSTRAINED BY THE DATABASE.** 226's
+/// rule for the column stands - the DM authors it and play never
+/// changes it - and a CHECK on a json shape is a constraint that only
+/// ever refuses honest data when the shape grows. The validation is
+/// here, where a refusal can be a sentence, and `Stack::legal()` does
+/// the actual judging so a recipe cannot say something a tile could
+/// not.
+///
+/// ANYTHING ELSE IN THE OBJECT IS LEFT ALONE. A recipe is also where a
+/// generator's seed and its lighting will live, and this reads the
+/// three keys it knows rather than refusing a document it did not
+/// write.
+fn recipe_of(v: &Value) -> Result<Option<Stack>, String> {
+    let Some(obj) = v.as_object() else {
+        return Ok(None);
+    };
+    let word = |k: &str| -> Option<String> {
+        obj.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let Some(surface) = word("surface") else {
+        // A recipe with no surface declares no ground. It may still
+        // carry a seed or a palette, which is not this function's
+        // business.
+        return Ok(None);
+    };
+    let tile = Tile {
+        x: 0,
+        y: 0,
+        z: 0,
+        surface,
+        cover: word("cover"),
+        sub: word("sub"),
+        surface_hp: None,
+        cover_hp: None,
+        leads_to: None,
+        to_x: None,
+        to_y: None,
+        to_z: None,
+    };
+    // The square it reports is (0,0,0), which is a lie about WHERE and
+    // true about WHAT - so the message is rewritten to say "the
+    // recipe" rather than naming a square nobody painted.
+    tile.stack()
+        .map(Some)
+        .map_err(|e| format!("the recipe is wrong: {}", e.replace("(0, 0, 0): ", "")))
+}
+
+/// How big a room is and what it is made of, in one read.
+#[derive(Debug, Clone, Deserialize)]
+struct MapOf {
+    width: Option<i32>,
+    height: Option<i32>,
+    #[serde(default)]
+    recipe: Value,
+}
+
+/// Read a location's extent and default ground.
+fn map_of(token: &str, location_id: &str) -> Result<(Bounds, Option<Stack>), String> {
+    let rows = supabase::rest_get(
+        token,
+        "locations",
+        &[
+            ("select", "width,height,recipe"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    let mut found: Vec<MapOf> = serde_json::from_value(rows)
+        .map_err(|e| format!("could not read the map's size: {}", e))?;
+    let m = found.pop().ok_or("no such place")?;
+    Ok((Bounds::of(m.width, m.height), recipe_of(&m.recipe)?))
+}
+
+/// Declare how big a room is and what it is made of.
+///
+/// 234. THE DEFAULT ONLY REACHES INSIDE A DECLARED ROOM - see
+/// `ground::Bounds::encloses` - so a recipe without a width and height
+/// is ground that covers nothing. This sets both in one call because
+/// setting one without the other is almost always a mistake.
+#[tauri::command]
+pub fn set_map(
+    state: State<AppState>,
+    location_id: String,
+    width: Option<i32>,
+    height: Option<i32>,
+    surface: Option<String>,
+    cover: Option<String>,
+    sub: Option<String>,
+) -> Result<(), String> {
+    let recipe = match surface.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => json!(null),
+        Some(sfc) => json!({
+            "surface": sfc,
+            "cover": cover.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+            "sub": sub.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        }),
+    };
+    // REFUSED HERE RATHER THAN STORED AND FOUND LATER. A recipe that
+    // cannot be read is a room that silently has no floor.
+    recipe_of(&recipe)?;
+
+    if surface.is_some() && (width.is_none() || height.is_none()) {
+        return Err(
+            "default ground needs a width and a height - it only reaches inside a declared room"
+                .to_string(),
+        );
+    }
+
+    let token = state.token()?;
+    let back = supabase::rest_update(
+        &token,
+        "locations",
+        &[("id", &format!("eq.{}", location_id))],
+        &json!({ "width": width, "height": height, "recipe": recipe }),
+    )
+    .map_err(|e| denied(e, "describe the map"))?;
+
+    match back.as_array().map(Vec::len).unwrap_or(0) {
+        0 => Err("that map was not changed - it is not yours to describe".to_string()),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -841,6 +987,54 @@ mod tests {
         assert!(inside(e, std::slice::from_ref(&tall)).is_ok());
         tall.x = 5;
         assert!(inside(e, std::slice::from_ref(&tall)).is_err());
+    }
+
+    /* ---------------- 234. the recipe ---------------- */
+
+    #[test]
+    fn a_recipe_is_the_same_three_words_a_tile_carries() {
+        let r = recipe_of(&json!({"surface": "stone_floor", "cover": null, "sub": null}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.surface, Terrain::StoneFloor);
+        assert_eq!(r.cover, None);
+    }
+
+    #[test]
+    fn a_recipe_may_declare_a_cover_too() {
+        // A snowed-over field is a legitimate default.
+        let r = recipe_of(&json!({"surface": "dirt", "cover": "snow"}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.cover, Some(Terrain::Snow));
+    }
+
+    #[test]
+    fn a_recipe_cannot_say_what_a_tile_could_not() {
+        // Stack::legal does the judging, so the two can never disagree.
+        let e = recipe_of(&json!({"surface": "grass"})).unwrap_err();
+        assert!(e.contains("cannot be a surface"), "{}", e);
+        assert!(e.contains("the recipe is wrong"), "{}", e);
+        assert!(!e.contains("(0, 0, 0)"), "it should not name a square: {}", e);
+    }
+
+    #[test]
+    fn a_recipe_with_no_surface_declares_no_ground() {
+        // It may still carry a seed or a palette, which is not this
+        // function's business.
+        assert_eq!(recipe_of(&json!({"seed": 42})).unwrap(), None);
+        assert_eq!(recipe_of(&json!(null)).unwrap(), None);
+        assert_eq!(recipe_of(&json!({"surface": "  "})).unwrap(), None);
+    }
+
+    #[test]
+    fn a_recipe_keeps_whatever_else_it_carries() {
+        // Reads the three keys it knows rather than refusing a
+        // document it did not write.
+        let r = recipe_of(&json!({"surface": "rock", "seed": 7, "lighting": "dim"}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.surface, Terrain::Rock);
     }
 
     #[test]

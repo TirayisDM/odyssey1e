@@ -9356,6 +9356,76 @@ starts being shaped by the transport.
 through this. That is the next cycle, and it is where the change to
 226's meaning actually lands.
 
+## 234. What a room is made of by default
+
+226 left `recipe` deliberately unconstrained and said what it was
+waiting for: *"the shape it actually wants is defaults for `surface`
+and `cover` per region"*. This is that shape.
+
+```json
+{ "surface": "stone_floor", "cover": null, "sub": null }
+```
+
+**THE SAME THREE WORDS A TILE ROW CARRIES**, judged by the same
+`Stack::legal()` - so a recipe cannot say something a tile could not. A
+test proves `{"surface": "grass"}` is refused, because grass is a
+cover.
+
+### Still jsonb, still unconstrained by the database
+
+226's rule for the column stands: the DM authors it and play never
+changes it, so it has no contention and needs no filtering. **A CHECK
+on a json shape is a constraint that only ever refuses honest data once
+the shape grows**, and the shape will grow - a seed, a palette, the
+lighting model.
+
+So the validation is in Rust where a refusal can be a sentence, and the
+error says "the recipe is wrong" rather than naming square (0,0,0),
+which is where the parser borrows a `Tile` to do the judging.
+
+### It reads the keys it knows and leaves the rest
+
+`{"surface": "rock", "seed": 7, "lighting": "dim"}` is a recipe with
+rock in it. **A recipe is also where a generator's seed and its
+lighting will live**, and refusing a document this function did not
+write would make every later addition a breaking change.
+
+A recipe with NO surface declares no ground rather than being an error
+- it may be carrying only a palette.
+
+### A default without a room is refused
+
+`set_map` will not store default ground without a width and a height,
+because `Bounds::encloses` means a recipe reaches nowhere in an
+unmeasured map. **Storing it anyway would be a room that silently has
+no floor** - every square resolving to `None`, and nobody able to see
+why.
+
+### And this is where 226's meaning actually changed
+
+`step_to` now resolves both squares through `ground::at`. A room
+declaring stone floor **has** stone floor everywhere inside it that
+nobody drew otherwise.
+
+Which is the whole point of a recipe, and the line worth remembering:
+**a wall needs a row and a floor does not.** A forty-by-thirty room is
+twelve hundred squares and perhaps forty of them are walls.
+
+226's "a missing row is unmapped" is still true everywhere a default
+does not reach - outside the bounds, and in any room with no recipe.
+
+### `ground` came off the module-wide suppression
+
+Down to two test-only items - `UNMEASURED` and `measured` - so they
+carry their own attributes now.
+
+**231 WROTE DOWN THE TRADE AND THIS IS IT BEING TAKEN**: a whole-module
+allow hides the NEXT unused thing added there too, which is worth
+accepting while a list is long and not worth it at two.
+
+Two modules still suppressed: `grid`, waiting on line of sight, and
+`terrain`, waiting on something that can attack terrain.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

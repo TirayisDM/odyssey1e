@@ -60,7 +60,6 @@ mod equipment;
 // stops shrinking; today both did shrink, from twenty-six.
 #[allow(dead_code)]
 mod grid;
-#[allow(dead_code)]
 mod ground;
 #[allow(dead_code)]
 mod terrain;
@@ -1696,6 +1695,7 @@ pub fn run() {
             commands::tiles::place_character,
             commands::tiles::standing_in,
             commands::tiles::step_to,
+            commands::tiles::set_map,
             commands::session::me,
             // Fast login. Convenience, not security - see pin.rs.
             commands::session::pin_status,

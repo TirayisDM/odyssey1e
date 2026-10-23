@@ -29,7 +29,51 @@
 // be proved readable before anything is pretty.
 
 /// How many screen pixels one five-foot square is.
-const SQUARE = 28;
+///
+/// 236. THIRTY-TWO, TO MATCH THE ART ONE FOR ONE. A tile drawn at 32
+/// and shown at 32 is not scaled at all, which is the sharpest result
+/// there is. The requirement was never the NUMBER 16 - it was that the
+/// scale be a WHOLE NUMBER, because at 1.75 some source pixels become
+/// two screen pixels and others become one, and pixel art falls apart
+/// even with smoothing off.
+const SQUARE = 32;
+
+/* ---------------------------------------------------------------------
+   236. TILE ART, LOADED LAZILY AND FAILING QUIETLY
+
+   MAP.md records the failure this is shaped to avoid: the Apps Script
+   prototype had a complete texture path - a table, a fetch, a
+   blend-mode render - that NEVER FIRED, because no tile type was ever
+   given a `texture` key. A pipeline that needs thirty-three drawings
+   before it does anything is a pipeline that never runs.
+
+   So: a terrain word is drawn as its PNG if one exists and as its flat
+   colour if not. **Art arrives one tile at a time and nothing breaks.**
+
+   EACH FILE IS ASKED FOR ONCE. A miss is remembered as a miss, so a
+   terrain with no art does not re-request it on every redraw; a hit
+   triggers one repaint, because the image arrives after the frame that
+   wanted it.
+   --------------------------------------------------------------------- */
+
+const TILES = "assets/tiles/";
+const art = new Map(); // key -> HTMLImageElement | null (null = asked, absent)
+let last = null; // the most recent draw, so a late image can repaint it
+
+function tile(word) {
+  if (art.has(word)) return art.get(word);
+  art.set(word, null); // pessimistic: assume absent until it loads
+  const img = new Image();
+  img.onload = () => {
+    art.set(word, img);
+    // ONE REPAINT, not one per tile: by the time this runs the word is
+    // cached, so the redraw asks for nothing new.
+    if (last) draw(last.canvas, last.view);
+  };
+  img.onerror = () => art.set(word, null); // remembered, never retried
+  img.src = TILES + word + ".png";
+  return null;
+}
 
 // THE ONE PLACE COLOURS LIVE. Flat, and chosen to be told apart rather
 // than to be handsome - this is a diagram until the tile art is wired.
@@ -109,7 +153,20 @@ function extent(view) {
   return { minX, minY, maxX, maxY };
 }
 
+/// Draw one terrain word into a square: its art if there is any, its
+/// flat colour if not.
+function lay(ctx, word, x, y) {
+  const img = tile(word);
+  if (img) {
+    ctx.drawImage(img, x, y, SQUARE, SQUARE);
+  } else {
+    ctx.fillStyle = paint(word);
+    ctx.fillRect(x, y, SQUARE, SQUARE);
+  }
+}
+
 export function draw(canvas, view) {
+  last = { canvas, view };
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
 
@@ -138,21 +195,24 @@ export function draw(canvas, view) {
     // than one somebody wrote down, so that while a map is being
     // authored you can see what you actually authored.
     ctx.globalAlpha = s.drawn ? 1 : 0.55;
-    ctx.fillStyle = paint(s.surface);
-    ctx.fillRect(x, y, SQUARE, SQUARE);
+    lay(ctx, s.surface, x, y);
     ctx.globalAlpha = 1;
 
     if (s.cover) {
       if (isSolid(s.cover)) {
         // A wall replaces the square.
-        ctx.fillStyle = paint(s.cover);
-        ctx.fillRect(x, y, SQUARE, SQUARE);
+        lay(ctx, s.cover, x, y);
       } else {
         // Everything else is a layer ON the ground, so the ground
         // stays visible under it.
-        ctx.globalAlpha = 0.6;
-        ctx.fillStyle = paint(s.cover);
-        ctx.fillRect(x, y, SQUARE, SQUARE);
+        //
+        // A PNG COVER NEEDS NO ALPHA FROM US: the art carries its own
+        // transparency, so snow drawn over a road shows the road
+        // without being faded. The 60% is for a FLAT COLOUR, which is
+        // an opaque rectangle and would hide what is beneath.
+        const img = tile(s.cover);
+        ctx.globalAlpha = img ? 1 : 0.6;
+        lay(ctx, s.cover, x, y);
         ctx.globalAlpha = 1;
       }
     }
@@ -205,10 +265,12 @@ export function draw(canvas, view) {
 
   const implied = view.squares.filter((s) => !s.drawn).length;
   const stray = view.squares.filter((s) => s.outside).length;
+  const drawnArt = [...art.values()].filter(Boolean).length;
   return (
     `${cols}x${rows} · ${view.squares.length} squares` +
     (implied ? ` (${implied} from the recipe)` : "") +
     (stray ? ` · ${stray} outside the room` : "") +
-    ` · ${view.standing.length} standing`
+    ` · ${view.standing.length} standing` +
+    (drawnArt ? ` · ${drawnArt} tile${drawnArt === 1 ? "" : "s"} of art` : "")
   );
 }

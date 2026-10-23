@@ -45,27 +45,35 @@ You can draw pixel art *in* SVG — one `<rect>` per pixel — but it is a
 perverse way to store a bitmap, and the browser will still antialias
 the edges unless every rect lands on an exact device pixel.
 
-So: **PNG-32 (RGBA), 16×16, no antialiasing.** Keep SVG for anything
+So: **PNG-32 (RGBA), 32×32, no antialiasing.** Keep SVG for anything
 that must scale arbitrarily — UI icons, the logo — and for the
 Illustrator sources.
 
-### 16×16 drawn at 32 px
+### 32 × 32, drawn at 32 px
 
 | | |
 |---|---|
-| source | **16 × 16** pixels |
-| displayed at | **32 px** — exactly 2× |
+| source | **32 × 32** pixels |
+| displayed at | **32 px** — one for one, no scaling at all |
 | scaling | nearest-neighbour (`imageSmoothingEnabled = false`, already set) |
 
-**THE DOUBLING MATTERS.** The canvas currently uses a 28 px square,
-which would scale a 16 px tile by 1.75 — and a non-integer scale
-destroys pixel art even with smoothing off, because some source pixels
-become two screen pixels and others become one. `SQUARE` moves from 28
-to 32 when the first tile lands.
+**DECIDED 2026-10-23, AFTER THE FIRST TILE ARRIVED AT 32.** This brief
+originally said 16×16 doubled to 32. Dave chose 32 for clarity while
+drawing and so that fixtures and characters have the resolution to
+match terrain later.
 
-16 is the 16-bit era's tile size and the right one for a top-down map.
-32×32 sources would carry more detail and read as modern pixel art
-rather than as the look you asked for.
+**IT WAS NEVER THE NUMBER 16 THAT MATTERED.** The requirement is that
+the scale be a WHOLE NUMBER: at the 28 px square 235 shipped with, a 16
+px tile scales by 1.75, some source pixels become two screen pixels
+and others become one, and pixel art falls apart even with smoothing
+off. One-to-one is the sharpest answer there is, and 32 gives four
+times the room to draw in.
+
+The trade, stated: 32×32 reads as modern pixel art rather than
+NES-era. Five kinds of wall and three states of door need telling
+apart at a glance, and that is worth more than era-accuracy.
+
+`SQUARE` in `src/map.js` is 32.
 
 ### Transparency is not optional for covers
 
@@ -130,7 +138,7 @@ they should be legible in the art without reading a legend.
 | file | notes |
 |---|---|
 | `rock.png` | bare stone, walkable |
-| `dirt.png` | **exists** (as `dirt.svg`, 26×26 — needs redrawing at 16) |
+| `dirt.png` | **DONE** — 32×32 RGBA, in `src/assets/tiles/`, drawn by the renderer |
 | `mud.png` | difficult; should look slow |
 | `sand.png` | difficult |
 | `scree.png` | difficult; loose stone |
@@ -206,9 +214,29 @@ the renderer darkens them. Draw everything at full light.
 
 `src/assets/tiles/<key>.png`, named exactly as the terrain key.
 
-The renderer falls back to the flat colour for any tile that is
-missing, so **art can arrive two at a time and nothing breaks.** That
-is deliberate: MAP.md records that the Apps Script prototype had a
+**WIRED 2026-10-23 AND WORKING.** The renderer falls back to the flat
+colour for any tile that is missing, so **art arrives one at a time and
+nothing breaks.** Each file is asked for once: a miss is remembered as
+a miss and never re-requested, a hit triggers one repaint because the
+image lands after the frame that wanted it.
+
+That is deliberate: MAP.md records that the Apps Script prototype had a
 complete texture path which never fired, because no tile type was ever
 given a `texture` key. A pipeline that needs thirty-three drawings
 before it does anything is a pipeline that never runs.
+
+### How it reaches anyone else
+
+**Committed to git**, like any other source file - `src/assets/` is not
+ignored, so a clone gets the art with the code and the two stay
+versioned together. Thirty-three tiles at a few kilobytes each is
+nothing, even with revisions.
+
+**And bundled into the app.** `tauri.conf.json` sets `frontendDist` to
+`../src`, so Tauri packs the whole tree into the executable: a player
+who installs the app has the art inside the binary and needs no network
+to draw a map.
+
+Art in Supabase Storage, fetched at runtime, becomes worth it the day a
+DM wants to upload THEIR OWN tiles. That is a real feature eventually
+and it is not this one.

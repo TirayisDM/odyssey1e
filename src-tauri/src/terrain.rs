@@ -1270,5 +1270,3 @@ mod tests {
         assert_eq!(Terrain::Ledge.footing().hazard, None);
     }
 }
-
-

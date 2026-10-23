@@ -80,8 +80,20 @@ whole reason a fourth is worth starting.
 a complete texture path - a `tile_textures` table, a fetch, a
 blend-mode render - that never fires, because no tile type was ever
 given a `texture` key. The Rust renderer hand-rolls 6x6 PNGs with a
-zlib encoder inside the rules crate instead. The 16x16 SVG tiles in
+zlib encoder inside the rules crate instead. The SVG tiles in
 `G:\My Drive\osdungeon\art` have never been wired to anything.
+
+**AND THERE ARE TWO OF THEM.** Corrected 2026-10-22 after actually
+looking: `dirt.svg` and `stonewall.svg`, against thirty-three terrain
+words - the rest of that folder is character sprites, a logo and the
+Illustrator sources. `dirt.svg` is also **26x26**, not 16x16.
+
+This file said "the 16x16 SVG art" in three places and implied a set
+existed. **PLANNING A CYCLE AROUND "WIRE UP THE TILE ART" WOULD HAVE
+RUN INTO THAT ON THE FIRST AFTERNOON.** `ART.md` is the brief for the
+thirty-one that do not exist, and it records why they should be PNG
+rather than SVG: a vector format draws shapes smoothly at any size,
+which is the opposite of pixel art.
 
 So the art exists and the look does not. That is a thing to build once,
 not to port.
@@ -356,7 +368,7 @@ screen, and a STATUS entry.
 | **3** | **Doors, locks, traps** | Doors as fixtures. Wire `lock.rs` and `trap.rs` - the first consumer they have ever had. | medium |
 | **4** | **Sight and light** | Bresenham LOS, the Apps Script lighting model, `tile_memory` and the fog policy on `tiles`. | medium |
 | **5** | **Movement** | `step_cost`, budget, 8-directional A*, into initiative and 051's action economy. | medium |
-| **6** | **The editor** | RoomDesigner's UX on the new model, and the 16x16 SVG tiles wired for the first time. | medium |
+| **6** | **The editor** | RoomDesigner's UX on the new model, and tile art wired for the first time - see `ART.md`, and note only two tiles exist. | medium |
 
 **Phase 0 is the one to insist on.** It carries no risk, touches no
 schema, and converts "262 tests exist somewhere" into "262 tests pass
@@ -448,15 +460,21 @@ choice made with this known rather than in ignorance of it.
 
 Flat pixel art on a grid. **Canvas 2D is the right tool and it is not
 close**: one line, `imageSmoothingEnabled = false`, and a 16x16 sprite
-scales to 32 or 48 with hard edges. CSS can be made to do it and fights
-you on sub-pixel positioning; WebGL is a GPU pipeline for a problem
-that is not GPU-bound.
+scales to exactly 32 with hard edges. **The doubling has to be a
+whole number** - at the 28px square 235 shipped with, a 16px tile
+scales by 1.75 and some source pixels become two screen pixels while
+others become one, which destroys pixel art even with smoothing off.
 
-**AND THE ART ALREADY EXISTS.** Section 1 records the sad part: the
-Apps Script prototype has a complete texture path - a `tile_textures`
-table, a fetch, a blend-mode render - that never fires, because no tile
-type was ever given a `texture` key. The 16x16 SVGs are in
-`G:\My Drive\osdungeon\art` and no generation has ever drawn one.
+CSS can be made to do it and fights you on sub-pixel positioning;
+WebGL is a GPU pipeline for a problem that is not GPU-bound.
+
+**AND SOME OF THE ART EXISTS.** Two terrain tiles, which is less than
+this file used to imply - see section 1, which also records the sad
+part: the Apps Script prototype has a complete texture path - a
+`tile_textures` table, a fetch, a blend-mode render - that never
+fires, because no tile type was ever given a `texture` key. The SVGs
+are in `G:\My Drive\osdungeon\art`, no generation has ever drawn one, and
+**there are two terrain tiles in there, not a set** - see `ART.md`.
 
 The 8-bit look is not a stretch goal. It is the thing three attempts
 have had the pieces for and never assembled.

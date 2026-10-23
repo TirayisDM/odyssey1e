@@ -9544,7 +9544,238 @@ at a time. The dev hook is still the only way to author anything, and
 still says twice to delete it - the render has to be able to paint
 before that is true.
 
+## 236. The first tiles of art, and a pipeline that lets the rest arrive late
+
+### 32x32, decided by the art turning up that way
+
+The brief said 16x16 doubled to 32. The first tile arrived at **32x32
+RGBA**, and Dave chose to keep it: clarity while drawing, and
+resolution for fixtures and characters to match terrain later.
+
+**IT WAS NEVER THE NUMBER 16 THAT MATTERED.** The requirement is that
+the scale be a WHOLE NUMBER. At the 28px square 235 shipped with, a
+32px tile scales by 0.875 - some source pixels become one screen pixel
+and others vanish - and pixel art falls apart even with smoothing off.
+
+`SQUARE` moves 28 -> 32, which is one for one and the sharpest result
+there is. The trade, stated in `ART.md`: 32x32 reads as modern pixel
+art rather than NES-era, and five kinds of wall and three states of
+door need telling apart at a glance.
+
+### The pipeline degrades on purpose
+
+A terrain word draws as its PNG if one exists and as its flat colour if
+not. **Art arrives ONE TILE AT A TIME and nothing breaks.**
+
+**EACH FILE IS ASKED FOR ONCE.** A miss is remembered as a miss and
+never re-requested, so thirty-one missing tiles do not make thirty-one
+requests per redraw. A hit triggers exactly one repaint, because the
+image lands after the frame that wanted it - and by then the word is
+cached, so the redraw asks for nothing new and it terminates.
+
+**THIS SHAPE IS TAKEN STRAIGHT FROM THE FAILURE MAP.md RECORDS.** The
+Apps Script prototype had a complete texture path - a `tile_textures`
+table, a fetch, a blend-mode render - that **never fired**, because no
+tile type was ever given a `texture` key. A pipeline that needs
+thirty-three drawings before it does anything is a pipeline that never
+runs.
+
+### A subtlety the covers needed
+
+A flat-colour cover draws at **60% alpha** so the ground stays visible
+beneath it. A **PNG cover draws at 100%**, because the art carries its
+own transparency - fading it would wash out snow that is meant to be
+opaque where it lies.
+
+The flat colour is an opaque rectangle standing in for art that has
+alpha. The two need different handling, and treating them alike would
+have made every future cover look half-finished.
+
+### How it reaches anyone else
+
+**COMMITTED TO GIT**, like any other source file. `src/assets/` is not
+ignored, so a clone gets the art with the code and the two stay
+versioned together. Thirty-three tiles at a few kilobytes is nothing.
+
+**AND BUNDLED INTO THE EXECUTABLE.** `tauri.conf.json` sets
+`frontendDist` to `../src`, so Tauri packs the whole tree in: an
+installed app has the art inside the binary and needs no network to
+draw a map.
+
+Art in Supabase Storage becomes worth it the day a DM wants to upload
+THEIR OWN tiles. That is a real feature eventually and it is not this
+one.
+
+### Two tiles in
+
+`dirt.png` and `stone_floor.png`, both 32x32 RGBA. `stone_floor` is
+Test Inn 1's recipe default, so forty-four of its forty-eight squares
+are now drawn art rather than flat grey - from one file and no rows.
+
 ## Pick up here
+
+### HANDOFF, 2026-10-23 - written for John pulling onto his own machine
+
+**Checked on the machine this was written from, not remembered:**
+
+| | |
+|---|---|
+| `git` | clean, nothing unpushed |
+| migrations | **162 files, 172 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
+| newest migration | **232**, and every ledger row since 218 has a file |
+| `security_doors()` | **0 faults** |
+| build / tests | **zero warnings, 1,233 tests pass** |
+| tile art | 2 of 33, both 32x32 RGBA, committed |
+
+**PULL BEFORE TOUCHING ANYTHING.** Five migrations landed on the shared
+live database between 21 and 23 October, and the code and the schema
+moved together: a checkout from before them pointed at this database
+will not understand `tiles`, and 234's `recipe` will read as an empty
+column.
+
+---
+
+### What happened: the map exists now
+
+Twelve cycles, 225 to 236. Read those entries rather than this summary
+if you are going to change any of it - each one records WHY, and
+several record where an earlier entry was wrong.
+
+**THE SHORT VERSION.** A location can have a map. A square has three
+layers. A room can declare its size and what it is made of by default,
+so a wall needs a row and a floor does not. A creature stands on a
+square, and `stride::step` says what moving costs and refuses a wall by
+name. There is a canvas that draws it.
+
+```
+grid.rs      geometry - a diagonal costs one, in ONE function
+terrain.rs   33 words in three layers, AC/HP, what breaks into what
+stride.rs    what one step costs, and what it gets you into
+ground.rs    what is AT a square: a row, else the default, else nothing
+src/map.js   the only thing that knows what any of it LOOKS like
+```
+
+**FIVE MIGRATIONS:** 226 (tiles, three layers, RLS), 227 (an anon
+revoke 226 half-did), 228 (links from any square + where you arrive),
+230 (x/y/z on characters + a trigger), 232 (map bounds + a trigger).
+
+---
+
+### The decisions most likely to surprise you
+
+**A WALL IS A COVER STANDING ON A SURFACE.** Not a terrain of its own.
+That is what lets a wall fall down and leave the floor it stood on, and
+what lets it snow on a road without losing the road. Dave's idea, and
+it dissolved a limitation 226 had written down as unavoidable.
+
+**A MISSING TILE ROW MEANS UNMAPPED, NOT EMPTY FLOOR** - except inside
+a room that declares a default, where it means the default. `ground::at`
+is the ONE place that resolves it, and `map_at` runs it in Rust so the
+picture cannot disagree with where a creature may walk.
+
+**NO UNIQUE CONSTRAINT ON (location, x, y, z)**, deliberately. 5e puts
+two creatures in one square routinely - squeezing, a swarm, a mount and
+rider. Occupancy is a rule with exceptions; a unique index has none.
+
+**`place_character` IS DUMB ON PURPOSE.** It will put a creature inside
+a wall. Judging that is `stride`'s job, and a DM placing a monster
+mid-sentence should not be argued with by a writer. Tarren is currently
+standing in a timber wall for exactly this reason.
+
+**UP AND DOWN IS NOT MERELY z.** 226 said a cliff needs no link because
+the place below is z-1; 228 corrects it. Two adjacent places are two
+maps with their own origins, so leaving one always needs a link.
+
+---
+
+### What is NOT built, so nobody looks for it
+
+- **No painting on the canvas.** The map is read-only. The only way to
+  author anything is the dev hook (below).
+- **No fog.** Phase 4. The RLS policy on `tiles` is DM-only, which is
+  the promise that is true today rather than the one MAP.md describes.
+- **No falling.** `Pit` and `Ledge` are storable and mean nothing yet.
+  A drop of two or more squares is refused rather than resolved.
+- **No movement budget.** `step_to` returns a cost and spends nothing;
+  that belongs with 051's action economy.
+- **No traversal.** `leads_to` and its arrival coordinates are
+  storable and unread.
+- **31 of 33 tiles.** See `ART.md`.
+
+---
+
+### The dev hook, and please do not grow it
+
+**Run tab -> "Tiles (dev hook)".** Paint 4 / List / Erase 4 / Describe
+/ Place / Step to / Lift off / Who is here. It is the only way to put a
+tile in the ground.
+
+**IT SAYS TWICE IN THE SOURCE TO DELETE IT**, and it means it - the
+render replaces it the day the canvas can paint. Two things to know
+while it exists:
+
+- **"Paint 4" and "Erase 4" hit FIXED coordinates** - (0,0) to (3,0).
+  Harmless on a test map, destructive on a real one.
+- It is the only caller of five commands. Deleting it today would make
+  them unreachable, which is worse than the clutter.
+
+---
+
+### Where to start, if you want the map
+
+**`ART.md` is the cheapest useful thing.** 31 tiles at 32x32 PNG,
+named for the terrain key, dropped in `src/assets/tiles/`. The renderer
+falls back to a flat colour for anything missing, so **art can arrive
+one tile at a time and nothing breaks.** No code needed.
+
+**Painting on the canvas** is the next real cycle: click a square, pick
+terrain, paint. It retires the hook and makes a real room drawable.
+
+**Fog** is the multiplayer payoff and the reason tiles are rows rather
+than a jsonb blob - RLS is row-level and cannot filter inside a blob.
+`tile_memory` is sketched in MAP.md section 4.
+
+---
+
+### Two documents worth reading before changing the map
+
+**`MAP.md`** - the standing plan. Section 3 is the settled decisions
+with their reasoning, section 4 is the data model, section 8 is new:
+the 8/16-bit goal, why canvas rather than WebGL, and what a
+Minecraft-like expansion would and would not reuse.
+
+**ITS PHASE 0 READS "SUPERSEDED".** 225 ran the baseline against
+`odyssey-engine` - 262 tests, all passing - and found the thing that
+mattered: **the engine resolves on PERCENTILE and this project
+resolves d20 against a DC.** It is HOPPER and we are 5e. So it became a
+reference rather than a port, and `grid`/`terrain`/`stride`/`ground`
+are written here rather than lifted.
+
+**`ART.md`** - the tile brief. Note section 1: MAP.md said "the 16x16
+SVG art" in three places and there were **two tiles**, one of them
+26x26. That is corrected now.
+
+---
+
+### Live data, read off the database today
+
+| | |
+|---|---|
+| games | 3 - Test Game 1, jec-game-1, jec-game-2 |
+| locations | 2 - Test Inn 1 (Dave), outhouse (John) |
+| **Test Inn 1** | 8x6, default `stone_floor`, 4 painted squares along y=0 |
+| tiles | **4 rows** - the rest of that room is the recipe |
+| characters placed | 2 - Tarren (1,0,0), Bryn (0,0,0) |
+
+**THIS IS A SHARED LIVE DATABASE.** Pull before diagnosing anything,
+and remember `character_location_same_game()` will refuse moving a
+character into the other game's location - that is 033 working, not a
+bug.
+
+---
+
+### The 2026-10-19 handoff below is now history
+
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop
 

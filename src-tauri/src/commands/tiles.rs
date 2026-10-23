@@ -43,6 +43,7 @@ use tauri::State;
 
 use crate::supabase::{self, AppState};
 use crate::grid::Point;
+use crate::ground::Bounds;
 use crate::terrain::{Stack, Terrain};
 
 /// How many rows go out in one request.
@@ -177,35 +178,50 @@ struct Extent {
     height: Option<i32>,
 }
 
+impl Extent {
+    /// 233. THE WIRE SHAPE BECOMES THE RULE SHAPE, the same way `Tile`
+    /// becomes a `Stack`. `ground::Bounds` holds no serde, for the
+    /// reason `terrain.rs` holds none: a rules type that knows how it
+    /// is transported starts being shaped by the transport.
+    fn bounds(&self) -> Bounds {
+        Bounds::of(self.width, self.height)
+    }
+}
+
 /// Is every square inside the map it is being painted on?
 ///
 /// 232. THE TRIGGER SAYS THIS TOO. This says it FIRST, naming the
 /// square, before nine hundred rows go out and one of them is refused
 /// by Postgres with a message about `new.x`.
 ///
-/// NULL IS UNBOUNDED, NOT ZERO. A map nobody has measured takes
-/// anything, which is every map that exists today.
+/// 233. AND THE QUESTION IT ASKS IS `allows`, NOT `encloses`. An
+/// unmeasured map takes anything - nobody has said where it stops -
+/// which is the opposite of what the same map answers about a default
+/// reaching a square. Both live in `ground.rs` so the two can never be
+/// confused for one function again.
 fn inside(e: Extent, tiles: &[Tile]) -> Result<(), String> {
+    let b = e.bounds();
     for t in tiles {
-        if let Some(w) = e.width {
-            if t.x < 0 || t.x >= w {
-                return Err(format!(
-                    "{}: x {} is outside this map, which is {} squares across",
-                    t.at(),
-                    t.x,
-                    w
-                ));
-            }
+        if b.allows(t.x, t.y) {
+            continue;
         }
-        if let Some(h) = e.height {
-            if t.y < 0 || t.y >= h {
-                return Err(format!(
-                    "{}: y {} is outside this map, which is {} squares down",
-                    t.at(),
-                    t.y,
-                    h
-                ));
-            }
+        // Which axis, so the message is about the mistake rather than
+        // about the square in general.
+        if let Some(w) = e.width.filter(|w| t.x < 0 || t.x >= *w) {
+            return Err(format!(
+                "{}: x {} is outside this map, which is {} squares across",
+                t.at(),
+                t.x,
+                w
+            ));
+        }
+        if let Some(h) = e.height.filter(|h| t.y < 0 || t.y >= *h) {
+            return Err(format!(
+                "{}: y {} is outside this map, which is {} squares down",
+                t.at(),
+                t.y,
+                h
+            ));
         }
     }
     Ok(())

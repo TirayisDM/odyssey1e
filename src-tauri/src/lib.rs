@@ -61,6 +61,8 @@ mod equipment;
 #[allow(dead_code)]
 mod grid;
 #[allow(dead_code)]
+mod ground;
+#[allow(dead_code)]
 mod terrain;
 mod grants;
 mod features;

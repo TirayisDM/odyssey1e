@@ -9281,6 +9281,81 @@ The renderer's job is to span the bounds AND whatever exists, so
 nothing ever becomes invisible: a tile outside the declared room should
 look WRONG, not vanish.
 
+## 233. What is at this square
+
+One question with three answers, asked in ONE PLACE so the renderer, a
+step and the fog cannot disagree about the same square.
+
+```
+a row is drawn there                                  ->  that
+no row, inside a declared room, and the room has one  ->  the default
+otherwise                                             ->  nothing, unmapped
+```
+
+### Why a default at all
+
+A forty-by-thirty room is **twelve hundred squares**, and storing
+twelve hundred rows that all say `stone_floor` makes a mockery of the
+sparseness 226 chose rows for - "a party entering a dark room pulls a
+handful of rows, not sixteen hundred".
+
+A default says "this room is stone floor unless stated", and only the
+EXCEPTIONS get rows: the walls, the doorway, the pit.
+
+### The thing I nearly got wrong
+
+**THE BOUNDS QUESTION HAS TWO DIFFERENT ANSWERS**, and I had been about
+to write one function for both.
+
+| | an unmeasured map |
+|---|---|
+| `allows(x,y)` - may a square EXIST here? | **yes** - nobody said where it stops, so paint where you like |
+| `encloses(x,y)` - is this inside a DRAWN ROOM? | **no** - nobody said where it stops, so a default reaches nowhere |
+
+Same map, same square, opposite answers, and both are right.
+
+**FOLDING THEM TOGETHER WOULD GIVE AN UNMEASURED ROOM INFINITE
+GROUND.** Every square in every direction would resolve to the default,
+a creature could walk to x = 500, and the map would have no edge at
+all. The distinction looks pedantic until it is the difference between
+a tavern and a plain.
+
+Two tests hold it: one that an unmeasured map allows everything and
+encloses nothing, and one that the two AGREE once a room is fully
+declared - so changing either later is a deliberate change to both.
+
+### Two earlier decisions held rather than drifted
+
+**226's `None` STILL MEANS UNMAPPED.** The rule is intact everywhere a
+default does not reach, which matters because `step_to` refuses onto
+undrawn ground and falling will want to know there is nothing
+underneath. That is why this returns an `Option` rather than always
+producing a square.
+
+**232's ORPHANED TILES ARE STILL REAL.** Shrinking a map does not
+delete the east wing - "it should look wrong, not vanish" - so a drawn
+square wins wherever it is, and the bounds are consulted only to decide
+whether a default reaches an UNDRAWN one.
+
+### And a duplicate removed the hour it appeared
+
+232 put bounds-checking in `commands/tiles.rs::inside`. 233 put it in
+`ground.rs`. **That is two places for one rule, created a cycle
+apart**, which is the fault this file exists to prevent - so `inside`
+now calls `Bounds::allows` and keeps only the part that is its own: the
+sentence naming which axis the square fell off.
+
+`Extent` stays as the wire type and converts, the same way `Tile`
+becomes a `Stack`. `ground::Bounds` holds no serde for the reason
+`terrain.rs` holds none: a rules type that knows how it is transported
+starts being shaped by the transport.
+
+### Nothing reads it yet
+
+`recipe` has no documented shape and `list_tiles` does not resolve
+through this. That is the next cycle, and it is where the change to
+226's meaning actually lands.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

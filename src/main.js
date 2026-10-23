@@ -9681,6 +9681,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   const whoSay = (t, isErr) => say("#map-whosay", t, isErr);
   const num = (id) => Number(document.querySelector(id).value);
 
+  // 234. Declare the room. `grass` is in the list ON PURPOSE: it is a
+  // cover, so choosing it should come back refused rather than stored,
+  // which is the one-line proof that a recipe cannot say what a tile
+  // could not.
+  guarded("#map-describe", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const r = await tryCall("set_map", {
+      locationId: loc,
+      width: num("#map-w") || null,
+      height: num("#map-h") || null,
+      surface: document.querySelector("#map-surface").value || null,
+      cover: null,
+      sub: null,
+    });
+    say("#map-mapsay", r.ok ? "described" : r.error, !r.ok);
+  });
+
   // A position needs a location - 230's constraint - so the hook can
   // put them in the place first. `move_character` is 035's, not new.
   guarded("#map-send", async () => {

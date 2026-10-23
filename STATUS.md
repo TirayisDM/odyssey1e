@@ -9414,6 +9414,33 @@ twelve hundred squares and perhaps forty of them are walls.
 226's "a missing row is unmapped" is still true everywhere a default
 does not reach - outside the bounds, and in any room with no recipe.
 
+### Tested as far as a test can reach
+
+`step_to` is `ground::at` twice and then `stride::step`, and the
+command itself cannot be unit tested because it is a round trip. So the
+same arithmetic was run over the same data - **Test Inn 1 as the hook
+leaves it**, eight by six, four painted squares along y = 0:
+
+| | |
+|---|---|
+| no recipe | the undrawn room is still unmapped and the step refuses |
+| a recipe | an undrawn square is walkable, cost 1 |
+| the painted wall | still stops you - a drawn row beats the default, so describing a room does not pave over its walls |
+| x = 8 | refused with a recipe as without one |
+| **six steps along y = 3, not one of which has a row** | total 6 |
+
+That last one is the feature in a single assertion.
+
+**AND THE COMMAND PATH WENT THROUGH IN THE APP.** `set_map` stored
+`{"surface":"stone_floor","cover":null,"sub":null}` with width 8 and
+height 6 on Test Inn 1, which exercises the parts a test cannot: the
+`rest_get` of three columns, the json construction, the update and its
+row count.
+
+The database half was proved separately in a rolled-back block -
+`recipe stored | width 0 refused | x=8 refused` - so 232's trigger
+still bites with a recipe present.
+
 ### `ground` came off the module-wide suppression
 
 Down to two test-only items - `UNMEASURED` and `measured` - so they

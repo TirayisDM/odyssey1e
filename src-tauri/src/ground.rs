@@ -252,4 +252,95 @@ mod tests {
             );
         }
     }
+
+    /* ---------------- the room from the dev hook ----------------
+
+       234. THE WHOLE COMPOSITION, WITHOUT THE NETWORK. `step_to` is
+       `ground::at` for two squares and then `stride::step`, and the
+       command itself cannot be unit tested because it is a round trip.
+       This is the same arithmetic over the same data: Test Inn 1 as
+       the hook leaves it - eight by six, wood floor by default, four
+       painted squares along y = 0.                                   */
+
+    use crate::stride;
+    use crate::grid::Point;
+
+    fn inn() -> Bounds {
+        Bounds::of(Some(8), Some(6))
+    }
+
+    /// The four squares the hook paints.
+    fn painted(x: i32, y: i32) -> Option<Stack> {
+        match (x, y) {
+            (0, 0) => Some(Stack::of(Terrain::WoodFloor)),
+            (1, 0) => Some(Stack::of(Terrain::WoodFloor).under(Terrain::TimberWall)),
+            (2, 0) => Some(Stack::of(Terrain::Doorway).under(Terrain::DoorClosed)),
+            (3, 0) => Some(Stack::of(Terrain::Stairs)),
+            _ => None,
+        }
+    }
+
+    fn square(x: i32, y: i32, default: Option<Stack>) -> Option<Stack> {
+        at(painted(x, y), default, inn(), x, y)
+    }
+
+    fn walk(fx: i32, fy: i32, tx: i32, ty: i32, default: Option<Stack>) -> Result<i64, String> {
+        let from = square(fx, fy, default).ok_or("nothing is drawn there")?;
+        let to = square(tx, ty, default).ok_or("nothing is drawn there")?;
+        stride::step(&from, Point::at(fx, fy), &to, Point::at(tx, ty), &[])
+            .map(|s| s.cost)
+    }
+
+    #[test]
+    fn with_no_recipe_the_undrawn_room_is_still_unmapped() {
+        // 226 unchanged. This is the "Describe with no default ground"
+        // case, and the step must refuse.
+        assert_eq!(square(5, 5, None), None);
+        assert!(walk(0, 0, 0, 1, None).is_err());
+    }
+
+    #[test]
+    fn a_recipe_makes_the_undrawn_room_walkable() {
+        // THE RECIPE BECOMING REAL. (0,1) has no row and never will.
+        let floor = Some(Stack::of(Terrain::WoodFloor));
+        assert_eq!(square(5, 5, floor), floor);
+        assert_eq!(walk(0, 0, 0, 1, floor), Ok(1));
+    }
+
+    #[test]
+    fn the_painted_wall_still_stops_you_after_a_recipe() {
+        // A drawn row beats the default, so describing the room does
+        // not quietly pave over the walls.
+        let floor = Some(Stack::of(Terrain::WoodFloor));
+        let e = walk(0, 0, 1, 0, floor).unwrap_err();
+        assert!(e.contains("timber wall"), "{}", e);
+    }
+
+    #[test]
+    fn the_shut_door_still_stops_you_too() {
+        let floor = Some(Stack::of(Terrain::WoodFloor));
+        let e = walk(1, 1, 2, 0, floor).unwrap_err();
+        assert!(e.contains("door closed"), "{}", e);
+    }
+
+    #[test]
+    fn the_default_stops_at_the_wall_of_the_room() {
+        // Eight across, so x = 7 is the last square and x = 8 is not
+        // the room's at all - recipe or no recipe.
+        let floor = Some(Stack::of(Terrain::WoodFloor));
+        assert!(square(7, 5, floor).is_some());
+        assert_eq!(square(8, 5, floor), None);
+        assert!(walk(7, 5, 8, 5, floor).is_err());
+    }
+
+    #[test]
+    fn a_creature_may_walk_the_length_of_an_undrawn_room() {
+        // Six steps along y = 3, not one of which has a row. This is
+        // what "a wall needs a row and a floor does not" buys.
+        let floor = Some(Stack::of(Terrain::WoodFloor));
+        let total: i64 = (0..6)
+            .map(|x| walk(x, 3, x + 1, 3, floor).expect("plain floor"))
+            .sum();
+        assert_eq!(total, 6);
+    }
 }

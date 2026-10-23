@@ -9453,6 +9453,97 @@ accepting while a list is long and not worth it at two.
 Two modules still suppressed: `grid`, waiting on line of sight, and
 `terrain`, waiting on something that can attack terrain.
 
+## 235. A map you can look at
+
+Everything from 225 to 234 was verifiable only through SQL, a message
+line or a test. This draws it.
+
+```
+8x6 · 48 squares (44 from the recipe) · 2 standing
+```
+
+**FORTY-FOUR OF THOSE SQUARES HAVE NO ROWS AND NEVER WILL.** Four do -
+the wood floor, the timber wall, the shut door, the stairs - and they
+are the bright ones. That line is 234's whole argument in one
+sentence: a wall needs a row and a floor does not.
+
+### Resolved in Rust, which was the decision worth taking
+
+`map_at` runs `ground::at` server-side and hands back squares that
+already know everything:
+
+```rust
+Square { x, y, surface, cover, drawn, blocks, outside }
+```
+
+So `map.js` **never decides what is at a square** - only what it looks
+like. A renderer walking the grid in JavaScript would have had to
+reimplement "a row, else the default if the room encloses it, else
+nothing", and then **the picture could disagree with where a creature
+may walk.**
+
+That is the two-places fault in its most visible costume, and it would
+have been the fourth time this project found it. The sparse rows are
+small by design, so resolving them costs almost nothing and buys one
+rule in one language.
+
+### Canvas, and the reason is not performance
+
+**A TACTICAL MAP IS NOT A GAME LOOP.** It redraws when something
+changes - a creature moves, a door opens - a few times a second at
+most, against a worst case of perhaps ten thousand squares. Canvas is
+comfortable at fifty thousand draws a frame, so this uses about two per
+cent of it.
+
+WebGL earns its complexity on real-time per-pixel lighting with moving
+sources. The model MAP.md praises is discrete rings and a per-TILE
+max-combine, and the Apps Script version achieved it in the DOM. It
+would also mean PixiJS - the first real dependency in a codebase where
+"no build step" has been load-bearing.
+
+`imageSmoothingEnabled = false` is already set, ready for the 16x16
+SVGs in `G:\My Drive\osdungeon\art` that MAP.md records as having never
+been drawn by any generation.
+
+### Four look decisions
+
+**FLAT COLOURS**, one table at the top of `map.js`. A word the palette
+forgets draws MAGENTA rather than defaulting quietly, so a missing
+colour shouts instead of looking like slate.
+
+**WALLS SOLID.** A wall REPLACES its square - you should not see the
+floor it stands on, because you cannot walk on it. Everything else
+(snow, grass, rubble, vines) draws at 60% over ground that stays
+visible beneath.
+
+**DEFAULT GROUND AT 55%.** A square the room merely IMPLIES is fainter
+than one somebody wrote down, so while authoring you can see what you
+actually authored.
+
+**A ROW OUTSIDE THE BOUNDS GETS A RED OUTLINE.** 232 asked for it to
+look WRONG rather than vanish, and this is the flag that lets it.
+
+The grid is drawn over everything so a wall does not swallow its own
+edges; creatures are drawn last, because a map you cannot find yourself
+on is a decoration.
+
+### Its own file, deliberately
+
+`src/map.js` is the only thing that knows what anything LOOKS like,
+which makes it the replaceable one.
+
+MAP.md section 8 expects a Three.js renderer if the voxel idea ever
+happens, and section 6 insisted the reference engine's CSS renderer be
+lifted out of `tile.rs` for exactly this reason: **a renderer tangled
+into the rules is one you cannot replace.**
+
+### What it is not
+
+Read-only. No clicking, no painting, no fog, no tile art, one z level
+at a time. The dev hook is still the only way to author anything, and
+still says twice to delete it - the render has to be able to paint
+before that is true.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

@@ -1132,7 +1132,24 @@
             <button class="tab" data-world="species">
               Species <span class="count" id="n-species"></span>
             </button>
+            <!-- 235. A map is a fact about a PLACE, which is what this
+                 tab is for - the same reasoning 068 used to move
+                 Species here off the Characters tab. -->
+            <button class="tab" data-world="map">Map</button>
           </nav>
+
+          <div class="world-pane" data-world="map" hidden>
+            <div class="row">
+              <select id="mv-where"></select>
+              <label class="muted">z</label>
+              <input id="mv-z" type="number" value="0" class="narrow" />
+              <button id="mv-draw" class="ghost tiny">Draw</button>
+            </div>
+            <div id="mv-say" class="muted"></div>
+            <!-- 235. One canvas. See map.js for why not divs and why
+                 not WebGL. -->
+            <canvas id="mv-canvas" class="mapcanvas"></canvas>
+          </div>
 
           <div class="world-pane" data-world="world">
         <!-- The world. Depth is the whole hierarchy: a universe and a

@@ -773,6 +773,128 @@ pub fn set_map(
     }
 }
 
+/* ================= 235. THE MAP, RESOLVED FOR DRAWING ================= */
+
+/// One square, as the renderer needs it.
+///
+/// 235. RESOLVED IN RUST, DELIBERATELY. The rule for what is at a
+/// square - a row, else the default if the room encloses it, else
+/// nothing - lives in `ground::at`. A renderer walking the grid in
+/// JavaScript would have to reimplement it, and then **the picture
+/// could disagree with where a creature may walk**, which is the
+/// two-places fault in its most visible costume.
+///
+/// The sparse rows are small by design, so resolving them server-side
+/// costs almost nothing and buys one rule in one language.
+#[derive(Debug, Clone, Serialize)]
+pub struct Square {
+    pub x: i32,
+    pub y: i32,
+    pub surface: String,
+    pub cover: Option<String>,
+    /// Is there a ROW here, or is this the room's default?
+    ///
+    /// The renderer shows the two differently while a map is being
+    /// authored: you want to see what you actually wrote down.
+    pub drawn: bool,
+    /// Does anything stop you entering? Decided here, by `footing`,
+    /// so the picture and `stride` cannot differ about a wall.
+    pub blocks: bool,
+    /// A row outside the room's declared bounds.
+    ///
+    /// 232: shrinking a map does not delete what falls outside it, and
+    /// "a tile outside the declared room should look WRONG, not
+    /// vanish". This is the flag that lets it look wrong.
+    pub outside: bool,
+}
+
+/// Everything one z level of a map needs to be drawn.
+#[derive(Debug, Clone, Serialize)]
+pub struct MapView {
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub z: i16,
+    pub squares: Vec<Square>,
+    pub standing: Vec<Standing>,
+}
+
+/// One level of a map, resolved and ready to draw.
+#[tauri::command]
+pub fn map_at(
+    state: State<AppState>,
+    location_id: String,
+    z: i16,
+) -> Result<MapView, String> {
+    let token = state.token()?;
+    let (bounds, default) = map_of(&token, &location_id)?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "tiles",
+        &[
+            ("select", COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("z", &format!("eq.{}", z)),
+        ],
+    )?;
+    let tiles: Vec<Tile> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the map: {}", e))?;
+
+    let mut drawn: HashMap<(i32, i32), Stack> = HashMap::new();
+    for t in &tiles {
+        drawn.insert((t.x, t.y), t.stack()?);
+    }
+
+    // WHICH SQUARES EXIST AT ALL: every drawn row, plus every square
+    // the room encloses if it has a default. An unmeasured map or one
+    // with no recipe is just its rows - which is right, because
+    // `ground::at` would return nothing for the rest anyway.
+    let mut wanted: Vec<(i32, i32)> = drawn.keys().copied().collect();
+    if default.is_some() {
+        if let (Some(w), Some(h)) = (bounds.width, bounds.height) {
+            for y in 0..h {
+                for x in 0..w {
+                    if !drawn.contains_key(&(x, y)) {
+                        wanted.push((x, y));
+                    }
+                }
+            }
+        }
+    }
+    wanted.sort_by_key(|(x, y)| (*y, *x));
+
+    let squares = wanted
+        .into_iter()
+        .filter_map(|(x, y)| {
+            let stack = crate::ground::at(drawn.get(&(x, y)).copied(), default, bounds, x, y)?;
+            Some(Square {
+                x,
+                y,
+                surface: stack.surface.key().to_string(),
+                cover: stack.cover.map(|c| c.key().to_string()),
+                drawn: drawn.contains_key(&(x, y)),
+                blocks: !stack.enterable(),
+                outside: !bounds.allows(x, y),
+            })
+        })
+        .collect();
+
+    // Only the creatures on THIS level. A bridge deck and the floor
+    // beneath it are different pictures.
+    let here: Vec<Standing> = standing_in(state, location_id)?
+        .into_iter()
+        .filter(|c| c.z == z)
+        .collect();
+
+    Ok(MapView {
+        width: bounds.width,
+        height: bounds.height,
+        z,
+        squares,
+        standing: here,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

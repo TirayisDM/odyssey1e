@@ -1175,3 +1175,14 @@ h2.foldhead.shut{margin-bottom:.15rem}
 .clock-now .clock-part{margin-left:.5rem;font-size:10px;
                        text-transform:uppercase;letter-spacing:.09em;
                        color:var(--fg)}
+
+/* 235. The map surface. Pixelated ready for the 16x16 tiles; a border
+   so the edge of the drawn area is visible against the panel. */
+.mapcanvas {
+  display: block;
+  margin-top: .5rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  image-rendering: pixelated;
+  max-width: 100%;
+}

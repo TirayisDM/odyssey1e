@@ -8,6 +8,11 @@
 
 const { invoke } = window.__TAURI__.core;
 
+// 235. The renderer, in its own file because it is the one part that
+// knows what things LOOK like - and therefore the one part MAP.md
+// section 8 expects to be replaced if the voxel idea ever happens.
+import { draw as drawMap } from "./map.js";
+
 // TWO ENCOUNTER IDS, ON PURPOSE.
 //
 // `encounterId` is the ACTIVE encounter, owned by loadTargets: what the
@@ -4817,6 +4822,7 @@ async function loadWorld() {
   fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
   // 229. The dev hook's picker. Same tree, same call.
   fillPlaces(document.querySelector("#map-where"), "— pick a place —");
+  fillPlaces(document.querySelector("#mv-where"), "— pick a place —");
   // The detail picker too. Its value is set by selectEncounter rather
   // than kept: it shows where THIS encounter is, not what was last
   // chosen on the create form.
@@ -9762,6 +9768,31 @@ window.addEventListener("DOMContentLoaded", async () => {
     const spots = PATCH(loc).map(({ x, y, z }) => ({ x, y, z }));
     const r = await tryCall("erase_tiles", { locationId: loc, spots });
     mapSay(r.ok ? `erased ${r.value}` : r.error, !r.ok);
+  });
+
+  /* ---------------- 235. drawing a map ----------------
+
+     THE SQUARES ARRIVE ALREADY RESOLVED. `map_at` runs `ground::at`
+     in Rust - a row, else the room's default, else nothing - so this
+     never has to decide what is at a square, and the picture cannot
+     disagree with where `stride::step` will let a creature walk. */
+
+  guarded("#mv-draw", async () => {
+    const loc = document.querySelector("#mv-where").value;
+    const el = document.querySelector("#mv-say");
+    if (!loc) {
+      el.textContent = "pick a place";
+      return;
+    }
+    const r = await tryCall("map_at", {
+      locationId: loc,
+      z: Number(document.querySelector("#mv-z").value) || 0,
+    });
+    if (!r.ok) {
+      el.textContent = r.error;
+      return;
+    }
+    el.textContent = drawMap(document.querySelector("#mv-canvas"), r.value);
   });
 
   document.querySelector("#refresh-games").addEventListener("click", loadGames);

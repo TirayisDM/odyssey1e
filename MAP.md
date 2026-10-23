@@ -425,12 +425,103 @@ than as working features**.
   want generation at all, or only hand-authored and imported maps, is
   not decided. `generateRoomTileHints` is worth porting regardless,
   because it is geometry-free.
-- **Whether `encounter_actors.x, y` or `characters.x, y` is the truth
-  during a fight.** Both, probably, with the encounter row winning while
-  one is running - but the checkpoint rule needs stating.
+- ~~**Whether `encounter_actors.x, y` or `characters.x, y` is the truth
+  during a fight.**~~ **SETTLED BY 230: `characters` only.** Two
+  columns both answering "where is Bryn" would disagree during a fight
+  and need copying back after - the two-places fault with a round
+  counter attached. The want behind the second one is PER-ROUND
+  HISTORY, not a second present, and it can be built when something
+  needs to rewind a round.
 - **Scale.** A 45x45 layer is 2,025 tile rows. Nothing here has been
   measured against a REST round trip, and the fog policy runs a
   per-row test for every one of them. See the note in section 4 - this
   is the one number to get before Phase 4.
 - **Whether a fixture should be destroyable** - backlog item 1's
   "attacking a thing", unchanged by any of this.
+
+## 8. The look, and a three-dimensional future
+
+Added 2026-10-22, because `surface`/`cover`/`sub` should be read as a
+choice made with this known rather than in ignorance of it.
+
+### The near goal is 8 or 16-bit
+
+Flat pixel art on a grid. **Canvas 2D is the right tool and it is not
+close**: one line, `imageSmoothingEnabled = false`, and a 16x16 sprite
+scales to 32 or 48 with hard edges. CSS can be made to do it and fights
+you on sub-pixel positioning; WebGL is a GPU pipeline for a problem
+that is not GPU-bound.
+
+**AND THE ART ALREADY EXISTS.** Section 1 records the sad part: the
+Apps Script prototype has a complete texture path - a `tile_textures`
+table, a fetch, a blend-mode render - that never fires, because no tile
+type was ever given a `texture` key. The 16x16 SVGs are in
+`G:\My Drive\osdungeon\art` and no generation has ever drawn one.
+
+The 8-bit look is not a stretch goal. It is the thing three attempts
+have had the pieces for and never assembled.
+
+### Why not WebGL now
+
+Not performance. **A tactical map is not a game loop.** It redraws when
+something changes - a creature moves, a door opens, a torch is lit -
+which is a few times a second at most, against a worst case of perhaps
+ten thousand tiles. Canvas is comfortable at fifty thousand draws per
+frame at sixty frames per second, so we would be using about two per
+cent of it.
+
+WebGL earns its complexity on real-time per-pixel lighting with moving
+sources. The model section 1 praises is not that: distance-profile
+arrays per burn phase - `[100x8, 50x4, 25x4]` - are discrete rings, and
+a max-combine of four contributors is per-TILE compositing. The Apps
+Script version achieved it in the DOM, which is a lower bar than
+canvas.
+
+In practice WebGL also means PixiJS, and **this project has no
+bundler.** That is not fatal but it would be the first real dependency
+in a codebase where "no build step" has been load-bearing.
+
+### A Minecraft-like expansion: a different renderer, and that is fine
+
+Voxel 3D is Three.js, and it would **reuse none of the canvas
+renderer**. Different geometry, different culling, different
+everything. Building canvas now costs nothing against that future,
+because a new renderer would be written either way.
+
+What matters is whether the DATA survives it, and two decisions already
+do:
+
+**`z` IS A REAL HEIGHT IN FIVE-FOOT UNITS, NOT A LAYER INDEX.** Settled
+in section 3 for 5e reasons - falling, bridges, flying creatures - and
+it is exactly what a voxel world needs: consistent three-dimensional
+addressing. A layer index would not have converted.
+
+**TILES ARE SPARSE WITH A DEFAULT.** "Stone floor unless stated" (234)
+is structurally the same idea as "air unless stated", which is how
+voxel worlds actually store themselves.
+
+### What would need rethinking, said plainly
+
+**`surface`/`cover`/`sub` IS 2.5D THINKING.** In a voxel world a square
+does not have layers: a CUBE has one material, and "a wall standing on
+a floor" is a stone block at z = 0 above a stone block at z = -1.
+
+It converts roughly - a cover becomes the block, a surface with no
+cover becomes air over a block - but it is a translation rather than a
+straight read.
+
+**IT SHOULD NOT BE CHANGED NOW.** Layers are right for a 5e tactical
+map; they solved "it snowed" and "a wall fell down" in one move (226).
+Voxelising early would make the actual game worse to serve a maybe, and
+that is the wrong trade every time.
+
+### The insurance, which costs nothing because it is already done
+
+`grid`, `terrain`, `stride` and `ground` are coordinate maths and
+material properties. **They survive both futures untouched.** The
+renderer is the part that would be replaced, and section 6 already
+insists it stay separable - a renderer tangled into the rules is one
+you cannot replace.
+
+Keep the rules in Rust and the drawing in one JS module, and swapping
+canvas for Three.js is a new module rather than a rewrite.

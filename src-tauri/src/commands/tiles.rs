@@ -170,6 +170,47 @@ fn check_batch(tiles: &[Tile]) -> Result<(), String> {
     Ok(())
 }
 
+/// How big the map says it is, if it says.
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct Extent {
+    width: Option<i32>,
+    height: Option<i32>,
+}
+
+/// Is every square inside the map it is being painted on?
+///
+/// 232. THE TRIGGER SAYS THIS TOO. This says it FIRST, naming the
+/// square, before nine hundred rows go out and one of them is refused
+/// by Postgres with a message about `new.x`.
+///
+/// NULL IS UNBOUNDED, NOT ZERO. A map nobody has measured takes
+/// anything, which is every map that exists today.
+fn inside(e: Extent, tiles: &[Tile]) -> Result<(), String> {
+    for t in tiles {
+        if let Some(w) = e.width {
+            if t.x < 0 || t.x >= w {
+                return Err(format!(
+                    "{}: x {} is outside this map, which is {} squares across",
+                    t.at(),
+                    t.x,
+                    w
+                ));
+            }
+        }
+        if let Some(h) = e.height {
+            if t.y < 0 || t.y >= h {
+                return Err(format!(
+                    "{}: y {} is outside this map, which is {} squares down",
+                    t.at(),
+                    t.y,
+                    h
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The row as it is written.
 ///
 /// HIT POINTS ARE NOT IN IT, deliberately. Painting is AUTHORING and
@@ -263,6 +304,23 @@ pub fn paint_tiles(
 ) -> Result<usize, String> {
     check_batch(&tiles)?;
     let token = state.token()?;
+
+    // 232. ONE ROW, ONCE, BEFORE ANYTHING GOES OUT. A map's extent is
+    // a fact about the place rather than about each square, so it is
+    // read once and checked against the whole batch.
+    let bounds = supabase::rest_get(
+        &token,
+        "locations",
+        &[
+            ("select", "width,height"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    let mut extents: Vec<Extent> = serde_json::from_value(bounds)
+        .map_err(|e| format!("could not read the map's size: {}", e))?;
+    let extent = extents.pop().ok_or("no such place")?;
+    inside(extent, &tiles)?;
+
     let mut done = 0usize;
     for part in tiles.chunks(CHUNK) {
         let body: Vec<Value> = part.iter().map(|t| row(&location_id, t)).collect();
@@ -714,6 +772,59 @@ mod tests {
 
         let e = short(12, 40, "painted").unwrap_err();
         assert!(e.contains("only 12 of 40"), "{}", e);
+    }
+
+    #[test]
+    fn an_unmeasured_map_takes_anything() {
+        // Null is unbounded, not zero - which is every map today.
+        let e = Extent { width: None, height: None };
+        let mut far = t("dirt");
+        far.x = 999999;
+        assert!(inside(e, &[far]).is_ok());
+    }
+
+    #[test]
+    fn a_square_off_the_east_edge_is_refused_with_its_coordinates() {
+        let e = Extent { width: Some(40), height: Some(30) };
+        let mut off = t("dirt");
+        off.x = 40;
+        let err = inside(e, &[off]).unwrap_err();
+        assert!(err.contains("x 40 is outside"), "{}", err);
+        assert!(err.contains("40 squares across"), "{}", err);
+    }
+
+    #[test]
+    fn the_last_square_is_inside_and_the_next_one_is_not() {
+        // 0..width-1, so 39 is the far edge of a 40-wide room.
+        let e = Extent { width: Some(40), height: Some(30) };
+        let mut edge = t("dirt");
+        edge.x = 39;
+        edge.y = 29;
+        assert!(inside(e, std::slice::from_ref(&edge)).is_ok());
+        edge.y = 30;
+        assert!(inside(e, std::slice::from_ref(&edge)).is_err());
+    }
+
+    #[test]
+    fn a_negative_coordinate_is_outside_a_measured_map() {
+        // (0,0) is the corner, so negatives are out of bounds rather
+        // than merely unusual.
+        let e = Extent { width: Some(10), height: Some(10) };
+        let mut neg = t("dirt");
+        neg.x = -1;
+        assert!(inside(e, &[neg]).is_err());
+    }
+
+    #[test]
+    fn a_width_without_a_height_bounds_only_one_axis() {
+        // Odd, legal, and the trigger checks the two separately too.
+        let e = Extent { width: Some(5), height: None };
+        let mut tall = t("dirt");
+        tall.x = 2;
+        tall.y = 900;
+        assert!(inside(e, std::slice::from_ref(&tall)).is_ok());
+        tall.x = 5;
+        assert!(inside(e, std::slice::from_ref(&tall)).is_err());
     }
 
     #[test]

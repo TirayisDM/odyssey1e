@@ -9205,6 +9205,82 @@ dead code too, so a function added tomorrow and never called would not
 warn. Twelve item-level attributes would fix that, and it is worth
 doing the day either list stops shrinking. Today both shrank.
 
+## 232. A map may know how big it is
+
+226 gave a location tiles and no extent. `tiles.x` and `tiles.y` are
+plain `int` - give or take two billion either way - so a map was
+"wherever squares happen to be" and its size had to be worked out from
+the data every time anybody drew it.
+
+### The sharp edge: a typo is a hang, not an error
+
+Paint a square at x = 999999 in a forty-wide room and **nothing refuses
+it.** The row is valid, every constraint passes, and the next thing to
+render that location computes an extent of 0..999999 and tries to draw
+a million columns.
+
+**THAT IS THE PROJECT'S NAMED DEFECT WEARING A COORDINATE** - a
+perfectly ordinary-looking answer that is wrong, with nothing between
+it and the screen.
+
+### Width and height, and not a z range
+
+**z STAYS UNBOUNDED ON PURPOSE.** Height is genuinely open-ended - a
+cellar at -2, a bridge deck at +2, a flying creature at +6 - and it is
+far sparser than the floor. Bounding it would buy nothing and cost a
+decision every time somebody digs.
+
+The floor is different: a room is a rectangle somebody can describe,
+and the number of squares in it is a fact about the place.
+
+### Null means unmeasured, which is every map today
+
+Both columns are nullable and nothing is backfilled. A sketch map
+somebody is feeling out should not have to declare its size first.
+
+**AND DECLARING THEM IS THE CURE FOR THE TYPO**, which is why this is
+worth having rather than a sanity cap invented out of nothing. A cap
+would be a number nobody chose; a width is a fact about the room.
+
+### (0,0) is the corner
+
+Where bounds exist the map is `0..width-1` by `0..height-1`, so a
+negative coordinate is OUT OF BOUNDS rather than merely unusual. 228's
+arrival coordinates are chosen by the destination anyway, so nothing
+needed negatives.
+
+### Checked twice, which is the division 226 already drew
+
+`paint_tiles` refuses first and NAMES THE SQUARE - "(40, 3, 0): x 40 is
+outside this map, which is 40 squares across" - before nine hundred
+rows go out and Postgres rejects one of them with a message about
+`new.x`.
+
+The trigger is the backstop for anything arriving by another route. A
+CHECK cannot do it because the bounds live on `locations` and the
+coordinates on `tiles`, and a CHECK cannot run a subquery.
+
+Proved against the live table and rolled back:
+
+```
+inside (7,5) accepted
+x=8  refused: x 8 is outside this map, which is 8 squares across
+y=-1 refused: y -1 is outside this map, which is 6 squares down
+```
+
+### Shrinking a map does not delete what falls outside it
+
+The trigger is on `tiles`, so setting `width` smaller than existing
+squares leaves them in place - out of bounds and still real.
+
+**DELIBERATE RATHER THAN OVERLOOKED.** A DM narrowing a room to see how
+it feels should not silently destroy the east wing, and a cascade here
+would be a delete nobody asked for.
+
+The renderer's job is to span the bounds AND whatever exists, so
+nothing ever becomes invisible: a tile outside the declared room should
+look WRONG, not vanish.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-19 - written for a pull onto the laptop

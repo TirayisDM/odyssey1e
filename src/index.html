@@ -312,6 +312,19 @@
                  is not typed out a second time in here. -->
             <select id="map-surface"></select>
             <button id="map-describe" class="ghost tiny">Describe</button>
+            <!-- 239. A facing on its own has nothing to apply to, so
+                 it arrives with the one button that uses it: paint the
+                 chosen surface at the x/y/z below, turned. Two
+                 controls on a hook marked for deletion, and the only
+                 way to look at the four tiles that are not
+                 symmetrical. -->
+            <select id="map-facing" title="quarter turns clockwise from north">
+              <option value="0">facing N</option>
+              <option value="1">facing E</option>
+              <option value="2">facing S</option>
+              <option value="3">facing W</option>
+            </select>
+            <button id="map-paint-one" class="ghost tiny">Paint here</button>
           </div>
           <div id="map-mapsay" class="dm-msg" hidden></div>
 

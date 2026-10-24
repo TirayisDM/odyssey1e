@@ -9709,6 +9709,36 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   })();
 
+  // 239. PAINT ONE SQUARE, TURNED. The surface picker and the x/y/z
+  // boxes already exist for other jobs, so this adds a facing and a
+  // button rather than a row of its own.
+  //
+  // It is also the only way to SEE the four tiles that are not
+  // symmetrical pointing anywhere but north - "Paint 4" writes a fixed
+  // patch and `Describe` cannot carry a facing, because a default that
+  // applied one to every square would be wrong everywhere it was not
+  // placed deliberately.
+  guarded("#map-paint-one", async () => {
+    const loc = mapWhere();
+    if (!loc) return;
+    const surface = document.querySelector("#map-surface").value;
+    if (!surface) {
+      mapSay("pick a surface first", true);
+      return;
+    }
+    const facing = Number(document.querySelector("#map-facing").value) || 0;
+    const r = await tryCall("paint_tiles", {
+      locationId: loc,
+      tiles: [{ x: num("#map-x"), y: num("#map-y"), z: num("#map-z"), surface, facing }],
+    });
+    mapSay(
+      r.ok
+        ? `painted ${surface} at (${num("#map-x")},${num("#map-y")},${num("#map-z")}) facing ${facing}`
+        : r.error,
+      !r.ok
+    );
+  });
+
   // 234. Declare the room.
   guarded("#map-describe", async () => {
     const loc = mapWhere();

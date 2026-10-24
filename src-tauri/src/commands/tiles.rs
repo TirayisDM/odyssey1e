@@ -895,6 +895,43 @@ pub fn map_at(
     })
 }
 
+/* ================ 237. THE VOCABULARY, FOR A PICKER ================ */
+
+/// One terrain word and where it may sit.
+#[derive(Debug, Clone, Serialize)]
+pub struct Word {
+    pub key: String,
+    pub surface: bool,
+    pub cover: bool,
+}
+
+/// Every terrain word, with the layers it is legal in.
+///
+/// 237. SO A PICKER DOES NOT HOLD ITS OWN COPY. The vocabulary is a
+/// rule and lives in `terrain.rs`; a dropdown with thirty-three words
+/// typed into JavaScript would be the same list in a second place, and
+/// the one that drifts is always the copy nobody tests.
+///
+/// NO STATE AND NO TOKEN. This is a constant, not a read - it is the
+/// same answer for everybody, signed in or not, and asking Supabase for
+/// it would be a round trip to learn something the binary already
+/// knows.
+///
+/// NOT A DEV-HOOK CONVENIENCE EITHER: the painting UI that replaces the
+/// hook needs exactly this, and so does anything that ever validates a
+/// word on screen before sending it.
+#[tauri::command]
+pub fn terrain_words() -> Vec<Word> {
+    crate::terrain::ALL
+        .iter()
+        .map(|t| Word {
+            key: t.key().to_string(),
+            surface: t.may(crate::terrain::Layer::Surface),
+            cover: t.may(crate::terrain::Layer::Cover),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1112,6 +1149,23 @@ mod tests {
     }
 
     /* ---------------- 234. the recipe ---------------- */
+
+    #[test]
+    fn the_picker_gets_every_word_and_its_layers() {
+        // The guard against a dropdown growing its own copy.
+        let w = terrain_words();
+        assert_eq!(w.len(), crate::terrain::ALL.len());
+
+        let floor = w.iter().find(|x| x.key == "stone_floor").unwrap();
+        assert!(floor.surface && !floor.cover);
+
+        let grass = w.iter().find(|x| x.key == "grass").unwrap();
+        assert!(grass.cover && !grass.surface);
+
+        // The five walls are the only words legal in both.
+        let both = w.iter().filter(|x| x.surface && x.cover).count();
+        assert_eq!(both, 5);
+    }
 
     #[test]
     fn a_recipe_is_the_same_three_words_a_tile_carries() {

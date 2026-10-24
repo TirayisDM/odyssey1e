@@ -308,13 +308,9 @@
           <div class="row">
             <input id="map-w" type="number" placeholder="width" value="8" class="narrow" />
             <input id="map-h" type="number" placeholder="height" value="6" class="narrow" />
-            <select id="map-surface">
-              <option value="">— no default ground —</option>
-              <option value="stone_floor">stone_floor</option>
-              <option value="wood_floor">wood_floor</option>
-              <option value="dirt">dirt</option>
-              <option value="grass">grass (illegal — should refuse)</option>
-            </select>
+            <!-- 237. Filled from `terrain_words`, so the vocabulary
+                 is not typed out a second time in here. -->
+            <select id="map-surface"></select>
             <button id="map-describe" class="ghost tiny">Describe</button>
           </div>
           <div id="map-mapsay" class="dm-msg" hidden></div>

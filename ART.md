@@ -82,10 +82,24 @@ underneath — snow on a road still shows the road at the edges, vines on
 stone still show stone. Those need real alpha, not a background colour
 matching whatever you assumed was beneath.
 
-**Ground tiles** may be fully opaque.
+**CONFIRMED 2026-10-24.** The first cover drawn — `grass` — came back
+as an indexed PNG with no alpha channel, and Dave's call is that covers
+carry transparency. So an RGBA save (`PNG-32`) or an indexed PNG with a
+`tRNS` chunk; what matters is that the renderer can see through it.
 
-**Walls and other solid covers** should also be fully opaque: they
-replace the square, because you cannot walk on the floor they stand on.
+**THE RENDERER ALREADY DEPENDS ON THIS.** A flat-colour cover is drawn
+at 60% alpha, because a flat colour is an opaque rectangle and would
+hide the ground. A cover with ART is drawn at **100%**, on the
+assumption that its own transparency does the work. An opaque cover
+tile therefore blots out everything beneath it at full strength.
+
+**Ground tiles** may be fully opaque. Indexed-colour PNG (type 3) is
+ideal for them — it bakes a fixed palette into the file, which is what
+section 3 asks for anyway.
+
+**Walls, trees and shut doors** should also be fully opaque: they
+replace the square, because you cannot walk on the floor they stand
+on.
 
 ---
 
@@ -138,6 +152,7 @@ they should be legible in the art without reading a legend.
 | file | notes |
 |---|---|
 | `rock.png` | bare stone, walkable |
+| | **all 18 DONE, 2026-10-24** — 32×32, indexed colour, in `src/assets/tiles/` |
 | `dirt.png` | **DONE** — 32×32 RGBA, in `src/assets/tiles/`, drawn by the renderer |
 | `mud.png` | difficult; should look slow |
 | `sand.png` | difficult |

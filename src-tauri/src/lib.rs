@@ -1697,6 +1697,7 @@ pub fn run() {
             commands::tiles::step_to,
             commands::tiles::set_map,
             commands::tiles::map_at,
+            commands::tiles::terrain_words,
             commands::session::me,
             // Fast login. Convenience, not security - see pin.rs.
             commands::session::pin_status,

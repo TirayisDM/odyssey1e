@@ -9687,10 +9687,29 @@ window.addEventListener("DOMContentLoaded", async () => {
   const whoSay = (t, isErr) => say("#map-whosay", t, isErr);
   const num = (id) => Number(document.querySelector(id).value);
 
-  // 234. Declare the room. `grass` is in the list ON PURPOSE: it is a
-  // cover, so choosing it should come back refused rather than stored,
-  // which is the one-line proof that a recipe cannot say what a tile
-  // could not.
+  // 237. THE SURFACE PICKER, FROM RUST. Every word the vocabulary has,
+  // filtered to the ones legal as a surface - so the list cannot drift
+  // from `terrain::ALL`, and a tile that has been drawn can be looked
+  // at by making it the room's default.
+  //
+  // 234's live proof that a recipe cannot say what a tile could not -
+  // choosing `grass` and watching it refuse - is gone with the
+  // hardcoded list, because a cover is no longer offered. It is still
+  // held by `a_recipe_cannot_say_what_a_tile_could_not`.
+  (async () => {
+    const words = await call("terrain_words");
+    const sel = document.querySelector("#map-surface");
+    if (!Array.isArray(words) || !sel) return;
+    sel.innerHTML = '<option value="">— no default ground —</option>';
+    for (const w of words.filter((x) => x.surface)) {
+      const o = document.createElement("option");
+      o.value = w.key;
+      o.textContent = w.key;
+      sel.append(o);
+    }
+  })();
+
+  // 234. Declare the room.
   guarded("#map-describe", async () => {
     const loc = mapWhere();
     if (!loc) return;

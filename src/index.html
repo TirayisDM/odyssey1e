@@ -293,59 +293,12 @@
 
              DELETE THIS BLOCK the day there is a real map surface. It
              exists to prove the round trip, not to author anything. -->
-        <details id="map-hook">
-          <summary class="muted">Tiles (dev hook)</summary>
-          <div class="row">
-            <select id="map-where"></select>
-            <button id="map-paint" class="ghost tiny">Paint 4</button>
-            <button id="map-list" class="ghost tiny">List</button>
-            <button id="map-erase" class="ghost tiny danger">Erase 4</button>
-          </div>
-          <div id="map-say" class="dm-msg" hidden></div>
-          <!-- 234. How big the room is and what it is made of. A
-               default only reaches inside a declared room, so the
-               width and height are not optional beside it. -->
-          <div class="row">
-            <input id="map-w" type="number" placeholder="width" value="8" class="narrow" />
-            <input id="map-h" type="number" placeholder="height" value="6" class="narrow" />
-            <!-- 237. Filled from `terrain_words`, so the vocabulary
-                 is not typed out a second time in here. -->
-            <select id="map-surface"></select>
-            <button id="map-describe" class="ghost tiny">Describe</button>
-            <!-- 239. A facing on its own has nothing to apply to, so
-                 it arrives with the one button that uses it: paint the
-                 chosen surface at the x/y/z below, turned. Two
-                 controls on a hook marked for deletion, and the only
-                 way to look at the four tiles that are not
-                 symmetrical. -->
-            <!-- 240. Covers, from the same `terrain_words` call - it
-                 already says which words are legal in which layer, so
-                 the list costs nothing extra. -->
-            <select id="map-cover"></select>
-            <select id="map-facing" title="quarter turns clockwise from north">
-              <option value="0">facing N</option>
-              <option value="1">facing E</option>
-              <option value="2">facing S</option>
-              <option value="3">facing W</option>
-            </select>
-            <button id="map-paint-one" class="ghost tiny">Paint here</button>
-          </div>
-          <div id="map-mapsay" class="dm-msg" hidden></div>
-
-          <!-- 230. And somebody standing on it. -->
-          <div class="row">
-            <select id="map-who"></select>
-            <input id="map-x" type="number" value="1" class="narrow" />
-            <input id="map-y" type="number" value="0" class="narrow" />
-            <input id="map-z" type="number" value="0" class="narrow" />
-            <button id="map-send" class="ghost tiny">To this place</button>
-            <button id="map-place" class="ghost tiny">Place</button>
-            <button id="map-step" class="ghost tiny">Step to</button>
-            <button id="map-lift" class="ghost tiny">Lift off</button>
-            <button id="map-who-here" class="ghost tiny">Who is here</button>
-          </div>
-          <div id="map-whosay" class="dm-msg" hidden></div>
-        </details>
+        <!-- 241. The "Tiles (dev hook)" block lived here from 229 to
+             240 and is gone: every job it did now lives in the Map
+             pane, where the map is visible while you do it. Its
+             `Paint 4` and `Erase 4` wrote to FIXED coordinates, which
+             was harmless on a test map and would have been
+             destructive on a real one. -->
 
         <div id="enc-detail" hidden>
           <div id="enc-editing" class="editing" hidden></div>
@@ -1152,15 +1105,62 @@
           </nav>
 
           <div class="world-pane" data-world="map" hidden>
+            <!-- 241. THE DM'S MAP WORKSPACE. Everything map-shaped in
+                 one place: the room, the brush, the creatures, and the
+                 map itself. There are no coordinate boxes anywhere
+                 here, because THE MAP IS THE COORDINATE INPUT - that
+                 is the whole reason the dev hook needed seventeen
+                 controls and this needs none. -->
             <div class="row">
               <select id="mv-where"></select>
-              <label class="muted">z</label>
+              <span class="muted">z</span>
+              <button id="mv-down" class="ghost tiny" title="a level down">&#9666;</button>
               <input id="mv-z" type="number" value="0" class="narrow" />
+              <button id="mv-up" class="ghost tiny" title="a level up">&#9656;</button>
               <button id="mv-draw" class="ghost tiny">Draw</button>
             </div>
+
+            <!-- The room: how big, and what it is made of where
+                 nobody has said otherwise. 20x20 is a 100ft battle
+                 map, which is the usual size of a fight. -->
+            <div class="row maprow">
+              <span class="maplabel">room</span>
+              <input id="mv-w" type="number" value="20" class="narrow" title="squares across" />
+              <input id="mv-h" type="number" value="20" class="narrow" title="squares down" />
+              <select id="mv-dsurface" title="default ground"></select>
+              <select id="mv-dcover" title="default cover"></select>
+              <button id="mv-describe" class="ghost tiny">Describe</button>
+            </div>
+
+            <!-- The brush. The mode decides what a click does, so one
+                 click never means two things. -->
+            <div class="row maprow">
+              <span class="maplabel">brush</span>
+              <select id="mv-surface"></select>
+              <select id="mv-cover"></select>
+              <select id="mv-facing" title="quarter turns clockwise from north">
+                <option value="0">N</option>
+                <option value="1">E</option>
+                <option value="2">S</option>
+                <option value="3">W</option>
+              </select>
+              <select id="mv-mode">
+                <option value="paint">click paints</option>
+                <option value="erase">click erases</option>
+                <option value="stand">click places the creature</option>
+              </select>
+            </div>
+
+            <div class="row maprow">
+              <span class="maplabel">who</span>
+              <select id="mv-who"></select>
+              <button id="mv-lift" class="ghost tiny">Lift off the map</button>
+            </div>
+
             <div id="mv-say" class="muted"></div>
-            <!-- 235. One canvas. See map.js for why not divs and why
-                 not WebGL. -->
+            <!-- What is under the cursor, including what it COSTS -
+                 the only way to check the rules without reading SQL. -->
+            <div id="mv-at" class="muted mapat">&nbsp;</div>
             <canvas id="mv-canvas" class="mapcanvas"></canvas>
           </div>
 

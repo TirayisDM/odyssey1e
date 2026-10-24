@@ -9695,23 +9695,119 @@ with no art at all.
 turned would only ever climb north. That cannot silently become true
 again.
 
+## 241. The map is the input, and the dev hook is gone
+
+**2026-10-24.** Dave: *"i think especially for the dm the map needs to
+be centralized with its controls and tools"*.
+
+That is a layout request on its face and a correctness one underneath.
+The hook and the picture had been **two places that both named a
+square** - you typed `3, 2` into a box while looking at a grid that
+told you nothing about whether `3, 2` was the square you meant. The
+map had been readable since 235 and still was not the thing you
+worked in.
+
+### THE HOOK DOES NOT MOVE, IT GOES
+
+Deleted: 2,982 characters of `<details id="map-hook">` and 8,633
+characters of its handlers. In their place, a comment saying why.
+
+It had been marked for deletion in its own source since 229 and the
+condition was always the same - *the render replaces it the day the
+canvas can paint*. Today the canvas can paint.
+
+What went with it, and good:
+
+- **`Paint 4` and `Erase 4`.** Fixed writes to (0,0)-(3,0). The
+  handoff called them *"harmless on a test map, destructive on a real
+  one"*, which is a sentence you write about something you have
+  decided to keep.
+- **Seventeen controls.** Eleven of them were coordinate boxes, and a
+  coordinate box is a question the map can answer by being clicked.
+
+Four rows remain: where and what level, the room's recipe, the brush,
+and who. Nothing in the pane takes an x or a y.
+
+### ONE CLICK DOES WHAT THE MODE SAYS
+
+`paint` / `erase` / `stand`, chosen in a select, so a click never
+means two things and no modifier key is load-bearing. Each mode calls
+the command the hook called - `paint_tiles`, `erase_tiles`,
+`place_character` - one square at a time, which is what the batch
+check in 229 was written to allow.
+
+**THERE IS NO UNDO.** A stray click changes the map. That is the cost
+of painting directly rather than describing a paint, it is named here
+so nobody discovers it, and it is worth its own cycle.
+
+### THE COST IS SAID OUT LOUD
+
+Hovering a square prints what it is, whether it was **drawn or came
+from the recipe**, **what it costs to enter**, its facing, and who is
+standing on it.
+
+`Square` grew a `cost: Option<i64>` for this, filled from
+`stack.step_cost()`. Everything about crossing a square had been
+visible only in SQL or a test since 230 - `stride::step` knew it,
+`step_to` returned it, and no human had ever seen it without asking.
+It is still Rust that decides; the pane only repeats it.
+
+### HIT-TESTING UNDOES THE CSS
+
+`squareAt(view, px, py)` in `map.js` uses **the same `extent()` the
+drawing uses**, which is the whole reason it cannot drift: the origin
+that places a square and the origin that identifies one are one
+function call.
+
+`squareUnder(ev)` then divides out `canvas.width / box.width`, because
+a room wider than the pane is scaled by CSS and a click on a squeezed
+canvas must land where the eye says it does. Getting that wrong would
+be this project's named defect exactly - an ordinary-looking click
+that paints the wrong square.
+
+A grid needs **no listener per square**: hit-testing is
+`floor(px / 32)` plus the origin, so a forty-by-forty room costs
+nothing to make clickable.
+
+### 8x6 WAS NEVER A DECISION
+
+Dave: *"What is the reasoning behind keeping it 8x6 - 40x40 seems like
+the upper limit"*. There was no reasoning. **8x6 is a number I typed
+into a test room in 232 and then repeated as though it meant
+something.** The default is 20x20 now.
+
+40x40 is a fair aspiration and needs one thing first: at 32 pixels it
+is 1,280 across, so it needs **pan and zoom**, and only 16, 32 and 64
+are integer scales. Anything else and pixel art falls apart whatever
+`imageSmoothingEnabled` says - 236 settled that.
+
+### Three small cycles that had no entry of their own
+
+- **237.** The surface picker is filled from `terrain_words`, so the
+  vocabulary cannot drift from `terrain::ALL`.
+- **239.** A facing box, 0..3, and the one button that used it.
+- **240.** Covers in the same picker from the same call, numbered
+  variants so a floor does not visibly repeat, and a **size guard**:
+  `grass.png` arrived at 58x57 and canvas would have squashed it into
+  the cell without complaint.
+
 ## Pick up here
 
-### HANDOFF, 2026-10-23 - written for John pulling onto his own machine
+### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
 
 **Checked on the machine this was written from, not remembered:**
 
 | | |
 |---|---|
 | `git` | clean, nothing unpushed |
-| migrations | **162 files, 172 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **232**, and every ledger row since 218 has a file |
+| migrations | **163 files, 173 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
+| newest migration | **238**, and every ledger row since 218 has a file |
 | `security_doors()` | **0 faults** |
-| build / tests | **zero warnings, 1,233 tests pass** |
-| tile art | 2 of 33, both 32x32 RGBA, committed |
+| build / tests | **zero warnings, 1,251 tests pass** |
+| tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
 
-**PULL BEFORE TOUCHING ANYTHING.** Five migrations landed on the shared
-live database between 21 and 23 October, and the code and the schema
+**PULL BEFORE TOUCHING ANYTHING.** Six migrations landed on the shared
+live database between 21 and 24 October, and the code and the schema
 moved together: a checkout from before them pointed at this database
 will not understand `tiles`, and 234's `recipe` will read as an empty
 column.
@@ -9720,7 +9816,7 @@ column.
 
 ### What happened: the map exists now
 
-Twelve cycles, 225 to 236. Read those entries rather than this summary
+Seventeen cycles, 225 to 241. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -9728,7 +9824,7 @@ several record where an earlier entry was wrong.
 layers. A room can declare its size and what it is made of by default,
 so a wall needs a row and a floor does not. A creature stands on a
 square, and `stride::step` says what moving costs and refuses a wall by
-name. There is a canvas that draws it.
+name. There is a canvas that draws it, and you author it by clicking it.
 
 ```
 grid.rs      geometry - a diagonal costs one, in ONE function
@@ -9738,9 +9834,10 @@ ground.rs    what is AT a square: a row, else the default, else nothing
 src/map.js   the only thing that knows what any of it LOOKS like
 ```
 
-**FIVE MIGRATIONS:** 226 (tiles, three layers, RLS), 227 (an anon
+**SIX MIGRATIONS:** 226 (tiles, three layers, RLS), 227 (an anon
 revoke 226 half-did), 228 (links from any square + where you arrive),
-230 (x/y/z on characters + a trigger), 232 (map bounds + a trigger).
+230 (x/y/z on characters + a trigger), 232 (map bounds + a trigger),
+238 (which way a square points).
 
 ---
 
@@ -9773,8 +9870,10 @@ maps with their own origins, so leaving one always needs a link.
 
 ### What is NOT built, so nobody looks for it
 
-- **No painting on the canvas.** The map is read-only. The only way to
-  author anything is the dev hook (below).
+- **No undo.** You paint by clicking, and a stray click is a change to
+  the map. 241.
+- **No pan or zoom.** A room wider than the pane is squeezed by CSS,
+  which is readable and not sharp. 40x40 needs this first.
 - **No fog.** Phase 4. The RLS policy on `tiles` is DM-only, which is
   the promise that is true today rather than the one MAP.md describes.
 - **No falling.** `Pit` and `Ledge` are storable and mean nothing yet.
@@ -9783,36 +9882,50 @@ maps with their own origins, so leaving one always needs a link.
   that belongs with 051's action economy.
 - **No traversal.** `leads_to` and its arrival coordinates are
   storable and unread.
-- **31 of 33 tiles.** See `ART.md`.
+- **18 of 33 words have art.** 10 covers and 5 walls to go, and
+  `grass.png` is the wrong size. See `ART.md`.
 
 ---
 
-### The dev hook, and please do not grow it
+### How you author a map, now that the hook is gone
 
-**Run tab -> "Tiles (dev hook)".** Paint 4 / List / Erase 4 / Describe
-/ Place / Step to / Lift off / Who is here. It is the only way to put a
-tile in the ground.
+**Map tab.** Four rows above the canvas and **no coordinate boxes** -
+the map is the coordinate input. Pick a place, pick a mode, click a
+square.
 
-**IT SAYS TWICE IN THE SOURCE TO DELETE IT**, and it means it - the
-render replaces it the day the canvas can paint. Two things to know
-while it exists:
+- **ROOM** declares the size and what the room is made of by default,
+  so a wall needs a row and a floor does not.
+- **BRUSH** is a surface, an optional cover and a facing. `paint`
+  writes it to the square you click; `erase` removes the row and the
+  square falls back to the recipe.
+- **WHO** places a creature, and `stand` mode drops it on the square
+  you click. `Lift off` takes it off the map.
+- **Hovering** prints what the square is, drawn or from the recipe,
+  **what it costs to enter**, its facing, and who is on it.
 
-- **"Paint 4" and "Erase 4" hit FIXED coordinates** - (0,0) to (3,0).
-  Harmless on a test map, destructive on a real one.
-- It is the only caller of five commands. Deleting it today would make
-  them unreachable, which is worse than the clutter.
+**THERE IS NO UNDO.** A stray click changes the map. 241 names this
+rather than hiding it, and it is the next thing worth a cycle.
+
+The `Tiles (dev hook)` the previous handoff described is **deleted** -
+241. Its fixed-coordinate `Paint 4` / `Erase 4` are gone with it, and
+nothing is missed.
 
 ---
 
 ### Where to start, if you want the map
 
-**`ART.md` is the cheapest useful thing.** 31 tiles at 32x32 PNG,
-named for the terrain key, dropped in `src/assets/tiles/`. The renderer
-falls back to a flat colour for anything missing, so **art can arrive
-one tile at a time and nothing breaks.** No code needed.
+**`ART.md` is the cheapest useful thing.** The 15 words with no tile
+yet - 10 covers and 5 walls - at 32x32 PNG, named for the terrain key,
+dropped in `src/assets/tiles/`. The renderer falls back to a flat
+colour for anything missing, so **art can arrive one tile at a time
+and nothing breaks.** No code needed.
 
-**Painting on the canvas** is the next real cycle: click a square, pick
-terrain, paint. It retires the hook and makes a real room drawable.
+**Pan and zoom** is the next real cycle. The default room is 20x20 and
+40x40 is the aspiration; at 32 pixels that is 1,280 across, which no
+pane holds. Only 16, 32 and 64 are integer scales - 236 settled why
+anything else ruins pixel art.
+
+**Undo** is the other one. See the hook section above.
 
 **Fog** is the multiplayer payoff and the reason tiles are rows rather
 than a jsonb blob - RLS is row-level and cannot filter inside a blob.

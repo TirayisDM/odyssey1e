@@ -1186,3 +1186,26 @@ h2.foldhead.shut{margin-bottom:.15rem}
   image-rendering: pixelated;
   max-width: 100%;
 }
+
+/* 241. The map workspace. A label column so the three tool rows line
+   up under each other and the eye can find "brush" without reading. */
+.maprow { align-items: center; }
+.maplabel {
+  display: inline-block;
+  width: 3.4rem;
+  font-size: 10px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* What is under the cursor. Fixed height so the canvas does not jump
+   when the readout empties. */
+.mapat {
+  font-size: 11px;
+  min-height: 1.2em;
+  font-variant-numeric: tabular-nums;
+}
+/* A room wider than the pane scrolls rather than squeezing - the art
+   is pixel art and a fractional scale would blur it. */
+.mapcanvas { max-width: none; }
+.world-pane[data-world="map"] { overflow-x: auto; }

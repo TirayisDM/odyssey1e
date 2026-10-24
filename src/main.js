@@ -11,7 +11,7 @@ const { invoke } = window.__TAURI__.core;
 // 235. The renderer, in its own file because it is the one part that
 // knows what things LOOK like - and therefore the one part MAP.md
 // section 8 expects to be replaced if the voxel idea ever happens.
-import { draw as drawMap } from "./map.js";
+import { draw as drawMap, squareAt } from "./map.js";
 
 // TWO ENCOUNTER IDS, ON PURPOSE.
 //
@@ -2814,17 +2814,19 @@ async function loadCharacters() {
   if (!state.gameId) return;
   const chars = await call("list_characters", { gameId: state.gameId });
   if (!Array.isArray(chars)) return;
-  // 230. The dev hook's picker. EVERY character, not only your own -
-  // placing a monster is the commonest reason to use it.
-  const who = document.querySelector("#map-who");
+  // 241. The map's creature picker. EVERY character, not only your
+  // own - placing a monster is the commonest reason to use it.
+  const who = document.querySelector("#mv-who");
   if (who) {
-    who.innerHTML = "";
+    const had = who.value;
+    who.innerHTML = '<option value="">— pick a creature —</option>';
     for (const c of chars) {
       const o = document.createElement("option");
       o.value = c.id;
       o.textContent = c.name;
       who.append(o);
     }
+    who.value = had;
   }
   for (const c of chars) {
     const mine = state.user && c.owner_uid === state.user.profile_id;
@@ -4821,7 +4823,6 @@ async function loadWorld() {
 
   fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
   // 229. The dev hook's picker. Same tree, same call.
-  fillPlaces(document.querySelector("#map-where"), "— pick a place —");
   fillPlaces(document.querySelector("#mv-where"), "— pick a place —");
   // The detail picker too. Its value is set by selectEncounter rather
   // than kept: it shows where THIS encounter is, not what was last
@@ -9630,83 +9631,192 @@ window.addEventListener("DOMContentLoaded", async () => {
     changeSay(r.value);
   });
 
-  /* ---------------- 229. tiles, a dev hook ----------------
+  /* ---------------- 241. the DM's map workspace ----------------
 
-     THE THREE COMMANDS HAVE NO SCREEN YET. Phase 1's render is its own
-     piece of work, and until it exists a command nobody can call is a
-     command nobody has watched fail. This paints four squares, reads
-     them back and erases them.
+     Everything the dev hook did, in the pane where the map is visible
+     while you do it. THERE ARE NO COORDINATE BOXES: the map is the
+     coordinate input, which is why seventeen controls became four rows.
 
-     THE FOUR SQUARES ARE CHOSEN, not arbitrary. A bare floor; a wall
-     STANDING ON a floor, which is the whole point of layers; a shut
-     door in a doorway; and stairs carrying a link with an arrival,
-     which 226's constraint would have refused and 228 allows.
+     The squares arrive already resolved - `map_at` runs `ground::at` in
+     Rust - so nothing here decides what is AT a square, only what a
+     click does to it. */
 
-     DELETE THIS the day there is a real map surface. */
+  let mapView = null; // the last drawn level, for hit-testing and hover
 
-  const PATCH = (loc) => [
-    { x: 0, y: 0, z: 0, surface: "wood_floor" },
-    { x: 1, y: 0, z: 0, surface: "wood_floor", cover: "timber_wall" },
-    { x: 2, y: 0, z: 0, surface: "doorway", cover: "door_closed" },
-    { x: 3, y: 0, z: 0, surface: "stairs", leadsTo: loc, toX: 0, toY: 9, toZ: 1 },
-  ];
-
-  const mapSay = (t, isErr) => say("#map-say", t, isErr);
-
-  const mapWhere = () => {
-    const id = document.querySelector("#map-where").value;
-    if (!id) mapSay("pick a place first", true);
-    return id || null;
+  const mvSay = (t, isErr) => {
+    const el = document.querySelector("#mv-say");
+    el.textContent = t || "";
+    el.className = isErr ? "muted err" : "muted";
   };
 
-  guarded("#map-paint", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const r = await tryCall("paint_tiles", { locationId: loc, tiles: PATCH(loc) });
-    mapSay(r.ok ? `painted ${r.value}` : r.error, !r.ok);
+  const mvWhere = () => document.querySelector("#mv-where").value || null;
+  const mvZ = () => Number(document.querySelector("#mv-z").value) || 0;
+  const pick = (id) => document.querySelector(id).value || null;
+
+  async function drawLevel() {
+    const loc = mvWhere();
+    if (!loc) {
+      mvSay("pick a place");
+      return;
+    }
+    const r = await tryCall("map_at", { locationId: loc, z: mvZ() });
+    if (!r.ok) return mvSay(r.error, true);
+    mapView = r.value;
+    mvSay(drawMap(document.querySelector("#mv-canvas"), mapView));
+  }
+
+  document.querySelector("#mv-draw").addEventListener("click", drawLevel);
+  document.querySelector("#mv-where").addEventListener("change", drawLevel);
+  document.querySelector("#mv-z").addEventListener("change", drawLevel);
+
+  // A level at a time is what you actually do; typing a number is what
+  // you do when there is no map in front of you.
+  for (const [id, step] of [["#mv-down", -1], ["#mv-up", 1]]) {
+    document.querySelector(id).addEventListener("click", async () => {
+      const box = document.querySelector("#mv-z");
+      box.value = Number(box.value || 0) + step;
+      await drawLevel();
+    });
+  }
+
+  guarded("#mv-describe", async () => {
+    const loc = mvWhere();
+    if (!loc) return mvSay("pick a place", true);
+    const r = await tryCall("set_map", {
+      locationId: loc,
+      width: Number(document.querySelector("#mv-w").value) || null,
+      height: Number(document.querySelector("#mv-h").value) || null,
+      surface: pick("#mv-dsurface"),
+      cover: pick("#mv-dcover"),
+      sub: null,
+    });
+    if (!r.ok) return mvSay(r.error, true);
+    await drawLevel();
   });
 
-  guarded("#map-list", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const r = await tryCall("list_tiles", { locationId: loc });
-    if (!r.ok) return mapSay(r.error, true);
-    // SAY WHAT IS THERE, not just how many - the layers are the thing
-    // being proved, and a count would hide them.
-    const said = r.value
-      .map((t) => `(${t.x},${t.y},${t.z}) ${t.surface}${t.cover ? " + " + t.cover : ""}`)
-      .join("  ·  ");
-    mapSay(r.value.length ? said : "nothing mapped here");
+  guarded("#mv-lift", async () => {
+    const who = pick("#mv-who");
+    if (!who) return mvSay("pick a creature", true);
+    const r = await tryCall("place_character", {
+      characterId: who,
+      x: null,
+      y: null,
+      z: null,
+    });
+    if (!r.ok) return mvSay(r.error, true);
+    await drawLevel();
   });
 
-  /* 230. Somebody standing on it. `place_character` is dumb by
-     design, so this can put Tarren inside a wall - that is the seam
-     working, not a bug. Judging legality is `stride::step`'s job and
-     nothing calls it yet. */
+  /* ---- the canvas itself ---- */
 
-  const whoSay = (t, isErr) => say("#map-whosay", t, isErr);
-  const num = (id) => Number(document.querySelector(id).value);
+  const mvCanvas = document.querySelector("#mv-canvas");
 
-  // 237. THE SURFACE PICKER, FROM RUST. Every word the vocabulary has,
-  // filtered to the ones legal as a surface - so the list cannot drift
-  // from `terrain::ALL`, and a tile that has been drawn can be looked
-  // at by making it the room's default.
+  // WHERE THE POINTER IS, in map squares.
   //
-  // 234's live proof that a recipe cannot say what a tile could not -
-  // choosing `grass` and watching it refuse - is gone with the
-  // hardcoded list, because a cover is no longer offered. It is still
-  // held by `a_recipe_cannot_say_what_a_tile_could_not`.
+  // The canvas may be scaled by CSS when a room is wider than the pane,
+  // so the ratio between the element box and its pixel buffer has to be
+  // undone first - a click on a squeezed canvas must land where the eye
+  // says it does.
+  function squareUnder(ev) {
+    if (!mapView) return null;
+    const box = mvCanvas.getBoundingClientRect();
+    const px = (ev.clientX - box.left) * (mvCanvas.width / box.width);
+    const py = (ev.clientY - box.top) * (mvCanvas.height / box.height);
+    return squareAt(mapView, px, py);
+  }
+
+  mvCanvas.addEventListener("mousemove", (ev) => {
+    const at = squareUnder(ev);
+    const el = document.querySelector("#mv-at");
+    if (!at) {
+      el.innerHTML = "&nbsp;";
+      return;
+    }
+    const sq = mapView.squares.find((s) => s.x === at.x && s.y === at.y);
+    if (!sq) {
+      el.textContent = "(" + at.x + "," + at.y + ") unmapped";
+      return;
+    }
+    const who = mapView.standing.filter((c) => c.x === at.x && c.y === at.y);
+    // WHAT IT COSTS, SAID OUT LOUD. Everything about crossing a square
+    // has only ever been visible in SQL or a test until now.
+    const cost = sq.blocks ? "blocked" : sq.cost + " to enter";
+    el.textContent =
+      "(" + sq.x + "," + sq.y + ") " +
+      sq.surface + (sq.cover ? " + " + sq.cover : "") +
+      " · " + (sq.drawn ? "drawn" : "from the recipe") +
+      " · " + cost +
+      (sq.facing ? " · facing " + "NESW"[sq.facing] : "") +
+      (who.length ? " · " + who.map((c) => c.name).join(", ") : "");
+  });
+
+  mvCanvas.addEventListener("mouseleave", () => {
+    document.querySelector("#mv-at").innerHTML = "&nbsp;";
+  });
+
+  // ONE CLICK DOES WHAT THE MODE SAYS, so a click never means two
+  // things. There is no undo: a stray click changes the map, which is
+  // the cost of painting directly and is worth its own cycle.
+  mvCanvas.addEventListener("click", async (ev) => {
+    const at = squareUnder(ev);
+    const loc = mvWhere();
+    if (!at || !loc) return;
+    const mode = document.querySelector("#mv-mode").value;
+    const z = mvZ();
+
+    if (mode === "stand") {
+      const who = pick("#mv-who");
+      if (!who) return mvSay("pick a creature first", true);
+      const r = await tryCall("place_character", {
+        characterId: who,
+        x: at.x,
+        y: at.y,
+        z: z,
+      });
+      if (!r.ok) return mvSay(r.error, true);
+      return drawLevel();
+    }
+
+    if (mode === "erase") {
+      const r = await tryCall("erase_tiles", {
+        locationId: loc,
+        spots: [{ x: at.x, y: at.y, z: z }],
+      });
+      if (!r.ok) return mvSay(r.error, true);
+      return drawLevel();
+    }
+
+    const surface = pick("#mv-surface");
+    if (!surface) return mvSay("pick a surface to paint with", true);
+    const r = await tryCall("paint_tiles", {
+      locationId: loc,
+      tiles: [
+        {
+          x: at.x,
+          y: at.y,
+          z: z,
+          surface: surface,
+          cover: pick("#mv-cover"),
+          facing: Number(document.querySelector("#mv-facing").value) || 0,
+        },
+      ],
+    });
+    if (!r.ok) return mvSay(r.error, true);
+    await drawLevel();
+  });
+
+  /* ---- the pickers, from Rust ---- */
+
+  // 237/240. BOTH VOCABULARIES FROM THE ONE CALL. `terrain_words`
+  // already says which layers each word is legal in, so four pickers
+  // cost one round trip and none can drift from `terrain::ALL`.
   (async () => {
     const words = await call("terrain_words");
     if (!Array.isArray(words)) return;
-    // 240. BOTH PICKERS FROM THE ONE CALL. `terrain_words` already
-    // says which layers each word is legal in, so the cover list costs
-    // nothing beyond a filter - and neither list can drift from
-    // `terrain::ALL`.
     const fill = (id, keep, blank) => {
       const sel = document.querySelector(id);
       if (!sel) return;
-      sel.innerHTML = `<option value="">${blank}</option>`;
+      sel.innerHTML = '<option value="">' + blank + "</option>";
       for (const w of words.filter(keep)) {
         const o = document.createElement("option");
         o.value = w.key;
@@ -9714,150 +9824,11 @@ window.addEventListener("DOMContentLoaded", async () => {
         sel.append(o);
       }
     };
-    fill("#map-surface", (w) => w.surface, "— no default ground —");
-    fill("#map-cover", (w) => w.cover, "— no cover —");
+    fill("#mv-surface", (w) => w.surface, "— pick ground —");
+    fill("#mv-cover", (w) => w.cover, "— no cover —");
+    fill("#mv-dsurface", (w) => w.surface, "— no default ground —");
+    fill("#mv-dcover", (w) => w.cover, "— no default cover —");
   })();
-
-  // 239. PAINT ONE SQUARE, TURNED. The surface picker and the x/y/z
-  // boxes already exist for other jobs, so this adds a facing and a
-  // button rather than a row of its own.
-  //
-  // It is also the only way to SEE the four tiles that are not
-  // symmetrical pointing anywhere but north - "Paint 4" writes a fixed
-  // patch and `Describe` cannot carry a facing, because a default that
-  // applied one to every square would be wrong everywhere it was not
-  // placed deliberately.
-  guarded("#map-paint-one", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const surface = document.querySelector("#map-surface").value;
-    if (!surface) {
-      mapSay("pick a surface first", true);
-      return;
-    }
-    const facing = Number(document.querySelector("#map-facing").value) || 0;
-    const cover = document.querySelector("#map-cover").value || null;
-    const r = await tryCall("paint_tiles", {
-      locationId: loc,
-      tiles: [
-        { x: num("#map-x"), y: num("#map-y"), z: num("#map-z"), surface, cover, facing },
-      ],
-    });
-    mapSay(
-      r.ok
-        ? `painted ${surface}${cover ? " + " + cover : ""} at ` +
-            `(${num("#map-x")},${num("#map-y")},${num("#map-z")}) facing ${facing}`
-        : r.error,
-      !r.ok
-    );
-  });
-
-  // 234. Declare the room.
-  guarded("#map-describe", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const r = await tryCall("set_map", {
-      locationId: loc,
-      width: num("#map-w") || null,
-      height: num("#map-h") || null,
-      surface: document.querySelector("#map-surface").value || null,
-      // 240. A room may default to ground WITH something on it - a
-      // field of grass is dirt with grass on it, not a `grass` surface.
-      cover: document.querySelector("#map-cover").value || null,
-      sub: null,
-    });
-    say("#map-mapsay", r.ok ? "described" : r.error, !r.ok);
-  });
-
-  // A position needs a location - 230's constraint - so the hook can
-  // put them in the place first. `move_character` is 035's, not new.
-  guarded("#map-send", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const r = await tryCall("move_character", {
-      characterId: document.querySelector("#map-who").value,
-      locationId: loc,
-    });
-    whoSay(r.ok ? "moved to this place (position cleared by the trigger)" : r.error, !r.ok);
-  });
-
-  guarded("#map-place", async () => {
-    const r = await tryCall("place_character", {
-      characterId: document.querySelector("#map-who").value,
-      x: num("#map-x"),
-      y: num("#map-y"),
-      z: num("#map-z"),
-    });
-    whoSay(r.ok ? "placed" : r.error, !r.ok);
-  });
-
-  // 231. The join: reads the ground either side, asks stride::step,
-  // and writes the position only if the ground allowed it. The cost
-  // comes back and nothing is deducted - there is no budget yet.
-  guarded("#map-step", async () => {
-    const r = await tryCall("step_to", {
-      characterId: document.querySelector("#map-who").value,
-      x: num("#map-x"),
-      y: num("#map-y"),
-      z: num("#map-z"),
-    });
-    if (!r.ok) return whoSay(r.error, true);
-    whoSay(
-      `stepped - cost ${r.value.cost}` + (r.value.peril ? ` · ${r.value.peril}!` : "")
-    );
-  });
-
-  guarded("#map-lift", async () => {
-    const r = await tryCall("place_character", {
-      characterId: document.querySelector("#map-who").value,
-      x: null,
-      y: null,
-      z: null,
-    });
-    whoSay(r.ok ? "lifted off the map" : r.error, !r.ok);
-  });
-
-  guarded("#map-who-here", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const r = await tryCall("standing_in", { locationId: loc });
-    if (!r.ok) return whoSay(r.error, true);
-    const said = r.value.map((c) => `${c.name} (${c.x},${c.y},${c.z})`).join("  ·  ");
-    whoSay(r.value.length ? said : "nobody is standing on this map");
-  });
-
-  guarded("#map-erase", async () => {
-    const loc = mapWhere();
-    if (!loc) return;
-    const spots = PATCH(loc).map(({ x, y, z }) => ({ x, y, z }));
-    const r = await tryCall("erase_tiles", { locationId: loc, spots });
-    mapSay(r.ok ? `erased ${r.value}` : r.error, !r.ok);
-  });
-
-  /* ---------------- 235. drawing a map ----------------
-
-     THE SQUARES ARRIVE ALREADY RESOLVED. `map_at` runs `ground::at`
-     in Rust - a row, else the room's default, else nothing - so this
-     never has to decide what is at a square, and the picture cannot
-     disagree with where `stride::step` will let a creature walk. */
-
-  guarded("#mv-draw", async () => {
-    const loc = document.querySelector("#mv-where").value;
-    const el = document.querySelector("#mv-say");
-    if (!loc) {
-      el.textContent = "pick a place";
-      return;
-    }
-    const r = await tryCall("map_at", {
-      locationId: loc,
-      z: Number(document.querySelector("#mv-z").value) || 0,
-    });
-    if (!r.ok) {
-      el.textContent = r.error;
-      return;
-    }
-    el.textContent = drawMap(document.querySelector("#mv-canvas"), r.value);
-  });
 
   document.querySelector("#refresh-games").addEventListener("click", loadGames);
 

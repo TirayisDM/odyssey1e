@@ -179,6 +179,22 @@ function lay(ctx, word, x, y, facing, col, row) {
   ctx.restore();
 }
 
+/// Which square a point on the canvas is over, or null off the map.
+///
+/// 241. THE SAME `extent` THE DRAWING USES, so a click lands where the
+/// eye says it does. Hit-testing a grid is arithmetic - `floor(px /
+/// 32)` plus the origin - which is why there is no listener per
+/// square and why a forty-by-forty room costs nothing to make
+/// clickable.
+export function squareAt(view, px, py) {
+  const box = extent(view);
+  if (!box) return null;
+  const x = Math.floor(px / SQUARE) + box.minX;
+  const y = Math.floor(py / SQUARE) + box.minY;
+  if (x < box.minX || x > box.maxX || y < box.minY || y > box.maxY) return null;
+  return { x, y };
+}
+
 export function draw(canvas, view) {
   last = { canvas, view };
   const ctx = canvas.getContext("2d");

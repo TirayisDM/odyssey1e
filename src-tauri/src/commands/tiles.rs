@@ -830,6 +830,14 @@ pub struct Square {
     /// Does anything stop you entering? Decided here, by `footing`,
     /// so the picture and `stride` cannot differ about a wall.
     pub blocks: bool,
+    /// Squares of movement spent entering, or null where nothing can.
+    ///
+    /// 241. SO A DM CAN CHECK THE RULES BY POINTING AT A SQUARE.
+    /// Everything else about what crossing costs has only ever been
+    /// visible in SQL or a test; hovering is the cheapest way to find
+    /// out that the marsh you drew is difficult and the road beside it
+    /// is not.
+    pub cost: Option<i64>,
     /// Quarter turns clockwise from north, for the renderer to turn
     /// the tile by. Always 0 for a word that does not face.
     pub facing: i16,
@@ -908,6 +916,7 @@ pub fn map_at(
                 facing: stack.facing.quarter(),
                 drawn: drawn.contains_key(&(x, y)),
                 blocks: !stack.enterable(),
+                cost: stack.step_cost(),
                 outside: !bounds.allows(x, y),
             })
         })

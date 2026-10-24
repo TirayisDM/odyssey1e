@@ -74,6 +74,73 @@
 
 use std::fmt;
 
+/* ========================== WHICH WAY ========================== */
+
+/// Which way a tile points. North is up on the screen.
+///
+/// 238. SOME TILES ARE NOT SYMMETRICAL. A flight of stairs climbs in a
+/// direction; a ledge has an edge you fall off; a doorway sits in one
+/// wall rather than all four. The art is drawn once, with **the top of
+/// the image as the direction of travel**, and turned a quarter at a
+/// time.
+///
+/// A QUARTER TURN AND NOT AN ANGLE. Three hundred and sixty degrees
+/// would let somebody store 37, and a square grid has four sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Facing {
+    North,
+    East,
+    South,
+    West,
+}
+
+impl Facing {
+    /// From the stored quarter turn, clockwise from north.
+    pub fn of(quarter: i16) -> Option<Facing> {
+        match quarter {
+            0 => Some(Facing::North),
+            1 => Some(Facing::East),
+            2 => Some(Facing::South),
+            3 => Some(Facing::West),
+            _ => None,
+        }
+    }
+
+    pub fn quarter(self) -> i16 {
+        match self {
+            Facing::North => 0,
+            Facing::East => 1,
+            Facing::South => 2,
+            Facing::West => 3,
+        }
+    }
+
+    /// Does a step with this delta run along the axis this points down?
+    ///
+    /// ---------------------------------------------------------------
+    /// 238. THE WHOLE REASON A FACING IS A RULE AND NOT A PICTURE
+    /// ---------------------------------------------------------------
+    ///
+    /// A ramp built north-south is climbed by walking north or south.
+    /// Walking EAST across it is walking along a slope, not up one, and
+    /// should cost the climb it always did.
+    ///
+    /// **BOTH WAYS ALONG THE AXIS COUNT**, because you walk down a ramp
+    /// as well as up it - a facing says which way the art points, not
+    /// which way you are allowed to go.
+    ///
+    /// A DIAGONAL WITH A COMPONENT ALONG THE AXIS COUNTS TOO. Stepping
+    /// north-east onto a north-facing ramp is still going up the ramp,
+    /// and refusing it would make a creature square up first for no
+    /// reason anybody could see.
+    pub fn along(self, dx: i32, dy: i32) -> bool {
+        match self {
+            Facing::North | Facing::South => dy != 0,
+            Facing::East | Facing::West => dx != 0,
+        }
+    }
+}
+
 /* ======================== WHAT IT COSTS ========================= */
 
 /// What it costs to cross.
@@ -573,6 +640,25 @@ impl Terrain {
         }
     }
 
+    /// Does this word mean something different depending which way it
+    /// points?
+    ///
+    /// 238. A ROCK DOES NOT FACE. Turning a symmetrical tile changes
+    /// nothing, so a facing on one is noise somebody will eventually
+    /// read as meaningful - and the database stores a quarter turn for
+    /// every square whether it means anything or not.
+    ///
+    /// So this is what `paint_tiles` checks before accepting a turn:
+    /// the column holds 0..3 for everybody, and only these words are
+    /// allowed to put anything but 0 in it.
+    pub fn faces(self) -> bool {
+        use Terrain::*;
+        matches!(
+            self,
+            Doorway | Ramp | Stairs | Ledge | DoorOpen | DoorClosed | DoorBroken | IronGrate
+        )
+    }
+
     /// Is a change of height in or out of this square a walk?
     ///
     /// THE WHOLE CONTENT OF `Ramp` AND `Stairs`. Without it they are
@@ -659,6 +745,12 @@ pub struct Stack {
     pub surface: Terrain,
     /// What stands on it.
     pub cover: Option<Terrain>,
+    /// Which way the square points.
+    ///
+    /// 238. ON THE SQUARE, NOT ON THE WORD. "Stairs" is a kind of
+    /// ground; "these stairs climb north" is a fact about one place.
+    /// North for everything that does not face, which is most of it.
+    pub facing: Facing,
 }
 
 impl Stack {
@@ -667,7 +759,13 @@ impl Stack {
             sub: None,
             surface,
             cover: None,
+            facing: Facing::North,
         }
+    }
+
+    pub fn facing(mut self, facing: Facing) -> Self {
+        self.facing = facing;
+        self
     }
 
     pub fn under(mut self, cover: Terrain) -> Self {
@@ -790,6 +888,92 @@ mod tests {
         assert_eq!(Terrain::of_key("wood_wall"), None);
     }
 
+    /* ---------------- which way it points ---------------- */
+
+    #[test]
+    fn a_quarter_turn_reads_back_and_nothing_else_does() {
+        for q in 0..4 {
+            assert_eq!(Facing::of(q).unwrap().quarter(), q);
+        }
+        assert_eq!(Facing::of(4), None);
+        assert_eq!(Facing::of(-1), None);
+    }
+
+    #[test]
+    fn a_ramps_axis_is_both_ways_and_not_the_other_one() {
+        // A facing says which way the art points, not which way you
+        // may go - you walk down a ramp as well as up it.
+        assert!(Facing::North.along(0, 1));
+        assert!(Facing::North.along(0, -1));
+        assert!(!Facing::North.along(1, 0));
+
+        assert!(Facing::East.along(1, 0));
+        assert!(Facing::East.along(-1, 0));
+        assert!(!Facing::East.along(0, 1));
+    }
+
+    #[test]
+    fn north_and_south_are_one_axis_and_east_and_west_the_other() {
+        // Turning a ramp end for end does not change which way it is
+        // climbed, so the two pairs must agree.
+        for (dx, dy) in [(0, 1), (1, 0), (1, 1), (0, 0)] {
+            assert_eq!(Facing::North.along(dx, dy), Facing::South.along(dx, dy));
+            assert_eq!(Facing::East.along(dx, dy), Facing::West.along(dx, dy));
+        }
+    }
+
+    #[test]
+    fn a_diagonal_runs_along_both_axes() {
+        assert!(Facing::North.along(1, 1));
+        assert!(Facing::East.along(1, 1));
+    }
+
+    #[test]
+    fn standing_still_runs_along_nothing() {
+        for f in [Facing::North, Facing::East, Facing::South, Facing::West] {
+            assert!(!f.along(0, 0));
+        }
+    }
+
+    #[test]
+    fn only_the_asymmetrical_words_face() {
+        // A rock is the same whichever way it is turned, so storing a
+        // turn on one is noise somebody will read as meaningful.
+        for t in ALL {
+            let expected = matches!(
+                t,
+                Terrain::Doorway
+                    | Terrain::Ramp
+                    | Terrain::Stairs
+                    | Terrain::Ledge
+                    | Terrain::DoorOpen
+                    | Terrain::DoorClosed
+                    | Terrain::DoorBroken
+                    | Terrain::IronGrate
+            );
+            assert_eq!(t.faces(), expected, "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn everything_that_links_levels_also_faces() {
+        // A ramp that could not be turned would only ever climb north.
+        for t in ALL {
+            if t.links_levels() {
+                assert!(t.faces(), "{} eases a climb but cannot be turned", t.key());
+            }
+        }
+    }
+
+    #[test]
+    fn a_stack_points_north_until_it_is_turned() {
+        assert_eq!(Stack::of(Terrain::Rock).facing, Facing::North);
+        assert_eq!(
+            Stack::of(Terrain::Ramp).facing(Facing::West).facing,
+            Facing::West
+        );
+    }
+
     /* ---------------- which layer ---------------- */
 
     #[test]
@@ -841,6 +1025,7 @@ mod tests {
             sub: None,
             surface: Terrain::Grass,
             cover: None,
+            facing: Facing::North,
         };
         assert!(bad.legal().unwrap_err().contains("cannot be a surface"));
 

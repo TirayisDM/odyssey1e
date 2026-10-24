@@ -112,7 +112,15 @@ pub fn step(
     // THE CLIMB. Either square may be the ramp: you walk UP a ramp and
     // you walk ONTO one, and a flight of stairs is no use if only the
     // bottom step counts.
-    let eased = from.surface.links_levels() || to.surface.links_levels();
+    //
+    // 238. AND IT MUST RUN DOWN THE RAMP'S OWN AXIS. Until now a ramp
+    // eased a climb in EVERY direction, which made walking east across
+    // a north-south ramp as cheap as walking up it. A slope crossed
+    // sideways is a slope, not a staircase.
+    let dx = onto.x - at.x;
+    let dy = onto.y - at.y;
+    let ramped = |s: &Stack| s.surface.links_levels() && s.facing.along(dx, dy);
+    let eased = ramped(from) || ramped(to);
     let cost = match dz {
         1 if !eased => base + 1,
         // Up a ramp, along the flat, or down a single square - a drop
@@ -157,7 +165,7 @@ fn peril_of(need: Mode) -> Option<Peril> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terrain::Terrain;
+    use crate::terrain::{Facing, Terrain};
 
     fn ground(t: Terrain) -> Stack {
         Stack::of(t)
@@ -302,13 +310,74 @@ mod tests {
     }
 
     #[test]
-    fn a_ramp_makes_a_climb_an_ordinary_step() {
-        // THE WHOLE CONTENT OF `links_levels`, finally read.
+    fn a_ramp_makes_a_climb_an_ordinary_step_along_its_own_axis() {
+        // THE WHOLE CONTENT OF `links_levels`, finally read - and 238
+        // added the half that matters: DOWN THE RAMP'S OWN AXIS.
+        let up_the_ramp = step(
+            &ground(Terrain::Ramp),
+            here(),
+            &ground(Terrain::StoneFloor),
+            Point::new(5, 6, 1), // northward-southward, matching a north facing
+            walk(),
+        )
+        .unwrap();
+        assert_eq!(up_the_ramp.cost, 1);
+    }
+
+    #[test]
+    fn a_ramp_crossed_sideways_is_a_slope_and_costs_the_climb() {
+        // 238. THE CASE THAT WAS WRONG UNTIL THE ART ARRIVED. A ramp
+        // built north-south walked EAST across is walking along a
+        // slope, not up one.
+        let across = step(
+            &ground(Terrain::Ramp),
+            here(),
+            &ground(Terrain::StoneFloor),
+            Point::new(6, 5, 1), // eastward, across a north-facing ramp
+            walk(),
+        )
+        .unwrap();
+        assert_eq!(across.cost, 2, "crossing a ramp is still a climb");
+    }
+
+    #[test]
+    fn a_ramp_turned_to_face_the_step_eases_it_again() {
+        let turned = Stack::of(Terrain::Ramp).facing(Facing::East);
+        let s = step(
+            &turned,
+            here(),
+            &ground(Terrain::StoneFloor),
+            Point::new(6, 5, 1),
+            walk(),
+        )
+        .unwrap();
+        assert_eq!(s.cost, 1);
+    }
+
+    #[test]
+    fn a_ramp_is_walked_down_as_well_as_up() {
+        // A facing says which way the art points, not which way you
+        // are allowed to go.
+        let s = step(
+            &ground(Terrain::Ramp),
+            Point::new(5, 5, 1),
+            &ground(Terrain::StoneFloor),
+            Point::at(5, 4),
+            walk(),
+        )
+        .unwrap();
+        assert_eq!(s.cost, 1);
+    }
+
+    #[test]
+    fn a_diagonal_with_a_component_along_the_axis_still_counts() {
+        // Refusing it would make a creature square up first for a
+        // reason nobody could see.
         let s = step(
             &ground(Terrain::Ramp),
             here(),
             &ground(Terrain::StoneFloor),
-            Point::new(6, 5, 1),
+            Point::new(6, 6, 1),
             walk(),
         )
         .unwrap();
@@ -322,7 +391,7 @@ mod tests {
             &ground(Terrain::StoneFloor),
             here(),
             &ground(Terrain::Stairs),
-            Point::new(6, 5, 1),
+            Point::new(5, 6, 1),
             walk(),
         )
         .unwrap();
@@ -332,7 +401,7 @@ mod tests {
             &ground(Terrain::Stairs),
             here(),
             &ground(Terrain::StoneFloor),
-            Point::new(6, 5, 1),
+            Point::new(5, 6, 1),
             walk(),
         )
         .unwrap();

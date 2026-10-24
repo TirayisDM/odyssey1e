@@ -154,15 +154,33 @@ function extent(view) {
 }
 
 /// Draw one terrain word into a square: its art if there is any, its
-/// flat colour if not.
-function lay(ctx, word, x, y) {
+/// flat colour if not, turned by `facing` quarter turns.
+///
+/// 238. THE ART IS DRAWN ONCE, WITH THE TOP OF THE IMAGE AS THE
+/// DIRECTION OF TRAVEL, and turned here. A stairway climbing east is
+/// the same file as one climbing north.
+///
+/// A FLAT COLOUR IS NOT TURNED, because a rectangle has no top - and
+/// doing the transform anyway would cost four canvas operations per
+/// square on a map with no art at all.
+function lay(ctx, word, x, y, facing) {
   const img = tile(word);
-  if (img) {
-    ctx.drawImage(img, x, y, SQUARE, SQUARE);
-  } else {
+  if (!img) {
     ctx.fillStyle = paint(word);
     ctx.fillRect(x, y, SQUARE, SQUARE);
+    return;
   }
+  if (!facing) {
+    ctx.drawImage(img, x, y, SQUARE, SQUARE);
+    return;
+  }
+  // Turn about the square's own centre, then draw as if at the origin.
+  const half = SQUARE / 2;
+  ctx.save();
+  ctx.translate(x + half, y + half);
+  ctx.rotate((facing * Math.PI) / 2);
+  ctx.drawImage(img, -half, -half, SQUARE, SQUARE);
+  ctx.restore();
 }
 
 export function draw(canvas, view) {
@@ -195,13 +213,13 @@ export function draw(canvas, view) {
     // than one somebody wrote down, so that while a map is being
     // authored you can see what you actually authored.
     ctx.globalAlpha = s.drawn ? 1 : 0.55;
-    lay(ctx, s.surface, x, y);
+    lay(ctx, s.surface, x, y, s.facing);
     ctx.globalAlpha = 1;
 
     if (s.cover) {
       if (isSolid(s.cover)) {
         // A wall replaces the square.
-        lay(ctx, s.cover, x, y);
+        lay(ctx, s.cover, x, y, s.facing);
       } else {
         // Everything else is a layer ON the ground, so the ground
         // stays visible under it.
@@ -212,7 +230,7 @@ export function draw(canvas, view) {
         // an opaque rectangle and would hide what is beneath.
         const img = tile(s.cover);
         ctx.globalAlpha = img ? 1 : 0.6;
-        lay(ctx, s.cover, x, y);
+        lay(ctx, s.cover, x, y, s.facing);
         ctx.globalAlpha = 1;
       }
     }

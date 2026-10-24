@@ -44,7 +44,7 @@ use tauri::State;
 use crate::supabase::{self, AppState};
 use crate::grid::Point;
 use crate::ground::Bounds;
-use crate::terrain::{Stack, Terrain};
+use crate::terrain::{Facing, Stack, Terrain};
 
 /// How many rows go out in one request.
 ///
@@ -55,7 +55,8 @@ const CHUNK: usize = 1000;
 
 /// The columns a read asks for. Spelled out rather than `*` so a new
 /// column does not silently widen every payload.
-const COLUMNS: &str = "x,y,z,surface,cover,sub,surface_hp,cover_hp,leads_to,to_x,to_y,to_z";
+const COLUMNS: &str =
+    "x,y,z,surface,cover,sub,surface_hp,cover_hp,leads_to,to_x,to_y,to_z,facing";
 
 /// One square, as it crosses the wire.
 ///
@@ -85,6 +86,9 @@ pub struct Tile {
     pub to_y: Option<i32>,
     #[serde(default)]
     pub to_z: Option<i16>,
+    /// Quarter turns clockwise from north. See 238.
+    #[serde(default)]
+    pub facing: i16,
 }
 
 /// A square to erase. Points rather than a rectangle: points compose,
@@ -117,12 +121,31 @@ impl Tile {
         let at = self.at();
         let surface = word(Some(&self.surface), &at, "surface")?
             .ok_or_else(|| format!("{}: a square needs a surface", at))?;
+        let facing = Facing::of(self.facing)
+            .ok_or_else(|| format!("{}: a facing is 0, 1, 2 or 3 - quarter turns from north", at))?;
         let stack = Stack {
             sub: word(self.sub.as_ref(), &at, "sub")?,
             surface,
             cover: word(self.cover.as_ref(), &at, "cover")?,
+            facing,
         };
         stack.legal().map_err(|e| format!("{}: {}", at, e))?;
+
+        // 238. ONLY EIGHT WORDS MEAN ANYTHING BY TURNING. A quarter
+        // turn on a rock is noise somebody will later read as
+        // meaningful, so it is refused here rather than stored - the
+        // database constrains the range and leaves the vocabulary to
+        // Rust.
+        if facing != Facing::North {
+            let turns = stack.surface.faces() || stack.cover.is_some_and(|c| c.faces());
+            if !turns {
+                return Err(format!(
+                    "{}: {} is the same whichever way it is turned",
+                    at,
+                    stack.surface
+                ));
+            }
+        }
         Ok(stack)
     }
 
@@ -247,6 +270,7 @@ fn row(location_id: &str, t: &Tile) -> Value {
         "to_x": t.to_x,
         "to_y": t.to_y,
         "to_z": t.to_z,
+        "facing": t.facing,
     })
 }
 
@@ -689,6 +713,12 @@ fn recipe_of(v: &Value) -> Result<Option<Stack>, String> {
         to_x: None,
         to_y: None,
         to_z: None,
+        // 238. A RECIPE CANNOT DECLARE A FACING. "This room is stairs
+        // climbing north by default" is not a thing anybody means - a
+        // turn is a fact about one square, and a default that applied
+        // one to every square in the room would be wrong everywhere it
+        // was not placed deliberately.
+        facing: 0,
     };
     // The square it reports is (0,0,0), which is a lie about WHERE and
     // true about WHAT - so the message is rewritten to say "the
@@ -800,6 +830,9 @@ pub struct Square {
     /// Does anything stop you entering? Decided here, by `footing`,
     /// so the picture and `stride` cannot differ about a wall.
     pub blocks: bool,
+    /// Quarter turns clockwise from north, for the renderer to turn
+    /// the tile by. Always 0 for a word that does not face.
+    pub facing: i16,
     /// A row outside the room's declared bounds.
     ///
     /// 232: shrinking a map does not delete what falls outside it, and
@@ -872,6 +905,7 @@ pub fn map_at(
                 y,
                 surface: stack.surface.key().to_string(),
                 cover: stack.cover.map(|c| c.key().to_string()),
+                facing: stack.facing.quarter(),
                 drawn: drawn.contains_key(&(x, y)),
                 blocks: !stack.enterable(),
                 outside: !bounds.allows(x, y),
@@ -950,6 +984,7 @@ mod tests {
             to_x: None,
             to_y: None,
             to_z: None,
+            facing: 0,
         }
     }
 
@@ -995,6 +1030,52 @@ mod tests {
         let mut tile = t("dirt");
         tile.cover = Some("   ".into());
         assert_eq!(tile.stack().unwrap().cover, None);
+    }
+
+    #[test]
+    fn a_turn_on_something_symmetrical_is_refused() {
+        // 238. A quarter turn on a rock is noise somebody will later
+        // read as meaningful.
+        let mut r = t("rock");
+        r.facing = 1;
+        let e = r.stack().unwrap_err();
+        assert!(e.contains("same whichever way"), "{}", e);
+        assert!(e.contains("(3, 4, 0)"), "{}", e);
+    }
+
+    #[test]
+    fn a_turn_on_something_that_faces_is_kept() {
+        let mut s = t("stairs");
+        s.facing = 3;
+        assert_eq!(s.stack().unwrap().facing, Facing::West);
+    }
+
+    #[test]
+    fn a_door_may_turn_even_though_its_doorway_is_the_surface() {
+        // The cover is what faces here, and either layer should allow
+        // the turn.
+        let mut d = t("doorway");
+        d.cover = Some("door_closed".into());
+        d.facing = 2;
+        assert_eq!(d.stack().unwrap().facing, Facing::South);
+    }
+
+    #[test]
+    fn a_facing_outside_the_quarter_turns_is_refused() {
+        let mut bad = t("stairs");
+        bad.facing = 4;
+        let e = bad.stack().unwrap_err();
+        assert!(e.contains("0, 1, 2 or 3"), "{}", e);
+    }
+
+    #[test]
+    fn a_recipe_cannot_declare_a_facing() {
+        // "This room is stairs climbing north by default" is not a
+        // thing anybody means.
+        let r = recipe_of(&json!({"surface": "stairs", "facing": 2}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.facing, Facing::North);
     }
 
     #[test]

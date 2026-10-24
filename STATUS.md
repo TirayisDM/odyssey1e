@@ -9612,6 +9612,89 @@ one.
 Test Inn 1's recipe default, so forty-four of its forty-eight squares
 are now drawn art rather than flat grey - from one file and no rows.
 
+## 238. Which way a square points
+
+**Found by drawing.** The eighteen ground tiles arrived and four of
+them are not symmetrical: a doorway sits in one wall rather than all
+four, a flight of stairs climbs in a direction, a ramp inclines one
+way, a ledge has an edge you fall off.
+
+Dave drew them with **the top of the image as the direction of travel**
+and asked how they would be turned. The answer is a column - a turn is
+a fact about ONE SQUARE and not about the kind of ground.
+
+### And it was never only a picture
+
+`stride.rs` has said since 230 that a ramp makes a change of height an
+ordinary step rather than a climb. **THAT WAS TRUE IN EVERY DIRECTION,
+WHICH IS WRONG.**
+
+A ramp built north-south is climbed by walking north or south. Walking
+EAST across it is walking along a slope, not up one, and should cost
+the climb it always did.
+
+**TWO EXISTING TESTS FAILED THE MOMENT THE RULE WENT IN**, and they
+were right to. They stepped east onto a north-facing ramp and expected
+it to be free. Nobody would have noticed until a player got a free
+climb sideways across a ramp - **an art question found a rules bug.**
+
+| | cost |
+|---|---|
+| north-facing ramp, stepped north or south | **1** |
+| north-facing ramp, stepped **east** | **2** |
+| ramp turned east, stepped east | **1** |
+| diagonal with a component along the axis | **1** |
+
+**BOTH DIRECTIONS ALONG THE AXIS COUNT**, because a facing says which
+way the art points, not which way you are allowed to go - you walk
+down a ramp as well as up it. And a diagonal counts, because making a
+creature square up first is a rule nobody could see the reason for.
+
+### A quarter turn, not an angle
+
+`0..3`, clockwise from north, north being up on the screen. Degrees
+would let somebody store 37, and a square grid has four sides.
+
+### NOT NULL DEFAULT 0, and no CHECK about which words may turn
+
+Every square gets a facing whether it means anything or not. A nullable
+one would make "this does not face" and "nobody has said" look
+identical, and rotating a symmetrical tile changes nothing, so 0 is a
+harmless answer for rock.
+
+**WHICH WORDS MAY ACTUALLY TURN IS A RULE AND LIVES IN RUST.**
+`Terrain::faces()` names the eight - doorway, ramp, stairs, ledge, the
+three doors, the grate - and `paint_tiles` refuses a turn on anything
+else: *"rock is the same whichever way it is turned"*.
+
+A CHECK could have expressed it, since the terrain and the facing are
+on the same row. It would have been the terrain vocabulary in a second
+place, which 226 decided against for this column's neighbours. **The
+database constrains the RANGE because that is a fact about the type,
+and leaves the vocabulary alone.**
+
+### A recipe cannot declare a facing
+
+"This room is stairs climbing north by default" is not a thing anybody
+means. A turn is a fact about one square, and a default applying one to
+every square in the room would be wrong everywhere it was not placed
+deliberately.
+
+### The renderer turns the art, and only the art
+
+The tile is drawn once and rotated about the square's own centre, so a
+stairway climbing east is the same file as one climbing north.
+
+**A FLAT COLOUR IS NOT TURNED.** A rectangle has no top, and doing the
+transform anyway would cost four canvas operations per square on a map
+with no art at all.
+
+### A guard worth having
+
+`everything_that_links_levels_also_faces` - a ramp that could not be
+turned would only ever climb north. That cannot silently become true
+again.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-23 - written for John pulling onto his own machine

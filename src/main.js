@@ -9698,15 +9698,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   // held by `a_recipe_cannot_say_what_a_tile_could_not`.
   (async () => {
     const words = await call("terrain_words");
-    const sel = document.querySelector("#map-surface");
-    if (!Array.isArray(words) || !sel) return;
-    sel.innerHTML = '<option value="">— no default ground —</option>';
-    for (const w of words.filter((x) => x.surface)) {
-      const o = document.createElement("option");
-      o.value = w.key;
-      o.textContent = w.key;
-      sel.append(o);
-    }
+    if (!Array.isArray(words)) return;
+    // 240. BOTH PICKERS FROM THE ONE CALL. `terrain_words` already
+    // says which layers each word is legal in, so the cover list costs
+    // nothing beyond a filter - and neither list can drift from
+    // `terrain::ALL`.
+    const fill = (id, keep, blank) => {
+      const sel = document.querySelector(id);
+      if (!sel) return;
+      sel.innerHTML = `<option value="">${blank}</option>`;
+      for (const w of words.filter(keep)) {
+        const o = document.createElement("option");
+        o.value = w.key;
+        o.textContent = w.key;
+        sel.append(o);
+      }
+    };
+    fill("#map-surface", (w) => w.surface, "— no default ground —");
+    fill("#map-cover", (w) => w.cover, "— no cover —");
   })();
 
   // 239. PAINT ONE SQUARE, TURNED. The surface picker and the x/y/z
@@ -9727,13 +9736,17 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     const facing = Number(document.querySelector("#map-facing").value) || 0;
+    const cover = document.querySelector("#map-cover").value || null;
     const r = await tryCall("paint_tiles", {
       locationId: loc,
-      tiles: [{ x: num("#map-x"), y: num("#map-y"), z: num("#map-z"), surface, facing }],
+      tiles: [
+        { x: num("#map-x"), y: num("#map-y"), z: num("#map-z"), surface, cover, facing },
+      ],
     });
     mapSay(
       r.ok
-        ? `painted ${surface} at (${num("#map-x")},${num("#map-y")},${num("#map-z")}) facing ${facing}`
+        ? `painted ${surface}${cover ? " + " + cover : ""} at ` +
+            `(${num("#map-x")},${num("#map-y")},${num("#map-z")}) facing ${facing}`
         : r.error,
       !r.ok
     );
@@ -9748,7 +9761,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       width: num("#map-w") || null,
       height: num("#map-h") || null,
       surface: document.querySelector("#map-surface").value || null,
-      cover: null,
+      // 240. A room may default to ground WITH something on it - a
+      // field of grass is dirt with grass on it, not a `grass` surface.
+      cover: document.querySelector("#map-cover").value || null,
       sub: null,
     });
     say("#map-mapsay", r.ok ? "described" : r.error, !r.ok);

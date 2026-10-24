@@ -53,7 +53,7 @@ Illustrator sources.
 
 | | |
 |---|---|
-| source | **32 × 32** pixels |
+| source | **32 × 32** pixels — **enforced**: the renderer refuses any other size, warns in the console, and falls back to the flat colour |
 | displayed at | **32 px** — one for one, no scaling at all |
 | scaling | nearest-neighbour (`imageSmoothingEnabled = false`, already set) |
 
@@ -209,11 +209,23 @@ fallen timber — and art that blurs them undoes the rename.
 
 ## 5. Optional, and worth knowing about
 
-**Variants.** The reference engine had `terrain_pattern_uri(terrain,
-variant_id)` — two or three versions of a tile, chosen by position, so
-a large floor does not visibly repeat. Nice, not needed, and the
-renderer can add it without the art changing: `dirt.png`, `dirt_2.png`,
-`dirt_3.png`.
+**Variants — BUILT 2026-10-24.** Two or three versions of a tile so a
+large floor does not visibly repeat.
+
+**NAMING: `grass.png`, `grass1.png`, `grass2.png`** — the base, then
+numbered from 1, no separator. Either the base or the numbers may be
+absent; `grass1/2/3` with no `grass.png` is perfectly fine, which is
+how the first set arrived.
+
+The renderer probes upward and **stops at the first gap**, so no
+manifest is needed and a new variant is a file rather than a code
+change. It also means `grass1, grass2, grass4` finds three and misses
+the fourth — a naming mistake worth noticing rather than papering
+over.
+
+**Which variant a square gets is decided by its position**, not at
+random: a square must look the same on every redraw, or a floor would
+shimmer whenever a door opened.
 
 **Creature tokens.** `actor.svg`, `warrior.png` and the two `Common`
 files exist. The renderer currently draws a disc with an initial, which

@@ -57,100 +57,96 @@ const SQUARE = 32;
    --------------------------------------------------------------------- */
 
 const TILES = "assets/tiles/";
-const art = new Map(); // key -> HTMLImageElement | null (null = asked, absent)
+const art = new Map(); // key -> HTMLImageElement[] (empty = asked, absent)
 let last = null; // the most recent draw, so a late image can repaint it
 
-function tile(word) {
-  if (art.has(word)) return art.get(word);
-  art.set(word, null); // pessimistic: assume absent until it loads
+/// 240. HOW MANY NUMBERED VARIANTS TO LOOK FOR BEYOND THE BASE.
+///
+/// Probing stops at the first miss, so a word with one tile costs two
+/// requests and a word with none costs one. This only caps how far a
+/// gap can be bridged: `grass1, grass2, grass4` would find three and
+/// miss the fourth, which is a naming mistake worth noticing rather
+/// than papering over.
+const VARIANTS = 6;
+
+/// Every square is 32x32. A tile that is not gets refused.
+///
+/// 240. A WRONG-SIZED TILE IS A SILENT BLUR. `grass.png` arrived at
+/// 58x57 and canvas would have squashed it into the cell without
+/// complaint - an ordinary-looking square that is quietly wrong, which
+/// is this project's named defect. Better a missing tile and a flat
+/// colour, which is obviously unfinished.
+const EXPECTED = 32;
+
+function load(src, onOk, onFail) {
   const img = new Image();
   img.onload = () => {
-    art.set(word, img);
-    // ONE REPAINT, not one per tile: by the time this runs the word is
-    // cached, so the redraw asks for nothing new.
-    if (last) draw(last.canvas, last.view);
+    if (img.naturalWidth !== EXPECTED || img.naturalHeight !== EXPECTED) {
+      console.warn(
+        `${src} is ${img.naturalWidth}x${img.naturalHeight}, not ${EXPECTED}x${EXPECTED} - not drawn`
+      );
+      onFail();
+      return;
+    }
+    onOk(img);
   };
-  img.onerror = () => art.set(word, null); // remembered, never retried
-  img.src = TILES + word + ".png";
-  return null;
+  img.onerror = onFail;
+  img.src = src;
 }
 
-// THE ONE PLACE COLOURS LIVE. Flat, and chosen to be told apart rather
-// than to be handsome - this is a diagram until the tile art is wired.
-const PAINT = {
-  // ground
-  rock: "#6b6b73",
-  dirt: "#6b543c",
-  mud: "#4f4030",
-  sand: "#c2ab78",
-  scree: "#8a8578",
-  road: "#8c8275",
-  stone_floor: "#56565e",
-  wood_floor: "#7a5a37",
-  marsh: "#4a5540",
-  ice: "#b8d8e0",
-  shallow_water: "#4a7f9e",
-  deep_water: "#28527a",
-  lava: "#c2451c",
-  pit: "#17171b",
-  ledge: "#5c5248",
-  doorway: "#453b30",
-  ramp: "#6f6354",
-  stairs: "#7d7366",
-  // covers
-  grass: "#4e7a3c",
-  snow: "#e8eef2",
-  brush: "#44632f",
-  trees: "#2f5223",
-  vines: "#3d6b33",
-  rubble: "#7d7368",
-  door_open: "#8a6b3f",
-  door_closed: "#8a6b3f",
-  door_broken: "#6b4f2c",
-  iron_grate: "#4a4a52",
-  // walls
-  stone_wall: "#3c3c44",
-  timber_wall: "#5c4426",
-  rock_wall: "#4a4a50",
-  wooden_wall: "#4a3a22",
-  ice_wall: "#8fb8c6",
-};
-
-const UNKNOWN = "#ff00ff"; // a word the palette forgot, shouting about it
-
-const paint = (word) => PAINT[word] || UNKNOWN;
-
-/// Which covers are drawn as SOLID rather than as a layer on the ground.
+/// The art for a word: its base tile and any numbered variants.
 ///
-/// A wall REPLACES its square - you should not be able to see the
-/// floor it stands on, because you cannot walk on it. Snow and grass
-/// sit ON the ground and must not hide it.
-const isSolid = (word) => word.endsWith("_wall") || word === "trees" || word.startsWith("door_");
-
-/// The extent to draw: the declared room, plus anything outside it.
+/// 240. VARIANTS SO A FLOOR DOES NOT VISIBLY REPEAT. `grass.png`,
+/// `grass1.png`, `grass2.png` - whichever exist. Probing walks upward
+/// and stops at the first miss, so nothing needs a manifest and a new
+/// variant is a file, not a code change.
 ///
-/// 232 decided that shrinking a map does not delete what falls outside
-/// it - "a tile outside the declared room should look WRONG, not
-/// vanish" - so the canvas has to be big enough to show both.
-function extent(view) {
-  let minX = 0;
-  let minY = 0;
-  let maxX = (view.width || 1) - 1;
-  let maxY = (view.height || 1) - 1;
-  if (!view.width || !view.height) {
-    minX = Infinity;
-    minY = Infinity;
-    maxX = -Infinity;
-    maxY = -Infinity;
-  }
-  for (const s of view.squares) {
-    minX = Math.min(minX, s.x);
-    minY = Math.min(minY, s.y);
-    maxX = Math.max(maxX, s.x);
-    maxY = Math.max(maxY, s.y);
-  }
-  if (!Number.isFinite(minX)) return null; // nothing to draw at all
-  return { minX, minY, maxX, maxY };
+/// EACH FILE IS ASKED FOR ONCE. A miss is remembered, so a word with no
+/// art does not re-request on every redraw; a hit repaints once,
+/// because the image lands after the frame that wanted it.
+function tiles(word) {
+  if (art.has(word)) return art.get(word);
+  const found = [];
+  art.set(word, found);
+
+  const repaint = () => {
+    if (last) draw(last.canvas, last.view);
+  };
+  // Walk the numbered ones in order and stop at the first gap, so the
+  // probe is bounded by what actually exists.
+  const probe = (n) => {
+    if (n > VARIANTS) return;
+    load(
+      `${TILES}${word}${n}.png`,
+      (img) => {
+        found.push(img);
+        repaint();
+        probe(n + 1);
+      },
+      () => {}
+    );
+  };
+  load(
+    `${TILES}${word}.png`,
+    (img) => {
+      found.unshift(img);
+      repaint();
+    },
+    () => {}
+  );
+  probe(1);
+  return found;
+}
+
+/// Which variant this square gets.
+///
+/// 240. DECIDED BY POSITION, NOT AT RANDOM. A square must look the
+/// same on every redraw, or a floor would shimmer whenever a door
+/// opened. Two primes so neighbours differ rather than striping.
+function variant(list, x, y) {
+  if (list.length < 2) return list[0];
+  const i = (((x * 31 + y * 17) % list.length) + list.length) % list.length;
+  return list[i];
 }
 
 /// Draw one terrain word into a square: its art if there is any, its
@@ -163,8 +159,8 @@ function extent(view) {
 /// A FLAT COLOUR IS NOT TURNED, because a rectangle has no top - and
 /// doing the transform anyway would cost four canvas operations per
 /// square on a map with no art at all.
-function lay(ctx, word, x, y, facing) {
-  const img = tile(word);
+function lay(ctx, word, x, y, facing, col, row) {
+  const img = variant(tiles(word), col, row);
   if (!img) {
     ctx.fillStyle = paint(word);
     ctx.fillRect(x, y, SQUARE, SQUARE);
@@ -213,13 +209,13 @@ export function draw(canvas, view) {
     // than one somebody wrote down, so that while a map is being
     // authored you can see what you actually authored.
     ctx.globalAlpha = s.drawn ? 1 : 0.55;
-    lay(ctx, s.surface, x, y, s.facing);
+    lay(ctx, s.surface, x, y, s.facing, s.x, s.y);
     ctx.globalAlpha = 1;
 
     if (s.cover) {
       if (isSolid(s.cover)) {
         // A wall replaces the square.
-        lay(ctx, s.cover, x, y, s.facing);
+        lay(ctx, s.cover, x, y, s.facing, s.x, s.y);
       } else {
         // Everything else is a layer ON the ground, so the ground
         // stays visible under it.
@@ -228,9 +224,9 @@ export function draw(canvas, view) {
         // transparency, so snow drawn over a road shows the road
         // without being faded. The 60% is for a FLAT COLOUR, which is
         // an opaque rectangle and would hide what is beneath.
-        const img = tile(s.cover);
-        ctx.globalAlpha = img ? 1 : 0.6;
-        lay(ctx, s.cover, x, y, s.facing);
+        const has = tiles(s.cover).length > 0;
+        ctx.globalAlpha = has ? 1 : 0.6;
+        lay(ctx, s.cover, x, y, s.facing, s.x, s.y);
         ctx.globalAlpha = 1;
       }
     }
@@ -283,12 +279,12 @@ export function draw(canvas, view) {
 
   const implied = view.squares.filter((s) => !s.drawn).length;
   const stray = view.squares.filter((s) => s.outside).length;
-  const drawnArt = [...art.values()].filter(Boolean).length;
+  const drawnArt = [...art.values()].reduce((n, v) => n + v.length, 0);
   return (
     `${cols}x${rows} · ${view.squares.length} squares` +
     (implied ? ` (${implied} from the recipe)` : "") +
     (stray ? ` · ${stray} outside the room` : "") +
     ` · ${view.standing.length} standing` +
-    (drawnArt ? ` · ${drawnArt} tile${drawnArt === 1 ? "" : "s"} of art` : "")
+    (drawnArt ? ` · ${drawnArt} tile image${drawnArt === 1 ? "" : "s"}` : "")
   );
 }

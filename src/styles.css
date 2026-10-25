@@ -1209,3 +1209,11 @@ h2.foldhead.shut{margin-bottom:.15rem}
    is pixel art and a fractional scale would blur it. */
 .mapcanvas { max-width: none; }
 .world-pane[data-world="map"] { overflow-x: auto; }
+
+/* 246. The shelf's name box. Wide enough for a real name - "before
+   the dragons" is the kind of thing a DM types - and it shares the
+   row with four controls, so it does not grow. */
+.vname {
+  min-width: 14rem;
+  flex: 1 1 14rem;
+}

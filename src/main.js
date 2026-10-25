@@ -9674,7 +9674,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     forgetArt();
     mvSay("asked for every tile image again");
   });
-  document.querySelector("#mv-where").addEventListener("change", drawLevel);
+  // A different place is a different map AND a different shelf.
+  document.querySelector("#mv-where").addEventListener("change", async () => {
+    await drawLevel();
+    await loadShelf("");
+  });
   document.querySelector("#mv-z").addEventListener("change", drawLevel);
 
   // A level at a time is what you actually do; typing a number is what
@@ -9713,6 +9717,102 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
     if (!r.ok) return mvSay(r.error, true);
     await drawLevel();
+  });
+
+
+  /* ---- 246. the shelf ---- */
+
+  // SAVED VERSIONS OF THIS MAP. 245 built the commands and nothing
+  // called them; these four controls are the whole of what was
+  // missing. There is no Save button on purpose - every click is
+  // already an INSERT - and 243 records why that is not an omission.
+
+  // Which version is selected, kept across a refill so saving does
+  // not move the selection out from under you.
+  async function loadShelf(keep) {
+    const sel = document.querySelector("#mv-ver");
+    const loc = mvWhere();
+    const want = keep || sel.value;
+    sel.innerHTML = "";
+    if (!loc) return;
+    const list = await call("list_map_versions", { locationId: loc });
+    if (!Array.isArray(list) || list.length === 0) {
+      sel.innerHTML = '<option value="">— nothing saved yet —</option>';
+      return;
+    }
+    for (const v of list) {
+      const o = document.createElement("option");
+      o.value = v.id;
+      // The room's size comes free - 243 made width and height
+      // columns so a listing need not drag the squares. The date is
+      // the DM's own locale: a shelf is read, not parsed.
+      const size = v.width && v.height ? v.width + "x" + v.height : "unmeasured";
+      const when = v.saved_at ? new Date(v.saved_at).toLocaleString() : "";
+      o.textContent = v.name + " · " + size + (when ? " · " + when : "");
+      sel.append(o);
+    }
+    if (want && [...sel.options].some((o) => o.value === want)) sel.value = want;
+  }
+
+  guarded("#mv-save", async () => {
+    const loc = mvWhere();
+    if (!loc) return mvSay("pick a place", true);
+    const box = document.querySelector("#mv-vname");
+    const r = await tryCall("save_map_as", { locationId: loc, name: box.value });
+    if (!r.ok) return mvSay(r.error, true);
+    box.value = "";
+    await loadShelf(r.value.id);
+    // THE COUNT IS THE DRAWN SQUARES, NOT THE ROOM. A 20x20 room with
+    // four painted squares saves four, because the other 396 are the
+    // recipe and are saved as the recipe.
+    mvSay(
+      'saved "' + r.value.name + '" · ' +
+        r.value.squares + " drawn square" + (r.value.squares === 1 ? "" : "s") +
+        " and the room's recipe"
+    );
+  });
+
+  guarded("#mv-load", async () => {
+    const sel = document.querySelector("#mv-ver");
+    if (!sel.value) return mvSay("nothing selected to load", true);
+    // LOADING REPLACES WHAT IS DRAWN. The version being loaded stays
+    // on the shelf, so this is undoable only if the CURRENT map is
+    // also saved - which is exactly what the warning says.
+    const what = sel.options[sel.selectedIndex].textContent;
+    if (
+      !confirm(
+        "Load " + what + "?\n\n" +
+          "This replaces everything drawn on this map, on every level. " +
+          "Save the current one first if you want it back."
+      )
+    ) {
+      return;
+    }
+    const r = await tryCall("load_map_version", { versionId: sel.value });
+    if (!r.ok) return mvSay(r.error, true);
+    // 217. WHAT HAPPENED, NOT WHAT WAS ASKED FOR. Written, removed
+    // and - the one worth reading - how many doors lost their
+    // destination because the place they opened on is gone.
+    const v = r.value;
+    mvSay(
+      'loaded "' + v.name + '" · ' + v.written + " written, " + v.removed + " removed" +
+        (v.links_dropped
+          ? " · " + v.links_dropped + " door" + (v.links_dropped === 1 ? "" : "s") +
+            " lost: those places no longer exist"
+          : "")
+    );
+    await drawLevel();
+  });
+
+  guarded("#mv-vdel", async () => {
+    const sel = document.querySelector("#mv-ver");
+    if (!sel.value) return mvSay("nothing selected to delete", true);
+    const what = sel.options[sel.selectedIndex].textContent;
+    if (!confirm("Delete the saved map " + what + "? The drawn map is not touched.")) return;
+    const r = await tryCall("delete_map_version", { versionId: sel.value });
+    if (!r.ok) return mvSay(r.error, true);
+    await loadShelf("");
+    mvSay("deleted");
   });
 
   /* ---- the canvas itself ---- */

@@ -10095,6 +10095,81 @@ warnings, but **the round trip through PostgREST is unverified** -
 to press. Four controls in the Map pane is the next cycle, and 242 is
 four hours old as a reminder of what shipping unexercised code buys.
 
+## 246. The shelf, with controls
+
+**2026-10-24.** Dave: *"do the controls"*. 245 built four commands and
+nothing could reach them; this is the row that reaches them.
+
+A fifth row in the Map pane: a version dropdown, `Load`, `Delete`, a
+name box, `Save as`.
+
+### THERE IS NO SAVE BUTTON, AND THE MARKUP SAYS WHY
+
+A comment in `index.html` at the row says it, because the absence is
+the kind of thing a later reader fixes:
+
+> There is no Save button, and that is not an omission: every click is
+> an INSERT, so the map is already saved.
+
+### What the dropdown says, and what it costs
+
+`name · 20x20 · 24/10/2026, 19:41`.
+
+The size comes free - 243 made `width` and `height` columns so a
+listing need not drag the squares, and 245's `VERSION_COLUMNS` leaves
+the blob behind. **A shelf of ten versions costs five fields each
+rather than a megabyte and a half of jsonb.**
+
+The date is `toLocaleString`, the DM's own locale. A shelf is read by
+a person, not parsed by anything.
+
+### Load asks first, because load replaces
+
+> This replaces everything drawn on this map, on every level. Save the
+> current one first if you want it back.
+
+Both halves are true and the second is the useful one: the version
+being loaded stays on the shelf, so a load is undoable **only if the
+current map was also saved.** Saying "are you sure?" and leaving the
+DM to work that out would be the polite version of hiding it.
+
+`Delete` says "the drawn map is not touched", for the same reason in
+reverse - a button next to Load that said only "Delete?" could
+reasonably be read as deleting the map.
+
+### What it reports is what happened
+
+217, in the pane:
+
+```
+loaded "before the dragons" · 40 written, 12 removed
+  · 2 doors lost: those places no longer exist
+```
+
+The doors are the line worth having. 245's `keep_link` drops a link
+whose destination was deleted and counts it; without the count, a
+version would come back one door short and nothing would say so -
+which is the named defect, in a feature built to protect against loss.
+
+A save reports **drawn squares**, and says so: "4 drawn squares and
+the room's recipe". A 20x20 room with four painted squares saves four,
+because the other 396 ARE the recipe. A count of 400 would be a
+plausible-looking lie.
+
+### Changing the place changes the shelf
+
+`#mv-where` now reloads both the picture and the version list. A shelf
+belonging to the last place you looked at, sitting above a map of this
+one, with Load enabled, is the worst small bug available in this row.
+
+### Still unverified in the app at the time of writing
+
+Zero warnings, 1,270 Rust tests, `npm test` green. **The round trip
+through PostgREST has not been exercised** - 245 said that and it is
+still true until somebody presses Save as. What is there to test in
+Rust is tested; the fetching is not testable without a database and
+these four commands are mostly fetching.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10121,7 +10196,7 @@ column.
 
 ### What happened: the map exists now
 
-Twenty-one cycles, 225 to 245. Read those entries rather than this summary
+Twenty-two cycles, 225 to 246. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -10179,10 +10254,11 @@ maps with their own origins, so leaving one always needs a link.
 - **No undo.** You paint by clicking, and a stray click is a change to
   the map. 241. Saved versions (245) are the nearest thing: "save as
   *before the dragons*" and load it back.
-- **Nothing calls the shelf.** `save_map_as`, `list_map_versions`,
-  `load_map_version` and `delete_map_version` are registered and
-  unreachable - 245 built the commands and not the controls, so the
-  round trip through PostgREST has never run.
+- **The shelf has not been exercised.** 246 wired `Save as` / `Load`
+  / `Delete` into the Map pane and the four commands build and pass
+  what can be tested, but the round trip through PostgREST had not
+  been pressed when this was written. Press it first if you are about
+  to build on it.
 - **No pan or zoom.** A room wider than the pane is squeezed by CSS,
   which is readable and not sharp. 40x40 needs this first.
 - **No fog.** Phase 4. The RLS policy on `tiles` is DM-only, which is

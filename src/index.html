@@ -1162,6 +1162,20 @@
               <button id="mv-lift" class="ghost tiny">Lift off the map</button>
             </div>
 
+            <!-- 246. THE SHELF. There is no Save button, and that is
+                 not an omission: every click is an INSERT, so the map
+                 is already saved. This is "save as" - a named copy of
+                 the whole map, every level, that can be put back.
+                 Load REPLACES what is drawn, so it asks first. -->
+            <div class="row maprow">
+              <span class="maplabel">shelf</span>
+              <select id="mv-ver" title="saved versions of this map, newest first"></select>
+              <button id="mv-load" class="ghost tiny">Load</button>
+              <button id="mv-vdel" class="ghost tiny">Delete</button>
+              <input id="mv-vname" class="vname" placeholder="save as, e.g. before the dragons" />
+              <button id="mv-save" class="ghost tiny">Save as</button>
+            </div>
+
             <div id="mv-say" class="muted"></div>
             <!-- What is under the cursor, including what it COSTS -
                  the only way to check the rules without reading SQL. -->

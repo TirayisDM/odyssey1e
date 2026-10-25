@@ -11,6 +11,14 @@ found and `Dirt.png` or `dirt_tile.png` is not.
 
 ## 1. What already exists, honestly
 
+> **UPDATE, 2026-10-24.** This section was written when nothing had
+> been drawn for this project. **Eighteen ground tiles now exist** at
+> 32×32 in `src/assets/tiles/`, plus three `grass` variants, all drawn
+> by Dave on 23-24 October. **Fifteen words still have no tile: 10
+> covers and 5 walls.** Section 4 is the live inventory; what follows
+> here is the audit of the OLD art and the reason MAP.md could not be
+> trusted about it.
+
 MAP.md calls this "the 16x16 SVG art". Having looked in
 `G:\My Drive\osdungeon\art`:
 
@@ -149,11 +157,15 @@ they should be legible in the art without reading a legend.
 
 ### Ground — 18 tiles, opaque
 
+**ALL EIGHTEEN DONE, 2026-10-24.** 32×32, in `src/assets/tiles/`,
+drawn by the renderer. `marsh` and `mud` were redrawn later the same
+day. The notes below are what each one is FOR, which still matters
+when one gets redrawn.
+
 | file | notes |
 |---|---|
 | `rock.png` | bare stone, walkable |
-| | **all 18 DONE, 2026-10-24** — 32×32, indexed colour, in `src/assets/tiles/` |
-| `dirt.png` | **DONE** — 32×32 RGBA, in `src/assets/tiles/`, drawn by the renderer |
+| `dirt.png` | plain earth |
 | `mud.png` | difficult; should look slow |
 | `sand.png` | difficult |
 | `scree.png` | difficult; loose stone |
@@ -171,7 +183,7 @@ they should be legible in the art without reading a legend.
 | `ramp.png` | a change of height that costs nothing extra |
 | `stairs.png` | the same, built |
 
-### Covers — 10 tiles, **transparent**
+### Covers — 10 tiles, **transparent** — **NONE DRAWN YET**
 
 | file | blocks | blocks sight | notes |
 |---|---|---|---|
@@ -186,7 +198,7 @@ they should be legible in the art without reading a legend.
 | `door_broken.png` | **yes** | **yes** | opaque — **jammed, not open.** Should read as ruined and still in the way |
 | `iron_grate.png` | **yes** | no | **the hard one.** Stops a body and not an eye, so it must look impassable AND see-through |
 
-### Walls — 5 tiles, opaque
+### Walls — 5 tiles, opaque — **NONE DRAWN YET**
 
 Legal as both a surface and a cover: as a **cover** it is the wall in
 your way, as a **surface** it is the top of one you are standing on. A
@@ -246,6 +258,41 @@ colour for any tile that is missing, so **art arrives one at a time and
 nothing breaks.** Each file is asked for once: a miss is remembered as
 a miss and never re-requested, a hit triggers one repaint because the
 image lands after the frame that wanted it.
+
+### Variants, so a floor does not visibly repeat (240)
+
+`grass.png`, `grass1.png`, `grass2.png` — whichever exist. The probe
+walks upward from the base and **stops at the first gap**, so nothing
+needs a manifest and a new variant is a file rather than a code
+change. Which variant a square gets is decided by its POSITION, not at
+random, or a floor would shimmer every time a door opened.
+
+`grass1` through `grass3` exist today. **`grass.png` itself is 58×57
+and is therefore not drawn** — see below.
+
+### A wrong-sized tile is refused and named (240/242)
+
+Canvas would squash a 58×57 tile into a 32×32 cell without complaint:
+an ordinary-looking square that is quietly wrong, which is this
+project's named defect. So `map.js` refuses anything that is not
+exactly 32×32 and the Map pane's summary line ends with the filename:
+
+```
+NOT 32x32, so not drawn: grass.png
+```
+
+Until 242 that refusal was only a `console.warn`, which is not open
+while somebody is drawing tiles, and `grass.png` was quietly undrawn
+for two days.
+
+### Redrawing a tile while the app is open
+
+**"Reload art"**, next to `Draw` in the Map tab. The webview caches a
+tile for the life of the session, so a file saved over after launch
+would keep showing the old picture; this empties the cache and asks
+again. Every tile request also carries a cache-busting token set to
+the moment the cache was last emptied, so a fresh launch always
+re-reads from disk.
 
 That is deliberate: MAP.md records that the Apps Script prototype had a
 complete texture path which never fired, because no tile type was ever

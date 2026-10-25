@@ -26,7 +26,7 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 1251 tests, about a second
+cargo test           # 1270 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
@@ -41,6 +41,10 @@ cannot reach `src/map.js`, and `node --check` only parses it - 240
 deleted five functions out of the middle of that file and both of
 those checks passed for two commits while the map drew nothing. See
 `tests/map.smoke.mjs`.
+
+**A map tab that shows nothing is the first thing to check after a
+pull.** `npm test` answers it in a second and does not need the app,
+a database or a sign-in.
 
 ### When it will not rebuild
 
@@ -113,14 +117,20 @@ many words that one appearing there is a bug.
 ```
 src/                     frontend. Vanilla JS, no framework, no build step.
   index.html             every pane, including the ones that start hidden
-  main.js                ~8k lines. All of it.
+  main.js                ~10k lines. All of it.
+  map.js                 the ONLY thing that knows what the map looks like
   styles.css
+  assets/tiles/*.png     32x32 tile art. See ART.md.
 src-tauri/src/
   *.rs                   THE RULES. Pure, tested, no Tauri, no network.
   commands/*.rs          THE PLUMBING. Tauri commands and row reading.
   supabase.rs            auth and PostgREST transport
   lib.rs                 the command registry, and the roll path
 supabase/migrations/     schema, applied in order. Read the comments.
+tests/map.smoke.mjs      `npm test`. The renderer, which cargo cannot see.
+tools/recover_migrations.py
+MAP.md  ART.md           the map's plan, and the tile brief
+STATUS.md                the chronological log. "Pick up here" is the end.
 ```
 
 ### The one architectural line that matters
@@ -350,25 +360,33 @@ That is the only record of them.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why **154 files run from 001 to 198.**
+file here, which is why **165 files run from 001 to 244.**
 
-The 44 gaps are all of that kind, and the comments say so in as many
+The 79 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
 099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
 `species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust;
 188-192 were conditions and the scribing labels, which were all code.
+**The map made a long run of them**: 233-237 and 239-242 are
+`ground.rs`, the canvas, the tile-art pipeline and a renderer that had
+lost five functions, none of which is a schema change.
 
 ```
 066-070  072  079-083  090-091  099  108-112  119-120  125
 133-134  138  140-141  153-154  169  173-174  176  178-182
-184  188-192
+184  188-192  199-207  209-216  219-225  229  231  233-237
+239-242
 ```
 
-**The chain is complete**, re-verified 2026-10-09. Every migration the
-database has a record of has a file here, MD5-verified against
-`supabase_migrations.schema_migrations`. The database holds 164 rows for
-154 files; the difference is five migrations that were applied in parts
-and committed as one file each (026-028, 031, 032, 043), not a gap.
+**The chain is complete**, re-verified 2026-10-24: every one of the
+**175 ledger rows** maps to one of the **165 files**, and no file is
+unapplied. The difference of ten is six migrations that were applied
+in parts and committed as one file each - 026 (2 rows), 027 (3), 028
+(3), 031 (4), 032 (2), 043 (2) - not a gap.
+
+That re-verification was by NAME AND COUNT. The last one by MD5
+against `schema_migrations.statements` was 2026-10-09; nothing since
+then has been edited after applying, which is 115's rule.
 
 It was not complete until 2026-10-03: seven files (101–107 — the spell
 catalogue and the whole cleric list) had been applied to the live
@@ -409,10 +427,12 @@ could not do.
 
 ## State
 
-About 39k lines of Rust - 26k of rules across 40 modules, 10k of
-plumbing across 17 command files - with 1046 tests, 40 tables, 153
-policies, and a frontend of 9.5k lines of plain JS.
-`STATUS.md` is the detailed handoff; this is the shape of it.
+About 46k lines of Rust - 33k of rules across 50 modules, 12.5k of
+plumbing across 19 command files - with 1,270 tests, 42 tables, 161
+policies, 49 functions, and a frontend of 11.2k lines of plain JS.
+**Every table in `public` has row level security on**, counted
+2026-10-24, not assumed. `STATUS.md` is the detailed handoff; this is
+the shape of it.
 
 **The app has eight top-level tabs** — Play, Run, World, Characters,
 Objects, Creatures, Spells, Trade — and the character sheet has five
@@ -425,7 +445,7 @@ Working, roughly in the order it was built:
 * **Access** — auth, games, join-by-code, RLS verified with four
   accounts. There is no DM *account*: "dm" is a per-game role in
   `game_members.role`, so the same person is DM of one game and a player
-  in another, and `is_game_dm()` backs 100 of the 153 policies
+  in another, and `is_game_dm()` backs 108 of the 161 policies
 * **Creatures** — a template IS a character (`is_template`), so a
   creature is edited with the same sheet a player uses and placing one
   on the board is a copy, contents of its containers and all. `npcs` is
@@ -459,8 +479,21 @@ Working, roughly in the order it was built:
 * **Casting** — the cleric spell list, prepared prayers, slots by level,
   concentration, and effects that reach the dice (Bless adds its d4)
 * **Trade** — merchants, pricing, haggling, coin
+* **The map** — built 2026-10-21 to 24, and the one part of this with
+  its own document: read `MAP.md` for the plan and `ART.md` for the
+  tile brief. A location can have a map; a square has three layers, so
+  a wall is a cover standing on a floor and can fall down and leave
+  the floor; a room declares its size and what it is made of by
+  default, so a wall needs a row and a floor does not. `stride::step`
+  says what one step costs and refuses a wall by name. The Map tab
+  draws it on a canvas and **you author it by clicking it** - there
+  are no coordinate boxes - and a whole map can be saved under a name
+  and loaded back. The rules are `grid.rs`, `terrain.rs`, `stride.rs`,
+  `ground.rs` and `shelf.rs`; `src/map.js` is the only thing that
+  knows what any of it LOOKS like, and is meant to be replaceable
 
 Not done, and the honest list is in `STATUS.md`: subclasses and their
 features, spells for the other eleven classes, four species still
-unseeded, and the `skill_choices` a class offers at creation are
-recorded but not enforced.
+unseeded, the `skill_choices` a class offers at creation are recorded
+but not enforced, and on the map there is no fog, no falling, no
+movement budget and no undo.

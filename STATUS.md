@@ -10180,17 +10180,26 @@ these four commands are mostly fetching.
 |---|---|
 | `git` | clean, nothing unpushed |
 | migrations | **165 files, 175 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **244**, and every ledger row since 218 has a file |
+| newest migration | **244**. **All 175 ledger rows reconcile to the 165 files and no file is unapplied** - checked by name and count, not remembered |
 | `security_doors()` | **0 faults** |
+| RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
+| `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
 | build / tests | **zero warnings, 1,270 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
 
-**PULL BEFORE TOUCHING ANYTHING.** Six migrations landed on the shared
-live database between 21 and 24 October, and the code and the schema
-moved together: a checkout from before them pointed at this database
-will not understand `tiles`, and 234's `recipe` will read as an empty
-column.
+**PULL BEFORE TOUCHING ANYTHING.** Eight migrations landed on the
+shared live database between 21 and 24 October, and the code and the
+schema moved together: a checkout from before them pointed at this
+database will not understand `tiles` or `map_versions`, and 226's
+`recipe` will read as an empty column.
+
+**THE DATABASE IS ALREADY AHEAD OF ANY OLD CHECKOUT, AND THAT IS THE
+RIGHT WAY ROUND.** Migrations are applied to the live project as they
+are written, so pulling the code catches your copy up to a schema
+that is already there. Nothing needs applying after a pull - and
+nothing should be: 115 is that an applied migration is a record, not
+a draft.
 
 ---
 
@@ -10291,7 +10300,19 @@ square.
   **what it costs to enter**, its facing, and who is on it.
 
 **THERE IS NO UNDO.** A stray click changes the map. 241 names this
-rather than hiding it, and it is the next thing worth a cycle.
+rather than hiding it.
+
+### The shelf (243-246)
+
+A fifth row: a version dropdown, `Load`, `Delete`, a name box, `Save
+as`. **There is no Save button**, because every click is already an
+INSERT - the map is saved continuously and always has been. "Save as"
+takes a named copy of the WHOLE map, every level, with the room's
+size and recipe; `Load` replaces what is drawn and asks first.
+
+It is the nearest thing to an undo: save "before the dragons" before
+a risky edit. Terrain only - creatures are not in a version - and
+damage IS, so a half-broken door comes back half-broken.
 
 The `Tiles (dev hook)` the previous handoff described is **deleted** -
 241. Its fixed-coordinate `Paint 4` / `Erase 4` are gone with it, and
@@ -10342,13 +10363,22 @@ SVG art" in three places and there were **two tiles**, one of them
 
 ### Live data, read off the database today
 
+Read off the database 2026-10-24, after 246.
+
 | | |
 |---|---|
 | games | 3 - Test Game 1, jec-game-1, jec-game-2 |
+| profiles / characters | 7 / 25 |
 | locations | 2 - Test Inn 1 (Dave), outhouse (John) |
-| **Test Inn 1** | 8x6, default `stone_floor`, 4 painted squares along y=0 |
-| tiles | **4 rows** - the rest of that room is the recipe |
-| characters placed | 2 - Tarren (1,0,0), Bryn (0,0,0) |
+| **Test Inn 1** | **20x20, default `mud`**, 22 painted squares - 10 of them with a cover, 1 turned, all on z=0 |
+| **outhouse** | no bounds, no recipe, no tiles. A location with no map. |
+| tiles | **22 rows** - the rest of that room is the recipe |
+| saved versions | **0.** The shelf exists (243/246) and nothing is on it. |
+| characters placed | 2 - Tarren, Bryn |
+
+**Test Inn 1 went from 8x6/4 squares to 20x20/22 squares on the 24th**,
+which is 241's click-to-paint being used rather than described. The
+default changed from `stone_floor` to `mud` the same way.
 
 **THIS IS A SHARED LIVE DATABASE.** Pull before diagnosing anything,
 and remember `character_location_same_game()` will refuse moving a

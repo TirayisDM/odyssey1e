@@ -363,12 +363,22 @@ screen, and a STATUS entry.
 | # | Phase | What lands | Risk |
 |---|---|---|---|
 | **0** | ~~Port the rules cold~~ **SUPERSEDED - see STATUS 225** | The baseline ran: 262 pass in the engine at `2551f1e`, 0 ignored. It also showed the engine resolves on PERCENTILE and this project on d20 vs DC, so the engine is now a REFERENCE. `grid.rs` and `terrain.rs` are written here instead. | — |
-| **1** | **A location can have a map** | The `tiles` table, `recipe`, `px_per_grid`. UVTT import. Read-only render, DM only. | low |
-| **2** | **Things have positions** | `x, y, z` on objects and characters. Fixtures and creatures drawn on the map; clicking a crate opens 218's panel. **The map stops being a picture.** | low |
+| **1** | **A location can have a map** — **LANDED**, 226-246 | The `tiles` table, `recipe`, `px_per_grid`, bounds, facing, saved versions. **NOT read-only**: 241 made the canvas the authoring surface, which retired the dev hook. UVTT import never built and nobody has wanted it. | low |
+| **2** | **Things have positions** — **HALF LANDED**, 230 | `x, y, z` on CHARACTERS, with a trigger; `stride::step` moves them and names a wall. **Objects have none**, so no crate is drawn and clicking one does not open 218's panel. **The map stopped being a picture** for creatures and has not for things. | low |
 | **3** | **Doors, locks, traps** | Doors as fixtures. Wire `lock.rs` and `trap.rs` - the first consumer they have ever had. | medium |
 | **4** | **Sight and light** | Bresenham LOS, the Apps Script lighting model, `tile_memory` and the fog policy on `tiles`. | medium |
 | **5** | **Movement** | `step_cost`, budget, 8-directional A*, into initiative and 051's action economy. | medium |
-| **6** | **The editor** | RoomDesigner's UX on the new model, and tile art wired for the first time - see `ART.md`, and note only two tiles exist. | medium |
+| **6** | **The editor** — **MOSTLY LANDED EARLY**, 241/246 | It arrived out of order, because a read-only map with a dev hook was worse than an editable one. Click to paint, a brush with cover and facing, the room's recipe, save-as and load. Tile art IS wired - 18 of the 33 words have a tile; see `ART.md`. Still missing: undo, pan and zoom, and a rectangle brush. | medium |
+
+**EVERYTHING FROM HERE TO THE END OF SECTION 5 IS SUPERSEDED.** It is
+the case for porting `odyssey-engine` cold, and 225 ran the baseline
+and decided against it: the engine resolves on PERCENTILE and this
+project rolls d20 against a DC, so it became a reference and
+`grid.rs`, `terrain.rs`, `stride.rs` and `ground.rs` were written
+here. The four edits below were never made and the defect list was
+never worked through. **Kept because the reasoning is still the right
+reasoning about that engine**, and because anybody tempted to port it
+later should read what the attempt would involve.
 
 **Phase 0 is the one to insist on.** It carries no risk, touches no
 schema, and converts "262 tests exist somewhere" into "262 tests pass
@@ -464,6 +474,14 @@ scales to exactly 32 with hard edges. **The doubling has to be a
 whole number** - at the 28px square 235 shipped with, a 16px tile
 scales by 1.75 and some source pixels become two screen pixels while
 others become one, which destroys pixel art even with smoothing off.
+
+> **236 SETTLED THIS DIFFERENTLY AND BETTER.** Dave chose 32x32 art
+> drawn at 32 pixels, so there is no scaling at all - the sharpest
+> result available - and the extra resolution leaves room for
+> fixtures and characters to match the terrain later. The requirement
+> was never the NUMBER 16; it was that the scale be a whole number.
+> `map.js` refuses a tile that is not 32x32 and names it in the pane,
+> because a wrong-sized tile is a silent blur.
 
 CSS can be made to do it and fights you on sub-pixel positioning;
 WebGL is a GPU pipeline for a problem that is not GPU-bound.

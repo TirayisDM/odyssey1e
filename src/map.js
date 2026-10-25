@@ -60,6 +60,47 @@ const TILES = "assets/tiles/";
 const art = new Map(); // key -> HTMLImageElement[] (empty = asked, absent)
 let last = null; // the most recent draw, so a late image can repaint it
 
+/* ---------------------------------------------------------------------
+   242. A REDRAWN TILE THAT NOBODY CAN SEE
+
+   Dave: "it seems to be using an old version of graphics". The files
+   on disk were the newest ones. **The webview had cached them** - it
+   asked for `grass1.png` once, at launch, and kept that answer for the
+   rest of the session however many times the artist saved over it.
+
+   The ordinary fix is a changing query string, and the honest token
+   here is THE MOMENT THE CACHE WAS LAST EMPTIED, not a version number
+   somebody has to remember to bump. A hand-maintained `?v=3` is one
+   more thing that can be stale, and it would be stale in exactly the
+   situation it exists for.
+
+   This costs one disk read per tile per launch. These are local files
+   of about two kilobytes.
+   --------------------------------------------------------------------- */
+
+let bust = Date.now();
+
+/// Files that loaded and were the wrong size, by name.
+///
+/// 242. SAID IN THE PANE, NOT ONLY THE CONSOLE. `grass.png` has been
+/// refused for being 58x57 since 240 and the only place that said so
+/// was a `console.warn` in devtools, which is not open while somebody
+/// is drawing tiles. A tile that silently does not appear is this
+/// project's named defect: the map looks finished and is not.
+const refused = new Set();
+
+/// Throw away every image and ask for them all again.
+///
+/// 242. Called by "Reload art", because the loop while drawing a tile
+/// is save, look, adjust - and restarting the app between each look is
+/// a reason to stop adjusting.
+export function forgetArt() {
+  art.clear();
+  refused.clear();
+  bust = Date.now();
+  if (last) draw(last.canvas, last.view);
+}
+
 /// 240. HOW MANY NUMBERED VARIANTS TO LOOK FOR BEYOND THE BASE.
 ///
 /// Probing stops at the first miss, so a word with one tile costs two
@@ -85,13 +126,16 @@ function load(src, onOk, onFail) {
       console.warn(
         `${src} is ${img.naturalWidth}x${img.naturalHeight}, not ${EXPECTED}x${EXPECTED} - not drawn`
       );
+      refused.add(src.slice(TILES.length));
       onFail();
       return;
     }
     onOk(img);
   };
   img.onerror = onFail;
-  img.src = src;
+  // The token is appended here rather than built into the path so that
+  // every request for a tile carries it, including the variant probes.
+  img.src = `${src}?v=${bust}`;
 }
 
 /// The art for a word: its base tile and any numbered variants.
@@ -147,6 +191,84 @@ function variant(list, x, y) {
   if (list.length < 2) return list[0];
   const i = (((x * 31 + y * 17) % list.length) + list.length) % list.length;
   return list[i];
+}
+
+// THE ONE PLACE COLOURS LIVE. Flat, and chosen to be told apart rather
+// than to be handsome - this is a diagram until the tile art is wired.
+const PAINT = {
+  // ground
+  rock: "#6b6b73",
+  dirt: "#6b543c",
+  mud: "#4f4030",
+  sand: "#c2ab78",
+  scree: "#8a8578",
+  road: "#8c8275",
+  stone_floor: "#56565e",
+  wood_floor: "#7a5a37",
+  marsh: "#4a5540",
+  ice: "#b8d8e0",
+  shallow_water: "#4a7f9e",
+  deep_water: "#28527a",
+  lava: "#c2451c",
+  pit: "#17171b",
+  ledge: "#5c5248",
+  doorway: "#453b30",
+  ramp: "#6f6354",
+  stairs: "#7d7366",
+  // covers
+  grass: "#4e7a3c",
+  snow: "#e8eef2",
+  brush: "#44632f",
+  trees: "#2f5223",
+  vines: "#3d6b33",
+  rubble: "#7d7368",
+  door_open: "#8a6b3f",
+  door_closed: "#8a6b3f",
+  door_broken: "#6b4f2c",
+  iron_grate: "#4a4a52",
+  // walls
+  stone_wall: "#3c3c44",
+  timber_wall: "#5c4426",
+  rock_wall: "#4a4a50",
+  wooden_wall: "#4a3a22",
+  ice_wall: "#8fb8c6",
+};
+
+const UNKNOWN = "#ff00ff"; // a word the palette forgot, shouting about it
+
+const paint = (word) => PAINT[word] || UNKNOWN;
+
+/// Which covers are drawn as SOLID rather than as a layer on the ground.
+///
+/// A wall REPLACES its square - you should not be able to see the
+/// floor it stands on, because you cannot walk on it. Snow and grass
+/// sit ON the ground and must not hide it.
+const isSolid = (word) => word.endsWith("_wall") || word === "trees" || word.startsWith("door_");
+
+/// The extent to draw: the declared room, plus anything outside it.
+///
+/// 232 decided that shrinking a map does not delete what falls outside
+/// it - "a tile outside the declared room should look WRONG, not
+/// vanish" - so the canvas has to be big enough to show both.
+function extent(view) {
+  let minX = 0;
+  let minY = 0;
+  let maxX = (view.width || 1) - 1;
+  let maxY = (view.height || 1) - 1;
+  if (!view.width || !view.height) {
+    minX = Infinity;
+    minY = Infinity;
+    maxX = -Infinity;
+    maxY = -Infinity;
+  }
+  for (const s of view.squares) {
+    minX = Math.min(minX, s.x);
+    minY = Math.min(minY, s.y);
+    maxX = Math.max(maxX, s.x);
+    maxY = Math.max(maxY, s.y);
+  }
+  if (!Number.isFinite(minX)) return null; // nothing to draw at all
+  return { minX, minY, maxX, maxY };
 }
 
 /// Draw one terrain word into a square: its art if there is any, its
@@ -301,6 +423,12 @@ export function draw(canvas, view) {
     (implied ? ` (${implied} from the recipe)` : "") +
     (stray ? ` · ${stray} outside the room` : "") +
     ` · ${view.standing.length} standing` +
-    (drawnArt ? ` · ${drawnArt} tile image${drawnArt === 1 ? "" : "s"}` : "")
+    (drawnArt ? ` · ${drawnArt} tile image${drawnArt === 1 ? "" : "s"}` : "") +
+    // 242. THE REFUSED ONES BY NAME. A wrong-sized tile does not
+    // appear, and without this the only clue is that one kind of
+    // ground looks unfinished while the artist is sure it is not.
+    (refused.size
+      ? ` · NOT ${EXPECTED}x${EXPECTED}, so not drawn: ${[...refused].join(", ")}`
+      : "")
   );
 }

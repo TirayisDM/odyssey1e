@@ -26,11 +26,21 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 1046 tests, about a second
+cargo test           # 1251 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
 inside it**, not from the repo root.
+
+```powershell
+npm test             # the renderer, from the repo root
+```
+
+**That is a second suite and it is tiny on purpose.** `cargo test`
+cannot reach `src/map.js`, and `node --check` only parses it - 240
+deleted five functions out of the middle of that file and both of
+those checks passed for two commits while the map drew nothing. See
+`tests/map.smoke.mjs`.
 
 ### When it will not rebuild
 
@@ -169,6 +179,16 @@ frontend can be driven in an ordinary browser against fixtures. Copy
 `window.__TAURI__.core.invoke`, and serve it with `python -m http.server`.
 This is how the layout work gets checked at several widths without
 clicking through a Tauri window.
+
+**`npm test` is the cheaper half of this.** `tests/map.smoke.mjs`
+imports `src/map.js` under Node with a stub canvas and a stub `Image`
+and draws a view with one of everything - a solid cover, a layer
+cover, an implied square, a square outside the declared room, a
+negative origin. It asserts nothing about pixels. It asserts that
+every function the renderer reaches **exists**, and that `squareAt`
+and `draw` still agree about which square a pixel is in, because a
+click that paints the neighbouring square is the kind of fault that
+looks like an ordinary answer.
 
 ---
 

@@ -1118,6 +1118,11 @@
               <input id="mv-z" type="number" value="0" class="narrow" />
               <button id="mv-up" class="ghost tiny" title="a level up">&#9656;</button>
               <button id="mv-draw" class="ghost tiny">Draw</button>
+              <!-- 242. The webview caches a tile for the life of the
+                   session, so a tile redrawn while the app is open
+                   stays the old one. This empties the cache and asks
+                   again. -->
+              <button id="mv-art" class="ghost tiny" title="re-read the tile images from disk">Reload art</button>
             </div>
 
             <!-- The room: how big, and what it is made of where

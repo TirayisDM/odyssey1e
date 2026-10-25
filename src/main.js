@@ -11,7 +11,7 @@ const { invoke } = window.__TAURI__.core;
 // 235. The renderer, in its own file because it is the one part that
 // knows what things LOOK like - and therefore the one part MAP.md
 // section 8 expects to be replaced if the voxel idea ever happens.
-import { draw as drawMap, squareAt } from "./map.js";
+import { draw as drawMap, squareAt, forgetArt } from "./map.js";
 
 // TWO ENCOUNTER IDS, ON PURPOSE.
 //
@@ -9666,6 +9666,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   document.querySelector("#mv-draw").addEventListener("click", drawLevel);
+
+  // 242. The art, not the squares. `forgetArt` repaints the last draw
+  // itself, so this does not need to ask Rust anything - what is AT a
+  // square has not changed, only the picture of it.
+  document.querySelector("#mv-art").addEventListener("click", () => {
+    forgetArt();
+    mvSay("asked for every tile image again");
+  });
   document.querySelector("#mv-where").addEventListener("change", drawLevel);
   document.querySelector("#mv-z").addEventListener("change", drawLevel);
 

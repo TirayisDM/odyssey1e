@@ -9791,6 +9791,99 @@ are integer scales. Anything else and pixel art falls apart whatever
   `grass.png` arrived at 58x57 and canvas would have squashed it into
   the cell without complaint.
 
+## 242. The renderer could not draw, and nothing in the project could say so
+
+**2026-10-24.** Dave, after reloading: *"its not drawing the map"*.
+
+**`map.js` had been unable to draw since 240.** That commit rewrote
+the top of the file to add tile variants and, going past, deleted
+seventy-seven lines out of the middle of it: the `PAINT` colour table,
+`UNKNOWN`, `paint()`, `isSolid()` and `extent()`.
+
+`draw()` calls `extent()` on its fourth line. So the first call threw
+`ReferenceError: extent is not defined` and the canvas stayed blank.
+
+```
+238   294 lines, extent defined
+240   290 lines, extent gone      <- committed AND PUSHED
+241   306 lines, still gone
+```
+
+### THE CHECKS THAT PASSED
+
+I ran `node --check src/map.js` after 240 and again after 241. It
+passed both times, because **`--check` parses and an undefined
+identifier is valid syntax.** It is a reference that will throw if it
+is ever evaluated, and parsing never evaluates anything.
+
+`cargo test` passed both times too - 1,251 tests that cannot reach a
+JavaScript file.
+
+So the only thing in this project that could tell a working renderer
+from one with its guts removed was **opening the Map tab**, and I did
+not do that after 240. I wrote a commit message about covers arriving
+in the picker and variants stopping a floor from repeating, and both
+of those things did arrive, into a file that could no longer draw
+anything at all.
+
+This is the named defect in its plainest form. Every signal said
+finished.
+
+### THE GUARD: `npm test`
+
+`tests/map.smoke.mjs` imports `map.js` under Node with a stub canvas
+and a stub `Image` and **runs it**. Thirty lines of assertions, none
+of them about pixels:
+
+- it draws, and the summary it returns is right - the extent stretches
+  to a square outside the declared room (232), an implied square is
+  counted as "from the recipe", a creature is counted
+- nothing mapped returns a sentence and a 1x1 canvas, rather than
+  throwing
+- **`squareAt` and `draw` agree.** A point inside a cell maps to that
+  cell, a point off the map maps to nothing, and a map whose origin is
+  negative still puts its top-left square under the top-left pixel.
+  241 arranged for this by making both call `extent`; this asserts the
+  consequence, because a click that paints the neighbouring square is
+  exactly the fault that looks like an ordinary answer.
+
+**PROVEN BY BREAKING IT.** With `extent` deleted again, the test exits
+1 with the real `ReferenceError` and names the line. That is the whole
+point: the check that would have caught 240 now exists and has been
+watched to fail.
+
+### AND THE ART WAS STALE TOO
+
+Dave, in the same message: *"it seems to be using an old version of
+graphics"*. The files on disk were the newest ones. **The webview had
+cached them** - it asked for `grass1.png` once at launch and kept that
+answer for the session, however many times the artist saved over it.
+
+Two changes:
+
+- **A cache-busting token on every tile request**, set to *the moment
+  the cache was last emptied*. A hand-maintained `?v=3` is one more
+  thing that can be stale, and it would be stale in precisely the
+  situation it exists for. The cost is one disk read per tile per
+  launch, of local files of about two kilobytes.
+- **"Reload art"**, which empties the cache and repaints without
+  asking Rust anything, because what is AT a square has not changed -
+  only the picture of it. The loop while drawing a tile is save, look,
+  adjust, and restarting the app between each look is a reason to stop
+  adjusting.
+
+### A WRONG-SIZED TILE NOW SAYS SO WHERE YOU CAN SEE IT
+
+240 refused `grass.png` for being 58x57 and said so in a
+`console.warn`, **which is not open while somebody is drawing tiles**.
+It has been quietly undrawn for two days.
+
+The pane's summary line now ends `NOT 32x32, so not drawn: grass.png`.
+The refusal was already right; it was being whispered.
+
+`grass.png` is still 58x57 and still not drawn. 32x32 or delete it -
+the three variants carry grass in the meantime.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -9803,7 +9896,8 @@ are integer scales. Anything else and pixel art falls apart whatever
 | migrations | **163 files, 173 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
 | newest migration | **238**, and every ledger row since 218 has a file |
 | `security_doors()` | **0 faults** |
-| build / tests | **zero warnings, 1,251 tests pass** |
+| build / tests | **zero warnings, 1,251 tests pass** (`cargo test`) |
+| the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
 
 **PULL BEFORE TOUCHING ANYTHING.** Six migrations landed on the shared
@@ -9816,7 +9910,7 @@ column.
 
 ### What happened: the map exists now
 
-Seventeen cycles, 225 to 241. Read those entries rather than this summary
+Eighteen cycles, 225 to 242. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

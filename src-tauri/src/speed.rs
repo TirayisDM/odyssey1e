@@ -64,15 +64,21 @@
 //   `effects`, and live grants - neither is on `Sheet` today, so the
 //   wiring is its own cycle rather than a line.
 //
-//   THE WALK READOUT needs a creature's natural speed, which means
-//   reading `species` or `npcs` per walk, and `npcs.speed` IS NULL FOR
-//   ALL 280 CREATURES until the SRD seeding pass Dave asked for. A
-//   readout that said "no speed recorded" for every monster on the map
-//   would look broken rather than unfinished.
+//   THE WALK READOUT needs the same two, and asking for them in
+//   `walk_to` would mean resolving equipment there - which is the
+//   two-places fault with a magic item attached. It must ask whatever
+//   already resolves a sheet, not re-derive it.
 //
-// **THIS COMES OFF WHEN THE FIRST CALLER LANDS**, which is the sheet
-// showing a resolved speed or `walk_to` reporting one. 233's rule
-// applies if that slips: restate the reason, do not renew the date.
+// **RESTATED 2026-10-25, NOT RENEWED.** The first draft of this note
+// gave a second reason: that `npcs.speed` was null for all 280
+// creatures, so a readout would have said "no speed recorded" for
+// every monster. 249 seeded 259 of them from the SRD, so **that
+// reason is gone** and only the grants one remains. 233's rule is
+// that a dated suppression gets its reason restated when the event it
+// was waiting on happens, rather than the date quietly moved.
+//
+// THIS COMES OFF WHEN THE FIRST CALLER LANDS: a sheet that shows a
+// resolved speed, which `walk_to` can then ask for.
 #![allow(dead_code)]
 
 use crate::conditions;

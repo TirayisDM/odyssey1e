@@ -360,7 +360,7 @@ That is the only record of them.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why **166 files run from 001 to 248.**
+file here, which is why **167 files run from 001 to 249.**
 
 The 82 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
@@ -379,7 +379,7 @@ lost five functions, none of which is a schema change.
 ```
 
 **The chain is complete**, re-verified 2026-10-25: every one of the
-**176 ledger rows** maps to one of the **166 files**, and no file is
+**177 ledger rows** maps to one of the **167 files**, and no file is
 unapplied. The difference of ten is six migrations that were applied
 in parts and committed as one file each - 026 (2 rows), 027 (3), 028
 (3), 031 (4), 032 (2), 043 (2) - not a gap.
@@ -454,8 +454,10 @@ Working, roughly in the order it was built:
   any weapon's - a wolf reaches Snap, an owlbear reaches Crush the
   Throat, gated by level. The statblocks are SRD-derived from memory
   rather than transcribed, so spot-check one before a session leans on
-  it, and the catalogue is not the whole SRD. 5e's fourteen creature
-  types,
+  it, and the catalogue is not the whole SRD. **Their walking speeds
+  ARE transcribed** - 249 fetched 259 of them from the SRD rather than
+  recalling them, and the other 21 are null rather than guessed. 5e's
+  fourteen creature types,
   which five seeded spells are written against. Export and import as
   a file for backup and sharing: keys travel, ids do not, and anything
   the receiving game has never heard of is skipped and listed rather

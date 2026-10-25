@@ -10412,6 +10412,106 @@ So the question is where the numbers come from: an open SRD source
 or a confident subset seeded and the rest left null - which is what
 null was built to express.
 
+## 249. Two hundred and fifty-nine speeds, transcribed
+
+**2026-10-25.** Dave: *"fetch them from the srd api"*.
+
+**259 of 280 seeded. 21 left null, deliberately.**
+
+### Transcribed, not remembered - which was the whole point
+
+Fetched from `dnd5eapi.co`, one request per creature, **334 of them,
+none failed**. README warns the existing statblocks are *"SRD-derived
+FROM MEMORY rather than transcribed, so spot-check one before a
+session leans on it"*. Writing 259 speeds from memory would have
+repeated exactly the fault that warning exists for, which is why
+"properly" ruled it out and why the fetch was worth the detour.
+
+Source: SRD 5.1, © Wizards of the Coast, CC-BY-4.0. Attribution is in
+the migration.
+
+**SPOT-CHECKED BEFORE WRITING ANYTHING.** Eighteen well-known speeds
+against the fetched data - wolf 40, dire wolf 50, zombie 20, giant
+eagle 10, pegasus 60, roc 20, tarrasque 40, gelatinous cube 15, stirge
+10, mimic 15, shrieker 0, ghost 0 and six more. **All eighteen
+agreed.** The distribution is sane too: 30 is the mode at 105
+creatures, then 40 at 76.
+
+### The matching, and the one judgement in it
+
+Our keys are snake_case and the API's are kebab-case, so most matched
+on a transform. Ten did not and were matched by name instead -
+`druid_npc` → `druid`, `giant_snake` → `giant-constrictor-snake`,
+`skeleton_warhorse` → `warhorse-skeleton`.
+
+**THE SHAPECHANGERS ARE A JUDGEMENT AND THE MIGRATION SAYS SO.** The
+API splits a werewolf into human, hybrid and wolf forms; we have one
+row. The humanoid form was taken, because that is what the statblock's
+own Speed line says - 5e prints *"Speed 30 ft. (40 ft. in wolf form)"*
+- so the base speed is the humanoid one and the rest is the
+parenthetical. Seven rows. A creature that changes shape and changes
+speed wants a rule, and there is no rule for shape.
+
+### Why 21 are still null, and why that is the right answer
+
+**Null is not a failure; it is the answer 248 built.** Two groups:
+
+- **Not in the SRD at all** - ours or from elsewhere: `archer`,
+  `dire_boar`, `goblin_boss`, `guard_captain`, `harpy_matriarch`,
+  `kobold_dragonshield`, `orc_war_chief`.
+- **In the 5.1 SRD but missing from this API's 2014 dataset**:
+  `aarakocra`, `allosaurus`, `ankylosaurus`, `banshee`,
+  `carrion_crawler`, `gas_spore`, `helmed_horror`, `hook_horror`,
+  `intellect_devourer`, `pixie`, `pteranodon`, `scarecrow`,
+  `twig_blight`, `yuan_ti_pureblood`.
+
+The second group is **a gap in the source, not in the SRD**, and the
+migration lists them so whoever fills them in knows they are
+transcribing from a book rather than correcting a mistake.
+
+### Nine walking speeds of zero, three of them awkward
+
+Six because the SRD says `0 ft.` - a shrieker and a ghost do not walk.
+Three because **the SRD gives them no walking speed at all**: an air
+elemental flies, a giant shark and a killer whale swim.
+
+Zero is the honest transcription of "cannot walk", and 248 made 0
+distinct from null for exactly this. **It is also temporarily
+misleading and the migration says so**: a shark is not immobile, it is
+in the wrong medium. `npcs.speed` is the WALKING speed, `stride`
+spends only walking, and `terrain.rs` has had `Mode::Swim` and
+`Mode::Fly` waiting since 226 for the columns that say which creatures
+have them.
+
+### A self-check that refuses
+
+`raise exception` unless exactly 259 rows came back non-null. A key
+renamed between computing the match and applying it would otherwise
+leave a handful of monsters quietly without a speed - which is the
+named defect, in a migration whose entire job is filling blanks.
+
+### Two corrections carried
+
+248's column comment said **134 creatures**; it is **280**. The
+migration file itself stays as written - 115, an applied migration is
+a record - but the live column comment is metadata, and 249 had a
+reason to touch it, so it now says 280 and names where the other 21
+are listed.
+
+And **`speed.rs`'s suppression note was restated rather than renewed.**
+It had given two reasons nothing called the module yet; one of them
+was "`npcs.speed` is null for all 280 creatures", which this cycle
+made false. 233's rule is that the reason gets restated when the event
+it waited on happens. Only the grants reason remains.
+
+### What still has to happen before a speed appears on screen
+
+`walk_to` cannot resolve one, and should not try: a creature's live
+grants come from its equipment, and re-deriving that inside a map
+command would be the two-places fault with a magic item attached. The
+next cycle is **the sheet resolving a speed**, which `walk_to` can
+then ask for.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10421,8 +10521,8 @@ null was built to express.
 | | |
 |---|---|
 | `git` | clean, nothing unpushed |
-| migrations | **166 files, 176 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **248**. **All 176 ledger rows reconcile to the 166 files and no file is unapplied** - checked by name and count, not remembered |
+| migrations | **167 files, 177 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
+| newest migration | **249**. **All 177 ledger rows reconcile to the 167 files and no file is unapplied** - checked by name and count, not remembered |
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
@@ -10447,7 +10547,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-four cycles, 225 to 248. Read those entries rather than this summary
+Twenty-five cycles, 225 to 249. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

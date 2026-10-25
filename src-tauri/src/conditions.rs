@@ -296,6 +296,48 @@ pub fn cannot_act(keys: &[String]) -> Option<&'static Condition> {
         ))
 }
 
+/// The condition stopping this creature from moving at all, if one is.
+///
+/// 248. WHICH CONDITIONS STOP MOVEMENT LIVES HERE, not in `speed.rs`.
+/// The `does` text is prose and nothing can read it, so the list has
+/// to exist somewhere structured - and the right somewhere is beside
+/// the condition vocabulary rather than in whatever happens to need
+/// it first. `cannot_act` made the same call for the same reason.
+///
+/// SIX, AND THEY ARE NOT THE SAME SIX AS `cannot_act`:
+///
+///   grappled    "Speed 0, and no bonus to speed" - it can still act
+///   restrained  "Speed 0", and it can still act
+///   paralysed   incapacitated AND cannot move
+///   petrified   incapacitated AND cannot move
+///   stunned     incapacitated AND cannot move
+///   unconscious incapacitated AND cannot move
+///
+/// **`incapacitated` ALONE IS NOT HERE.** It takes away actions and
+/// reactions and says nothing about speed, which is why a creature
+/// can be incapacitated and still be carried along by something else.
+/// A caller wanting "can it act" asks `cannot_act`; the two questions
+/// overlap and are not the same question.
+///
+/// PRONE IS NOT HERE EITHER. It does not reduce speed - it makes
+/// movement cost more (crawling) and standing up cost half. That is a
+/// rule about the COST of a square, which is `stride`'s, not about
+/// how many squares there are.
+///
+/// THE FIRST ONE FOUND, like `cannot_act`: a creature that is both
+/// grappled and restrained is not more motionless.
+/// 248. Unused until `speed.rs` has a caller - see the note at the top
+/// of that module, which this comes off with.
+#[allow(dead_code)]
+pub fn stops_movement(keys: &[String]) -> Option<&'static Condition> {
+    keys.iter()
+        .filter_map(|k| of_key(k))
+        .find(|c| matches!(
+            c.key,
+            "grappled" | "restrained" | "paralysed" | "petrified" | "stunned" | "unconscious"
+        ))
+}
+
 /// What the hover says: the name first, then what it does, and the
 /// level where there is one.
 ///

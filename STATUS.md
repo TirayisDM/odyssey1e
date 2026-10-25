@@ -10286,6 +10286,132 @@ wondering where the step command went deserves an answer.
 Until 1 lands, one click can cross a room. The cost is **returned**,
 which is what 3 spends.
 
+## 248. How far a creature can go
+
+**2026-10-25.** Dave's two calls, recorded: **no encumbrance** (it is a
+PHB variant rule, not default) and **grants gets a speed term**.
+
+`species.speed` has said 25 / 30 / 40 since 057 and 059 wrote the
+contract down: *"when one arrives, `speed` is the column it reads"*.
+This is the module that reads it.
+
+### `speed.rs`, and the order is the rule
+
+```
+natural     species.speed, or npcs.speed for a monster. FEET.
+grants      target "speed". Longstrider +10.
+exhaustion  level 2 halves it, level 5 stops it.
+conditions  grappled, restrained and four others stop it dead.
+```
+
+Bonuses land on the natural speed, **then** exhaustion halves whatever
+that came to, **then** a condition can zero the lot. Longstrider on an
+exhausted creature is (30+10)/2 = 20, not 30/2+10 = 25 - 5e halves
+*your speed*, the one you have. A zeroing condition is checked first
+and returns immediately, because grappled says so out loud: *"Speed 0,
+**and no bonus to speed**."*
+
+27 tests.
+
+### AN UNKNOWN SPEED IS NOT THIRTY
+
+`natural` is an `Option` and `None` comes back as `None`. This is
+226's rule about a missing tile row applied to a creature: **absent
+and empty are different answers.** A module that quietly answered 30
+would put a number on screen that nobody wrote and that is wrong for a
+zombie (20), a wolf (40) and a giant eagle alike.
+
+`npcs.speed` is nullable for the same reason and **deliberately not
+defaulted** - a default would have had every existing row claim a
+number nobody checked, which is the named defect in a single DDL line.
+
+A speed of **0 is a real answer** and distinct from null: a shrieker
+does not move.
+
+### THE TESTS CAUGHT ME, AND THE FAILURE WAS THE USEFUL KIND
+
+Three condition tests failed on the first run. Conditions are stored
+`cond.grappled`; I passed bare `"grappled"`, `of_key` strips the
+prefix and returned `None`, and a grappled creature resolved at full
+speed.
+
+**Had `resolve` matched on bare words instead of asking
+`conditions::of_key`, all three would have passed** and the app would
+have let a held creature run. The test helper now builds keys from
+`conditions::PREFIX`, and there is a test asserting that a bare key
+does nothing - the storage contract, written down.
+
+### Which conditions stop movement lives in `conditions.rs`
+
+Not in `speed.rs`. The `does` text is prose and nothing can read it,
+so the list has to exist somewhere structured, and the right somewhere
+is beside the vocabulary - `cannot_act` made the same call.
+
+The six are **not** the same six as `cannot_act`: `incapacitated`
+alone takes actions and says nothing about speed, and `prone` does not
+reduce speed at all - it makes movement *cost* more, which is
+`stride`'s business, not a question of how many squares there are.
+
+### The grant term cost one word
+
+`target` is free text against a documented vocabulary, so `speed`
+needed one entry in `known_target` and no migration. That is the
+argument the module header has always made for one vocabulary over a
+column per effect, collecting.
+
+**DOUBLING IS STILL NOT EXPRESSIBLE.** `add` is cumulative and `set`
+is a floor; there is no multiply, because a multiply would make the
+order of two items matter and 100 refused that. Haste and Boots of
+Speed double a speed, and today they must be written as an `add` of
+whatever that creature's speed is - which works, is ugly, and wants
+its own decision rather than a `Mode::Multiply` smuggled in.
+
+### NOTHING CALLS IT, AND THE SUPPRESSION SAYS WHAT WOULD
+
+`#![allow(dead_code)]`, with the condition named at the top of the
+module. Both callers wanted a decision that was not mine to make:
+
+- **The sheet** needs conditions, which are `cond.`-prefixed rows in
+  `effects`, and live grants. Neither is on `Sheet` today, so the
+  wiring is a cycle rather than a line.
+- **The walk readout** needs a natural speed per walk, and
+  `npcs.speed` is null for every creature until the seeding pass.
+
+It comes off when the first caller lands. 233's rule applies if that
+slips: **restate the reason, do not renew the date.**
+
+### TWO CORRECTIONS
+
+**It is 280 creatures, not 134.** The README said 134, I repeated it,
+and the bestiary grew past it somewhere in 137-144 - "seventy one more
+of the srd", "the rest of the bestiary", "every creature the srd has".
+Counted off the database: **280 global rows across all fourteen
+types.** README fixed.
+
+**248's own comment still says 134**, in the file and in the column
+comment it installed. **It is applied, so it stays wrong on that one
+number** - 115 is that an applied migration is a record rather than a
+draft, and editing it would break the MD5 chain README describes. The
+column comment gets corrected by the seeding migration, where there is
+a reason to touch it.
+
+### The seeding pass needs a decision before it starts
+
+Dave asked for the speeds seeded **properly from the SRD**. Two facts
+make that its own cycle rather than an afternoon:
+
+1. **280 rows**, not 134.
+2. **The existing statblocks are "SRD-derived from memory rather than
+   transcribed"** - the README says so and warns to spot-check one
+   before a session leans on it. Writing 280 speeds from memory would
+   repeat exactly the fault that warning exists for, and "properly"
+   rules it out.
+
+So the question is where the numbers come from: an open SRD source
+(the 5.1 SRD is CC-BY-4.0 and there are APIs carrying monster speeds),
+or a confident subset seeded and the rest left null - which is what
+null was built to express.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10295,12 +10421,12 @@ which is what 3 spends.
 | | |
 |---|---|
 | `git` | clean, nothing unpushed |
-| migrations | **165 files, 175 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **244**. **All 175 ledger rows reconcile to the 165 files and no file is unapplied** - checked by name and count, not remembered |
+| migrations | **166 files, 176 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
+| newest migration | **248**. **All 176 ledger rows reconcile to the 166 files and no file is unapplied** - checked by name and count, not remembered |
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
-| build / tests | **zero warnings, 1,285 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,312 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
 
@@ -10321,7 +10447,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-three cycles, 225 to 247. Read those entries rather than this summary
+Twenty-four cycles, 225 to 248. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -10393,8 +10519,10 @@ maps with their own origins, so leaving one always needs a link.
 - **No drowning.** Walking into deep water without a swim speed comes
   back as the word `drowning` and nothing consumes it. The creature is
   in the water and the game does not know.
-- **No movement budget, and nothing reads a speed.** `walk_to` returns
-  a cost and spends nothing, so one click can cross a room.
+- **No movement budget, and nothing CALLS the speed that now
+  resolves.** `walk_to` returns a cost and spends nothing, so one
+  click still crosses a room. 248 built `speed.rs` and it has no
+  caller yet - see its entry for the two that were blocked and why.
   `species.speed` has said 25/30/40 since 057 and 059 named it as the
   column a movement system reads; nothing reads it, **`npcs` has no
   speed column at all**, and `grants.rs` has no speed term so no item

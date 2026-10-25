@@ -85,6 +85,7 @@ mod shelf;
 mod size;
 mod slots;
 mod species;
+mod speed;
 mod spellcast;
 mod spent;
 mod stride;

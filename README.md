@@ -26,7 +26,7 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 1270 tests, about a second
+cargo test           # 1312 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
@@ -360,9 +360,9 @@ That is the only record of them.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why **165 files run from 001 to 244.**
+file here, which is why **166 files run from 001 to 248.**
 
-The 79 gaps are all of that kind, and the comments say so in as many
+The 82 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
 099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
 `species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust;
@@ -375,11 +375,11 @@ lost five functions, none of which is a schema change.
 066-070  072  079-083  090-091  099  108-112  119-120  125
 133-134  138  140-141  153-154  169  173-174  176  178-182
 184  188-192  199-207  209-216  219-225  229  231  233-237
-239-242
+239-242  245-247
 ```
 
-**The chain is complete**, re-verified 2026-10-24: every one of the
-**175 ledger rows** maps to one of the **165 files**, and no file is
+**The chain is complete**, re-verified 2026-10-25: every one of the
+**176 ledger rows** maps to one of the **166 files**, and no file is
 unapplied. The difference of ten is six migrations that were applied
 in parts and committed as one file each - 026 (2 rows), 027 (3), 028
 (3), 031 (4), 032 (2), 043 (2) - not a gap.
@@ -428,7 +428,7 @@ could not do.
 ## State
 
 About 46k lines of Rust - 33k of rules across 50 modules, 12.5k of
-plumbing across 19 command files - with 1,270 tests, 42 tables, 161
+plumbing across 19 command files - with 1,312 tests, 42 tables, 161
 policies, 49 functions, and a frontend of 11.2k lines of plain JS.
 **Every table in `public` has row level security on**, counted
 2026-10-24, not assumed. `STATUS.md` is the detailed handoff; this is
@@ -449,8 +449,8 @@ Working, roughly in the order it was built:
 * **Creatures** — a template IS a character (`is_template`), so a
   creature is edited with the same sheet a player uses and placing one
   on the board is a copy, contents of its containers and all. `npcs` is
-  the published reference you import from, stocked with 134 creatures
-  across all fourteen types whose natural attacks are TECHNIQUES like
+  the published reference you import from, stocked with **280
+  creatures** across all fourteen types whose natural attacks are TECHNIQUES like
   any weapon's - a wolf reaches Snap, an owlbear reaches Crush the
   Throat, gated by level. The statblocks are SRD-derived from memory
   rather than transcribed, so spot-check one before a session leans on

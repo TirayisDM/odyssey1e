@@ -60,8 +60,8 @@ impl Mode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Grant {
     /// What it touches, in the vocabulary 100 wrote down: `ac`,
-    /// `attack`, `damage`, `save`, `save.<code>`, `skill.<key>`, or
-    /// one of the six ability codes.
+    /// `attack`, `damage`, `save`, `speed`, `save.<code>`,
+    /// `skill.<key>`, or one of the six ability codes.
     pub target: String,
     pub mode: Mode,
     pub value: i64,
@@ -273,7 +273,14 @@ pub const ABILITIES: [&str; 6] = ["str", "dex", "con", "int", "wis", "cha"];
 /// that writes a grant checks the key against it, which is where the
 /// read already is.
 pub fn known_target(target: &str) -> bool {
-    if ["ac", "attack", "damage", "save"].contains(&target) {
+    // 248. `speed` JOINED THIS LIST AND COST NOTHING ELSE. The target
+    // is free text against a documented vocabulary, so a Longstrider
+    // or a Monk's Unarmoured Movement needed one word here rather than
+    // a column - which is the whole argument the module header makes
+    // for one vocabulary over a column per effect. `speed.rs` resolves
+    // it; see the note there about doubling, which this vocabulary
+    // still cannot say.
+    if ["ac", "attack", "damage", "save", "speed"].contains(&target) {
         return true;
     }
     // 116. `resist.fire`, `immune.poison`, `vulnerable.cold`, and the

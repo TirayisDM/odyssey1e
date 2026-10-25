@@ -162,6 +162,142 @@ fn peril_of(need: Mode) -> Option<Peril> {
     }
 }
 
+/* ================= 247. WALKING, NOT STEPPING ================= */
+
+/// How far a creature actually got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Walked {
+    /// Where it ended up, which is NOT always where it was sent.
+    pub reached: Point,
+    /// Squares of movement spent, summed step by step - so difficult
+    /// ground and a climb are each paid for where they happen.
+    pub cost: i64,
+    pub steps: usize,
+    /// Why it stopped short, or `None` if it arrived.
+    ///
+    /// **A SENTENCE, NOT A CODE.** It is `step`'s own refusal for the
+    /// square it could not enter - "a timber wall is in the way" - and
+    /// it is the thing the DM reads.
+    pub stopped: Option<String>,
+    /// What the square it ENDED IN does to it.
+    ///
+    /// 247. THE END, NOT THE JOURNEY. A creature that crosses two
+    /// squares of deep water and comes out the far side was in the
+    /// water, and this does not say so. That is deliberate rather than
+    /// overlooked: the only thing anything can act on today is the
+    /// state it is now IN, because the drowning rules do not exist and
+    /// nothing counts rounds held underwater. When they do, this
+    /// becomes a peril per step and the caller sums them.
+    pub peril: Option<Peril>,
+}
+
+/// Walk toward a square, one step at a time, stopping at the first
+/// thing in the way.
+///
+/// ---------------------------------------------------------------------
+/// WHY A LINE AND NOT A ROUTE
+/// ---------------------------------------------------------------------
+///
+/// This is **not** pathfinding. It walks `grid::line` - the Bresenham
+/// walk 225 already built for line of sight - and every consecutive
+/// pair on that line is adjacent, so each pair is exactly the question
+/// [`step`] answers. A wall in the middle stops the creature AT the
+/// wall rather than sending it round, and `stopped` says what stopped
+/// it.
+///
+/// A route that goes round corners is MAP.md's Phase 5 and wants its
+/// own module with its own tests. **The honest version of the small
+/// thing is better than a pretend version of the big one**: a creature
+/// that visibly stops against a wall is telling the truth, and one
+/// that silently takes a different path than the line the DM drew is
+/// not.
+///
+/// ---------------------------------------------------------------------
+/// EACH STEP IS PRICED WHERE IT HAPPENS
+/// ---------------------------------------------------------------------
+///
+/// The cost is summed step by step rather than taken as the distance,
+/// so crossing three squares of mud costs six and crossing three of
+/// road costs three. Chebyshev means the NUMBER of steps is the
+/// distance; it does not mean they cost the same.
+///
+/// `ground` answers what is at a square - a row, else the room's
+/// default, else nothing. Passing it in rather than reaching for it
+/// keeps this testable without a database, and means the caller
+/// decides how wide a window to fetch.
+///
+/// ONE LEVEL. `grid::line` is 2D and carries the starting z, so a
+/// target on another level is refused rather than quietly flattened
+/// into a walk across this one. **A change of height is a step**, and
+/// `step` prices it - up a ramp, down a drop, onto a stair.
+pub fn walk(
+    at: Point,
+    toward: Point,
+    ground: impl Fn(Point) -> Option<Stack>,
+    can: &[Mode],
+) -> Result<Walked, String> {
+    if at == toward {
+        return Err("that is the square you are already in".to_string());
+    }
+    // THE QUIET WRONG ANSWER THIS PREVENTS: `line` ignores z and keeps
+    // the start's, so without this a click on another level would walk
+    // the creature sideways across its own floor to the x,y of a
+    // square it was never sent to.
+    if toward.z != at.z {
+        return Err(
+            "that is on another level - a change of height is a step, not a walk".to_string(),
+        );
+    }
+
+    let Some(mut from) = ground(at) else {
+        return Err("the square it is standing on is not drawn".to_string());
+    };
+
+    let mut here = at;
+    let mut cost = 0i64;
+    let mut steps = 0usize;
+    let mut peril = None;
+    let mut stopped = None;
+
+    // `line` yields the starting square first, so it is skipped.
+    for next in grid::line(at, toward).skip(1) {
+        let Some(to) = ground(next) else {
+            stopped = Some(
+                "nothing is drawn there - a missing square is unmapped, not open floor".to_string(),
+            );
+            break;
+        };
+        match step(&from, here, &to, next, can) {
+            Ok(s) => {
+                cost += s.cost;
+                steps += 1;
+                peril = s.peril;
+                here = next;
+                from = to;
+            }
+            Err(e) => {
+                stopped = Some(e);
+                break;
+            }
+        }
+    }
+
+    // 217'S SHAPE. A walk that moved nothing is not a success with a
+    // note attached - it is a refusal, and the reason is the only
+    // useful part of it.
+    if steps == 0 {
+        return Err(stopped.unwrap_or_else(|| "it did not move".to_string()));
+    }
+
+    Ok(Walked {
+        reached: here,
+        cost,
+        steps,
+        stopped,
+        peril,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +311,12 @@ mod tests {
         Point::at(5, 5)
     }
 
-    fn walk() -> &'static [Mode] {
+    /// What this creature can do besides walk: nothing.
+    ///
+    /// 247. Renamed from `afoot()` when [`walk`] became a function in
+    /// this module - a helper shadowing the thing under test is how a
+    /// test ends up passing against itself.
+    fn afoot() -> &'static [Mode] {
         &[]
     }
 
@@ -188,7 +329,7 @@ mod tests {
             here(),
             &ground(Terrain::Dirt),
             Point::at(6, 5),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -203,7 +344,7 @@ mod tests {
             here(),
             &ground(Terrain::Dirt),
             Point::at(6, 6),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -216,7 +357,7 @@ mod tests {
             here(),
             &ground(Terrain::Marsh),
             Point::at(6, 5),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 2);
@@ -230,7 +371,7 @@ mod tests {
             here(),
             &ground(Terrain::Road),
             Point::at(6, 5),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -239,7 +380,7 @@ mod tests {
     #[test]
     fn a_cover_can_make_good_ground_slow() {
         let snowy = Stack::of(Terrain::Road).under(Terrain::Snow);
-        let s = step(&ground(Terrain::Road), here(), &snowy, Point::at(6, 5), walk()).unwrap();
+        let s = step(&ground(Terrain::Road), here(), &snowy, Point::at(6, 5), afoot()).unwrap();
         assert_eq!(s.cost, 2);
     }
 
@@ -248,7 +389,7 @@ mod tests {
     #[test]
     fn a_wall_is_named_rather_than_numbered() {
         let wall = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
-        let e = step(&ground(Terrain::StoneFloor), here(), &wall, Point::at(6, 5), walk())
+        let e = step(&ground(Terrain::StoneFloor), here(), &wall, Point::at(6, 5), afoot())
             .unwrap_err();
         assert!(e.contains("stone wall"), "{}", e);
     }
@@ -259,7 +400,7 @@ mod tests {
         // the wrong thing.
         let wall = Stack::of(Terrain::WoodFloor).under(Terrain::TimberWall);
         let e =
-            step(&ground(Terrain::WoodFloor), here(), &wall, Point::at(6, 5), walk()).unwrap_err();
+            step(&ground(Terrain::WoodFloor), here(), &wall, Point::at(6, 5), afoot()).unwrap_err();
         assert!(e.contains("timber wall"), "{}", e);
         assert!(!e.contains("floor"), "{}", e);
     }
@@ -269,13 +410,13 @@ mod tests {
         for d in [Terrain::DoorClosed, Terrain::DoorBroken] {
             let door = Stack::of(Terrain::Doorway).under(d);
             assert!(
-                step(&ground(Terrain::StoneFloor), here(), &door, Point::at(6, 5), walk()).is_err(),
+                step(&ground(Terrain::StoneFloor), here(), &door, Point::at(6, 5), afoot()).is_err(),
                 "{}",
                 d.key()
             );
         }
         let open = Stack::of(Terrain::Doorway).under(Terrain::DoorOpen);
-        assert!(step(&ground(Terrain::StoneFloor), here(), &open, Point::at(6, 5), walk()).is_ok());
+        assert!(step(&ground(Terrain::StoneFloor), here(), &open, Point::at(6, 5), afoot()).is_ok());
     }
 
     /* ---------------- up and down ---------------- */
@@ -288,7 +429,7 @@ mod tests {
             here(),
             &ground(Terrain::Rock),
             Point::new(6, 5, 1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 2);
@@ -303,7 +444,7 @@ mod tests {
             here(),
             &ground(Terrain::Scree),
             Point::new(6, 5, 1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 3);
@@ -318,7 +459,7 @@ mod tests {
             here(),
             &ground(Terrain::StoneFloor),
             Point::new(5, 6, 1), // northward-southward, matching a north facing
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(up_the_ramp.cost, 1);
@@ -334,7 +475,7 @@ mod tests {
             here(),
             &ground(Terrain::StoneFloor),
             Point::new(6, 5, 1), // eastward, across a north-facing ramp
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(across.cost, 2, "crossing a ramp is still a climb");
@@ -348,7 +489,7 @@ mod tests {
             here(),
             &ground(Terrain::StoneFloor),
             Point::new(6, 5, 1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -363,7 +504,7 @@ mod tests {
             Point::new(5, 5, 1),
             &ground(Terrain::StoneFloor),
             Point::at(5, 4),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -378,7 +519,7 @@ mod tests {
             here(),
             &ground(Terrain::StoneFloor),
             Point::new(6, 6, 1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -392,7 +533,7 @@ mod tests {
             here(),
             &ground(Terrain::Stairs),
             Point::new(5, 6, 1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(up.cost, 1);
@@ -402,7 +543,7 @@ mod tests {
             here(),
             &ground(Terrain::StoneFloor),
             Point::new(5, 6, 1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(onto.cost, 1);
@@ -416,7 +557,7 @@ mod tests {
             here(),
             &ground(Terrain::Dirt),
             Point::new(6, 5, -1),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -429,7 +570,7 @@ mod tests {
             here(),
             &ground(Terrain::Rock),
             Point::new(5, 5, 2),
-            walk(),
+            afoot(),
         )
         .unwrap_err();
         assert!(e.contains("10 feet up") && e.contains("climb"), "{}", e);
@@ -442,7 +583,7 @@ mod tests {
             here(),
             &ground(Terrain::Rock),
             Point::new(5, 5, -3),
-            walk(),
+            afoot(),
         )
         .unwrap_err();
         assert!(e.contains("15 feet down") && e.contains("fall"), "{}", e);
@@ -455,7 +596,7 @@ mod tests {
             here(),
             &ground(Terrain::Rock),
             Point::at(9, 9),
-            walk(),
+            afoot(),
         )
         .unwrap_err();
         assert!(e.contains("not next to"), "{}", e);
@@ -468,7 +609,7 @@ mod tests {
             here(),
             &ground(Terrain::Rock),
             here(),
-            walk(),
+            afoot(),
         )
         .unwrap_err();
         assert!(e.contains("already in"), "{}", e);
@@ -485,7 +626,7 @@ mod tests {
             here(),
             &ground(Terrain::DeepWater),
             Point::at(6, 5),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 1);
@@ -513,7 +654,7 @@ mod tests {
             here(),
             &ground(Terrain::ShallowWater),
             Point::at(6, 5),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.cost, 2);
@@ -531,10 +672,202 @@ mod tests {
             here(),
             &ground(Terrain::Lava),
             Point::at(6, 5),
-            walk(),
+            afoot(),
         )
         .unwrap();
         assert_eq!(s.peril, None);
         assert!(ground(Terrain::Lava).footing().hazard.is_some());
+    }
+
+    /* ============== 247. walking a line ============== */
+
+    /// A map from a list, so a test can describe a corridor and nothing
+    /// else. Anything not listed is UNMAPPED, which is 226's rule and
+    /// the reason a walk can stop at the edge of what is drawn.
+    fn room(squares: &[(i32, i32, Terrain)]) -> impl Fn(Point) -> Option<Stack> + '_ {
+        move |p: Point| {
+            squares
+                .iter()
+                .find(|(x, y, _)| *x == p.x && *y == p.y)
+                .map(|(_, _, t)| Stack::of(*t))
+        }
+    }
+
+    fn strip(n: i32, t: Terrain) -> Vec<(i32, i32, Terrain)> {
+        (0..n).map(|x| (x, 0, t)).collect()
+    }
+
+    #[test]
+    fn a_walk_down_a_clear_line_arrives() {
+        let g = strip(5, Terrain::Dirt);
+        let w = walk(Point::at(0, 0), Point::at(4, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.reached, Point::at(4, 0));
+        assert_eq!(w.steps, 4);
+        assert_eq!(w.cost, 4);
+        assert_eq!(w.stopped, None, "it got there");
+    }
+
+    #[test]
+    fn each_step_is_priced_where_it_happens() {
+        // Three squares of mud cost six, not three. Chebyshev says how
+        // MANY steps; it does not say what they cost.
+        let g = strip(4, Terrain::Mud);
+        let w = walk(Point::at(0, 0), Point::at(3, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.steps, 3);
+        assert_eq!(w.cost, 6);
+    }
+
+    #[test]
+    fn a_mixed_line_costs_the_sum_of_its_squares() {
+        let g = vec![
+            (0, 0, Terrain::Road),
+            (1, 0, Terrain::Road),
+            (2, 0, Terrain::Mud),
+            (3, 0, Terrain::Road),
+        ];
+        let w = walk(Point::at(0, 0), Point::at(3, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.steps, 3);
+        assert_eq!(w.cost, 1 + 2 + 1, "road, mud, road");
+    }
+
+    #[test]
+    fn a_wall_stops_it_at_the_wall() {
+        let mut g = strip(5, Terrain::Dirt);
+        g[3] = (3, 0, Terrain::Dirt);
+        let g: Vec<_> = g
+            .into_iter()
+            .map(|(x, y, t)| if x == 3 { (x, y, Terrain::TimberWall) } else { (x, y, t) })
+            .collect();
+        let w = walk(Point::at(0, 0), Point::at(4, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.reached, Point::at(2, 0), "it stands against the wall");
+        assert_eq!(w.steps, 2);
+        // The sentence is `step`'s own, so the two cannot drift apart.
+        assert!(w.stopped.unwrap().contains("in the way"));
+    }
+
+    #[test]
+    fn a_wall_in_the_very_first_square_is_a_refusal_not_a_walk() {
+        // 217: a walk that moved nothing is not a success with a note.
+        let g = vec![(0, 0, Terrain::Dirt), (1, 0, Terrain::TimberWall)];
+        let e = walk(Point::at(0, 0), Point::at(1, 0), room(&g), afoot()).unwrap_err();
+        assert!(e.contains("in the way"), "{}", e);
+    }
+
+    #[test]
+    fn it_stops_at_the_edge_of_what_is_drawn() {
+        // A MISSING ROW IS UNMAPPED, NOT OPEN FLOOR - 226. Walking off
+        // the end of a corridor must stop, not continue into nothing.
+        let g = strip(3, Terrain::Dirt);
+        let w = walk(Point::at(0, 0), Point::at(6, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.reached, Point::at(2, 0));
+        assert!(w.stopped.unwrap().contains("unmapped"));
+    }
+
+    #[test]
+    fn a_diagonal_line_is_walked_one_square_at_a_time() {
+        let g: Vec<_> = (0..4).map(|i| (i, i, Terrain::Dirt)).collect();
+        let w = walk(Point::at(0, 0), Point::at(3, 3), room(&g), afoot()).unwrap();
+        assert_eq!(w.steps, 3);
+        assert_eq!(w.cost, 3, "a diagonal costs one - grid.rs decided that");
+    }
+
+    #[test]
+    fn every_pair_on_the_line_is_a_legal_step() {
+        // The property the whole function rests on: Bresenham never
+        // jumps, so each consecutive pair is adjacent and `step` is
+        // always being asked a question it can answer. A knight's-move
+        // line would make this fail.
+        let g: Vec<_> = (0..8)
+            .flat_map(|x| (0..8).map(move |y| (x, y, Terrain::Dirt)))
+            .collect();
+        for (tx, ty) in [(7, 3), (3, 7), (7, 7), (1, 6), (6, 1)] {
+            let w = walk(Point::at(0, 0), Point::at(tx, ty), room(&g), afoot()).unwrap();
+            assert_eq!(w.reached, Point::at(tx, ty), "to ({},{})", tx, ty);
+            assert_eq!(
+                w.steps as i32,
+                tx.max(ty),
+                "steps should be the Chebyshev distance to ({},{})",
+                tx,
+                ty
+            );
+        }
+    }
+
+    #[test]
+    fn walking_into_deep_water_ends_in_peril() {
+        let g = vec![
+            (0, 0, Terrain::Dirt),
+            (1, 0, Terrain::Dirt),
+            (2, 0, Terrain::DeepWater),
+        ];
+        let w = walk(Point::at(0, 0), Point::at(2, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.reached, Point::at(2, 0), "it is allowed in - stride's rule");
+        assert_eq!(w.peril, Some(Peril::Drowning));
+    }
+
+    #[test]
+    fn a_swimmer_crosses_the_same_water_without_peril() {
+        let g = vec![(0, 0, Terrain::Dirt), (1, 0, Terrain::DeepWater)];
+        let w = walk(Point::at(0, 0), Point::at(1, 0), room(&g), &[Mode::Swim]).unwrap();
+        assert_eq!(w.peril, None);
+    }
+
+    #[test]
+    fn coming_out_the_far_side_of_the_water_reports_no_peril() {
+        // RECORDED, NOT LIKED. The creature was in the water and this
+        // says it is not now. See the note on `Walked::peril`: the end
+        // state is the only thing anything can act on until the
+        // drowning rules exist.
+        let g = vec![
+            (0, 0, Terrain::Dirt),
+            (1, 0, Terrain::DeepWater),
+            (2, 0, Terrain::Dirt),
+        ];
+        let w = walk(Point::at(0, 0), Point::at(2, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.reached, Point::at(2, 0));
+        assert_eq!(w.peril, None);
+    }
+
+    #[test]
+    fn another_level_is_refused_rather_than_flattened() {
+        // Without this, `line` would keep the start's z and walk the
+        // creature sideways across its own floor to the x,y of a
+        // square it was never sent to.
+        let g = vec![(0, 0, Terrain::Dirt), (1, 0, Terrain::Dirt)];
+        let e = walk(
+            Point::at(0, 0),
+            Point::new(1, 0, 1),
+            room(&g),
+            afoot(),
+        )
+        .unwrap_err();
+        assert!(e.contains("another level"), "{}", e);
+    }
+
+    #[test]
+    fn the_square_you_are_in_is_not_a_walk() {
+        let g = vec![(0, 0, Terrain::Dirt)];
+        let e = walk(Point::at(0, 0), Point::at(0, 0), room(&g), afoot()).unwrap_err();
+        assert!(e.contains("already in"), "{}", e);
+    }
+
+    #[test]
+    fn standing_on_nothing_is_refused_before_anything_moves() {
+        let g = vec![(1, 0, Terrain::Dirt)];
+        let e = walk(Point::at(0, 0), Point::at(1, 0), room(&g), afoot()).unwrap_err();
+        assert!(e.contains("not drawn"), "{}", e);
+    }
+
+    #[test]
+    fn there_is_no_budget_yet_so_a_long_walk_is_allowed() {
+        // RECORDED SO IT IS NOT MISTAKEN FOR AN OVERSIGHT. A speed
+        // exists on `species` and nothing reads it; until it does, one
+        // click can cross a room. The cost is RETURNED, which is what
+        // the next cycle spends.
+        let g = strip(40, Terrain::Dirt);
+        let w = walk(Point::at(0, 0), Point::at(39, 0), room(&g), afoot()).unwrap();
+        assert_eq!(w.steps, 39);
+        assert_eq!(w.cost, 39);
+        assert_eq!(w.stopped, None);
     }
 }

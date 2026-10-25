@@ -29,7 +29,7 @@
 //! 226 says plainly: **a missing row is unmapped, not empty floor.**
 //! That is still true where there is no default. Where a room declares
 //! one, a missing row inside it is now THE DEFAULT - and the two states
-//! have to stay tellable apart, because `step_to` refuses onto undrawn
+//! have to stay tellable apart, because `walk_to` refuses onto undrawn
 //! ground and falling will want to know there is nothing underneath.
 //!
 //! So this returns an `Option`. `None` still means unmapped, and it
@@ -255,7 +255,7 @@ mod tests {
 
     /* ---------------- the room from the dev hook ----------------
 
-       234. THE WHOLE COMPOSITION, WITHOUT THE NETWORK. `step_to` is
+       234. THE WHOLE COMPOSITION, WITHOUT THE NETWORK. `walk_to` is
        `ground::at` for two squares and then `stride::step`, and the
        command itself cannot be unit tested because it is a round trip.
        This is the same arithmetic over the same data: Test Inn 1 as

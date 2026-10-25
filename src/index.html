@@ -1152,7 +1152,15 @@
               <select id="mv-mode">
                 <option value="paint">click paints</option>
                 <option value="erase">click erases</option>
+                <!-- 247. TWO CREATURE MODES, AND THE DIFFERENCE IS THE
+                     RULES. "places" is 230's deliberately dumb
+                     teleport - it will put a monster inside a wall,
+                     because a DM placing one mid-sentence should not
+                     be argued with. "walks" goes through
+                     `stride::walk`, which prices every square and
+                     stops at the first thing in the way. -->
                 <option value="stand">click places the creature</option>
+                <option value="walk">click walks the creature</option>
               </select>
             </div>
 

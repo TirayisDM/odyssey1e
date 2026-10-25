@@ -1695,7 +1695,7 @@ pub fn run() {
             commands::tiles::erase_tiles,
             commands::tiles::place_character,
             commands::tiles::standing_in,
-            commands::tiles::step_to,
+            commands::tiles::walk_to,
             commands::tiles::set_map,
             commands::tiles::map_at,
             commands::tiles::terrain_words,

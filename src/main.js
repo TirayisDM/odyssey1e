@@ -9885,6 +9885,34 @@ window.addEventListener("DOMContentLoaded", async () => {
       return drawLevel();
     }
 
+    // 247. WALKING, WHICH IS THE ONE CLICK MODE THAT OBEYS THE RULES.
+    // `stand` teleports because a DM placing a monster should not be
+    // argued with; this goes through `stride::walk`, so it pays for
+    // difficult ground, stops at a wall, and names what stopped it.
+    if (mode === "walk") {
+      const who = pick("#mv-who");
+      if (!who) return mvSay("pick a creature first", true);
+      const r = await tryCall("walk_to", {
+        characterId: who,
+        x: at.x,
+        y: at.y,
+        z: z,
+      });
+      if (!r.ok) return mvSay(r.error, true);
+      const v = r.value;
+      mvSay(
+        v.name + " to (" + v.x + "," + v.y + ") · " +
+          v.steps + " step" + (v.steps === 1 ? "" : "s") +
+          ", " + v.cost + " square" + (v.cost === 1 ? "" : "s") + " of movement" +
+          // SAID WHEN IT DID NOT GET THERE, in stride's own words, so
+          // the pane and the rules cannot describe a wall differently.
+          (v.stopped ? " · stopped short: " + v.stopped : "") +
+          (v.peril ? " · " + v.peril.toUpperCase() : ""),
+        !!v.peril
+      );
+      return drawLevel();
+    }
+
     if (mode === "erase") {
       const r = await tryCall("erase_tiles", {
         locationId: loc,

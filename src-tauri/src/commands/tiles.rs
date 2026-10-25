@@ -495,16 +495,6 @@ pub fn standing_in(state: State<AppState>, location_id: String) -> Result<Vec<St
 
 /* ===================== 231. TAKING A STEP ====================== */
 
-/// What a step actually did.
-#[derive(Debug, Clone, Serialize)]
-pub struct Moved {
-    /// Squares of movement it cost.
-    pub cost: i64,
-    /// What the creature has got itself into, as a word the screen can
-    /// show. `null` for an ordinary step.
-    pub peril: Option<String>,
-}
-
 /// Fetch the squares at these exact coordinates, and nothing else.
 ///
 /// NOT THE WHOLE MAP. A step reads two squares, and pulling sixteen
@@ -548,116 +538,18 @@ struct Standpoint {
     z: Option<i16>,
 }
 
-/// Move a creature one square, if the ground allows it.
-///
-/// 231. THE JOIN. `stride::step` has known what a step costs since 230
-/// and had no caller; `characters` has known where a creature stands
-/// and nothing read it against the ground. This is the seam closing.
-///
-/// ---------------------------------------------------------------------
-/// IT COSTS SOMETHING AND SPENDS NOTHING
-/// ---------------------------------------------------------------------
-///
-/// The cost comes back and no budget is deducted, because **there is no
-/// budget**. How much movement a creature has left is a question about
-/// the creature and the round, and 051's action economy is where it
-/// will live. Inventing a second one here would be the two-places fault
-/// before the first place exists.
-///
-/// ---------------------------------------------------------------------
-/// BOTH SQUARES MUST BE DRAWN
-/// ---------------------------------------------------------------------
-///
-/// 226 is explicit that a missing row means UNMAPPED, not empty floor.
-/// So stepping onto nothing is refused rather than treated as a step
-/// onto ordinary ground - inventing a floor is exactly what that
-/// decision forbids.
-///
-/// AND THE SQUARE BEING LEFT MUST BE DRAWN TOO, which is the stricter
-/// half and deliberate. The departure square decides whether this is a
-/// ramp, so guessing it is guessing the cost of a climb. A creature
-/// standing on undrawn ground is somewhere the map does not describe,
-/// and the honest answer is to draw it rather than to let the engine
-/// assume a floor.
-#[tauri::command]
-pub fn step_to(
-    state: State<AppState>,
-    character_id: String,
-    x: i32,
-    y: i32,
-    z: i16,
-) -> Result<Moved, String> {
-    let token = state.token()?;
+/* 247. `step_to` AND `Moved` WERE DELETED HERE.
 
-    let rows = supabase::rest_get(
-        &token,
-        "characters",
-        &[
-            ("select", "name,location_id,x,y,z"),
-            ("id", &format!("eq.{}", character_id)),
-        ],
-    )?;
-    let mut who: Vec<Standpoint> =
-        serde_json::from_value(rows).map_err(|e| format!("could not read the creature: {}", e))?;
-    let who = who.pop().ok_or("no such creature")?;
+   230 built `step_to`: one step, refused unless adjacent. 241 deleted
+   the dev hook and took its only caller with it, and 247 replaced it -
+   `walk_to` to an adjacent square IS one step, priced by the same
+   `stride::step`, so keeping both was two commands for one rule and
+   the one nobody called was the one that would drift.
 
-    let Some(location_id) = who.location_id else {
-        return Err(format!("{} is not anywhere", who.name));
-    };
-    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
-        return Err(format!("{} is not on the map - place them first", who.name));
-    };
-
-    let from_spot = Spot { x: fx, y: fy, z: fz };
-    let to_spot = Spot { x, y, z };
-    let ground = squares_at(&token, &location_id, &[from_spot, to_spot])?;
-
-    // 234. THROUGH `ground::at`, SO A DEFAULT COUNTS AS GROUND. A room
-    // that declares stone floor has stone floor everywhere inside it
-    // that nobody has drawn otherwise - which is the whole point of a
-    // recipe, and why a wall needs a row and a floor does not.
-    let (bounds, default) = map_of(&token, &location_id)?;
-    let resolve = |sx: i32, sy: i32, sz: i16| {
-        crate::ground::at(ground.get(&(sx, sy, sz)).copied(), default, bounds, sx, sy)
-    };
-
-    let from = resolve(fx, fy, fz)
-        .ok_or_else(|| format!("{} is standing on ground nobody has drawn", who.name))?;
-    let to = resolve(x, y, z)
-        .ok_or("nothing is drawn there - a missing square is unmapped, not open floor")?;
-
-    // No modes yet: nothing records a swim or fly speed, so every
-    // creature walks and deep water perils all of them equally. When
-    // speeds exist this is where they arrive.
-    let taken = crate::stride::step(
-        &from,
-        Point::new(fx, fy, fz),
-        &to,
-        Point::new(x, y, z),
-        &[],
-    )?;
-
-    let back = supabase::rest_update(
-        &token,
-        "characters",
-        &[("id", &format!("eq.{}", character_id))],
-        &json!({ "x": x, "y": y, "z": z }),
-    )
-    .map_err(|e| denied(e, "move a creature about the map"))?;
-
-    // 217, for the third time in three entries. A blocked UPDATE
-    // matches no row and returns success.
-    if back.as_array().map(Vec::len).unwrap_or(0) == 0 {
-        return Err(format!("{} did not move - not yours to move", who.name));
-    }
-
-    Ok(Moved {
-        cost: taken.cost,
-        peril: taken.peril.map(|p| match p {
-            crate::stride::Peril::Drowning => "drowning".to_string(),
-        }),
-    })
-}
+   Nothing is lost. If something ever wants "exactly one step and
+   refuse the rest" - arrow keys, say - that is `walk_to` with a
+   neighbouring square, and `stride::step` is still the only thing
+   deciding. */
 
 /* ============== 234. WHAT A ROOM IS MADE OF BY DEFAULT ============== */
 
@@ -974,6 +866,123 @@ pub fn terrain_words() -> Vec<Word> {
             cover: t.may(crate::terrain::Layer::Cover),
         })
         .collect()
+}
+
+/* ============== 247. WALKING TO A SQUARE ============== */
+
+/// What a walk did.
+#[derive(Debug, Clone, Serialize)]
+pub struct Walk {
+    pub name: String,
+    /// Where it ended up, which is **not** always where it was sent.
+    pub x: i32,
+    pub y: i32,
+    pub z: i16,
+    /// Squares of movement spent, summed step by step.
+    pub cost: i64,
+    pub steps: usize,
+    /// Why it stopped short, in `stride`'s own words, or null if it
+    /// arrived.
+    pub stopped: Option<String>,
+    pub peril: Option<String>,
+}
+
+/// Walk a creature toward a square, stopping at the first thing in the
+/// way.
+///
+/// 247. ONE CLICK, A LINE OF STEPS. `step_to` prices ONE step and
+/// refuses anything not adjacent, which made crossing a room six
+/// clicks. This walks `grid::line` and prices each step with
+/// `stride::step`, so the rule is unchanged and only the number of
+/// times it is asked has gone up.
+///
+/// **THE LINE IS COMPUTED BEFORE ANYTHING IS FETCHED.** `grid::line`
+/// is pure arithmetic, so the squares a walk could possibly touch are
+/// known in advance and read in ONE request. That is the difference
+/// between this and the obvious version, which would fetch a square,
+/// decide, fetch the next, and make a forty-square walk forty round
+/// trips.
+///
+/// Reads at most the squares on the line. A walk stopped by a wall
+/// will have read a few squares beyond it, which is one request either
+/// way.
+#[tauri::command]
+pub fn walk_to(
+    state: State<AppState>,
+    character_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+) -> Result<Walk, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "name,location_id,x,y,z"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let mut who: Vec<Standpoint> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the creature: {}", e))?;
+    let who = who.pop().ok_or("no such creature")?;
+
+    let Some(location_id) = who.location_id else {
+        return Err(format!("{} is not anywhere", who.name));
+    };
+    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
+        return Err(format!("{} is not on the map - place them first", who.name));
+    };
+
+    let at = Point::new(fx, fy, fz);
+    let toward = Point::new(x, y, z);
+
+    // Every square the walk could touch, known before the first read.
+    let spots: Vec<Spot> = crate::grid::line(at, toward)
+        .map(|p| Spot { x: p.x, y: p.y, z: p.z })
+        .collect();
+    let ground = squares_at(&token, &location_id, &spots)?;
+
+    // 234. THROUGH `ground::at`, so the room's default counts as floor
+    // - a corridor nobody drew square by square is still walkable.
+    let (bounds, default) = map_of(&token, &location_id)?;
+    let resolve = |p: Point| {
+        crate::ground::at(ground.get(&(p.x, p.y, p.z)).copied(), default, bounds, p.x, p.y)
+    };
+
+    // No modes yet: nothing records a swim or a fly speed, so every
+    // creature walks and deep water perils all of them equally. 059
+    // named `species.speed` as the column a movement system reads;
+    // when that lands this is where the modes arrive with it.
+    let went = crate::stride::walk(at, toward, resolve, &[])
+        .map_err(|e| format!("{} did not move - {}", who.name, e))?;
+
+    let back = supabase::rest_update(
+        &token,
+        "characters",
+        &[("id", &format!("eq.{}", character_id))],
+        &json!({ "x": went.reached.x, "y": went.reached.y, "z": went.reached.z }),
+    )
+    .map_err(|e| denied(e, "move a creature about the map"))?;
+
+    // 217. A blocked UPDATE matches no row and returns success.
+    if back.as_array().map(Vec::len).unwrap_or(0) == 0 {
+        return Err(format!("{} did not move - not yours to move", who.name));
+    }
+
+    Ok(Walk {
+        name: who.name,
+        x: went.reached.x,
+        y: went.reached.y,
+        z: went.reached.z,
+        cost: went.cost,
+        steps: went.steps,
+        stopped: went.stopped,
+        peril: went.peril.map(|p| match p {
+            crate::stride::Peril::Drowning => "drowning".to_string(),
+        }),
+    })
 }
 
 /* ============ 245. THE SHELF: SAVE AS, LIST, LOAD, DELETE ============

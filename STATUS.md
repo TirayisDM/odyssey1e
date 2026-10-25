@@ -10170,6 +10170,122 @@ still true until somebody presses Save as. What is there to test in
 Rust is tested; the fetching is not testable without a database and
 these four commands are mostly fetching.
 
+## 247. Click to walk, and a line of steps
+
+**2026-10-25.** Dave, having stopped me building arrow keys that moved
+a creature with no notion of how far it can go: *"don't characters have
+a movement - this is what we should be reading"*. Then, having been
+shown the five holes between `species.speed` and a movement system:
+*"click to move is prob a good place to start, establish move and seed
+properly from srd"*.
+
+So this is the control, and the speed work is the next cycle. **This
+one deliberately has no budget**, and a test says so out loud rather
+than leaving it to be mistaken for an oversight.
+
+### THE QUESTION THAT HAD TO BE ASKED
+
+"Click to move" has two readings and they are different builds.
+`stride::step` enforces adjacency - it always has - so a click on a
+distant square was either a refusal or a path. Dave chose: **walk the
+straight line, stop at the first obstacle.**
+
+The third option, going round corners, is MAP.md's Phase 5 and wants
+its own module. **The honest version of the small thing beats a
+pretend version of the big one**: a creature that visibly stops against
+a wall is telling the truth, and one that silently takes a different
+route than the line the DM drew is not.
+
+### `stride::walk`
+
+It composes two things already built and tested: `grid::line` - the
+Bresenham walk 225 wrote for line of sight - and `step`. Every
+consecutive pair on a Bresenham line is adjacent, so each pair is
+exactly the question `step` answers. **No rule changed. Only the
+number of times it is asked.**
+
+Fourteen tests. Three earn their keep on their own:
+
+- **`every_pair_on_the_line_is_a_legal_step`** asserts the property
+  the whole function rests on, across five different lines: steps come
+  out as the Chebyshev distance, which is only true if Bresenham never
+  jumps. A knight's-move line would fail it.
+- **`each_step_is_priced_where_it_happens`** - three squares of mud
+  cost six, not three. Chebyshev says how MANY steps; it does not say
+  what they cost.
+- **`another_level_is_refused_rather_than_flattened`.** `grid::line`
+  is 2D and keeps the starting z, so without a check a click on
+  another level would walk the creature **sideways across its own
+  floor** to the x,y of a square it was never sent to. A quiet wrong
+  answer of exactly the kind this project names.
+
+`stopped` carries `step`'s own sentence - "a timber wall is in the
+way" - so the pane and the rules cannot describe a wall differently.
+And 217's shape again: a walk that moved NOTHING is not a success with
+a note attached, it is a refusal, and the reason is the only useful
+part.
+
+### The peril it records, and the one it does not
+
+`Walked::peril` is the peril of the square it ENDED in. A creature
+that crosses two squares of deep water and comes out the far side was
+in the water, and this does not say so.
+
+**That is recorded rather than liked.** A test asserts the current
+behaviour and explains it: the only thing anything can act on today is
+the state the creature is now IN, because the drowning rules do not
+exist and nothing counts rounds held underwater. When they do, this
+becomes a peril per step and the caller sums them.
+
+### The line is computed before anything is fetched
+
+`grid::line` is pure arithmetic, so the squares a walk could touch are
+known in advance and read in **one** request. The obvious version -
+fetch a square, decide, fetch the next - would make a forty-square
+walk forty round trips. That is the kind of thing that is invisible
+until a map is large, which is the same reasoning `squares_at` was
+written with in 230.
+
+### TWO CREATURE MODES, AND THE DIFFERENCE IS THE RULES
+
+`click places the creature` is 230's deliberately dumb teleport: it
+will put a monster inside a wall, because a DM placing one mid-
+sentence should not be argued with by a writer.
+
+`click walks the creature` goes through `stride::walk`: it pays for
+difficult ground, refuses to enter a wall, stops at the edge of what
+is drawn, and names what stopped it. The markup says this at the
+options, because two adjacent modes that both move a creature need to
+say why there are two.
+
+### `step_to` AND `Moved` DELETED
+
+230 built `step_to`; 241 deleted the dev hook and took its only caller
+with it; `walk_to` to an adjacent square **is** one step, priced by
+the same `stride::step`. Keeping both would be two commands for one
+rule, and the one nobody called is the one that drifts.
+
+Two comments in `ground.rs` that cited `step_to` as the thing which
+refuses onto undrawn ground now cite `walk_to`. The deletion is
+recorded at the site with the reasoning, because a later reader
+wondering where the step command went deserves an answer.
+
+### Still ahead, in order
+
+1. **`speed.rs` and `npcs.speed`** - a creature's speed resolved in
+   ONE place out of species-or-statblock, conditions and encumbrance.
+   `species.speed` has said 25/30/40 since 057 and 059 wrote the
+   contract: *"when one arrives, `speed` is the column it reads"*.
+   Nothing reads it, `npcs` has no speed column at all, and
+   `grants.rs` has no speed term, so no item or spell can change one.
+2. **Seed the 134 monsters from the SRD**, which Dave asked for
+   explicitly rather than guessing from creature type.
+3. **The budget** - spending it, and resetting it on a turn, which
+   reaches into 051's action economy.
+
+Until 1 lands, one click can cross a room. The cost is **returned**,
+which is what 3 spends.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10184,7 +10300,7 @@ these four commands are mostly fetching.
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
-| build / tests | **zero warnings, 1,270 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,285 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
 
@@ -10205,7 +10321,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-two cycles, 225 to 246. Read those entries rather than this summary
+Twenty-three cycles, 225 to 247. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -10274,8 +10390,15 @@ maps with their own origins, so leaving one always needs a link.
   the promise that is true today rather than the one MAP.md describes.
 - **No falling.** `Pit` and `Ledge` are storable and mean nothing yet.
   A drop of two or more squares is refused rather than resolved.
-- **No movement budget.** `step_to` returns a cost and spends nothing;
-  that belongs with 051's action economy.
+- **No drowning.** Walking into deep water without a swim speed comes
+  back as the word `drowning` and nothing consumes it. The creature is
+  in the water and the game does not know.
+- **No movement budget, and nothing reads a speed.** `walk_to` returns
+  a cost and spends nothing, so one click can cross a room.
+  `species.speed` has said 25/30/40 since 057 and 059 named it as the
+  column a movement system reads; nothing reads it, **`npcs` has no
+  speed column at all**, and `grants.rs` has no speed term so no item
+  or spell can change one. 247 lists the order this gets fixed in.
 - **No traversal.** `leads_to` and its arrival coordinates are
   storable and unread.
 - **18 of 33 words have art.** 10 covers and 5 walls to go, and
@@ -10298,6 +10421,12 @@ square.
   you click. `Lift off` takes it off the map.
 - **Hovering** prints what the square is, drawn or from the recipe,
   **what it costs to enter**, its facing, and who is on it.
+
+Two of the modes move a creature and **the difference is the rules**:
+`places` is a dumb teleport that will drop a monster inside a wall
+(230, on purpose), `walks` goes through `stride::walk` - it pays for
+difficult ground, stops at the first thing in the way, and names what
+stopped it (247).
 
 **THERE IS NO UNDO.** A stray click changes the map. 241 names this
 rather than hiding it.

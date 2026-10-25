@@ -1,0 +1,56 @@
+-- 244. I WROTE THE HALF REVOKE AGAIN.
+--
+-- 243 ended with:
+--
+--     revoke select, insert, update, delete on public.map_versions from anon;
+--
+-- which is 226's line with the table name changed, and **227 exists
+-- because that line is wrong.** It leaves `anon` holding REFERENCES,
+-- TRIGGER and TRUNCATE, which 227 called "the worst available state:
+-- the table LOOKS locked down and two of the three survivors do not
+-- answer to RLS at all."
+--
+-- Checked, not assumed. Immediately after applying 243:
+--
+--     anon on map_versions -> REFERENCES, TRIGGER, TRUNCATE
+--     anon on tiles        -> nothing
+--
+-- ---------------------------------------------------------------------
+-- WHY RLS DOES NOT COVER THEM, AGAIN
+-- ---------------------------------------------------------------------
+--
+-- Postgres checks the GRANT first and RLS second. **TRUNCATE is not a
+-- row operation** - it empties the table without consulting a single
+-- row, so there is nothing for a policy to filter and RLS is never
+-- asked. TRIGGER is the same shape. For those two the grant is the
+-- only gate.
+--
+-- Not reachable today: PostgREST cannot issue a TRUNCATE or a CREATE
+-- TRIGGER, so there is no HTTP request that produces one. A gap in the
+-- wall with no road to it, which is why this is a tidy-up and not an
+-- incident - 227's words, and still true.
+--
+-- ---------------------------------------------------------------------
+-- HOW IT HAPPENED, WHICH IS THE ONLY INTERESTING PART
+-- ---------------------------------------------------------------------
+--
+-- I wrote 243 by reading 226 - the migration that created the table
+-- most like this one - and copying its shape: the same four policies,
+-- the same join through `locations`, the same closing revoke. The
+-- policies and the join were right. The revoke was the one line of 226
+-- that a later migration had already corrected, and **reading 226 is
+-- how you find out what 226 decided, not what is true now.**
+--
+-- `security_doors()` returned 0 faults with `anon` holding TRUNCATE on
+-- a brand-new table, so it did not help. That is not a hole in it: 227
+-- recorded that EVERY other table in this schema gives `anon` all
+-- seven privileges, because that is Supabase's default and nothing has
+-- ever swept it. A check for "no table grants anon TRUNCATE" would
+-- light up forty tables and be switched off by lunchtime. The sweep is
+-- still deferred, still deliberate, and still wants its own entry.
+--
+-- What would actually have caught it is the thing that did: **looking
+-- at the grants after applying, rather than at the SQL I had just
+-- written.**
+
+revoke all on public.map_versions from anon;

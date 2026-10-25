@@ -41,6 +41,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 
+use crate::commands::Ctx;
 use crate::supabase::{self, AppState};
 use crate::grid::Point;
 use crate::ground::Bounds;
@@ -973,6 +974,474 @@ pub fn terrain_words() -> Vec<Word> {
             cover: t.may(crate::terrain::Layer::Cover),
         })
         .collect()
+}
+
+/* ============ 245. THE SHELF: SAVE AS, LIST, LOAD, DELETE ============
+
+   243 built `map_versions` and recorded why it is a separate table
+   rather than a column on `tiles`: nothing that READS a map changes at
+   all. These four commands are the only things that touch it.
+
+   **DRAWING IS NOT SAVING AND NEVER WAS.** Every click is an INSERT,
+   so a map survives closing the app whether anybody pressed anything
+   or not. There is deliberately no `save_map` here, because a button
+   that writes nothing while looking like it wrote something is this
+   project's named defect.
+
+   THE RULES ARE IN `shelf.rs`. What a name may be, what happens to a
+   door whose destination is gone, and which squares a load has to
+   remove - three questions with wrong answers that look like ordinary
+   answers. This file does the fetching. */
+
+/// A version's columns, without the blob.
+///
+/// 245. THE SQUARES ARE NOT IN A LISTING. A fully painted
+/// forty-by-forty level is about 160 kB of jsonb, so fetching ten
+/// versions to draw a dropdown would move a megabyte and a half to
+/// display ten names. The room's size comes from `width`/`height`,
+/// which 243 made columns for exactly this.
+///
+/// HOW MANY SQUARES EACH VERSION HOLDS IS NOT HERE, and it would be
+/// useful - "4 squares" against "400" tells you which version is the
+/// real one at a glance. PostgREST cannot compute
+/// `jsonb_array_length` in a `select`, so it wants either a generated
+/// column or the whole blob. It is worth a generated column the day
+/// somebody misses it; it is not worth a megabyte today.
+const VERSION_COLUMNS: &str = "id,name,saved_at,width,height";
+
+/// What is on the shelf.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Version {
+    pub id: String,
+    pub name: String,
+    pub saved_at: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+}
+
+/// What a save put away.
+#[derive(Debug, Clone, Serialize)]
+pub struct Saved {
+    pub id: String,
+    pub name: String,
+    /// How many drawn squares went onto the shelf. Not how big the
+    /// room is: a 20x20 room with four painted squares saves four,
+    /// because the other 396 are the recipe and are saved as the
+    /// recipe.
+    pub squares: usize,
+}
+
+/// What a load actually did. 217: not what it was asked to do.
+#[derive(Debug, Clone, Serialize)]
+pub struct Loaded {
+    pub name: String,
+    pub written: usize,
+    /// Squares that were on the map and are not in the version.
+    pub removed: usize,
+    /// Doors whose destination no longer exists. See
+    /// [`crate::shelf::keep_link`].
+    pub links_dropped: usize,
+}
+
+/// The whole of a version, blob included.
+#[derive(Debug, Deserialize)]
+struct Shelved {
+    // No `id`: the caller already has it, and a field selected and
+    // never read is a column asked for out of habit.
+    location_id: String,
+    name: String,
+    width: Option<i32>,
+    height: Option<i32>,
+    #[serde(default)]
+    recipe: Value,
+    squares: Vec<Tile>,
+}
+
+/// A location's map as it is stored, verbatim.
+#[derive(Debug, Deserialize)]
+struct Room {
+    width: Option<i32>,
+    height: Option<i32>,
+    #[serde(default)]
+    recipe: Value,
+}
+
+/// One square, as a RESTORE writes it.
+///
+/// 245. THIS IS NOT [`row`], AND THE DIFFERENCE IS DAMAGE.
+///
+/// `row` is what PAINTING sends, and painting makes fresh terrain -
+/// it omits `surface_hp` and `cover_hp` entirely, so the columns take
+/// their null default and a newly painted wall is undamaged. Correct
+/// there, and silently wrong here: Dave decided a version keeps
+/// damage, and reusing `row` would have dropped every hit point on
+/// the way back in while reporting a successful load.
+///
+/// The nulls are explicit because an upsert REPLACES the row. A square
+/// that was damaged when the map was saved over and is undamaged in
+/// the version must come back undamaged, which means saying null
+/// rather than saying nothing.
+fn restored(location_id: &str, t: &Tile) -> Value {
+    json!({
+        "location_id": location_id,
+        "x": t.x,
+        "y": t.y,
+        "z": t.z,
+        "surface": t.surface.trim(),
+        "cover": t.cover.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        "sub": t.sub.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        "surface_hp": t.surface_hp,
+        "cover_hp": t.cover_hp,
+        "leads_to": t.leads_to.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        "to_x": t.to_x,
+        "to_y": t.to_y,
+        "to_z": t.to_z,
+        "facing": t.facing,
+    })
+}
+
+/// Of these places, which still exist.
+///
+/// Asked in one request with `id=in.(...)` rather than fetching every
+/// location, and asked only about the ids a version actually mentions.
+///
+/// **RLS MAKES "INVISIBLE" AND "GONE" THE SAME ANSWER.** A location in
+/// a game this DM does not run is not returned, so a link to it reads
+/// as dead and gets dropped. That is accepted rather than worked
+/// around: `leads_to` points inside the DM's own world in every case
+/// anybody has built, the cost of a wrong drop is one doorway needing
+/// its destination set again, and the alternative is a load that fails
+/// on a foreign key with a message about a constraint.
+fn surviving(token: &str, ids: &HashSet<String>) -> Result<HashSet<String>, String> {
+    if ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let list: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let rows = supabase::rest_get(
+        token,
+        "locations",
+        &[
+            ("select", "id"),
+            ("id", &format!("in.({})", list.join(","))),
+        ],
+    )?;
+    #[derive(Deserialize)]
+    struct Id {
+        id: String,
+    }
+    let found: Vec<Id> = serde_json::from_value(rows)
+        .map_err(|e| format!("could not check where the doors go: {}", e))?;
+    Ok(found.into_iter().map(|r| r.id).collect())
+}
+
+/// Put the whole map on the shelf under a name.
+///
+/// EVERY LEVEL, because 243 has no `z`: a dungeon is its floors, and
+/// versions taken a level at a time can be restored out of step with
+/// each other.
+///
+/// THE RECIPE GOES VERBATIM. 226 calls it the map's PROVENANCE - the
+/// account of what produced the room, as authored - and it is
+/// deliberately unconstrained, so parsing and re-emitting it could
+/// quietly lose a key some later generator put there. It is copied,
+/// not understood.
+#[tauri::command]
+pub fn save_map_as(
+    state: State<AppState>,
+    location_id: String,
+    name: String,
+) -> Result<Saved, String> {
+    let name = crate::shelf::name_for(&name)?;
+    let ctx = Ctx::of(&state)?;
+
+    let rooms = supabase::rest_get(
+        &ctx.token,
+        "locations",
+        &[
+            ("select", "width,height,recipe"),
+            ("id", &format!("eq.{}", location_id)),
+        ],
+    )?;
+    let mut rooms: Vec<Room> =
+        serde_json::from_value(rooms).map_err(|e| format!("could not read the room: {}", e))?;
+    let room = rooms.pop().ok_or("no such place")?;
+
+    let rows = supabase::rest_get(
+        &ctx.token,
+        "tiles",
+        &[
+            ("select", COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("order", "z.asc,y.asc,x.asc"),
+        ],
+    )?;
+    let squares: Vec<Tile> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the map: {}", e))?;
+
+    // A ROOM THAT IS NOTHING IS NOT A VERSION. An empty `squares` is
+    // legal and meaningful - 243 says so - but only alongside a recipe
+    // or some bounds. With none of the three there is no map here, and
+    // saving one would put a row on the shelf that restores to the
+    // same nothing.
+    if squares.is_empty() && room.width.is_none() && room.height.is_none() && room.recipe.is_null()
+    {
+        return Err(
+            "there is no map here to save - draw something, or describe the room first".to_string(),
+        );
+    }
+
+    let back = supabase::rest_insert(
+        &ctx.token,
+        "map_versions",
+        &json!([{
+            "location_id": location_id,
+            "name": name,
+            "saved_by": ctx.profile_id,
+            "width": room.width,
+            "height": room.height,
+            "recipe": room.recipe,
+            "squares": squares,
+        }]),
+    )
+    .map_err(|e| taken(e, &name))?;
+
+    let id = back
+        .get(0)
+        .and_then(|r| r.get("id"))
+        .and_then(Value::as_str)
+        // 217 in its own shape: an insert RLS refused comes back as an
+        // empty array with a 201, which is a success that saved nothing.
+        .ok_or("nothing was saved - this is not your map to save")?
+        .to_string();
+
+    Ok(Saved {
+        id,
+        name,
+        squares: squares.len(),
+    })
+}
+
+/// What is on this location's shelf, newest first.
+#[tauri::command]
+pub fn list_map_versions(
+    state: State<AppState>,
+    location_id: String,
+) -> Result<Vec<Version>, String> {
+    let token = state.token()?;
+    let rows = supabase::rest_get(
+        &token,
+        "map_versions",
+        &[
+            ("select", VERSION_COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("order", "saved_at.desc"),
+        ],
+    )?;
+    serde_json::from_value(rows).map_err(|e| format!("could not read the shelf: {}", e))
+}
+
+/// Put a saved map back, replacing what is drawn now.
+///
+/// THE LOCATION IS NOT A PARAMETER. It comes off the version's own
+/// row, so there is no way to ask for a version to be loaded somewhere
+/// it did not come from. Copying a map into a DIFFERENT place is a
+/// separate thing, with its own problem - every `leads_to` would point
+/// at doors belonging to the original - and Dave settled that it is
+/// not this.
+///
+/// ---------------------------------------------------------------------
+/// THE ORDER OF THE THREE WRITES, WHICH IS THE WHOLE DESIGN
+/// ---------------------------------------------------------------------
+///
+/// PostgREST gives no transaction, so three requests can stop after
+/// one or two and **every possible stopping point has to leave a state
+/// a DM can see and recover from.** That rules the obvious order out:
+/// delete the map, then write the version. Stop in the middle of that
+/// and the map is EMPTY.
+///
+/// So:
+///
+///   1. the room - width, height, recipe. The cheapest write and the
+///      least destructive. Stop here and the squares are the old
+///      ones against the new room's size, which 232 draws with a red
+///      border because it asked for a square outside the room to look
+///      WRONG rather than vanish.
+///   2. the version's squares, upserted. Nothing is deleted, so stop
+///      here and the map is the version PLUS leftovers - every square
+///      the version names is already correct.
+///   3. the surplus - what was on the map and is not in the version.
+///      [`crate::shelf::surplus`] computes it; stop here and you are
+///      in state 2, which is where a second Load puts you right.
+///
+/// **NO BOUNDS CHECK ON THE WAY IN.** `paint_tiles` refuses a square
+/// outside the declared room, and a restore must not: 232 decided
+/// that shrinking a map does not delete what falls outside it, so a
+/// version can legitimately carry squares the room no longer contains.
+/// Refusing them here would make a version unloadable because of a
+/// decision taken after it was saved.
+#[tauri::command]
+pub fn load_map_version(state: State<AppState>, version_id: String) -> Result<Loaded, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "map_versions",
+        &[
+            ("select", "location_id,name,width,height,recipe,squares"),
+            ("id", &format!("eq.{}", version_id)),
+        ],
+    )?;
+    let mut found: Vec<Shelved> = serde_json::from_value(rows)
+        .map_err(|e| format!("could not read that saved map: {}", e))?;
+    let version = found.pop().ok_or("no such saved map")?;
+    let location_id = version.location_id;
+
+    // The doors first, because dropping one changes what gets written.
+    let wanted: HashSet<String> = version
+        .squares
+        .iter()
+        .filter_map(|t| t.leads_to.clone())
+        .collect();
+    let live = surviving(&token, &wanted)?;
+    let mut squares = version.squares;
+    let mut links_dropped = 0usize;
+    for t in squares.iter_mut() {
+        if t.leads_to.is_some()
+            && crate::shelf::keep_link(t.leads_to.as_deref(), &live).is_none()
+        {
+            t.leads_to = None;
+            t.to_x = None;
+            t.to_y = None;
+            t.to_z = None;
+            links_dropped += 1;
+        }
+    }
+
+    // What is there now, so the surplus can be worked out before
+    // anything is written.
+    let now = supabase::rest_get(
+        &token,
+        "tiles",
+        &[
+            ("select", "x,y,z"),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("order", "z.asc,y.asc,x.asc"),
+        ],
+    )?;
+    let now: Vec<Spot> =
+        serde_json::from_value(now).map_err(|e| format!("could not read the map: {}", e))?;
+    let current: Vec<crate::shelf::At> = now.iter().map(|s| (s.x, s.y, s.z)).collect();
+    let coming: Vec<crate::shelf::At> = squares.iter().map(|t| (t.x, t.y, t.z)).collect();
+    let surplus = crate::shelf::surplus(&current, &coming);
+
+    /* ---- 1. the room ---- */
+    let back = supabase::rest_update(
+        &token,
+        "locations",
+        &[("id", &format!("eq.{}", location_id))],
+        &json!({
+            "width": version.width,
+            "height": version.height,
+            "recipe": version.recipe,
+        }),
+    )
+    .map_err(|e| denied(e, "load a saved map"))?;
+    if back.as_array().map(Vec::len).unwrap_or(0) == 0 {
+        return Err("nothing was loaded - that map is not yours to change".to_string());
+    }
+
+    /* ---- 2. the squares ---- */
+    let mut written = 0usize;
+    for part in squares.chunks(CHUNK) {
+        let body: Vec<Value> = part.iter().map(|t| restored(&location_id, t)).collect();
+        let back = supabase::rest_upsert(&token, "tiles", &json!(body), "location_id,z,y,x")
+            .map_err(|e| halfway(e, written, "written"))?;
+        written += back.as_array().map(Vec::len).unwrap_or(0);
+    }
+    if written != squares.len() {
+        return Err(format!(
+            "only {} of {} squares were written - the room was resized and the rest refused, \
+             so load it again",
+            written,
+            squares.len()
+        ));
+    }
+
+    /* ---- 3. the surplus ---- */
+    let mut removed = 0usize;
+    for part in surplus.chunks(CHUNK) {
+        let clauses: Vec<String> = part
+            .iter()
+            .map(|(x, y, z)| format!("and(x.eq.{},y.eq.{},z.eq.{})", x, y, z))
+            .collect();
+        let or = format!("({})", clauses.join(","));
+        removed += supabase::rest_delete_counted(
+            &token,
+            "tiles",
+            &[("location_id", &format!("eq.{}", location_id)), ("or", &or)],
+        )
+        .map_err(|e| halfway(e, removed, "removed"))?;
+    }
+
+    Ok(Loaded {
+        name: version.name,
+        written,
+        removed,
+        links_dropped,
+    })
+}
+
+/// Take a version off the shelf.
+#[tauri::command]
+pub fn delete_map_version(state: State<AppState>, version_id: String) -> Result<usize, String> {
+    let token = state.token()?;
+    let gone = supabase::rest_delete_counted(
+        &token,
+        "map_versions",
+        &[("id", &format!("eq.{}", version_id))],
+    )
+    .map_err(|e| denied(e, "delete a saved map"))?;
+    match gone {
+        0 => Err("nothing was deleted - that saved map is not yours, or is already gone"
+            .to_string()),
+        n => Ok(n),
+    }
+}
+
+/// A name already on this shelf, said as a sentence.
+///
+/// 243 made `(location_id, name)` unique so that "Save as" over an
+/// existing name is REFUSED rather than quietly replacing the thing
+/// you were keeping. The constraint does the refusing; this does the
+/// explaining, because `one_name_one_version` is not a sentence.
+fn taken(e: String, name: &str) -> String {
+    if e.contains("one_name_one_version") || e.contains("23505") {
+        format!(
+            "there is already a saved map called \"{}\" here - delete it first, \
+             or save under another name",
+            name
+        )
+    } else {
+        denied(e, "save a map")
+    }
+}
+
+/// A write that stopped part way through, said so the DM knows what
+/// state the map is in.
+///
+/// 217 is about a write that did nothing reporting success. This is
+/// its larger cousin: a write that did SOME of it, where the honest
+/// report has to name where it got to, because "it failed" would
+/// leave a DM guessing whether to load again or start over.
+///
+/// Loading again is always the right answer - see the ordering note on
+/// [`load_map_version`] - so it says so.
+fn halfway(e: String, done: usize, verb: &str) -> String {
+    format!(
+        "the load stopped after {} squares were {} - the map is part old and part new. \
+         Load the same saved map again to finish it. ({})",
+        done, verb, e
+    )
 }
 
 #[cfg(test)]

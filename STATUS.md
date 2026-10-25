@@ -9884,6 +9884,217 @@ The refusal was already right; it was being whispered.
 `grass.png` is still 58x57 and still not drawn. 32x32 or delete it -
 the three variants carry grass in the meantime.
 
+## 243. A map you can put on a shelf
+
+**2026-10-24.** Dave: *"Need a save feature so once a map is drawn it
+can be saved to be reloaded, and a save as so it can be saved as a new
+or different version"*.
+
+**THE FIRST HALF HAS WORKED SINCE 229.** Every click is an INSERT, so
+a drawn map survives closing the app whether anybody pressed anything
+or not. A Save button would write nothing, and a button that reassures
+you while doing nothing is the named defect in its most irritating
+form. I said so before building anything, because the feature as asked
+for was half already there.
+
+The second half is `map_versions`: a named copy of a whole map, taken
+on purpose.
+
+### A separate table, not a version column on `tiles`
+
+The tempting design is `tiles.version_id` with one version current. It
+is wrong: `ground::at`, `map_at`, `stride::step`, four RLS policies
+and the `locations` row would all have to agree about which version is
+live, and "which version am I looking at" becomes a fact in five
+places that can disagree.
+
+With a separate table **nothing that reads a map changes at all.** A
+reader cannot tell the migration happened.
+
+### jsonb, and it is the rule rather than an exception
+
+226 chose rows over a blob for `tiles` and quoted MAP.md's rule:
+
+> jsonb for what the DM authors and play does not change.
+> Rows for anything two people can change at once.
+
+A version is authored once, play cannot reach it, and no player ever
+reads it. **It is the jsonb side of that rule.** The other half of
+226's reasoning was fog - RLS is row-level and cannot filter inside a
+blob - and a version is a DM's shelf that is never shown to a player,
+so there is nothing to filter.
+
+### A version is not just the tiles
+
+Test Inn 1 is four painted rows and *"20x20, default mud"*. Put the
+rows back without the recipe and you get four squares floating in
+nothing, because 233 resolves an absent row against the room's
+default. So `width`, `height` and `recipe` sit beside the squares.
+
+That duplicates three columns of `locations` and is **not** the
+two-places problem: a snapshot is a copy by definition, and the
+failure mode of two places is two LIVE facts drifting apart.
+
+**No `z` column.** A version is every level. Versions taken a level at
+a time could be put back out of step with each other - a staircase
+arriving where 233 says there is no floor.
+
+### Dave's three decisions
+
+- **Creatures out.** A creature is a `characters` row with x/y/z that
+  belongs to a GAME, not a map. A terrain restore that teleported the
+  party would be a nasty surprise, and 033 would refuse it across
+  games anyway.
+- **Damage in.** `surface_hp` and `cover_hp` travel, so a version can
+  carry a half-broken door. A copy that quietly healed everything
+  would be lying about what it copied. **This decision is why 245
+  needed a second row builder** - see below.
+- **Not the same as reuse elsewhere.** Copying a map into a different
+  place is its own thing, with its own problem: every `leads_to` would
+  point at doors belonging to the original.
+
+Three constraints, tested against the live table in a transaction that
+rolled itself back: blank name refused, non-array `squares` refused,
+duplicate name refused.
+
+## 244. I wrote the half revoke again
+
+**2026-10-24.** 243 ended with
+
+```sql
+revoke select, insert, update, delete on public.map_versions from anon;
+```
+
+which is 226's line with the table name changed, and **227 exists
+because that line is wrong.** Checked immediately after applying:
+
+```
+anon on map_versions -> REFERENCES, TRIGGER, TRUNCATE
+anon on tiles        -> nothing
+```
+
+227 called that "the worst available state: the table LOOKS locked
+down and two of the three survivors do not answer to RLS at all."
+TRUNCATE is not a row operation - it empties a table without
+consulting a row, so no policy is ever asked and the grant is the only
+gate. 244 is `revoke all`.
+
+### How it happened is the only interesting part
+
+I wrote 243 by reading 226 - the existing table most like it - and
+copying its shape. The policies and the join were right. The revoke
+was **the one line of 226 that a later migration had already
+corrected**, and reading 226 tells you what 226 decided, not what is
+true now.
+
+`security_doors()` returned 0 faults throughout, and that is not a
+hole in it: 227 recorded that every other table in this schema gives
+`anon` all seven privileges, because that is Supabase's default and
+nothing has swept it. A check for "no table grants anon TRUNCATE"
+would light up forty tables and be switched off by lunchtime. The
+sweep is still deferred and still deliberate.
+
+**What caught it was looking at the grants rather than at the SQL I
+had just written.** That is the only lesson available here and it is
+the same one 242 produced four hours earlier.
+
+## 245. Save as, list, load, delete
+
+**2026-10-24.** Dave: *"build the commands"*.
+
+Four commands and one rules module.
+
+### Three things that are rules, so they are in `shelf.rs` with tests
+
+`commands/mod.rs` is explicit that a command wanting a test is a rule
+wearing a wrapper. Nineteen tests.
+
+**`name_for`** trims and refuses blank. 243's CHECK refuses it too -
+**the point of refusing it here is the sentence.** A constraint
+violation arrives as `a_version_is_named`; a DM who typed a space
+deserves to be told they typed a space. The trim happens before the
+uniqueness does, because `"cellar "` and `"cellar"` are one shelf to a
+person and two rows to a unique index. The length limit counts
+CHARACTERS, so eighty Greek letters and eighty English ones get the
+same answer.
+
+**`keep_link`** is the dangerous one. On `tiles`, `leads_to` is a
+foreign key with `on delete set null`, so deleting a place quietly
+empties the doors pointing at it. **Inside a version's jsonb there is
+no foreign key and no cascade**, so a version taken last week can name
+a location that is gone - and putting it back would violate the key on
+insert, or, if somebody reached for `on conflict do nothing`, drop the
+square and report success. A dead link becomes no link, the square
+survives, and the count is reported.
+
+Not refusing the whole load, because a room you cannot have back
+because one doorway lost its destination is worse than a room with one
+doorway that goes nowhere - which is the state `on delete set null`
+leaves the live table in anyway.
+
+**`surplus`** is the difference between load and merge. The version's
+squares are written over whatever is there, so what needs deleting is
+everything ELSE; load a four-square version onto a forty-square map
+without it and thirty-six squares survive that no version ever
+contained. A test covers z specifically: the same x and y on another
+floor is another square, and a surplus computed on x and y alone would
+wipe the cellar when you loaded the ground floor.
+
+### THE ORDER OF THE THREE WRITES IS THE WHOLE DESIGN
+
+PostgREST gives no transaction, so a load can stop after one or two
+requests. **Every stopping point has to leave a state a DM can see and
+recover from**, which rules out the obvious order - delete the map,
+then write the version - because stopping in the middle of that leaves
+the map EMPTY.
+
+So: the room first (cheapest, least destructive; stop here and the old
+squares sit outside the new bounds, which 232 already draws with a red
+border because it asked for exactly that to look wrong). Then the
+squares, **upserted** - nothing is deleted, so stopping here leaves
+the version plus leftovers and every square the version names is
+already correct. Then the surplus.
+
+A partial load says where it got to and that loading again finishes
+it, which is true at every stopping point.
+
+### The bug Dave's "damage in" decision planted
+
+`row()` is what PAINTING sends and it omits `surface_hp` and
+`cover_hp` entirely, so a freshly painted wall is undamaged. Correct
+there. **Reusing it for a restore would have dropped every hit point
+on the way back in while reporting a successful load** - the decision
+silently not implemented, with every signal saying done.
+
+So `restored()` is a second row builder, and its nulls are explicit
+because an upsert REPLACES a row: a square damaged on the map and
+undamaged in the version has to come back undamaged, which means
+saying null rather than saying nothing.
+
+### Two things deliberately not done
+
+**A listing does not fetch the squares.** A painted forty-by-forty
+level is about 160 kB of jsonb, so ten versions would move a megabyte
+and a half to draw a dropdown. `width`/`height` are columns for this
+reason. The count of squares per version is NOT available - PostgREST
+cannot compute `jsonb_array_length` in a select - and it is worth a
+generated column the day somebody misses it.
+
+**No bounds check on the way in.** `paint_tiles` refuses a square
+outside the declared room and a restore must not: 232 decided
+shrinking a map does not delete what falls outside it, so a version
+can legitimately carry squares the room no longer contains. Refusing
+them would make a version unloadable because of a decision taken after
+it was saved.
+
+### NOTHING CALLS THESE YET
+
+They are registered and unreachable. 1,270 tests pass and zero
+warnings, but **the round trip through PostgREST is unverified** -
+`shelf.rs` is tested and the fetching is not, because there is nothing
+to press. Four controls in the Map pane is the next cycle, and 242 is
+four hours old as a reminder of what shipping unexercised code buys.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -9893,10 +10104,10 @@ the three variants carry grass in the meantime.
 | | |
 |---|---|
 | `git` | clean, nothing unpushed |
-| migrations | **163 files, 173 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **238**, and every ledger row since 218 has a file |
+| migrations | **165 files, 175 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
+| newest migration | **244**, and every ledger row since 218 has a file |
 | `security_doors()` | **0 faults** |
-| build / tests | **zero warnings, 1,251 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,270 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
 
@@ -9910,7 +10121,7 @@ column.
 
 ### What happened: the map exists now
 
-Eighteen cycles, 225 to 242. Read those entries rather than this summary
+Twenty-one cycles, 225 to 245. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -9928,10 +10139,11 @@ ground.rs    what is AT a square: a row, else the default, else nothing
 src/map.js   the only thing that knows what any of it LOOKS like
 ```
 
-**SIX MIGRATIONS:** 226 (tiles, three layers, RLS), 227 (an anon
+**EIGHT MIGRATIONS:** 226 (tiles, three layers, RLS), 227 (an anon
 revoke 226 half-did), 228 (links from any square + where you arrive),
 230 (x/y/z on characters + a trigger), 232 (map bounds + a trigger),
-238 (which way a square points).
+238 (which way a square points), 243 (saved map versions), 244 (the
+anon revoke 243 half-did, the same way 226 did).
 
 ---
 
@@ -9965,7 +10177,12 @@ maps with their own origins, so leaving one always needs a link.
 ### What is NOT built, so nobody looks for it
 
 - **No undo.** You paint by clicking, and a stray click is a change to
-  the map. 241.
+  the map. 241. Saved versions (245) are the nearest thing: "save as
+  *before the dragons*" and load it back.
+- **Nothing calls the shelf.** `save_map_as`, `list_map_versions`,
+  `load_map_version` and `delete_map_version` are registered and
+  unreachable - 245 built the commands and not the controls, so the
+  round trip through PostgREST has never run.
 - **No pan or zoom.** A room wider than the pane is squeezed by CSS,
   which is readable and not sharp. 40x40 needs this first.
 - **No fog.** Phase 4. The RLS policy on `tiles` is DM-only, which is

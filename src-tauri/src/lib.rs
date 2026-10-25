@@ -81,6 +81,7 @@ mod resist;
 mod resolution;
 mod reveal;
 mod scribe;
+mod shelf;
 mod size;
 mod slots;
 mod species;
@@ -1698,6 +1699,10 @@ pub fn run() {
             commands::tiles::set_map,
             commands::tiles::map_at,
             commands::tiles::terrain_words,
+            commands::tiles::save_map_as,
+            commands::tiles::list_map_versions,
+            commands::tiles::load_map_version,
+            commands::tiles::delete_map_version,
             commands::session::me,
             // Fast login. Convenience, not security - see pin.rs.
             commands::session::pin_status,

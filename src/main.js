@@ -10037,10 +10037,18 @@ window.addEventListener("DOMContentLoaded", async () => {
       });
       if (!r.ok) return mvSay(r.error, true);
       const v = r.value;
+      // 253. AND WHAT IT HAS COST THE TURN SO FAR, when there is a
+      // turn to count within. Outside a fight `moved_this_round` is
+      // null and the line simply does not carry it - a 0 would read
+      // as "has not moved" rather than "nobody is counting".
+      const sofar = v.moved_this_round == null
+        ? ""
+        : " · " + v.moved_this_round + " this round";
       mvSay(
         v.name + " to (" + v.x + "," + v.y + ") · " +
           v.steps + " step" + (v.steps === 1 ? "" : "s") +
           ", " + v.cost + " square" + (v.cost === 1 ? "" : "s") + " of movement" +
+          sofar +
           // SAID WHEN IT DID NOT GET THERE, in stride's own words, so
           // the pane and the rules cannot describe a wall differently.
           (v.stopped ? " · stopped short: " + v.stopped : "") +

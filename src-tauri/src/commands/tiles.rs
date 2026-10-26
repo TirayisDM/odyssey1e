@@ -532,6 +532,8 @@ fn squares_at(
 #[derive(Debug, Deserialize)]
 struct Standpoint {
     name: String,
+    /// 253. Which game, so a recorded move lands in the right one.
+    game_id: String,
     location_id: Option<String>,
     x: Option<i32>,
     y: Option<i32>,
@@ -885,6 +887,57 @@ pub struct Walk {
     /// arrived.
     pub stopped: Option<String>,
     pub peril: Option<String>,
+    /// 253. EVERY SQUARE THIS CREATURE HAS COVERED THIS ROUND,
+    /// including the walk that just happened, or null when it is not
+    /// in a fight.
+    ///
+    /// NULL IS NOT ZERO. Outside an encounter there is no round to
+    /// count within - 054 - so there is no total to report, and a 0
+    /// would read as "has not moved" rather than "nobody is counting".
+    pub moved_this_round: Option<i64>,
+}
+
+/// The fight this creature is in, as the roster row and the encounter.
+///
+/// 253. SO A MOVE CAN BE COUNTED. `stamp_action_moment` fills an
+/// action's `round` and `turn_actor_id` FROM ITS `encounter_id`, so an
+/// action written without one is unattributable to a round - which is
+/// 054's rule and exactly right for a DM shuffling creatures around
+/// while drawing a map. Those moves are still recorded; they are just
+/// not counted against anybody's turn.
+///
+/// ACTIVE ONLY. A draft encounter is a fight being assembled, and
+/// movement in one is set-dressing rather than a turn being spent.
+///
+/// FAILING QUIET, like the resistances on a sheet: a creature that
+/// cannot be looked up walks anyway and its move is recorded without
+/// an encounter. Refusing to move somebody because the roster read was
+/// slow would be a worse answer than an uncounted step.
+fn fighting_in(token: &str, character_id: &str) -> Option<(String, String)> {
+    let rows = supabase::rest_get(
+        token,
+        "encounter_actors",
+        &[
+            (
+                "select",
+                "id,encounter_id,encounters!encounter_actors_encounter_id_fkey(status)",
+            ),
+            ("character_id", &format!("eq.{}", character_id)),
+        ],
+    )
+    .ok()?;
+    rows.as_array()?.iter().find_map(|r| {
+        let status = r
+            .get("encounters")
+            .and_then(|e| e.get("status"))
+            .and_then(|v| v.as_str())?;
+        if status != "active" {
+            return None;
+        }
+        let actor = r.get("id").and_then(|v| v.as_str())?;
+        let enc = r.get("encounter_id").and_then(|v| v.as_str())?;
+        Some((actor.to_string(), enc.to_string()))
+    })
 }
 
 /// Walk a creature toward a square, stopping at the first thing in the
@@ -920,7 +973,7 @@ pub fn walk_to(
         &token,
         "characters",
         &[
-            ("select", "name,location_id,x,y,z"),
+            ("select", "name,game_id,location_id,x,y,z"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -971,6 +1024,46 @@ pub fn walk_to(
         return Err(format!("{} did not move - not yours to move", who.name));
     }
 
+    /* ---- 253. THE MOVE IS A THING THAT HAPPENED ----
+
+       Recorded whether or not anybody is counting. Inside an active
+       fight it carries the encounter and the roster row, and the
+       trigger stamps the round and whose turn it was; outside one it
+       is a row with no round, which 054 says cannot be attributed to
+       a turn and therefore is not.
+
+       `key` AND `cost` ARE BOTH "move", which is `Act::cost`'s
+       fallback rule - a cost word used as a key IS that cost - so the
+       count agrees whether it reads the column or the key.
+
+       FAILING QUIET. The creature HAS MOVED: the position was written
+       above and 217-checked. If the log write fails, the move still
+       happened, and refusing to report it would be a lie about the
+       map in order to complain about the diary. */
+    let fight = fighting_in(&token, &character_id);
+    let mut row = json!({
+        "game_id": who.game_id,
+        "character_id": character_id,
+        "key": "move",
+        "cost": "move",
+        "request": "move",
+        "label": format!("moved {} squares", went.cost),
+        "status": "done",
+        "squares": went.cost,
+    });
+    if let Some((actor_id, encounter_id)) = &fight {
+        row["actor_id"] = json!(actor_id);
+        row["encounter_id"] = json!(encounter_id);
+    }
+    let _ = supabase::rest_insert(&token, "actions", &json!([row]));
+
+    // AND WHAT THAT MAKES THE ROUND'S TOTAL. Summed from the rows, not
+    // from a counter - see 253. Only inside a fight, because outside
+    // one there is no round to sum within.
+    let moved_this_round = fight
+        .as_ref()
+        .and_then(|(actor_id, _)| moved_so_far(&token, actor_id));
+
     Ok(Walk {
         name: who.name,
         x: went.reached.x,
@@ -982,7 +1075,41 @@ pub fn walk_to(
         peril: went.peril.map(|p| match p {
             crate::stride::Peril::Drowning => "drowning".to_string(),
         }),
+        moved_this_round,
     })
+}
+
+/// Every square this roster row has covered in the round it is in.
+///
+/// 253. SUMMED IN RUST FROM THE ROWS, rather than asked of PostgREST
+/// as an aggregate. The sum is three lines here and a `select=sum(...)`
+/// there would be a second place that knows what counts as a move -
+/// and `this_round` in `spent.rs` is already the first.
+///
+/// THE ROUND COMES OFF THE ROWS THEMSELVES. Asking the encounter for
+/// its current round and filtering on it would be correct and would
+/// also be a second read; the actions carry the stamp, so the newest
+/// one names the round being counted.
+fn moved_so_far(token: &str, actor_id: &str) -> Option<i64> {
+    let rows = supabase::rest_get(
+        token,
+        "actions",
+        &[
+            ("select", "round,squares"),
+            ("actor_id", &format!("eq.{}", actor_id)),
+            ("squares", "not.is.null"),
+            ("order", "round.desc"),
+        ],
+    )
+    .ok()?;
+    let rows = rows.as_array()?;
+    let round = rows.iter().find_map(|r| r.get("round").and_then(|v| v.as_i64()))?;
+    Some(
+        rows.iter()
+            .filter(|r| r.get("round").and_then(|v| v.as_i64()) == Some(round))
+            .filter_map(|r| r.get("squares").and_then(|v| v.as_i64()))
+            .sum(),
+    )
 }
 
 /* ============ 245. THE SHELF: SAVE AS, LIST, LOAD, DELETE ============

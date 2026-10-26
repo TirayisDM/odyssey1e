@@ -10741,6 +10741,92 @@ the wall was the thing being turned. The check reads
 alone for now because with the walls facing it is much harder to hit,
 but it is a sentence that points at the wrong thing.
 
+## 253. How far a move went
+
+**2026-10-26.** Dave: *"do the budget cycle"*.
+
+`spent.rs` has counted what a creature did in a round since 054, and
+**everything it counted was an occurrence**: three actions is three
+rows, two swings is two.
+
+**Movement is a quantity.** Three moves might be one square, then two
+across mud, then one - four squares in three rows. Counting rows would
+say three and be wrong about the only number anybody cares about, and
+no column on `actions` carried an amount of anything.
+
+So `actions.squares`, and `this_round` sums it instead of counting it.
+
+### WHY NOT A RUNNING TOTAL ON THE CREATURE
+
+Because somebody has to reset it, and the somebody is what drifts. A
+`movement_spent` column would need zeroing when the turn passes, when
+the round advances, when initiative is rebuilt, when a creature joins
+mid-fight and when a DM rewinds - and the day one path forgets, a
+creature is out of movement for a reason nobody can see.
+
+`this_round` already derives every other tally by summing the rows of
+the round it was asked about. This is the same derivation with
+`+= squares` instead of `+= 1`, and it inherits the property that
+makes the others trustworthy: **the tally cannot disagree with the
+log, because the tally IS the log.**
+
+### A move is a thing that happened, counted or not
+
+`walk_to` records every walk. Inside an active fight it carries the
+encounter and the roster row, and `stamp_action_moment` fills the
+round and whose turn it was; **outside one it is a row with no round**,
+which 054 says cannot be attributed to a turn - and therefore is not.
+
+That is exactly right for a DM shuffling creatures while drawing a
+map: the moves are recorded and nothing is charged for them.
+
+A draft encounter does not count either. A fight being assembled is
+set-dressing, not a turn being spent.
+
+**THE LOG WRITE FAILS QUIET.** The creature has already moved - the
+position was written and 217-checked - so refusing to report the move
+because the diary entry failed would be a lie about the map in order
+to complain about the paperwork.
+
+### Movement out of turn still covered the ground
+
+A creature dragged on somebody else's turn moved. The squares count
+even though the ACTION lands in `legendary`, because distance is
+distance - and a readout that forgot those squares would under-report
+the one tally that is a quantity. There is a test.
+
+### `Budget.movement` IS AN OPTION, AND THAT IS THE CARE
+
+Every other field in `Budget` has an honest default - one swing, one
+action. Movement has none. **249 left 21 of the 280 creatures without
+a transcribed speed**, so a 0 would mark every one of them over budget
+the moment it took a step, and a 6 would invent a speed no book backs.
+
+`None` means the comparison is simply not made. The squares are still
+counted and still shown; what is missing is the thing to measure them
+against, and saying so beats measuring against a guess. 061 had to
+repair a warning that fired on correct play once already.
+
+A speed of **0 is different from None** and is measured against: a
+shrieker, or anybody grappled. Moving at all is then past the
+allowance.
+
+### WHERE THIS CYCLE STOPS, AND WHY
+
+**Nothing sets `Budget.movement` yet**, so the pane says *"3 squares
+of movement · 7 this round"* and not *"7 of 12"*. There is no
+`with_movement` builder either - shipping an unused one would be
+scaffolding for a decision not yet taken.
+
+The decision: **the only thing that resolves a speed is a whole sheet
+build** (250), and `budgets_for` serves a whole roster. Six combatants
+would be six sheet builds to print six numbers. Resolving it cheaply -
+species or statblock only, skipping items and conditions - would be a
+partial resolution that looks complete, which is the named defect.
+
+So the comparison waits for a roster-wide speed read that is worth
+having, and that is its own cycle rather than a corner of this one.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10751,11 +10837,11 @@ but it is a sentence that points at the wrong thing.
 |---|---|
 | `git` | clean, nothing unpushed |
 | migrations | **167 files, 177 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **249**. **All 177 ledger rows reconcile to the 167 files and no file is unapplied** - checked by name and count, not remembered |
+| newest migration | **253**. **All 177 ledger rows reconcile to the 167 files and no file is unapplied** - checked by name and count, not remembered |
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
-| build / tests | **zero warnings, 1,313 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,324 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **21 of 33 words**, 33 files - all 32x32. `grass` has 5, `brush` 5, `snow` 5. The 12 left are 5 walls and 7 covers |
 
@@ -10776,7 +10862,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-eight cycles, 225 to 252. Read those entries rather than this summary
+Twenty-nine cycles, 225 to 253. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -10848,11 +10934,11 @@ maps with their own origins, so leaving one always needs a link.
 - **No drowning.** Walking into deep water without a swim speed comes
   back as the word `drowning` and nothing consumes it. The creature is
   in the water and the game does not know.
-- **No movement budget.** The sheet shows a resolved speed (250) and
-  `walk_to` returns a cost, and **nothing compares them** - one click
-  still crosses a room. It is one subtraction away now that both
-  numbers exist; it reaches into 051's action economy, which is why
-  it is its own cycle.
+- **Movement is counted but not measured.** 253 records every walk
+  and sums the round's squares, and the pane says "7 this round" -
+  but `Budget.movement` is `None` everywhere, so nothing says "of
+  12". The comparison needs a roster-wide speed read that is not six
+  sheet builds; see 253 for why that is its own cycle.
   `species.speed` has said 25/30/40 since 057 and 059 named it as the
   column a movement system reads; nothing reads it, **`npcs` has no
   speed column at all**, and `grants.rs` has no speed term so no item

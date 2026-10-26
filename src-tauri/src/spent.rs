@@ -64,6 +64,20 @@ pub struct Act {
     /// now reads it while counting rather than only while painting.
     #[serde(default)]
     pub turn_actor_id: Option<String>,
+    /// 253. HOW FAR, for a move. `None` for everything else.
+    ///
+    /// **MOVEMENT IS THE FIRST THING HERE THAT IS A QUANTITY RATHER
+    /// THAN AN OCCURRENCE.** Three actions is three; three moves might
+    /// be one square, then two across mud, then one - four squares in
+    /// three rows. Counting rows would say three and be wrong about
+    /// the only number that matters.
+    ///
+    /// So the amount is recorded on the row that happened, and summed.
+    /// Nothing stores a running total: a counter has to be reset by
+    /// somebody, and the somebody is what drifts. `this_round` already
+    /// derives every other tally the same way.
+    #[serde(default)]
+    pub squares: Option<i64>,
 }
 
 impl Act {
@@ -133,12 +147,36 @@ pub struct Budget {
     /// and that warning is what 054's `beyond_one_turn` was reaching
     /// for before it could tell the two cases apart.
     pub legendary: i64,
+    /// 253. SQUARES OF MOVEMENT IN A TURN, or `None` when nobody has
+    /// said how fast this creature is.
+    ///
+    /// **AN OPTION, AND THAT IS THE WHOLE CARE TAKEN HERE.** Every
+    /// other field in this struct has an honest default - one swing,
+    /// one action - and movement has none: 249 left 21 of the 280
+    /// creatures without a transcribed speed, so a 0 would mark every
+    /// one of them over budget the moment it took a step, and a 6
+    /// would invent a speed no book backs.
+    ///
+    /// `None` means the comparison is simply not made. The squares are
+    /// still counted and still shown; what is missing is the thing to
+    /// measure them against, and saying so is better than measuring
+    /// against a guess.
+    pub movement: Option<i64>,
 }
 
 impl Default for Budget {
     /// What somebody with no class gets: one swing, one action.
     fn default() -> Self {
-        Self { attacks: 1, actions: 1, bonus: 1, reactions: 1, free: 1, legendary: 0 }
+        Self {
+            attacks: 1,
+            actions: 1,
+            bonus: 1,
+            reactions: 1,
+            free: 1,
+            legendary: 0,
+            // NOT ZERO AND NOT SIX. See the field.
+            movement: None,
+        }
     }
 }
 
@@ -151,6 +189,7 @@ impl Budget {
     pub fn with_legendary(self, legendary: i64) -> Self {
         Self { legendary: legendary.max(0), ..self }
     }
+
 }
 
 /// What one creature has spent, in one round.
@@ -185,6 +224,11 @@ pub struct Spent {
     /// only thing that can tell the two apart. Anything else taken on
     /// somebody else's turn lands here.
     pub legendary: i64,
+    /// 253. SQUARES MOVED THIS ROUND, summed from the rows rather than
+    /// counted. Zero for a creature that has not moved, which is not
+    /// the same as a creature whose speed is unknown - that shows in
+    /// `budget.movement`.
+    pub movement: i64,
     /// What this creature was owed, so a screen can print "2 of 2"
     /// rather than counting to two and worrying.
     pub budget: Budget,
@@ -268,12 +312,19 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
                     reactions: 0,
                     free: 0,
                     legendary: 0,
+                    movement: 0,
                     budget,
                     over_budget: false,
                 });
                 out.last_mut().expect("just pushed")
             }
         };
+        // 253. MOVEMENT IS SUMMED WHEREVER IT HAPPENED, including out
+        // of turn. A creature dragged on somebody else's turn still
+        // covered the ground, and a readout that forgot those squares
+        // would under-report the only tally that is a quantity.
+        slot.movement += a.squares.unwrap_or(0).max(0);
+
         slot.actions += 1;
 
         // 149. OUTSIDE ITS OWN TURN IS ITS OWN TALLY, and this is the
@@ -334,7 +385,13 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
             || slot.free > slot.budget.free
             // 149. And spending more out of turn than the statblock
             // allows - which for almost everything is any at all.
-            || slot.legendary > slot.budget.legendary;
+            || slot.legendary > slot.budget.legendary
+            // 253. AND ONLY WHEN THERE IS SOMETHING TO MEASURE
+            // AGAINST. `None` is 21 creatures with no transcribed
+            // speed, and flagging them for taking a step would be a
+            // warning firing on correct play - which 061 already had
+            // to repair once for Extra Attack.
+            || slot.budget.movement.is_some_and(|m| slot.movement > m);
     }
 
     out.sort_by(|a, b| a.actor_id.cmp(&b.actor_id));
@@ -342,6 +399,15 @@ pub fn this_round(acts: &[Act], round: i64, budgets: &[(String, Budget)]) -> Vec
 }
 
 /* ============================ TESTS ============================ */
+
+/* 253. THERE IS NO `with_movement` BUILDER YET, deliberately.
+
+   `Budget.movement` is read by `over_budget` and defaults to `None`,
+   so the squares are counted and shown and nothing is measured
+   against a guess. The builder arrives with the thing that fills it -
+   a roster-wide speed resolution, which is its own problem: the only
+   thing that resolves a speed today is a whole sheet build, and six
+   combatants would be six of them to print six numbers. */
 
 #[cfg(test)]
 mod tests {
@@ -368,14 +434,111 @@ mod tests {
                 reactions: 0,
                 free: 0,
                 legendary: 0,
+                movement: 0,
                 budget: Budget::default(),
                 over_budget: false,
             })
     }
 
+    /// A move of `squares`, taken on its own turn.
+    fn moved(actor: &str, squares: i64, round: i64) -> Act {
+        Act {
+            squares: Some(squares),
+            turn_actor_id: Some(actor.to_string()),
+            ..act(Some(actor), "move", Some(round))
+        }
+    }
+
+    /// How far this creature may go, in squares.
+    fn can_go(actor: &str, squares: i64) -> Vec<(String, Budget)> {
+        vec![(actor.to_string(), Budget { movement: Some(squares), ..Budget::default() })]
+    }
+
     /// The same act, taken while somebody else held the turn.
     fn out(actor: &str, key: &str, round: i64, whose_turn: &str) -> Act {
         Act { turn_actor_id: Some(whose_turn.to_string()), ..act(Some(actor), key, Some(round)) }
+    }
+
+    /* ------------- movement (253) ----------------------------------- */
+
+    #[test]
+    fn squares_are_summed_not_counted() {
+        // THE WHOLE REASON `squares` EXISTS. Three moves across mixed
+        // ground is four squares, not three rows.
+        let acts = vec![moved("garn", 1, 1), moved("garn", 2, 1), moved("garn", 1, 1)];
+        let s = one(&acts, 1, "garn");
+        assert_eq!(s.movement, 4);
+        assert_eq!(s.actions, 3, "they are still three actions");
+    }
+
+    #[test]
+    fn a_creature_that_has_not_moved_has_moved_nothing() {
+        let acts = vec![act(Some("garn"), "attack", Some(1))];
+        assert_eq!(one(&acts, 1, "garn").movement, 0);
+    }
+
+    #[test]
+    fn another_rounds_movement_is_not_this_rounds() {
+        let acts = vec![moved("garn", 5, 1), moved("garn", 3, 2)];
+        assert_eq!(one(&acts, 1, "garn").movement, 5);
+        assert_eq!(one(&acts, 2, "garn").movement, 3);
+    }
+
+    #[test]
+    fn movement_out_of_turn_still_covered_the_ground() {
+        // A creature dragged on somebody else's turn moved. The
+        // squares count even though the action lands in `legendary`,
+        // because distance is distance.
+        let acts = vec![Act { squares: Some(3), ..out("garn", "move", 1, "luci") }];
+        let s = one(&acts, 1, "garn");
+        assert_eq!(s.movement, 3);
+        assert_eq!(s.legendary, 1, "the ACTION was out of turn");
+    }
+
+    #[test]
+    fn going_further_than_the_speed_is_flagged() {
+        let acts = vec![moved("garn", 4, 1), moved("garn", 3, 1)];
+        let s = one_with(&acts, 1, "garn", &can_go("garn", 6));
+        assert_eq!(s.movement, 7);
+        assert!(s.over_budget, "seven squares on a speed of six");
+    }
+
+    #[test]
+    fn exactly_the_speed_is_correct_play() {
+        let acts = vec![moved("garn", 6, 1)];
+        let s = one_with(&acts, 1, "garn", &can_go("garn", 6));
+        assert!(!s.over_budget, "six of six is not over");
+    }
+
+    #[test]
+    fn an_unknown_speed_never_flags() {
+        // 249 LEFT 21 CREATURES WITHOUT A TRANSCRIBED SPEED, and
+        // `Budget::default().movement` is None for every one of them.
+        // Flagging them for taking a step would be a warning firing on
+        // correct play - which 061 already had to repair once for
+        // Extra Attack.
+        let acts = vec![moved("thing", 40, 1)];
+        let s = one(&acts, 1, "thing");
+        assert_eq!(s.movement, 40);
+        assert_eq!(s.budget.movement, None);
+        assert!(!s.over_budget, "nobody said how fast it is, so nothing is exceeded");
+    }
+
+    #[test]
+    fn a_speed_of_zero_is_measured_against() {
+        // Distinct from None: a shrieker, or anybody grappled. Moving
+        // at all is then past the allowance.
+        let acts = vec![moved("rooted", 1, 1)];
+        let s = one_with(&acts, 1, "rooted", &can_go("rooted", 0));
+        assert!(s.over_budget, "a speed of zero and a square moved");
+    }
+
+    #[test]
+    fn a_row_with_no_squares_adds_nothing() {
+        // Every action written before 253 has a null here, and an
+        // attack has one forever.
+        let acts = vec![act(Some("garn"), "attack", Some(1)), moved("garn", 2, 1)];
+        assert_eq!(one(&acts, 1, "garn").movement, 2);
     }
 
     /* ------------- legendary actions (149) -------------------------- */
@@ -478,6 +641,9 @@ mod tests {
             // about a creature on its own turn, and saying so keeps
             // them testing what they were written to test.
             turn_actor_id: actor.map(String::from),
+            // 253. NOT A MOVE unless a fixture says so, which is every
+            // action in this file except the ones `moved` builds.
+            squares: None,
         }
     }
 

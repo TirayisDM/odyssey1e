@@ -73,7 +73,10 @@ pub fn encounter_log(
                 // "Someone" for as long as it did. A column the database
                 // fills and the query never asks for is a column that
                 // does not exist as far as the screen is concerned.
-                "id,round,turn_actor_id,key,cost,request,label,created_at,character_name,\
+                // 253. `squares` joins the list for the same reason 155
+                // gives above: a column the query never asks for does
+                // not exist as far as the screen is concerned.
+                "id,round,turn_actor_id,key,cost,request,label,created_at,character_name,squares,\
                  actor_id,character_id,target_actor_id,target_challenge_id,\
                  rolls!rolls_action_id_fkey(id,role,label,request,formula,detail,total,natural_roll,\
                  character_name,target_value,target_kind,target_label,\
@@ -121,6 +124,9 @@ pub fn encounter_log(
                 .get("turn_actor_id")
                 .and_then(|v| v.as_str())
                 .map(String::from),
+            // 253. HOW FAR A MOVE WENT. Null for everything that is
+            // not a move, which is every row written before 253.
+            squares: a.get("squares").and_then(|v| v.as_i64()),
         })
         .collect();
 

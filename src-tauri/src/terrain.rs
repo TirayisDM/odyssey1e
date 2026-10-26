@@ -651,11 +651,44 @@ impl Terrain {
     /// So this is what `paint_tiles` checks before accepting a turn:
     /// the column holds 0..3 for everybody, and only these words are
     /// allowed to put anything but 0 in it.
+    ///
+    /// ---------------------------------------------------------------------
+    /// 252. AND THE FIVE WALLS JOINED THEM, BECAUSE THE ART FACES
+    /// ---------------------------------------------------------------------
+    ///
+    /// Dave, painting: *"the stone_wall will not place if its
+    /// orientation is not N"*. 238 listed eight words and every one of
+    /// them turns for a reason the RULES can read - a ramp eases a
+    /// climb along its own axis, a doorway sits in one wall, a ledge
+    /// has an edge you fall off.
+    ///
+    /// **A WALL'S REASON IS ONLY THAT IT IS DRAWN.** Its tile has a
+    /// top: a face, a capstone, a weathered edge. Turning it changes
+    /// nothing any rule asks about and everything the eye asks about,
+    /// and 238's own test for this list was never "does a rule read
+    /// it" - it was *"does this word mean something different
+    /// depending which way it points"*. A directional wall does.
+    ///
+    /// THE REFUSAL WAS CORRECT AND THE LIST WAS WRONG. `paint_tiles`
+    /// was doing exactly what it was told; what it was told predated
+    /// the art.
     pub fn faces(self) -> bool {
         use Terrain::*;
         matches!(
             self,
-            Doorway | Ramp | Stairs | Ledge | DoorOpen | DoorClosed | DoorBroken | IronGrate
+            Doorway
+                | Ramp
+                | Stairs
+                | Ledge
+                | DoorOpen
+                | DoorClosed
+                | DoorBroken
+                | IronGrate
+                | StoneWall
+                | TimberWall
+                | RockWall
+                | WoodenWall
+                | IceWall
         )
     }
 
@@ -939,6 +972,11 @@ mod tests {
     fn only_the_asymmetrical_words_face() {
         // A rock is the same whichever way it is turned, so storing a
         // turn on one is noise somebody will read as meaningful.
+        //
+        // 252. THE FIVE WALLS JOINED THE LIST. Their art has a top -
+        // a face, a capstone, a weathered edge - so a turn changes
+        // what you see even though no rule reads it. The ground and
+        // the soft covers still do not face.
         for t in ALL {
             let expected = matches!(
                 t,
@@ -950,8 +988,43 @@ mod tests {
                     | Terrain::DoorClosed
                     | Terrain::DoorBroken
                     | Terrain::IronGrate
+                    | Terrain::StoneWall
+                    | Terrain::TimberWall
+                    | Terrain::RockWall
+                    | Terrain::WoodenWall
+                    | Terrain::IceWall
             );
             assert_eq!(t.faces(), expected, "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn every_wall_can_be_turned() {
+        // 252. Stated against WALLS rather than by listing them again,
+        // so a sixth wall added to the vocabulary cannot quietly
+        // arrive unable to turn - which is the shape of the bug Dave
+        // hit, one list having moved on without the other.
+        for t in WALLS {
+            assert!(t.faces(), "{} is drawn with a top and must turn", t.key());
+        }
+    }
+
+    #[test]
+    fn the_ground_still_does_not_face() {
+        // The half of 238 that has not changed: a turn on open ground
+        // is noise. This is the guard that stops 252 being read as
+        // "facing is free now".
+        for t in [
+            Terrain::Rock,
+            Terrain::Dirt,
+            Terrain::Mud,
+            Terrain::Sand,
+            Terrain::Road,
+            Terrain::StoneFloor,
+            Terrain::Grass,
+            Terrain::Snow,
+        ] {
+            assert!(!t.faces(), "{} should not turn", t.key());
         }
     }
 

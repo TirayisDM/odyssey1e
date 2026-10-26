@@ -10697,6 +10697,50 @@ it makes the reset less necessary rather than unnecessary.
 Dave's to do: Authentication -> Users -> the account -> set a password.
 Nothing in this app can read or reset a password, and it should not be
 able to.
+## 252. A wall is drawn with a top
+
+**2026-10-26.** Dave, painting: *"the stone_wall will not place if its
+orientation is not N"*.
+
+`paint_tiles` was refusing it, and **the refusal was correct while the
+list behind it was wrong.**
+
+238 named eight words that may be turned, and every one of them turns
+for a reason the RULES can read: a ramp eases a climb along its own
+axis, a doorway sits in one wall of a square, a ledge has an edge you
+fall off. A wall was not among them because nothing in the rules asks
+which way a wall points.
+
+**A WALL'S REASON IS ONLY THAT IT IS DRAWN.** Its tile has a top - a
+face, a capstone, a weathered edge - so turning it changes everything
+the eye asks about and nothing any rule asks about. And 238's own test
+for the list was never "does a rule read it". It was, in its own
+words, *"does this word mean something different depending which way
+it points"*. A directional wall does.
+
+So the five walls joined the eight. One line, and three tests around
+it:
+
+- `every_wall_can_be_turned` is stated against the `WALLS` constant
+  rather than by listing them again, **so a sixth wall cannot quietly
+  arrive unable to turn** - which is the exact shape of the bug Dave
+  hit, one list having moved on without the other.
+- `the_ground_still_does_not_face` keeps the half of 238 that has not
+  changed. A turn on open ground is still noise, and this is the guard
+  that stops 252 being read as "facing is free now".
+- `only_the_asymmetrical_words_face` was updated rather than deleted.
+
+The renderer needed nothing: `lay` has turned a cover by the square's
+facing since 238, so the art rotated the moment the refusal lifted.
+
+**THE MESSAGE NAMED THE WRONG LAYER**, which is why this took a
+screenshot to understand. Painting `rock` + `stone_wall` refuses with
+*"rock is the same whichever way it is turned"* - the surface, when
+the wall was the thing being turned. The check reads
+`surface.faces() || cover.faces()` and reports only the surface. Left
+alone for now because with the walls facing it is much harder to hit,
+but it is a sentence that points at the wrong thing.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10732,7 +10776,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-seven cycles, 225 to 251. Read those entries rather than this summary
+Twenty-eight cycles, 225 to 252. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

@@ -97,6 +97,21 @@ const refused = new Set();
 /// moved here. A shaped wall with no shaped PNG falls back to the
 /// plain one, which looks like an ordinary wall and is not what the
 /// DM painted.
+///
+/// 257. EMPTIED AT THE START OF EVERY DRAW, which it was not, and the
+/// readout lied about art that exists.
+///
+/// `tiles()` hands back its array IMMEDIATELY and fills it as the
+/// images arrive, so the first frame misses every shaped sprite by
+/// definition - the files had not loaded yet. Each load then calls
+/// `repaint()` and the next frame draws them correctly, but a name
+/// added once stayed for the life of the session. Dave's map reported
+/// `stone_wall_corner, stone_wall_diag` as having no art while both
+/// were plainly drawn on the screen in front of him.
+///
+/// A warning that cries wolf is worse than no warning: the one time
+/// it is right, it has already been learned to be ignored. Cleared
+/// per frame, it says what THIS picture is missing.
 const unshaped = new Set();
 
 /// Throw away every image and ask for them all again.
@@ -344,6 +359,9 @@ export function squareAt(view, px, py) {
 
 export function draw(canvas, view) {
   last = { canvas, view };
+  // 257. See the note on `unshaped`. This set describes the picture
+  // about to be drawn, not every picture ever drawn.
+  unshaped.clear();
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
 
@@ -371,8 +389,16 @@ export function draw(canvas, view) {
     // THE GROUND. A square the room merely IMPLIES is drawn fainter
     // than one somebody wrote down, so that while a map is being
     // authored you can see what you actually authored.
+    // 257. NO SHAPE ON THE GROUND. The shape is which piece of a WALL
+    // this is, and 254 said so in the migration: *"the only shaped
+    // thing on it is the wall."* Passing it here asked for
+    // `dirt_corner.png` and `dirt_diag.png`, which nobody will ever
+    // draw, and then named them as missing art.
+    //
+    // The FACING still goes to the ground, because a ramp climbs a
+    // direction and stairs do. Only the shape is the wall's alone.
     ctx.globalAlpha = s.drawn ? 1 : 0.55;
-    lay(ctx, s.surface, x, y, s.facing, s.x, s.y, s.shape);
+    lay(ctx, s.surface, x, y, s.facing, s.x, s.y, null);
     ctx.globalAlpha = 1;
 
     if (s.cover) {

@@ -123,11 +123,60 @@ pub enum Shape {
     /// 255. Also two distinct pictures rather than four, for the same
     /// reason: a diagonal turned 180 degrees is itself.
     Diag,
+    /// A diagonal with the ground on one side of it filled solid -
+    /// where a diagonal run meets the stone it is cut from.
+    ///
+    /// 257. TWO WORDS FOR WHAT ROTATION COULD HAVE DONE WITH ONE, and
+    /// that is a choice rather than an oversight.
+    ///
+    /// Measured rather than eyeballed: the two sprites Dave drew are
+    /// 180 degrees apart, not mirrored - one fills the lower-left of
+    /// the diagonal, the other the upper-right. Four turns of EITHER
+    /// reaches all four quadrant fills, so `_r` draws nothing `_l`
+    /// could not.
+    ///
+    /// It is still two words, because the alternative is a DM working
+    /// out which rotation of the left-hand piece makes a right-hand
+    /// corner while drawing a map. The picker should name what the
+    /// hand wants, not what the geometry minimises.
+    ///
+    /// What this replaced mattered more: the files arrived as
+    /// `..._corner1.png` and `..._corner2.png`, and a NUMBER means
+    /// variant. `variant()` picks by `(x * 31 + y * 17) % len`, a
+    /// position hash that never looks at `facing` - so a diagonal
+    /// corner would have drawn the wrong half of the wall on about
+    /// half the squares, with the chosen facing having no say. An
+    /// ordinary-looking wall, quietly wrong.
+    DiagCornerL,
+    /// The right-hand diagonal corner. See `DiagCornerL`.
+    DiagCornerR,
 }
 
-/// Every shape, for a picker that must not keep its own copy.
-pub const ALL: [Shape; 5] =
-    [Shape::Corner, Shape::End, Shape::Tee, Shape::Center, Shape::Diag];
+/// Every shape.
+///
+/// 257. THE PICKER DOES KEEP ITS OWN COPY, and this said otherwise.
+/// The `<select>` in `index.html` lists the words by hand, so the
+/// vocabulary is in two places - the thing this project keeps naming
+/// as a defect. It is named here rather than quietly left, because a
+/// comment claiming a single source where there is none is worse than
+/// the duplication it hides.
+///
+/// It is survivable in ONE direction only. An option the Rust does
+/// not know is refused by `of_key` with a sentence naming what IS
+/// allowed, so a stale `<option>` cannot paint a wrong square. A
+/// shape here with no `<option>` is merely unreachable - nobody can
+/// choose it, and nothing lies.
+///
+/// A command serving this list would close it. That is its own cycle.
+pub const ALL: [Shape; 7] = [
+    Shape::Corner,
+    Shape::End,
+    Shape::Tee,
+    Shape::Center,
+    Shape::Diag,
+    Shape::DiagCornerL,
+    Shape::DiagCornerR,
+];
 
 impl Shape {
     /// As it is stored, and as the filename suffix.
@@ -143,6 +192,10 @@ impl Shape {
             // and the file is `stone_wall_center.png`.
             Shape::Center => "center",
             Shape::Diag => "diag",
+            // Dave's filenames, and the key IS the suffix:
+            // `stone_wall_diag_corner_l.png`.
+            Shape::DiagCornerL => "diag_corner_l",
+            Shape::DiagCornerR => "diag_corner_r",
         }
     }
 
@@ -204,6 +257,40 @@ mod tests {
         assert_eq!(Shape::End.key(), "end");
         assert_eq!(Shape::Tee.key(), "t");
         assert_eq!(Shape::Corner.key(), "corner");
+        assert_eq!(Shape::DiagCornerL.key(), "diag_corner_l");
+        assert_eq!(Shape::DiagCornerR.key(), "diag_corner_r");
+    }
+
+    #[test]
+    fn an_underscore_in_a_key_is_not_a_separator() {
+        // `stone_wall` + `diag_corner_l` is ONE filename with four
+        // underscores in it. The renderer joins word and shape with an
+        // underscore and does not care how many are already there -
+        // this test exists so that nobody later "tidies" the key by
+        // splitting on `_`.
+        assert_eq!(
+            Shape::of_key("diag_corner_l").unwrap(),
+            Some(Shape::DiagCornerL)
+        );
+        assert_eq!(
+            format!("stone_wall_{}", Shape::DiagCornerL.key()),
+            "stone_wall_diag_corner_l"
+        );
+    }
+
+    #[test]
+    fn a_handed_piece_is_two_words_and_not_a_number() {
+        // 257. These two came in as `..._corner1.png` and
+        // `..._corner2.png`, which `variant()` reads as two textures
+        // of ONE tile and picks between by position - so the facing
+        // the DM chose would have been ignored on half the squares.
+        // Renaming them made each a shape of its own.
+        //
+        // The names must therefore stay distinct words. If one of
+        // these ever becomes `diag_corner` with a number again, this
+        // fails.
+        assert!(Shape::of_key("diag_corner").is_err());
+        assert_ne!(Shape::DiagCornerL.key(), Shape::DiagCornerR.key());
     }
 
     #[test]

@@ -11033,6 +11033,112 @@ Four of five shapes render: `corner`, `end`, `t`, `center` - and
 name, so every shaped tile gets numbered variants with no code at
 all. `diag` waits on a 32x32 redraw.
 
+## 257. A number meant variant, and the wall would have faced the wrong way
+
+**2026-10-26.** Dave: *"do all three - I already got rid of the
+diagonal issue - named files stone_wall_diag_corner_l and
+stone_wall_diag_corner_r"*.
+
+Two diagonal corner sprites arrived as `stone_wall_diag_corner1.png`
+and `stone_wall_diag_corner2.png`. They are now `_l` and `_r`, and the
+vocabulary has both.
+
+### What the numbers would have done
+
+**A trailing number means VARIANT in this renderer, not SHAPE.**
+`variant()` picks one with `(x * 31 + y * 17) % len` - a hash of the
+square's position that never looks at `facing`. Two genuinely
+different pictures under one name would have been chosen between by
+where the square happens to sit, and the facing the DM picked would
+have had no say on roughly half of them.
+
+A wall that is drawn, looks like stonework, and faces the wrong way.
+The costume again, and this one would have been blamed on the art.
+
+### The two sprites were measured, not eyeballed
+
+Opened at 11x and reduced to ninths - `#` solid, `.` empty:
+
+```
+corner1                 corner2
+  # + .                   # # #
+  # # +                   + # #
+  # # #                   . + #
+```
+
+Same diagonal axis, opposite fill. **`corner2` is `corner1` turned 180
+degrees** - not a mirror. Four turns of either reaches all four
+quadrant fills, so `_r` draws nothing `_l` could not.
+
+**Two words were kept anyway**, and that is a choice rather than an
+oversight. The alternative is a DM working out which rotation of the
+left-hand piece makes a right-hand corner while drawing a map. The
+picker should name what the hand wants, not what the geometry
+minimises. One line in the enum is a cheap price for not doing
+mental arithmetic mid-map.
+
+This also corrects something said in the previous session: the
+handedness warning was right about the renderer - `lay()` only
+rotates, there is no `scale(-1, 1)` anywhere - and **wrong about this
+piece**, which rotation reaches.
+
+### Two faults in 255, both visible on Dave's screen
+
+His summary line read:
+
+```
+no art yet, drawn plain: dirt_corner, stone_wall_corner,
+dirt_diag, stone_wall_diag
+```
+
+**Every one of those four was wrong**, in two different ways.
+
+**`unshaped` was never emptied.** `tiles()` hands back its array
+immediately and fills it as the PNGs arrive, so the FIRST frame misses
+every shaped sprite by definition - the files had not loaded yet. Each
+load calls `repaint()` and the next frame draws them correctly, but a
+name added once stayed for the life of the session. So the readout
+named `stone_wall_corner` and `stone_wall_diag` as having no art while
+both were plainly drawn on the screen in front of him.
+
+A warning that cries wolf is worse than no warning: the one time it is
+right, it has already been learned to be ignored. It is cleared at the
+top of every `draw()` now and describes the picture in front of you.
+
+**The shape was being handed to the GROUND.** `dirt_corner.png` and
+`dirt_diag.png` are files nobody will ever draw. 254's own migration
+said it - *"the only shaped thing on it is the wall"* - and the
+renderer did not. The surface layer now gets `null`.
+
+The FACING still goes to the ground, because a ramp climbs a direction
+and stairs do. Only the shape is the wall's alone.
+
+### The vocabulary is in two places, and the comment said it was not
+
+`ALL` carried the line *"for a picker that must not keep its own
+copy"*. The `<select>` in `index.html` lists the words by hand, so it
+does keep one.
+
+**Named rather than quietly left**, because a comment claiming a
+single source where there is none is worse than the duplication it
+hides. It is survivable in one direction only: an option the Rust does
+not know is refused by `of_key` with a sentence naming what IS
+allowed, so a stale `<option>` cannot paint a wrong square. A shape
+with no `<option>` is merely unreachable. A command serving the list
+would close it, and that is its own cycle.
+
+### Art that John could not have pulled
+
+Nine PNGs were sitting untracked: `door_closed`, `door_open`,
+`rubble` and its four variants, and the two renamed diagonal corners.
+**Doors and rubble would have drawn as flat colour on his machine**
+while working here - the failure mode 226 warned about, where the
+machine that drew the art is the only one that has it.
+
+All fifty tiles are 32x32, checked by reading the PNG headers rather
+than the file sizes. `stone_wall_diag.png` was redrawn at 32 and is
+no longer refused.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

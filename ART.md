@@ -183,7 +183,12 @@ when one gets redrawn.
 | `ramp.png` | a change of height that costs nothing extra |
 | `stairs.png` | the same, built |
 
-### Covers — 10 tiles, **transparent** — **NONE DRAWN YET**
+### Covers — 10 tiles, **transparent** — **3 OF 10 DRAWN**
+
+`grass` (5 variants), `brush` (5) and `snow` (5) arrived 24-25
+October, all 32x32 RGBA with real alpha - checked, not assumed: every
+one has most of its pixels partially transparent, so the ground shows
+through. Seven to go.
 
 | file | blocks | blocks sight | notes |
 |---|---|---|---|

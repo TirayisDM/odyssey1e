@@ -326,9 +326,6 @@ pub fn cannot_act(keys: &[String]) -> Option<&'static Condition> {
 ///
 /// THE FIRST ONE FOUND, like `cannot_act`: a creature that is both
 /// grappled and restrained is not more motionless.
-/// 248. Unused until `speed.rs` has a caller - see the note at the top
-/// of that module, which this comes off with.
-#[allow(dead_code)]
 pub fn stops_movement(keys: &[String]) -> Option<&'static Condition> {
     keys.iter()
         .filter_map(|k| of_key(k))

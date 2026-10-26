@@ -1264,7 +1264,12 @@ function paintSpeciesView() {
     ["height", heightText(sp).trim() || "\u2014"],
     ["size", (SIZE_WORDS[sp.size] || sp.size) + sizeWarning(sp)],
     ["reach / space", reachText(sp)],
-    ["speed", sp.speed ? sp.speed + " ft" : "\u2014 (no movement system yet)"],
+    // 250. THE PEOPLE'S OWN NUMBER, before anything touches it. What
+    // a PARTICULAR character ends up with - after items, exhaustion
+    // and conditions - is on their sheet, the same split 116 made for
+    // resistances. The "(no movement system yet)" this carried stopped
+    // being true when `speed.rs` got its first caller.
+    ["speed", sp.speed ? sp.speed + " ft (before items and conditions)" : "—"],
   ];
   if (sp.playable === false) {
     facts.push(["playable", "no - not a player character"]);
@@ -2894,9 +2899,26 @@ async function loadSheet() {
   // Absent for everybody until a DM says - and absent reads as absent
   // rather than as "humanoid", because nobody has stated it.
   const kind = sheet.creature_type ? " · " + sheet.creature_type : "";
+  // 250. HOW FAR IT GOES, beside what it is worth.
+  //
+  // SQUARES FIRST, because this app's map is squares and that is the
+  // number a DM spends; the feet follow because that is what the books
+  // and the statblocks say, and a sheet that only spoke in squares
+  // would make everybody convert.
+  //
+  // ABSENT READS AS ABSENT, like the creature type above it. 249 left
+  // 21 creatures without a transcribed speed, and a dash would look
+  // like a speed of nothing rather than a question nobody answered.
+  //
+  // A RESOLVED ZERO DOES SHOW: grappled, restrained, or a shrieker.
+  // "0 sq" is a fact, and the object is truthy even when both its
+  // numbers are not.
+  const pace = sheet.speed
+    ? " · " + sheet.speed.squares + " sq (" + sheet.speed.feet + " ft)"
+    : "";
   document.querySelector("#sheet-who").textContent =
     "level " + sheet.level + " · PB +" + pb +
-    " · AC " + sheet.armor_class + hp + kind;
+    " · AC " + sheet.armor_class + hp + pace + kind;
   document.querySelector("#level").value = sheet.level;
   // 072. FILLED ON EVERY PAINT, like the level beside it. An empty box
   // under a heading that says "Test PC 1" would read as a field to type

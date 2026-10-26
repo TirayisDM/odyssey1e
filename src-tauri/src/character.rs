@@ -296,6 +296,19 @@ pub struct Sheet {
     /// when this character has no species, which is every one made
     /// before 056 and every monster.
     pub species: Option<crate::species::Species>,
+    /// 250. HOW FAR THIS CREATURE CAN GO, resolved.
+    ///
+    /// NOT `species.speed`, which is the natural number before
+    /// anything touches it. This is what `speed::resolve` makes of it
+    /// once items, class features, spells, exhaustion and conditions
+    /// have had their say - the same five grant sources `resist`
+    /// already collects, because they are the same five.
+    ///
+    /// **None means NOBODY HAS SAID**, not thirty. 249 left 21 of the
+    /// 280 creatures without a transcribed speed, and a sheet that
+    /// invented one would be putting a number on screen that no book
+    /// backs.
+    pub speed: Option<crate::speed::Speed>,
     /// 058. What this particular person looks like, against the band
     /// their people occupies.
     pub body: Body,
@@ -1126,7 +1139,7 @@ pub(crate) fn load_npc_traits(
         token,
         "npcs",
         &[
-            ("select", "key,name,grants,creature_type,game_id"),
+            ("select", "key,name,grants,creature_type,game_id,speed"),
             ("key", &format!("eq.{}", key)),
             ("or", &format!("(game_id.is.null,game_id.eq.{})", game_id)),
         ],
@@ -1162,6 +1175,10 @@ pub(crate) fn load_npc_traits(
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_string),
+        // 250. A MONSTER'S WALKING SPEED, in feet. Null for the 21
+        // creatures 249 could not transcribe, and null is the answer -
+        // `speed::resolve` hands back None rather than inventing 30.
+        speed: r.get("speed").and_then(|v| v.as_i64()),
     }
 }
 
@@ -1176,6 +1193,9 @@ pub(crate) struct NpcTraits {
     /// 5e's fourteen. A monster has no species row to ask, so the
     /// statblock states its own.
     pub creature_type: Option<String>,
+    /// 250. Walking speed in FEET, the same unit `species.speed` uses.
+    /// The third thing off one row, for 122's reason.
+    pub speed: Option<i64>,
 }
 
 pub(crate) fn load_species(
@@ -2035,6 +2055,50 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
     resist_sources.extend(crate::resist::from_grants(&live));
     let resistances = crate::resist::standing(&resist_sources);
 
+    /* ---------------- 250. HOW FAR IT CAN GO ----------------
+
+       THE SAME FIVE SOURCES THE RESISTANCES JUST USED, because they
+       are the same five: what it is wearing, what its statblock
+       grants, what its class gives it passively, and what is running
+       on it right now. A Longstrider is an effect; a Monk's
+       Unarmoured Movement is a class feature; Boots of Striding are
+       worn. One vocabulary, one collection.
+
+       A SIXTH READ FOR THE CONDITIONS. `conditions_on` and
+       `grants_on` hit the same table for the same character, and 189
+       kept them apart deliberately so a caller wanting one does not
+       pay for the other. This sheet wants BOTH, so it pays twice -
+       noted rather than optimised, because folding them together
+       would put the effects read in a third place to save a round
+       trip nobody has measured.
+
+       FAILING QUIET, like the resistances above. A sheet that refused
+       to load because the effects table was slow is a worse failure
+       than a speed that reads as unconditioned. */
+    let conditions =
+        crate::commands::effects::conditions_on(token, &game_id, character_id)
+            .unwrap_or_default();
+    let mut speed_grants = worn_grants(&loadout);
+    speed_grants.extend(from_statblock.grants.iter().cloned());
+    speed_grants.extend(
+        crate::features::load_passive_grants(token, &game_id, &classes)
+            .unwrap_or_default(),
+    );
+    speed_grants.extend(live.iter().cloned());
+    // THE NATURAL SPEED: a people's, or - for a monster, which has no
+    // people - its statblock's. The same fallback 122 uses for the
+    // creature type, and for the same reason.
+    let natural = species
+        .as_ref()
+        .and_then(|sp| sp.speed)
+        .or(from_statblock.speed);
+    let speed = crate::speed::resolve(
+        natural,
+        &conditions,
+        profile.vitals.exhaustion,
+        &speed_grants,
+    );
+
     // 122. AND WHAT IT IS. The creature's own word, then its people's,
     // then - for a monster, which has no people - its statblock's.
     // `creature::of` owns the first two and this adds the third, which
@@ -2064,6 +2128,7 @@ pub fn load_sheet(token: &str, character_id: &str) -> Result<Sheet, String> {
         spells,
         from_statblock: from_statblock_row,
         gate_level: crate::attack::gate_level(profile.level, from_statblock_row),
+        speed,
         location_id: profile.location_id,
         character_id: Some(profile.character_id),
         game_id,
@@ -2175,6 +2240,9 @@ mod tests {
         Sheet {
             classes: Vec::new(),
             spells: Vec::new(),
+            // 250. The fixture is a 30-foot human, which is what
+            // every test that does not care about speed should see.
+            speed: crate::speed::resolve(Some(30), &[], 0, &[]),
             location_id: None,
             character_id: Some("c1".into()),
             game_id: "g1".into(),

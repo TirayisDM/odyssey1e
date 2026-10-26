@@ -10512,6 +10512,88 @@ command would be the two-places fault with a magic item attached. The
 next cycle is **the sheet resolving a speed**, which `walk_to` can
 then ask for.
 
+## 250. The sheet resolves a speed
+
+**2026-10-25.** Dave: *"do the sheet speed cycle"*.
+
+248 built `speed.rs` and nothing called it. 249 seeded 259 monsters.
+**This is the first caller**, and both `#[allow(dead_code)]`
+suppressions came off with it - which is what a dated suppression is
+supposed to end with.
+
+### THE SAME FIVE SOURCES THE RESISTANCES ALREADY USE
+
+The sheet was already collecting grants from five places for
+`resist::standing`: what the creature wears, what its statblock
+grants, what its class gives it passively, and what is running on it
+right now. **Speed needed exactly those five**, because they are the
+same five - Boots of Striding are worn, a Monk's Unarmoured Movement
+is a class feature, Longstrider is an effect.
+
+That is 100's one-vocabulary argument paying off for the second time
+in two cycles: the grant term cost one word in `known_target` (248)
+and the collection cost nothing at all here, because it was already
+being collected for something else.
+
+### A sixth read, taken deliberately
+
+`conditions_on` and `grants_on` hit the same table for the same
+character, and **189 kept them apart on purpose** so a caller wanting
+one does not pay for the other. This sheet wants both, so it pays
+twice.
+
+Noted rather than optimised. Folding them together would put the
+effects read in a third place to save a round trip nobody has
+measured, and 189's reasoning is still right for every other caller.
+
+Both reads **fail quiet**, like the resistances beside them: a sheet
+that refused to load because the effects table was slow is a worse
+failure than a speed that reads as unconditioned.
+
+### The natural speed, and where a monster's comes from
+
+A people's `species.speed`, or - for a monster, which has no people -
+its statblock's. The same fallback 122 uses for the creature type, for
+the same reason, and `load_npc_traits` now takes `speed` off the row
+it was already reading. **Three things off one row** rather than a
+third request.
+
+### On the sheet, beside what it is worth
+
+```
+level 3 · PB +2 · AC 15 · HP 24 · 6 sq (30 ft) · humanoid
+```
+
+**Squares first**, because this app's map is squares and that is the
+number a DM spends; the feet follow because that is what the books and
+the statblocks say.
+
+**ABSENT READS AS ABSENT**, like the creature type beside it. 249 left
+21 creatures without a transcribed speed and the line simply omits it
+- a dash would look like a speed of nothing rather than a question
+nobody answered.
+
+**A resolved ZERO does show.** Grappled, restrained, or a shrieker.
+"0 sq" is a fact, and it is the one case where the number on the sheet
+tells a DM something they could not have worked out from the
+statblock.
+
+### And the species viewer stopped lying
+
+That panel has said `speed: — (no movement system yet)` since 057. It
+now says the people's own number **"(before items and conditions)"**,
+which is the same split 116 made for resistances: the Unt'garoth's
+entry belongs on the species viewer, what a PARTICULAR character
+resists belongs on their sheet.
+
+### What this does not do
+
+**`walk_to` still spends nothing.** It reports a cost and the sheet
+reports a speed, and no code compares them. That is the budget, it
+reaches into 051's action economy, and it is the next cycle - the
+readout that says *"4 of 6 used"* is one subtraction away now that
+both numbers exist in one place.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10528,7 +10610,7 @@ then ask for.
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
 | build / tests | **zero warnings, 1,312 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
-| tile art | **18 of 33 words**, 22 files - `grass` has three variants, and `grass.png` itself is 58x57 and therefore refused |
+| tile art | **21 of 33 words**, 33 files - all 32x32. `grass` has 5, `brush` 5, `snow` 5. The 12 left are 5 walls and 7 covers |
 
 **PULL BEFORE TOUCHING ANYTHING.** Eight migrations landed on the
 shared live database between 21 and 24 October, and the code and the
@@ -10547,7 +10629,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-five cycles, 225 to 249. Read those entries rather than this summary
+Twenty-six cycles, 225 to 250. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 
@@ -10619,10 +10701,11 @@ maps with their own origins, so leaving one always needs a link.
 - **No drowning.** Walking into deep water without a swim speed comes
   back as the word `drowning` and nothing consumes it. The creature is
   in the water and the game does not know.
-- **No movement budget, and nothing CALLS the speed that now
-  resolves.** `walk_to` returns a cost and spends nothing, so one
-  click still crosses a room. 248 built `speed.rs` and it has no
-  caller yet - see its entry for the two that were blocked and why.
+- **No movement budget.** The sheet shows a resolved speed (250) and
+  `walk_to` returns a cost, and **nothing compares them** - one click
+  still crosses a room. It is one subtraction away now that both
+  numbers exist; it reaches into 051's action economy, which is why
+  it is its own cycle.
   `species.speed` has said 25/30/40 since 057 and 059 named it as the
   column a movement system reads; nothing reads it, **`npcs` has no
   speed column at all**, and `grants.rs` has no speed term so no item

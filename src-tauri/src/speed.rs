@@ -55,32 +55,6 @@
 //! **absent and empty are different answers.** The caller says "no
 //! speed recorded"; it does not say "30".
 
-// 248. UNUSED UNTIL SOMETHING RESOLVES A SPEED, AND THAT IS ON PURPOSE.
-//
-// This module is complete and has 27 tests. Nothing calls it, because
-// the two things that would both wanted a decision that was not mine:
-//
-//   THE SHEET needs conditions, which are `cond.`-prefixed rows in
-//   `effects`, and live grants - neither is on `Sheet` today, so the
-//   wiring is its own cycle rather than a line.
-//
-//   THE WALK READOUT needs the same two, and asking for them in
-//   `walk_to` would mean resolving equipment there - which is the
-//   two-places fault with a magic item attached. It must ask whatever
-//   already resolves a sheet, not re-derive it.
-//
-// **RESTATED 2026-10-25, NOT RENEWED.** The first draft of this note
-// gave a second reason: that `npcs.speed` was null for all 280
-// creatures, so a readout would have said "no speed recorded" for
-// every monster. 249 seeded 259 of them from the SRD, so **that
-// reason is gone** and only the grants one remains. 233's rule is
-// that a dated suppression gets its reason restated when the event it
-// was waiting on happens, rather than the date quietly moved.
-//
-// THIS COMES OFF WHEN THE FIRST CALLER LANDS: a sheet that shows a
-// resolved speed, which `walk_to` can then ask for.
-#![allow(dead_code)]
-
 use crate::conditions;
 use crate::grants::{self, Grant};
 use crate::grid;
@@ -92,7 +66,11 @@ const HALVED_AT: i64 = 2;
 const STOPPED_AT: i64 = 5;
 
 /// How far a creature can go, in both units that matter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// 250. SERDE BECAUSE IT RIDES ON THE SHEET, the same way
+/// `species::Species` does. This module still reaches for no network
+/// and no database - a derive is not a dependency on either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Speed {
     /// Feet, the unit the books and the columns use.
     pub feet: i64,

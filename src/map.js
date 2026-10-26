@@ -89,6 +89,16 @@ let bust = Date.now();
 /// project's named defect: the map looks finished and is not.
 const refused = new Set();
 
+/// 255. Shapes asked for whose sprite does not exist, by name.
+///
+/// `shape.rs` stopped waiting for the art before admitting a word -
+/// `center` and `diag` were asked for by name before either was drawn
+/// - so the guard against a square quietly drawing the WRONG picture
+/// moved here. A shaped wall with no shaped PNG falls back to the
+/// plain one, which looks like an ordinary wall and is not what the
+/// DM painted.
+const unshaped = new Set();
+
 /// Throw away every image and ask for them all again.
 ///
 /// 242. Called by "Reload art", because the loop while drawing a tile
@@ -97,6 +107,7 @@ const refused = new Set();
 export function forgetArt() {
   art.clear();
   refused.clear();
+  unshaped.clear();
   bust = Date.now();
   if (last) draw(last.canvas, last.view);
 }
@@ -295,6 +306,7 @@ function lay(ctx, word, x, y, facing, col, row, shape) {
   // refuses a shape nobody has drawn, so this only catches the gap
   // between a word being allowed and its PNG arriving.
   const shaped = shape ? tiles(word + "_" + shape) : [];
+  if (shape && !shaped.length) unshaped.add(word + "_" + shape);
   const img = variant(shaped.length ? shaped : tiles(word), col, row);
   if (!img) {
     ctx.fillStyle = paint(word);
@@ -442,6 +454,11 @@ export function draw(canvas, view) {
     // ground looks unfinished while the artist is sure it is not.
     (refused.size
       ? ` · NOT ${EXPECTED}x${EXPECTED}, so not drawn: ${[...refused].join(", ")}`
+      : "") +
+    // 255. A SHAPE WITH NO SPRITE, by name. Without this a `center`
+    // wall draws as a plain one and looks finished.
+    (unshaped.size
+      ? ` · no art yet, drawn plain: ${[...unshaped].join(", ")}`
       : "")
   );
 }

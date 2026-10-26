@@ -59,8 +59,28 @@
 //! `end` was added within the hour: the first draft of this module
 //! listed `corner` and `t` because those were the two files on disk,
 //! and `stone_wall_end.png` appeared while the wiring was being
-//! written. That is the rule working rather than failing. `cross` is
-//! the obvious next one and is still not here.
+//! written. That is the rule working rather than failing.
+//!
+//! ---------------------------------------------------------------------
+//! 255. `t` CAME OUT AGAIN, AND center AND diag WENT IN AHEAD OF THE ART
+//! ---------------------------------------------------------------------
+//!
+//! Dave: *"the t junction isn't currently necessary"*. It never had a
+//! sprite, which means it was the one word in here breaking the rule
+//! above. Nobody had painted one - checked, not assumed: five corners
+//! and no tees - so it came out.
+//!
+//! `center` and `diag` go in **before** their art, which is the
+//! opposite of how `end` arrived and worth being honest about. They
+//! were asked for by name, so they are not speculation - but until
+//! the PNGs exist the renderer falls back to the plain wall, and a
+//! square that silently draws the wrong picture is exactly what the
+//! rule above protects against.
+//!
+//! So `map.js` now NAMES a shape it could not draw, the same way it
+//! names a tile of the wrong size. The guard moved from the
+//! vocabulary to the screen, which is a better place for it: the
+//! vocabulary can now follow the artist instead of trailing them.
 
 /// A piece of wall that is not a plain straight run.
 ///
@@ -70,18 +90,31 @@
 pub enum Shape {
     /// Two runs meeting at a right angle.
     Corner,
-    /// Three runs meeting - a side wall joining a straight run.
-    ///
-    /// Spelled `t` in the database and in a filename, lower case like
-    /// every other key in this project. Dave wrote `stone_wall_T`; the
-    /// capital is the only thing that changed.
-    Tee,
     /// Where a run of wall stops - a stub with one open side.
     End,
+    /// A run through the MIDDLE of the square rather than along an
+    /// edge.
+    ///
+    /// 255. Dave: *"a center wall section will not align with a wall -
+    /// we need another wall view - stone_wall_center that can orient
+    /// N-S or E-W"*. The ordinary wall tile is a band along one edge
+    /// of the square; this one crosses it.
+    ///
+    /// TWO DISTINCT PICTURES, NOT FOUR. A band through the middle
+    /// turned 180 degrees is the same band, so facings 0 and 2 draw
+    /// identically and so do 1 and 3. The picker still offers four
+    /// because `facing` is one column for every word and a wall is not
+    /// the only thing that turns.
+    Center,
+    /// A run corner to corner.
+    ///
+    /// 255. Also two distinct pictures rather than four, for the same
+    /// reason: a diagonal turned 180 degrees is itself.
+    Diag,
 }
 
 /// Every shape, for a picker that must not keep its own copy.
-pub const ALL: [Shape; 3] = [Shape::Corner, Shape::Tee, Shape::End];
+pub const ALL: [Shape; 4] = [Shape::Corner, Shape::End, Shape::Center, Shape::Diag];
 
 impl Shape {
     /// As it is stored, and as the filename suffix.
@@ -91,8 +124,11 @@ impl Shape {
     pub fn key(self) -> &'static str {
         match self {
             Shape::Corner => "corner",
-            Shape::Tee => "t",
             Shape::End => "end",
+            // Dave's spelling, because the key IS the filename suffix
+            // and the file is `stone_wall_center.png`.
+            Shape::Center => "center",
+            Shape::Diag => "diag",
         }
     }
 
@@ -138,11 +174,21 @@ mod tests {
     }
 
     #[test]
-    fn the_capital_t_dave_wrote_is_lower_case_here() {
-        // Keys in this project are lower case. `stone_wall_T` was the
-        // filename he had; `t` is the key.
-        assert_eq!(Shape::Tee.key(), "t");
-        assert_eq!(Shape::of_key("t").unwrap(), Some(Shape::Tee));
+    fn the_t_junction_is_gone() {
+        // 255. "the t junction isn't currently necessary", and it
+        // never had a sprite - the one word in here that broke the
+        // module's own rule. No square had ever used it.
+        assert!(Shape::of_key("t").is_err());
+    }
+
+    #[test]
+    fn a_key_is_the_filename_suffix() {
+        // `stone_wall` + `center` IS `stone_wall_center.png`. If these
+        // ever drift the renderer asks for a file nobody drew.
+        assert_eq!(Shape::Center.key(), "center");
+        assert_eq!(Shape::Diag.key(), "diag");
+        assert_eq!(Shape::End.key(), "end");
+        assert_eq!(Shape::Corner.key(), "corner");
     }
 
     #[test]

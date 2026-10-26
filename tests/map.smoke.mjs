@@ -155,6 +155,22 @@ const named = draw(canvas(), view);
 assert.match(named, /NOT 32x32, so not drawn/);
 assert.match(named, /stone_floor\.png/, "the refused file is named");
 
+/* ---- 255. A SHAPE WITH NO SPRITE IS NAMED ----
+   `shape.rs` admits a word before its art exists, so the only thing
+   standing between a `center` wall and a square that silently draws
+   a plain one is this line in the summary. */
+forgetArt();
+const shaped = {
+  width: 1, height: 1, z: 0,
+  squares: [sq(0, 0, "stone_floor", "stone_wall", { shape: "center" })],
+  standing: [],
+};
+draw(canvas(), shaped);
+await new Promise((r) => setTimeout(r, 10));
+const named2 = draw(canvas(), shaped);
+assert.match(named2, /no art yet, drawn plain/);
+assert.match(named2, /stone_wall_center/, "it names the sprite it wanted");
+
 /* ---- and forgetArt is the way back ---- */
 forgetArt();
 assert.doesNotMatch(

@@ -10920,6 +10920,77 @@ none it draws the plain `stone_wall.png`; if there is none of that
 either it draws the flat colour. The same ladder 236 built, one rung
 longer.
 
+## 255. The vocabulary stops trailing the artist
+
+**2026-10-26.** Dave: *"the t junction isn't currently necessary just
+fyi - as a center wall section will not align with a wall - we need
+another wall view - stone_wall_center that can orient N-S or E-W, and
+another stone_wall_diag that rotates the same"*.
+
+**Looking at the art made the request obvious.** A `stone_wall` tile
+is a band along ONE EDGE of the square with transparency below it, not
+a block filling the square. So a run of them makes a continuous wall
+along a row, and a piece that crosses the MIDDLE of a square is a
+genuinely different picture - it cannot be made by turning an edge
+piece.
+
+That is the whole of what 254's column was for: two more words, no
+migration, no terrain change, and `timber_wall_center.png` will work
+the day it is drawn without a line of code.
+
+### `t` came out
+
+It never had a sprite, which made it **the one word breaking this
+module's own rule** - the vocabulary follows the art. Checked rather
+than assumed before removing it: five squares painted `corner`, none
+`t`.
+
+### AND THE RULE ITSELF CHANGED, WHICH IS THE INTERESTING PART
+
+`center` and `diag` went in **before** their art, which is the
+opposite of how `end` arrived an hour earlier. They were asked for by
+name, so they are not speculation - but the reason for the old rule
+was real: a shape with no sprite falls back to the plain wall, and a
+square that quietly draws the wrong picture is this project's named
+defect.
+
+So the guard moved rather than being waived. **`map.js` now names a
+shape it could not draw**, next to where it already names a tile of
+the wrong size:
+
+```
+20x20 · 86 squares · 2 tile images · no art yet, drawn plain: stone_wall_center
+```
+
+With the guard on the screen instead of in the vocabulary, the
+vocabulary can follow the artist rather than trail them - which is
+strictly better, because the artist is the one who knows what is
+coming.
+
+**Proven by breaking it.** With the one line that records an unshaped
+wall deleted, `npm test` fails on the assertion; restored, it passes.
+
+### Two pictures, not four
+
+A band through the middle turned 180 degrees is the same band, and a
+diagonal turned 180 degrees is itself. So `center` and `diag` each
+have two distinct appearances across the four facings, with 0/2 alike
+and 1/3 alike. The picker still offers four, because `facing` is one
+column for every word and a wall is not the only thing that turns.
+
+### Worth watching, not fixing
+
+**A diagonal wall will look half-passable and be fully blocked.** A
+`cover` that is a wall makes the whole square `Blocked` - that is
+226's model and `stride` reads it - so a square cut corner to corner
+stops a creature as completely as a solid one.
+
+That is the first time the picture and the rule will visibly
+disagree, and it is worth knowing before the art lands rather than
+after. Nothing is wrong today; the model simply says "a square with a
+wall on it is impassable" and the drawing will start implying
+otherwise.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10934,7 +11005,7 @@ longer.
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
-| build / tests | **zero warnings, 1,330 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,331 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **21 of 33 words**, 33 files - all 32x32. `grass` has 5, `brush` 5, `snow` 5. The 12 left are 5 walls and 7 covers |
 
@@ -10955,7 +11026,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Thirty cycles, 225 to 254. Read those entries rather than this summary
+Thirty-one cycles, 225 to 255. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

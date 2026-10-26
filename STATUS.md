@@ -10991,6 +10991,48 @@ after. Nothing is wrong today; the model simply says "a square with a
 wall on it is impassable" and the drawing will start implying
 otherwise.
 
+## 256. The T came back
+
+**2026-10-26.** Dave: *"add the t back, check diag"*.
+
+255 removed `t` an hour earlier on *"the t junction isn't currently
+necessary"*, when it was the one word in `shape.rs` with no sprite -
+breaking that module's own rule. `stone_wall_t.png` was drawn minutes
+later.
+
+**Both moves are the same rule rather than a mind changed twice: the
+word follows the art.** The test that asserted `t` was refused now
+asserts it resolves, and says why in both directions.
+
+### And `diag` is drawn but will not be
+
+`stone_wall_diag.png` arrived at **64x63**, so the size guard refuses
+it and the summary line says so:
+
+```
+NOT 32x32, so not drawn: stone_wall_diag.png
+```
+
+The drawing is right - corner to corner, the same stonework, soft
+alpha edges. It is at double scale and one pixel short of square.
+
+**IT MUST BE REDRAWN RATHER THAN SCALED.** A diagonal is the worst
+case for resampling: every pixel along the edge is a partial, so
+64 to 32 turns a crisp stair-step into a grey smear. 236 chose 32x32
+drawn at 32 precisely so nothing is ever resampled.
+
+**63 is the tell.** A 64x64 canvas one pixel short suggests a 2x
+working file, which means the export is the step that needs
+nearest-neighbour - the same reason `imageSmoothingEnabled = false`
+exists in `map.js`.
+
+### The state of the wall set
+
+Four of five shapes render: `corner`, `end`, `t`, `center` - and
+`center1` came free, because the variant probe walks the COMPOSED
+name, so every shaped tile gets numbered variants with no code at
+all. `diag` waits on a 32x32 redraw.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -11026,7 +11068,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Thirty-one cycles, 225 to 255. Read those entries rather than this summary
+Thirty-two cycles, 225 to 256. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

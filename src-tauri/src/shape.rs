@@ -92,6 +92,18 @@ pub enum Shape {
     Corner,
     /// Where a run of wall stops - a stub with one open side.
     End,
+    /// Three runs meeting - a stub dropping from a straight run.
+    ///
+    /// Spelled `t`, lower case like every other key here, because the
+    /// key IS the filename suffix. Dave's file was `stone_wall_T.png`
+    /// and is `stone_wall_t.png` now.
+    ///
+    /// 256. IT WENT OUT AND CAME BACK IN THE SAME HOUR, which is the
+    /// rule working both ways rather than a mind being changed twice.
+    /// 255 removed it on *"the t junction isn't currently necessary"*
+    /// when it had no sprite; `stone_wall_t.png` was drawn minutes
+    /// later and Dave asked for it back. The word follows the art.
+    Tee,
     /// A run through the MIDDLE of the square rather than along an
     /// edge.
     ///
@@ -114,7 +126,8 @@ pub enum Shape {
 }
 
 /// Every shape, for a picker that must not keep its own copy.
-pub const ALL: [Shape; 4] = [Shape::Corner, Shape::End, Shape::Center, Shape::Diag];
+pub const ALL: [Shape; 5] =
+    [Shape::Corner, Shape::End, Shape::Tee, Shape::Center, Shape::Diag];
 
 impl Shape {
     /// As it is stored, and as the filename suffix.
@@ -125,6 +138,7 @@ impl Shape {
         match self {
             Shape::Corner => "corner",
             Shape::End => "end",
+            Shape::Tee => "t",
             // Dave's spelling, because the key IS the filename suffix
             // and the file is `stone_wall_center.png`.
             Shape::Center => "center",
@@ -174,11 +188,11 @@ mod tests {
     }
 
     #[test]
-    fn the_t_junction_is_gone() {
-        // 255. "the t junction isn't currently necessary", and it
-        // never had a sprite - the one word in here that broke the
-        // module's own rule. No square had ever used it.
-        assert!(Shape::of_key("t").is_err());
+    fn the_t_junction_came_back_with_its_sprite() {
+        // 255 removed it when it had no art and was said not to be
+        // needed; 256 restored it when `stone_wall_t.png` arrived.
+        // Both moves are the same rule - the word follows the art.
+        assert_eq!(Shape::of_key("t").unwrap(), Some(Shape::Tee));
     }
 
     #[test]
@@ -188,6 +202,7 @@ mod tests {
         assert_eq!(Shape::Center.key(), "center");
         assert_eq!(Shape::Diag.key(), "diag");
         assert_eq!(Shape::End.key(), "end");
+        assert_eq!(Shape::Tee.key(), "t");
         assert_eq!(Shape::Corner.key(), "corner");
     }
 

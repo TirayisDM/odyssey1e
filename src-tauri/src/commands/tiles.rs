@@ -57,7 +57,7 @@ const CHUNK: usize = 1000;
 /// The columns a read asks for. Spelled out rather than `*` so a new
 /// column does not silently widen every payload.
 const COLUMNS: &str =
-    "x,y,z,surface,cover,sub,surface_hp,cover_hp,leads_to,to_x,to_y,to_z,facing";
+    "x,y,z,surface,cover,sub,surface_hp,cover_hp,leads_to,to_x,to_y,to_z,facing,shape";
 
 /// One square, as it crosses the wire.
 ///
@@ -90,6 +90,10 @@ pub struct Tile {
     /// Quarter turns clockwise from north. See 238.
     #[serde(default)]
     pub facing: i16,
+    /// 254. Which PIECE of a wall this is - `corner`, `t`, or absent
+    /// for a plain run. Chooses the PNG and nothing else.
+    #[serde(default)]
+    pub shape: Option<String>,
 }
 
 /// A square to erase. Points rather than a rectangle: points compose,
@@ -131,6 +135,14 @@ impl Tile {
             facing,
         };
         stack.legal().map_err(|e| format!("{}: {}", at, e))?;
+
+        // 254. AND THE SHAPE IS A WORD, SO IT IS CHECKED.
+        //
+        // The database holds free text - see the migration - so this
+        // is the only thing standing between a typo and a square that
+        // silently draws the plain tile. `shape.rs` owns the list.
+        crate::shape::Shape::of_key(self.shape.as_deref().unwrap_or(""))
+            .map_err(|e| format!("{}: {}", at, e))?;
 
         // 238. ONLY EIGHT WORDS MEAN ANYTHING BY TURNING. A quarter
         // turn on a rock is noise somebody will later read as
@@ -272,6 +284,7 @@ fn row(location_id: &str, t: &Tile) -> Value {
         "to_y": t.to_y,
         "to_z": t.to_z,
         "facing": t.facing,
+        "shape": t.shape.as_deref().map(str::trim).filter(|s| !s.is_empty()),
     })
 }
 
@@ -608,6 +621,10 @@ fn recipe_of(v: &Value) -> Result<Option<Stack>, String> {
         to_x: None,
         to_y: None,
         to_z: None,
+        // 254. NOR A SHAPE, for the same reason and more plainly: a
+        // recipe says what a room is MADE of, and "this room is
+        // corners by default" is not a sentence.
+        shape: None,
         // 238. A RECIPE CANNOT DECLARE A FACING. "This room is stairs
         // climbing north by default" is not a thing anybody means - a
         // turn is a fact about one square, and a default that applied
@@ -736,6 +753,8 @@ pub struct Square {
     /// Quarter turns clockwise from north, for the renderer to turn
     /// the tile by. Always 0 for a word that does not face.
     pub facing: i16,
+    /// 254. Which piece of a wall, for the renderer alone.
+    pub shape: Option<String>,
     /// A row outside the room's declared bounds.
     ///
     /// 232: shrinking a map does not delete what falls outside it, and
@@ -777,8 +796,22 @@ pub fn map_at(
         serde_json::from_value(rows).map_err(|e| format!("could not read the map: {}", e))?;
 
     let mut drawn: HashMap<(i32, i32), Stack> = HashMap::new();
+    // 254. THE SHAPE TRAVELS BESIDE THE STACK, NOT INSIDE IT.
+    //
+    // `Stack` is `terrain.rs`'s - the physics - and `ground::at`
+    // resolves one from a row or the room's default. A shape is a
+    // drawing and neither of them should learn about it, so it is kept
+    // in its own map and joined back on at the end.
+    //
+    // A SQUARE FROM THE RECIPE HAS NO SHAPE, which falls out of this
+    // for free: only drawn rows are in here, and a default describes
+    // what a room is MADE of rather than how a wall is cut.
+    let mut shapes: HashMap<(i32, i32), String> = HashMap::new();
     for t in &tiles {
         drawn.insert((t.x, t.y), t.stack()?);
+        if let Some(sh) = t.shape.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            shapes.insert((t.x, t.y), sh.to_string());
+        }
     }
 
     // WHICH SQUARES EXIST AT ALL: every drawn row, plus every square
@@ -813,6 +846,7 @@ pub fn map_at(
                 blocks: !stack.enterable(),
                 cost: stack.step_cost(),
                 outside: !bounds.allows(x, y),
+                shape: shapes.get(&(x, y)).cloned(),
             })
         })
         .collect();
@@ -1233,6 +1267,7 @@ fn restored(location_id: &str, t: &Tile) -> Value {
         "to_y": t.to_y,
         "to_z": t.to_z,
         "facing": t.facing,
+        "shape": t.shape.as_deref().map(str::trim).filter(|s| !s.is_empty()),
     })
 }
 
@@ -1599,6 +1634,7 @@ mod tests {
             to_y: None,
             to_z: None,
             facing: 0,
+            shape: None,
         }
     }
 

@@ -281,8 +281,21 @@ function extent(view) {
 /// A FLAT COLOUR IS NOT TURNED, because a rectangle has no top - and
 /// doing the transform anyway would cost four canvas operations per
 /// square on a map with no art at all.
-function lay(ctx, word, x, y, facing, col, row) {
-  const img = variant(tiles(word), col, row);
+function lay(ctx, word, x, y, facing, col, row, shape) {
+  // 254. A SHAPE PICKS A DIFFERENT SPRITE OF THE SAME WORD.
+  //
+  // `stone_wall` + `corner` is `stone_wall_corner.png`. The shape is
+  // a drawing and nothing else - the square blocks, breaks and costs
+  // exactly what a plain wall does, which is why it is one column on
+  // the row rather than five more terrain words.
+  //
+  // FALLING BACK TO THE PLAIN TILE when the shaped art does not
+  // exist, the same way a missing tile falls back to a flat colour:
+  // art arrives one piece at a time and nothing breaks. `shape.rs`
+  // refuses a shape nobody has drawn, so this only catches the gap
+  // between a word being allowed and its PNG arriving.
+  const shaped = shape ? tiles(word + "_" + shape) : [];
+  const img = variant(shaped.length ? shaped : tiles(word), col, row);
   if (!img) {
     ctx.fillStyle = paint(word);
     ctx.fillRect(x, y, SQUARE, SQUARE);
@@ -347,13 +360,13 @@ export function draw(canvas, view) {
     // than one somebody wrote down, so that while a map is being
     // authored you can see what you actually authored.
     ctx.globalAlpha = s.drawn ? 1 : 0.55;
-    lay(ctx, s.surface, x, y, s.facing, s.x, s.y);
+    lay(ctx, s.surface, x, y, s.facing, s.x, s.y, s.shape);
     ctx.globalAlpha = 1;
 
     if (s.cover) {
       if (isSolid(s.cover)) {
         // A wall replaces the square.
-        lay(ctx, s.cover, x, y, s.facing, s.x, s.y);
+        lay(ctx, s.cover, x, y, s.facing, s.x, s.y, s.shape);
       } else {
         // Everything else is a layer ON the ground, so the ground
         // stays visible under it.
@@ -364,7 +377,7 @@ export function draw(canvas, view) {
         // an opaque rectangle and would hide what is beneath.
         const has = tiles(s.cover).length > 0;
         ctx.globalAlpha = has ? 1 : 0.6;
-        lay(ctx, s.cover, x, y, s.facing, s.x, s.y);
+        lay(ctx, s.cover, x, y, s.facing, s.x, s.y, s.shape);
         ctx.globalAlpha = 1;
       }
     }

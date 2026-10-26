@@ -9989,6 +9989,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     el.textContent =
       "(" + sq.x + "," + sq.y + ") " +
       sq.surface + (sq.cover ? " + " + sq.cover : "") +
+      // 254. Said in the hover, because a corner and a straight wall
+      // are otherwise indistinguishable in words.
+      (sq.shape ? " (" + sq.shape + ")" : "") +
       " · " + (sq.drawn ? "drawn" : "from the recipe") +
       " · " + cost +
       (sq.facing ? " · facing " + "NESW"[sq.facing] : "") +
@@ -10079,6 +10082,9 @@ window.addEventListener("DOMContentLoaded", async () => {
           surface: surface,
           cover: pick("#mv-cover"),
           facing: Number(document.querySelector("#mv-facing").value) || 0,
+          // 254. Empty means plain, which is what `shape.rs` reads an
+          // empty string as.
+          shape: pick("#mv-shape"),
         },
       ],
     });

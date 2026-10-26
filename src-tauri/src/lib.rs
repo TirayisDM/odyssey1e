@@ -81,6 +81,7 @@ mod resist;
 mod resolution;
 mod reveal;
 mod scribe;
+mod shape;
 mod shelf;
 mod size;
 mod slots;

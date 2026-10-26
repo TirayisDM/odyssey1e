@@ -10827,6 +10827,99 @@ partial resolution that looks complete, which is the named defect.
 So the comparison waits for a roster-wide speed read that is worth
 having, and that is its own cycle rather than a corner of this one.
 
+## 254. Which piece of a wall a square is
+
+**2026-10-26.** Dave, having drawn a corner: *"it needs to be its own
+cover type as it is wall section but a corner that also needs to be
+faceable - will rename as stone_wall_corner if this is best way to do
+it"*.
+
+It needed to be its own *something*. **It did not need to be its own
+terrain word**, and he was right to ask before doing it.
+
+### THE COST, COUNTED RATHER THAN GUESSED
+
+One new wall word touches **seventeen places in `terrain.rs`** - the
+enum, `ALL`, `WALLS`, `key`, `of_key`, `footing`, `integrity`,
+`destruction`, `faces` and the tests - and **three CHECK constraints
+in 226**, which is applied, so rewriting them needs a migration of its
+own.
+
+And it multiplies: `stone_wall_corner` implies the same for timber,
+rock, wooden and ice. Five words, eighty-five edits. Ends and
+T-junctions would be fifteen more.
+
+**The decisive part: a corner and a straight run are mechanically
+identical.** Same `Blocked` footing, same AC 17 / HP 60 / threshold
+10, same `Leaves(Rubble)`, same blocked sight. Every rule in the
+codebase treats them the same. `terrain.rs` is a vocabulary where
+every word earns its place by meaning something different TO A RULE,
+and a corner means something different only to the eye.
+
+### One column, and it is the first of its kind here
+
+`tiles.shape` - `corner`, `t`, `end`, or null for a plain run, which
+is every square painted before today.
+
+**IT IS THE ONLY COLUMN ON `tiles` THAT NO RULE READS.** The three
+layers, both hit-point columns, `leads_to` and `facing` all mean
+something to `stride` or `ground`. This one means something only to
+`map.js`, and the migration says so and says **do not later promote it
+to a rule** - a corner that blocked differently from a straight wall
+would be a rule nobody asked for, arrived at because the column was
+sitting next to `cover`.
+
+226 set the precedent in the other direction: `px_per_grid` is a
+purely-rendering number on `locations`, on purpose.
+
+### `shape.rs`, and why it is not in `terrain.rs`
+
+`terrain.rs` holds the physics, and **nothing about a shape changes
+what a square does.** Putting it beside `Footing` would invite
+somebody to give it a rule later because of the company it keeps.
+
+Validated in Rust rather than by a CHECK, which is 238's split again:
+*"the database constrains the RANGE because that is a fact about the
+type. It leaves the vocabulary alone."* A shape has no range, so the
+column is free text and `paint_tiles` refuses an unknown word with a
+sentence that names what IS allowed - because a typo falling back to
+the plain tile is this project's named defect.
+
+### THE SHAPE TRAVELS BESIDE THE STACK, NOT INSIDE IT
+
+`Stack` is `terrain.rs`'s and `ground::at` resolves one from a row or
+the room's default. Neither should learn about drawings, so `map_at`
+keeps the shapes in their own map and joins them back on at the end.
+
+**A square from the recipe has no shape**, which falls out for free:
+only drawn rows are in that map, and a default says what a room is
+MADE of rather than how a wall is cut.
+
+### The vocabulary follows the art, and proved it within the hour
+
+The first draft listed **two** words, `corner` and `t`, because those
+were the two files on disk - with a test asserting `end` and `cross`
+were refused, and a note saying a shape nobody has drawn stores as a
+word the renderer cannot honour.
+
+**`stone_wall_end.png` appeared while the wiring was being written.**
+So `end` went in, and the test now guards `cross` alone. That is the
+rule working rather than failing: the vocabulary arrived with the art
+rather than ahead of it.
+
+`stone_wall2.png` was renamed to `stone_wall_corner.png`. It would
+never have drawn: the variant probe stops at the first gap and there
+was no `stone_wall1` - which `map.js` calls *"a naming mistake worth
+noticing rather than papering over"*, and that is it noticing.
+`stone_wall1.png` has since arrived as a genuine variant.
+
+### The renderer falls back twice
+
+`stone_wall` + `corner` asks for `stone_wall_corner.png`; if there is
+none it draws the plain `stone_wall.png`; if there is none of that
+either it draws the flat colour. The same ladder 236 built, one rung
+longer.
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10837,11 +10930,11 @@ having, and that is its own cycle rather than a corner of this one.
 |---|---|
 | `git` | clean, nothing unpushed |
 | migrations | **167 files, 177 ledger rows** - the difference is the ten applied in parts (026-028, 031, 032, 043) |
-| newest migration | **253**. **All 177 ledger rows reconcile to the 167 files and no file is unapplied** - checked by name and count, not remembered |
+| newest migration | **254**. **All 177 ledger rows reconcile to the 167 files and no file is unapplied** - checked by name and count, not remembered |
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
-| build / tests | **zero warnings, 1,324 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,330 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **21 of 33 words**, 33 files - all 32x32. `grass` has 5, `brush` 5, `snow` 5. The 12 left are 5 walls and 7 covers |
 
@@ -10862,7 +10955,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-nine cycles, 225 to 253. Read those entries rather than this summary
+Thirty cycles, 225 to 254. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

@@ -1170,6 +1170,16 @@
               <span class="maplabel">brush</span>
               <select id="mv-surface"></select>
               <select id="mv-cover"></select>
+              <!-- 254. WHICH PIECE OF A WALL, not which wall. A corner
+                   blocks, breaks and costs exactly what a straight run
+                   does, so it is one column on the square rather than
+                   five more terrain words - see the migration. -->
+              <select id="mv-shape" title="which piece of a wall">
+                <option value="">plain</option>
+                <option value="corner">corner</option>
+                <option value="t">T-junction</option>
+                <option value="end">end</option>
+              </select>
               <select id="mv-facing" title="quarter turns clockwise from north">
                 <option value="0">N</option>
                 <option value="1">E</option>

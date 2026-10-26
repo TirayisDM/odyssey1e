@@ -6,6 +6,14 @@
 //! STATUS 223 for why, and commit `158effd` for the code, which was
 //! complete and tested and failed on CONFIGURATION rather than on
 //! anything it did. What survived is the half password CHANGE needs.
+//!
+//! 251. AND SIGN-UP NEEDS THE SAME HALF, which nobody noticed for a
+//! month. The change form has compared two boxes since 219; sign-up had
+//! ONE box and no comparison, so a typo made an account whose password
+//! its owner never knew - with no reset to recover by, because 223 took
+//! that out. A collaborator made three accounts before saying so.
+//!
+//! The function did not change. The second caller did.
 
 /// The two boxes agree and neither is empty.
 ///
@@ -53,6 +61,17 @@ mod tests {
     #[test]
     fn an_empty_new_password_is_refused_before_the_round_trip() {
         assert!(check_new_password("", "").is_err());
+    }
+
+    /// 251. THE CASE THAT COST THREE ACCOUNTS.
+    ///
+    /// A password typed once correctly and once with a typo. Before
+    /// 251 sign-up never asked this question, so the answer went to
+    /// Supabase and became an account nobody could open.
+    #[test]
+    fn a_typo_in_the_second_box_is_refused() {
+        let e = check_new_password("Frostvalley-1", "Frostvalley-l").unwrap_err();
+        assert!(e.contains("do not match"), "{}", e);
     }
 
     #[test]

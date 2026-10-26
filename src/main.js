@@ -306,6 +306,52 @@ function pinSay(text, isError) {
   el.hidden = !text;
 }
 
+// 251. What the front door says.
+//
+// The three helpers beside this one exist because a message in the log
+// pane is the right place to READ what happened and the wrong place to
+// NOTICE it. Sign in and Sign up had no message at all: `call` throws
+// the reason away, so a wrong password did nothing visible whatsoever.
+// John made three accounts in three weeks off the back of it.
+function authSay(text, isError) {
+  const el = document.querySelector("#auth-msg");
+  el.textContent = text || "";
+  el.className = "dm-msg" + (isError ? " err" : "");
+  el.hidden = !text;
+}
+
+/// Supabase's wording, turned into something a person can act on.
+///
+/// 251. THE SAME ERROR FOR A WRONG PASSWORD AND A MISSING ACCOUNT,
+/// deliberately on Supabase's part - telling the two apart would let
+/// anybody test which emails have accounts. So the message must not
+/// claim to know which it was, and must name BOTH things to try.
+///
+/// THE RAW TEXT IS KEPT where it is not one of the known shapes. A
+/// sentence I did not anticipate is worth showing verbatim rather than
+/// flattening into "something went wrong".
+function authReason(raw) {
+  const e = String(raw || "");
+  if (/invalid login credentials/i.test(e)) {
+    return "that email and password do not match an account - check both. " +
+      "If you have never signed up on this machine, use Sign up.";
+  }
+  if (/user already registered|already been registered/i.test(e)) {
+    return "there is already an account with that email - use Sign in rather than Sign up. " +
+      "If you cannot get in, the password needs resetting from the Supabase dashboard.";
+  }
+  if (/email not confirmed/i.test(e)) {
+    return "that account exists but its email was never confirmed.";
+  }
+  if (/password should be at least/i.test(e)) {
+    return "that password is too short for the project's rules - " + e;
+  }
+  if (/rate limit|too many/i.test(e)) {
+    return "too many attempts in a row - wait a minute and try again. " + e;
+  }
+  return e;
+}
+
 function unlockSay(text, isError) {
   const el = document.querySelector("#unlock-msg");
   el.textContent = text || "";
@@ -9582,18 +9628,81 @@ window.addEventListener("DOMContentLoaded", async () => {
   await paintUnlock();
   if (state.user) await loadGames();
 
-  document.querySelector("#signin").addEventListener("click", async () => {
-    const u = await call("sign_in", { email: val("#email"), password: val("#password") });
-    if (u) { state.user = u; paintUser(); clearData(); await paintUnlock(); await loadGames(); }
+  // 251. SIGN IN, AND SAY SO WHEN IT DOES NOT WORK.
+  //
+  // `tryCall` rather than `call`: the reason is the whole point. A
+  // refusal here is almost always a true thing about the account - the
+  // password is wrong, or there is no such account - and it was being
+  // thrown away.
+  guarded("#signin", async () => {
+    authSay("");
+    const email = val("#email");
+    const password = val("#password");
+    // SAID BEFORE THE ROUND TRIP, because an empty box is not a
+    // credential and Supabase's answer for it is less clear than ours.
+    if (!email || !password) {
+      return authSay("fill in both the email and the password", true);
+    }
+    const r = await tryCall("sign_in", { email, password });
+    if (!r.ok) return authSay(authReason(r.error), true);
+    state.user = r.value;
+    paintUser();
+    clearData();
+    await paintUnlock();
+    await loadGames();
+    authSay("");
   });
 
-  document.querySelector("#signup").addEventListener("click", async () => {
-    const u = await call("sign_up", {
-      email: val("#email"),
-      password: val("#password"),
+  // 251. SIGN UP IN TWO PRESSES, which is the confirm box arriving.
+  //
+  // The first press reveals "repeat the password" and a display name
+  // and asks for them; the second actually signs up. One box and one
+  // press is how an account gets made with a password its owner never
+  // knew - there is nothing to compare against and, since 206, no
+  // reset to recover with.
+  //
+  // IT IS NOT A WIZARD. The fields stay revealed, so a second mistake
+  // costs one more press rather than starting again.
+  guarded("#signup", async () => {
+    authSay("");
+    const extra = document.querySelector("#signup-only");
+    if (extra.hidden) {
+      extra.hidden = false;
+      document.querySelector("#password2").focus();
+      return authSay("repeat the password, then press Sign up again");
+    }
+    const email = val("#email");
+    const password = val("#password");
+    if (!email || !password) {
+      return authSay("fill in both the email and the password", true);
+    }
+    // THE CONFIRMATION GOES TO RUST RATHER THAN BEING COMPARED HERE.
+    // `passwords::check_new_password` has done this since 219 for the
+    // change form, and `sign_up` now calls it on the way through - so
+    // the rule has one home and this cannot forget to apply it.
+    const r = await tryCall("sign_up", {
+      email,
+      password,
+      confirm: val("#password2"),
       displayName: val("#display") || "Adventurer",
     });
-    if (u) { state.user = u; paintUser(); clearData(); await paintUnlock(); await loadGames(); }
+    if (!r.ok) return authSay(authReason(r.error), true);
+    state.user = r.value;
+    paintUser();
+    clearData();
+    await paintUnlock();
+    await loadGames();
+    extra.hidden = true;
+    document.querySelector("#password2").value = "";
+    // 251. AND OFFER THE PIN IMMEDIATELY. Without one the session is
+    // in memory only - `AppState.session` is never written to disk -
+    // so every launch starts at this form again. The offer used to sit
+    // folded away until somebody went looking, which is to say never.
+    authSay(
+      "signed up. Set a 4-digit PIN below and you will not have to type " +
+      "the password on this machine again."
+    );
+    document.querySelector("#new-pin").focus();
   });
 
   document.querySelector("#signout").addEventListener("click", async () => {
@@ -9601,6 +9710,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     state.user = null;
     paintUser();
     clearData();
+    // 251. Back to the plain two-box form, with nothing left over from
+    // the last sign-up attempt and no stale message under it.
+    authSay("");
+    document.querySelector("#signup-only").hidden = true;
+    document.querySelector("#password").value = "";
+    document.querySelector("#password2").value = "";
     // Signing out returns to the unlock screen if a PIN is set. The PIN
     // is NOT forgotten - signing out is "not me right now", and
     // forgetting the device is a separate, deliberate button.

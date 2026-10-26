@@ -10594,6 +10594,109 @@ reaches into 051's action economy, and it is the next cycle - the
 readout that says *"4 of 6 used"* is one subtraction away now that
 both numbers exist in one place.
 
+## 251. The front door said nothing
+
+**2026-10-26.** Dave: *"Just checked in with John - he says it looks
+like the passwords are not persistant and that he has had to make a
+new account each log in"*.
+
+**It was not the passwords. Sign-in failed silently.**
+
+```js
+const u = await call("sign_in", { email: val("#email"), password: val("#password") });
+if (u) { ... }
+```
+
+`call` throws the reason away and returns null. On a wrong password
+`if (u)` is false and **nothing happens at all** - no message, no
+movement, no explanation. The only trace went to the Run tab's log
+pane, which nobody signing in has any reason to be watching. Sign-up
+was identical.
+
+From John's seat: type the details, press Sign in, the screen sits
+there. The reasonable conclusion is that the account does not work, so
+make another.
+
+### THE EVIDENCE WAS IN `auth.users`
+
+Three accounts for one person, created 4 October, 18 October and 26
+October. **Every one of them was last signed into within seconds of
+being created** - which is the signup's own automatic sign-in - and
+never again. He has never once got back in with a password. Between
+them they hold 2 games and 6 characters, and the third was made the
+day this was reported.
+
+(The addresses are not written down here. This file is committed to a
+public repository and they are somebody's personal email; the dates
+are the evidence and the addresses add nothing to it.)
+
+### Four things, and they are one bug wearing four hats
+
+1. **Nothing was said.** `call` -> `tryCall`, and the reason goes on
+   screen beside the buttons, the way `pinSay` and `unlockSay` and
+   `changeSay` already do for every smaller decision in this app.
+2. **Sign-up had one password box and no confirmation.** One typo made
+   an account whose password its owner never knew.
+3. **`autocomplete="off"`** on the email and password stopped the
+   webview's password manager saving or filling anything, so there was
+   no record and no safety net.
+4. **The session is in memory only** - `AppState.session` is never
+   written to disk - so without a PIN every launch starts at this
+   form. The PIN existed, folded away inside "Account", visible only
+   after signing in. He had no reason to find it.
+
+### `authReason`, and the thing it must not claim to know
+
+Supabase answers a wrong password and a missing account with the same
+`Invalid login credentials`, **deliberately** - telling them apart
+would let anybody test which emails have accounts. So the message
+cannot claim to know which it was, and names both things to try:
+
+> that email and password do not match an account - check both. If you
+> have never signed up on this machine, use Sign up.
+
+`User already registered` gets the one John needed most: *use Sign in
+rather than Sign up.*
+
+**An unrecognised error is shown verbatim** rather than flattened into
+"something went wrong". A sentence I did not anticipate is worth
+reading.
+
+### THE CONFIRMATION IS CHECKED IN RUST
+
+`passwords::check_new_password` has compared two boxes since 219, for
+the change form. **Sign-up simply never asked it.** The function did
+not change; the second caller did.
+
+It goes in `sign_up` rather than in the form, and that is the point: a
+check the caller performs is a check the next caller forgets. Nothing
+that reaches `sign_up` can skip it, and it costs no round trip because
+it happens on the way through.
+
+Sign-up now takes two presses. The first reveals "repeat the password"
+and a display name; the second signs up. The fields stay revealed, so
+a second mistake costs one more press rather than starting over.
+
+### And the PIN is offered at the moment it is useful
+
+> signed up. Set a 4-digit PIN below and you will not have to type the
+> password on this machine again.
+
+With the focus in the box. Previously the offer sat folded away until
+somebody went looking, which is to say never.
+
+### What this does NOT fix
+
+**There is still no password reset.** 223 removed it because
+Supabase's built-in SMTP refuses addresses outside the project team
+and M365 answered `535` four times across three config reloads.
+Nothing about that has changed, and 251 does not pretend otherwise -
+it makes the reset less necessary rather than unnecessary.
+
+**John's existing accounts still need a dashboard reset**, which is
+Dave's to do: Authentication -> Users -> the account -> set a password.
+Nothing in this app can read or reset a password, and it should not be
+able to.
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
@@ -10608,7 +10711,7 @@ both numbers exist in one place.
 | `security_doors()` | **0 faults** |
 | RLS | **42 tables in `public`, 42 with row level security on, 161 policies** |
 | `anon` on the map tables | nothing at all - `tiles` (227) and `map_versions` (244) |
-| build / tests | **zero warnings, 1,312 tests pass** (`cargo test`) |
+| build / tests | **zero warnings, 1,313 tests pass** (`cargo test`) |
 | the renderer | **`npm test` passes** - a second, tiny suite, because `cargo test` cannot reach `src/map.js` and 242 explains what that cost |
 | tile art | **21 of 33 words**, 33 files - all 32x32. `grass` has 5, `brush` 5, `snow` 5. The 12 left are 5 walls and 7 covers |
 
@@ -10629,7 +10732,7 @@ a draft.
 
 ### What happened: the map exists now
 
-Twenty-six cycles, 225 to 250. Read those entries rather than this summary
+Twenty-seven cycles, 225 to 251. Read those entries rather than this summary
 if you are going to change any of it - each one records WHY, and
 several record where an earlier entry was wrong.
 

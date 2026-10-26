@@ -42,13 +42,40 @@
              forms nobody needs again until they sign out. -->
         <h2 class="foldhead" data-fold="auth"><span class="caret">▾</span>Account</h2>
         <div class="foldbody" data-fold-body="auth">
-        <input id="email" type="email" placeholder="tirayis.dm+p1@gmail.com" autocomplete="off" />
-        <input id="password" type="password" placeholder="password" autocomplete="off" />
-        <input id="display" type="text" placeholder="display name (sign-up only)" autocomplete="off" />
+        <!-- 251. autocomplete IS ON NOW, AND THAT IS THE FIX.
+             `autocomplete="off"` here stopped the webview's password
+             manager from ever saving or filling these, so somebody
+             who mistyped a password at sign-up had no record of it,
+             no autofill, and - since 206 removed the reset - no way
+             back in. John made three accounts.
+
+             The tokens are the standard ones: a manager that sees
+             `current-password` beside `email` offers to save the
+             pair, and `new-password` tells it this is a NEW
+             credential rather than one to autofill. -->
+        <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
+        <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+
+        <!-- 251. SIGN-UP ONLY, and shown by the Sign up button rather
+             than always. A confirm box above Sign in would read as a
+             field you must fill to sign in. -->
+        <div id="signup-only" hidden>
+          <input id="password2" type="password" placeholder="repeat the password"
+                 autocomplete="new-password" />
+          <input id="display" type="text" placeholder="display name" autocomplete="nickname" />
+        </div>
+
         <div class="row">
           <button id="signin">Sign in</button>
           <button id="signup" class="ghost">Sign up</button>
         </div>
+
+        <!-- 251. WHAT HAPPENED, SAID OUT LOUD. Both buttons went
+             through `call`, which throws the reason away - so a wrong
+             password did NOTHING VISIBLE AT ALL and the only honest
+             reading was "this account does not work, I will make
+             another". -->
+        <div id="auth-msg" class="dm-msg" hidden></div>
         <div id="pin-setup" hidden>
           <div class="row">
             <input id="new-pin" type="password" inputmode="numeric" maxlength="4"

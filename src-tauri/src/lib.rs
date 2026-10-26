@@ -103,13 +103,31 @@ use tauri::{Manager, State};
 
 /* ============================ AUTH ============================ */
 
+/// 251. THE CONFIRMATION IS CHECKED HERE, NOT IN THE FORM.
+///
+/// Sign-up had one password box and no confirmation, so a single typo
+/// made an account whose password its owner never knew - and 206
+/// removed the reset, so there was no way back. John made three
+/// accounts in three weeks.
+///
+/// `passwords::check_new_password` has compared a new password against
+/// its confirmation since 219, for the CHANGE form. Sign-up simply
+/// never asked it.
+///
+/// AND IT IS ASKED IN RUST RATHER THAN IN JAVASCRIPT, which is the
+/// whole point: a check the caller performs is a check the next caller
+/// forgets. This one cannot be skipped by anything that reaches
+/// `sign_up`, and it costs no extra round trip because it happens on
+/// the way through.
 #[tauri::command]
 fn sign_up(
     state: State<AppState>,
     email: String,
     password: String,
+    confirm: String,
     display_name: String,
 ) -> Result<Session, String> {
+    passwords::check_new_password(&password, &confirm)?;
     let s = supabase::sign_up(&email, &password, &display_name)?;
     state.set(Some(s.clone()))?;
     Ok(s)

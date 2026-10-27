@@ -11,7 +11,12 @@ const { invoke } = window.__TAURI__.core;
 // 235. The renderer, in its own file because it is the one part that
 // knows what things LOOK like - and therefore the one part MAP.md
 // section 8 expects to be replaced if the voxel idea ever happens.
-import { draw as drawMap, squareAt, forgetArt } from "./map.js";
+import {
+  draw as drawMap,
+  squareAt,
+  forgetArt,
+  drawSquareInto,
+} from "./map.js";
 
 // TWO ENCOUNTER IDS, ON PURPOSE.
 //
@@ -9799,7 +9804,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     const r = await tryCall("map_at", { locationId: loc, z: mvZ() });
     if (!r.ok) return mvSay(r.error, true);
     mapView = r.value;
+    // 258. The outline is drawn by the renderer, so the map and the
+    // panel cannot disagree about which square is being discussed.
+    mapView.selected = mvSelected;
     mvSay(drawMap(document.querySelector("#mv-canvas"), mapView));
+    // AND THE PANEL, because a redraw follows every paint, erase and
+    // walk - the selected square has usually just changed.
+    renderTilePanel();
   }
 
   document.querySelector("#mv-draw").addEventListener("click", drawLevel);
@@ -9970,6 +9981,237 @@ window.addEventListener("DOMContentLoaded", async () => {
     return squareAt(mapView, px, py);
   }
 
+  /* ============ 258. THE TILE PANEL ============ */
+
+  /// Which square the panel is describing, or null.
+  let mvSelected = null;
+  /// `inspect`, `edit` or `play`. INSPECT IS THE DEFAULT and the only
+  /// one wired so far - see the note the panel prints.
+  let tpMode = "inspect";
+
+  const tpEl = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  // BUILT AS NODES WITH `textContent`, NOT AS AN HTML STRING. Creature
+  // names and version names are typed by people, and this file has no
+  // escaping helper - so the panel does not need one either.
+  const tpLine = (k, v) => {
+    const d = tpEl("div", "tpline");
+    d.append(tpEl("span", null, k), tpEl("span", null, v));
+    return d;
+  };
+  const tpBand = (t) => tpEl("div", "tpband", t);
+
+  /// 259. WHICH CLICK-ACTIONS EACH MODE MEANS.
+  ///
+  /// The mode dropdown has carried both kinds since 247 - two that
+  /// change a SQUARE and two that move a CREATURE - and nothing said
+  /// which was which. These are the two halves, and the panel mode
+  /// picks one, so "click paints" cannot be selected while playing.
+  const TP_ACTS = { edit: ["paint", "erase"], play: ["stand", "walk"] };
+
+  /// Show the controls the current mode owns, and no others.
+  function syncTpMode() {
+    for (const o of document.querySelectorAll(".tpmode")) {
+      o.classList.toggle("on", o.dataset.tpmode === tpMode);
+    }
+    // INSPECT HAS NO CONTROLS AT ALL, which is the point of it: the
+    // click is suppressed, so there is nothing for a control to do.
+    const act = document.querySelector("#tp-act");
+    const edit = document.querySelector("#tp-edit");
+    if (act) act.hidden = tpMode === "inspect";
+    if (edit) edit.hidden = tpMode !== "edit";
+
+    const sel = document.querySelector("#mv-mode");
+    const allowed = TP_ACTS[tpMode] || [];
+    if (sel) {
+      for (const o of sel.options) o.hidden = !allowed.includes(o.value);
+      // SNAPPED TO A LEGAL ONE rather than left on a hidden option -
+      // a dropdown showing nothing while a click still did the old
+      // thing would be the worst of both.
+      if (allowed.length && !allowed.includes(sel.value)) sel.value = allowed[0];
+    }
+  }
+
+  for (const b of document.querySelectorAll(".tpmode")) {
+    b.addEventListener("click", () => {
+      tpMode = b.dataset.tpmode;
+      syncTpMode();
+      renderTilePanel();
+    });
+  }
+  syncTpMode();
+
+  /// Ask Rust what one square holds, and lay it out.
+  ///
+  /// TWO BANDS, AND THE SPLIT IS THE POINT. "Written down" is what
+  /// somebody chose and what a row stores; "the rules say" is derived
+  /// from it on every read and kept nowhere. The panel is the first
+  /// place in this project where that distinction is visible to the
+  /// person it protects.
+  /// 260. WHICH RENDER IS THE CURRENT ONE.
+  ///
+  /// A paint click renders the panel, then redraws the level, which
+  /// renders the panel again - two reads in flight at once, and the
+  /// slower one lands last. Each render takes a number on the way in
+  /// and refuses to put itself on the screen if a later one has
+  /// started, so what you end up looking at is the newest answer
+  /// rather than whichever query the database finished second.
+  let tpSeq = 0;
+
+  async function renderTilePanel() {
+    const host = document.querySelector("#tp-body");
+    if (!host) return;
+    const mine = ++tpSeq;
+
+    // 260. BUILT OFF-SCREEN AND SWAPPED IN ONE MOVE.
+    //
+    // It used to empty the panel, then ask Rust, then fill it - so for
+    // the length of a round trip the panel was blank, the column it
+    // sits in collapsed to nothing, and the map beside it jumped up and
+    // back down again. Every paint did this. A fragment is not in the
+    // document, so nothing is laid out until there is something to say.
+    const body = document.createDocumentFragment();
+    const show = () => {
+      if (mine === tpSeq) host.replaceChildren(body);
+    };
+
+    if (!mvSelected) {
+      body.append(tpEl("div", "tpderived", "Click a square to read it."));
+      return show();
+    }
+
+    const loc = mvWhere();
+    if (!loc) return;
+    const r = await tryCall("inspect_square", {
+      locationId: loc,
+      x: mvSelected.x,
+      y: mvSelected.y,
+      z: mvZ(),
+    });
+    if (!r.ok) {
+      body.append(tpEl("div", "tpwarn", r.error));
+      return show();
+    }
+
+    const where = "(" + mvSelected.x + "," + mvSelected.y + ") z " + mvZ();
+    const d = r.value;
+
+    // 226. NULL IS "NOTHING IS THERE", not an empty floor. A sparse
+    // map has gaps inside its own extent and clicking one is ordinary.
+    if (!d) {
+      body.append(tpEl("div", "tpwhere", where));
+      body.append(tpEl("div", "tpderived", "not mapped - no row, and no recipe reaches here"));
+      return show();
+    }
+
+    const head = tpEl("div", "tphead");
+    const shot = tpEl("canvas", "tpshot");
+    const titles = tpEl("div");
+    titles.append(tpEl("div", "tpwhere", where));
+    titles.append(
+      tpEl(
+        "div",
+        null,
+        d.layers.map((l) => l.word).join(" + ")
+      )
+    );
+    titles.append(
+      tpEl("div", "tpderived", d.drawn ? "drawn" : "from the recipe")
+    );
+    head.append(shot, titles);
+    body.append(head);
+
+    if (d.outside) {
+      body.append(tpEl("div", "tpwarn", "outside the room's declared bounds"));
+    }
+
+    /* ---- what somebody wrote down ---- */
+    body.append(tpBand("written down"));
+    for (const l of d.layers) {
+      body.append(tpLine(l.layer, l.word));
+    }
+    if (d.facing) body.append(tpLine("facing", "NESW"[d.facing]));
+    if (d.shape) body.append(tpLine("shape", d.shape));
+    for (const l of d.layers) {
+      // ONLY WHEN SOMETHING WROTE IT. A null hit points column means
+      // nobody has damaged this, which is not the same as full - and
+      // a line reading "25" on an untouched door would invent a fact.
+      if (l.stored_hp != null) {
+        body.append(tpLine(l.layer + " hp set to", String(l.stored_hp)));
+      }
+    }
+    if (d.leads_to) {
+      body.append(tpLine("leads to", d.leads_to.slice(0, 8)));
+      if (d.to_x != null) {
+        body.append(tpLine("arrives", "(" + d.to_x + "," + d.to_y + ") z " + d.to_z));
+      }
+    }
+
+    /* ---- what the rules make of it ---- */
+    body.append(tpBand("the rules say"));
+    for (const l of d.layers) {
+      if (l.ac == null) {
+        body.append(tpEl("div", "tpderived", l.word + " - " + l.destruction));
+        continue;
+      }
+      body.append(tpLine(l.word, l.hp_now + " / " + l.hp_max + " · " + l.wear));
+      body.append(
+        tpEl(
+          "div",
+          "tpderived",
+          "AC " + l.ac +
+            " · damage under " + l.threshold + " does nothing" +
+            // Only a mechanism can jam, so only a mechanism has one.
+            (l.breaks_at != null ? " · jams at " + l.breaks_at : "") +
+            " · " + l.destruction
+        )
+      );
+    }
+    body.append(
+      tpLine(
+        "crossing",
+        d.cost == null ? d.going : d.going + " · " + d.cost + " to enter"
+      )
+    );
+    const extra = [];
+    if (d.needs) extra.push("must " + d.needs);
+    if (d.blocks_sight) extra.push("blocks sight");
+    if (d.links_levels) extra.push("links levels");
+    if (d.hazard) extra.push(d.hazard.dice + " " + d.hazard.kind);
+    if (extra.length) body.append(tpEl("div", "tpderived", extra.join(" · ")));
+
+    /* ---- what is on it ---- */
+    body.append(tpBand("on it"));
+    body.append(
+      tpLine(
+        "standing",
+        d.standing.length ? d.standing.map((c) => c.name).join(", ") : "nobody"
+      )
+    );
+    // 218 BUILT FIXTURES AGAINST A LOCATION, NOT A SQUARE. There is no
+    // column that would attach one here, so the slot is named and told
+    // the truth rather than left out or filled with a blank.
+    body.append(tpEl("div", "tpderived", "fixtures cannot be attached to a square yet"));
+
+    show();
+
+    // LAST, because the canvas must be in the document before it can
+    // be drawn into - which is what `show` just did.
+    if (mine !== tpSeq) return;
+    drawSquareInto(shot, d.layers.length ? {
+      x: d.x,
+      y: d.y,
+      surface: (d.layers.find((l) => l.layer === "surface") || {}).word,
+      cover: (d.layers.find((l) => l.layer === "cover") || {}).word || null,
+      facing: d.facing,
+      shape: d.shape,
+    } : null);
+  }
+
   mvCanvas.addEventListener("mousemove", (ev) => {
     const at = squareUnder(ev);
     const el = document.querySelector("#mv-at");
@@ -10009,6 +10251,25 @@ window.addEventListener("DOMContentLoaded", async () => {
     const at = squareUnder(ev);
     const loc = mvWhere();
     if (!at || !loc) return;
+
+    // 258. EVERY CLICK SELECTS, WHATEVER ELSE IT DOES.
+    //
+    // Selection is deliberately NOT a fifth mode. All four modes
+    // already compute a target square; they just did not remember it.
+    // Making looking its own mode would mean leaving paint mode to
+    // see what you painted, which is backwards - you want to paint and
+    // have the panel show you the result.
+    mvSelected = { x: at.x, y: at.y };
+    if (mapView) mapView.selected = mvSelected;
+    drawMap(mvCanvas, mapView);
+    renderTilePanel();
+
+    // AND INSPECT STOPS HERE. The panel saying "inspect" while a click
+    // still painted would be a label that lies; this makes the mode
+    // mean "I am looking, not touching", which is what a DM reviewing
+    // a map actually wants.
+    if (tpMode === "inspect") return;
+
     const mode = document.querySelector("#mv-mode").value;
     const z = mvZ();
 

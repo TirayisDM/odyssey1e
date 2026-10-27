@@ -11139,6 +11139,181 @@ All fifty tiles are 32x32, checked by reading the PNG headers rather
 than the file sizes. `stone_wall_diag.png` was redrawn at 32 and is
 no longer refused.
 
+## 258. A square can be read, not only painted
+
+**2026-10-26.** Dave: *"we need a tile widget or section to the left of
+the map. When a tile is selected all its information should show up
+under the Tile Properties ... That will allow us to have the most
+control for the DM and establish full tile control eventually."*
+
+Until now the map pane was **write-only**. Five controls changed a
+square and one hover line described it in a sentence. Nothing in the
+app could show you what a square actually holds.
+
+### Stored and derived, in two bands with a heading each
+
+The panel says *written down*, then *the rules say*. That is not
+decoration - it is 245 made visible.
+
+**245 ruled that painting is authoring and damage is play**, which is
+why `row()` omits `surface_hp` and `cover_hp`: an editor that round-trips
+a square must not silently repair the dungeon. The panel is the first
+place a person can see which half of a square is a choice somebody made
+and which half is worked out again on every read.
+
+`inspect_square` returns both and labels them. `stored_hp` is printed
+**only when something wrote it** - a line reading `25` on an untouched
+door would invent a fact. `hp_now` falls back to the maximum, because
+**NULL is not zero**: the column is empty because nobody has hurt this
+door, and read the other way every untouched door in the world would be
+`destroyed`.
+
+A word nothing can hurt gets **no numbers at all**, not zeroes. "AC 0,
+0 / 0 hp" on a patch of dirt would be a panel inventing a fight nobody
+can have.
+
+### What it found on its first day
+
+`Wear`, `destruction()` and `integrity()` had **no callers outside
+`terrain.rs`**. Thirteen of the thirty-three terrain words carry an
+`Integrity` and not one of them had ever been read by anything a person
+could see. Putting the stored line next to the derived line found this
+in a minute:
+
+**Painting `door_broken` does not make a broken door.** `door_broken`
+is a terrain word a DM can paint. `Wear::Broken` is a verdict derived
+from hit points. Nothing connects them, so a freshly painted broken door
+is mechanically pristine - the word says broken and the rules say fine.
+
+**A fault wearing the costume of an ordinary answer**, and the costume
+here was the DM's own brush. There is a test pinning it:
+`painting_door_broken_does_not_make_a_broken_door`. It asserts the wrong
+answer on purpose. When a later cycle makes painting stamp the
+condition, **that test should fail** - and the failure is the signal to
+delete it, not to work around it.
+
+### Inspect is a mode, and the click is suppressed in it
+
+Three buttons: Inspect, Edit, Play. Inspect is the default and a click
+in it selects and nothing else. You turn the ability to change things
+**on**, deliberately.
+
+**Selection is not a fifth mode.** All four click actions already
+computed a target square; they just never remembered it. Making looking
+its own mode would mean leaving paint mode to see what you painted,
+which is backwards - you want to paint and have the panel show you the
+result. So every click selects, whatever else it does.
+
+The outline is drawn by the renderer from `view.selected`, so the map
+and the panel cannot disagree about which square is being discussed.
+
+### Two things the panel had to admit
+
+**Fixtures cannot be attached to a square.** 218 built them against a
+LOCATION, and there is no column that would narrow one to a square - so
+a door fixture is currently impossible. The slot is named and told the
+truth rather than left out or filled with a blank.
+
+**Nothing can damage a square either.** No command writes either hit
+points column, so the derived band is currently always describing a
+whole thing. That is the next cycle, not a defect in this one.
+
+The panel is built with `textContent` on real nodes, not an HTML string.
+Creature names and version names are typed by people and this file has
+no escaping helper.
+
+---
+
+## 259. The brush moved next to the thing it paints
+
+**2026-10-26.** Dave: *"a bit cramped - edit should be the mode where
+you select brushes, default textures, other building features - give the
+panel 10% more width and extend edit to show all editing controls"*.
+
+The panel went from 15rem to 16.5rem, and the ROOM and BRUSH rows left
+the top of the pane entirely.
+
+They had been above the map since the map pane existed, which meant the
+thing you were painting and the thing you were painting **with** were in
+different places. Stacked rather than in a row: the panel is a narrow
+column and five selects side by side would need the width the map wants.
+
+### Edit and Play stopped being two labels on one behaviour
+
+**The mode dropdown has carried two different kinds of action since
+247** - two that change a *square* and two that move a *creature* - and
+nothing ever said which was which. Now the panel mode picks: Edit offers
+paint and erase, Play offers places and walks.
+
+The value is **snapped to a legal one** when you switch rather than left
+on a hidden option. A dropdown showing nothing while a click still did
+the old thing would be the worst of both.
+
+That is the Edit/Play split meaning something. Before this it was a
+heading over identical behaviour.
+
+---
+
+## 260. The screen stopped moving while you worked
+
+**2026-10-26.** Dave: *"the map and screen move around a lot when
+commiting moves or changes - stabilize the screen and images"*.
+
+Four separate causes, each of them something the panel work introduced
+or made visible.
+
+### The panel emptied itself before it had anything to put back
+
+`renderTilePanel` cleared `#tp-body`, then awaited a round trip to Rust
+and Postgres, then filled it. **For the length of that query the panel
+was blank**, the column collapsed to nothing, and the map beside it rose
+and fell again. Every paint did this.
+
+It now builds into a `DocumentFragment` and swaps it in one move. A
+fragment is not in the document, so nothing is laid out until there is
+something to say.
+
+### Two reads were in flight and the slower one won
+
+A paint click renders the panel, then redraws the level, which renders
+the panel again. Both were live at once and **whichever query the
+database finished second was what you ended up reading**.
+
+Each render now takes a number on the way in and refuses to put itself
+on the screen if a later one has started. Not a lock and not a
+cancellation - the stale answer is still computed, it just does not get
+to speak.
+
+### Seventy redraws in the first second
+
+A word can bring six image files and a map can use a dozen words. Every
+file that landed called a full `draw()` - a `clearRect` of the whole
+canvas followed by a refill. The picture was correct at the end and
+visibly unstable on the way there.
+
+Repaints are now **coalesced into one per frame**, not throttled: every
+arrival still causes a redraw, it is just the same redraw. Nothing is
+dropped and nothing is delayed past the next frame.
+
+### Two heights that breathed
+
+`canvas.width` was assigned on every draw whether or not it had changed.
+Assigning it resizes the element as well as clearing the bitmap, so the
+usual case was writing the same two numbers back and making the browser
+lay the pane out again for nothing. It is now only written when it
+differs; `clearRect` does the clearing either way.
+
+And the panel has a `min-height`, with the status line above the map
+holding one line whether or not there is anything on it. The panel says
+more about a damaged door than about a patch of dirt, and a line that
+comes and goes pushes the whole map down and back.
+
+**None of the four was a wrong answer.** The panel showed the right
+square, the map drew the right picture, and the costume this time was
+the layout.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

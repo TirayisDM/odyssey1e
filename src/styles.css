@@ -1200,6 +1200,11 @@ h2.foldhead.shut{margin-bottom:.15rem}
 }
 /* What is under the cursor. Fixed height so the canvas does not jump
    when the readout empties. */
+/* 260. The line is kept whether or not there is anything on it. It is
+   written after every draw and cleared between, and a line that comes
+   and goes pushes the whole map down and back. */
+.mapsay { min-height: 1.15em; }
+
 .mapat {
   font-size: 11px;
   min-height: 1.2em;
@@ -1208,7 +1213,81 @@ h2.foldhead.shut{margin-bottom:.15rem}
 /* A room wider than the pane scrolls rather than squeezing - the art
    is pixel art and a fractional scale would blur it. */
 .mapcanvas { max-width: none; }
-.world-pane[data-world="map"] { overflow-x: auto; }
+
+/* 258. THE MAP STAGE: the tile panel on the left, the map beside it.
+   The SCROLL MOVED INWARDS - a wide room used to scroll the whole
+   pane, which would have carried the panel off the screen with it.
+   `min-width: 0` is what lets the canvas side shrink instead of
+   forcing the flex row wider than the pane. */
+.mapstage { display: flex; gap: .6rem; align-items: flex-start; }
+.mapscroll { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+
+/* Narrow on purpose. It is a column of labelled facts, not a form,
+   and the map is the thing being looked at. */
+.tilepanel {
+  flex: 0 0 16.5rem;
+  margin-top: .5rem;
+  padding: .5rem .6rem .6rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 11px;
+}
+.tpmodes { display: flex; gap: .25rem; margin: .35rem 0 .5rem; }
+.tpmode {
+  flex: 1 1 0;
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .25rem 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tpmode.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+.tpbody { font-variant-numeric: tabular-nums; }
+
+/* The preview. The BUFFER is 32x32 and the browser enlarges it by an
+   integer with nearest-neighbour, so 236's "drawn at 32, never
+   resampled" survives being looked at closely. */
+.tpshot {
+  width: 64px; height: 64px;
+  image-rendering: pixelated;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+.tphead { display: flex; gap: .5rem; align-items: flex-start; }
+.tpwhere { font-weight: 600; }
+
+/* A heading per band, so STORED and DERIVED never run together. */
+.tpband {
+  margin: .55rem 0 .2rem;
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tpline { display: flex; justify-content: space-between; gap: .5rem; }
+.tpline span:last-child { text-align: right; }
+/* What the rules worked out, quieter than what somebody wrote down. */
+.tpderived { color: var(--muted); font-size: 10px; padding-left: .2rem; }
+.tpwarn { color: #ff8a4d; }
+
+/* 260. A FLOOR, SO THE ROW DOES NOT BREATHE. The panel says more about
+   a damaged door than about a patch of dirt, and without this the map
+   beside it rose and fell by the difference every time you clicked. */
+.tilepanel { min-height: 24rem; }
+
+/* 259. The editing controls, stacked. Full width because the panel is
+   a column - a select that has to be read is worth the whole of it. */
+.tptools { margin-top: .5rem; border-top: 1px solid var(--line); }
+.tpfield { display: block; width: 100%; margin-bottom: .25rem; }
+/* Two short things that belong together: shape with facing, width
+   with height. */
+.tppair { display: flex; gap: .25rem; margin-bottom: .25rem; }
+.tppair > * { flex: 1 1 0; min-width: 0; }
+
+.world-pane[data-world="map"] { overflow-x: hidden; }
 
 /* 246. The shelf's name box. Wide enough for a real name - "before
    the dragons" is the kind of thing a DM types - and it shares the

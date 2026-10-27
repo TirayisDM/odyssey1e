@@ -104,7 +104,7 @@ const refused = new Set();
 /// `tiles()` hands back its array IMMEDIATELY and fills it as the
 /// images arrive, so the first frame misses every shaped sprite by
 /// definition - the files had not loaded yet. Each load then calls
-/// `repaint()` and the next frame draws them correctly, but a name
+/// `repaintSoon()` and the next frame draws them correctly, but a name
 /// added once stayed for the life of the session. Dave's map reported
 /// `stone_wall_corner, stone_wall_diag` as having no art while both
 /// were plainly drawn on the screen in front of him.
@@ -174,14 +174,34 @@ function load(src, onOk, onFail) {
 /// EACH FILE IS ASKED FOR ONCE. A miss is remembered, so a word with no
 /// art does not re-request on every redraw; a hit repaints once,
 /// because the image lands after the frame that wanted it.
+/// 260. ONE REPAINT PER FRAME, however many images land in it.
+///
+/// A word can bring six files and a map can use a dozen words, so a
+/// cold open used to redraw the whole map seventy-odd times in a
+/// second - each one a `clearRect` followed by a fill. The picture was
+/// correct at the end and visibly unstable on the way there.
+///
+/// COALESCED RATHER THAN THROTTLED: every arrival still causes a
+/// redraw, it is just the same redraw. Nothing is dropped and nothing
+/// is delayed past the next frame.
+let frame = 0;
+function repaintSoon() {
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = 0;
+    if (last) draw(last.canvas, last.view);
+    // 258. AND THE PREVIEW, which is drawn from the same art and would
+    // otherwise sit on the flat colour until something else moved. A
+    // tile loading is exactly when a preview is wrong.
+    if (lastSquare) drawSquareInto(lastSquare.canvas, lastSquare.square);
+  });
+}
+
 function tiles(word) {
   if (art.has(word)) return art.get(word);
   const found = [];
   art.set(word, found);
 
-  const repaint = () => {
-    if (last) draw(last.canvas, last.view);
-  };
   // Walk the numbered ones in order and stop at the first gap, so the
   // probe is bounded by what actually exists.
   const probe = (n) => {
@@ -190,7 +210,7 @@ function tiles(word) {
       `${TILES}${word}${n}.png`,
       (img) => {
         found.push(img);
-        repaint();
+        repaintSoon();
         probe(n + 1);
       },
       () => {}
@@ -200,7 +220,7 @@ function tiles(word) {
     `${TILES}${word}.png`,
     (img) => {
       found.unshift(img);
-      repaint();
+      repaintSoon();
     },
     () => {}
   );
@@ -341,6 +361,57 @@ function lay(ctx, word, x, y, facing, col, row, shape) {
   ctx.restore();
 }
 
+/// 258. THE ONE SQUARE THE TILE PANEL IS SHOWING.
+///
+/// Kept so that art arriving late refreshes the preview as well as the
+/// map - see `repaintSoon` above.
+let lastSquare = null;
+
+/// Draw ONE square, composed exactly as the map composes it, into its
+/// own canvas.
+///
+/// ---------------------------------------------------------------------
+/// WHY THIS IS HERE AND NOT IN THE PANEL
+/// ---------------------------------------------------------------------
+///
+/// The obvious panel code is `img.src = "assets/tiles/" + cover +
+/// ".png"`, and it would be wrong four ways at once: it ignores the
+/// shape suffix, it ignores numbered variants, it never turns the tile
+/// by its facing, and it skips the 32x32 guard. It would also be the
+/// filename rule in a SECOND place, which is the fault this project
+/// keeps naming.
+///
+/// So the panel asks the renderer for a picture instead. The square it
+/// passes carries its real `x` and `y`, so `variant()` hashes to the
+/// SAME variant the map drew - a preview that showed a different
+/// grass to the one on screen would be a small lie told confidently.
+///
+/// THE BUFFER STAYS 32x32. 236 chose art drawn at 32 and never
+/// resampled; the panel makes it bigger with CSS and
+/// `image-rendering: pixelated`, which is the browser doing an integer
+/// nearest-neighbour rather than us smearing it.
+export function drawSquareInto(canvas, square) {
+  if (!canvas) return;
+  lastSquare = square ? { canvas, square } : null;
+  canvas.width = SQUARE;
+  canvas.height = SQUARE;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, SQUARE, SQUARE);
+  if (!square) return;
+
+  // THE SAME ORDER AS `draw`, for the same reasons - a solid cover
+  // replaces the square, anything else layers on the ground.
+  lay(ctx, square.surface, 0, 0, square.facing, square.x, square.y, null);
+  if (square.cover) {
+    const solid = isSolid(square.cover);
+    const has = tiles(square.cover).length > 0;
+    ctx.globalAlpha = solid || has ? 1 : 0.6;
+    lay(ctx, square.cover, 0, 0, square.facing, square.x, square.y, square.shape);
+    ctx.globalAlpha = 1;
+  }
+}
+
 /// Which square a point on the canvas is over, or null off the map.
 ///
 /// 241. THE SAME `extent` THE DRAWING USES, so a click lands where the
@@ -374,8 +445,13 @@ export function draw(canvas, view) {
 
   const cols = box.maxX - box.minX + 1;
   const rows = box.maxY - box.minY + 1;
-  canvas.width = cols * SQUARE;
-  canvas.height = rows * SQUARE;
+  // 260. ONLY WHEN IT ACTUALLY CHANGED. Assigning `width` resizes the
+  // element as well as clearing the bitmap, and a redraw follows every
+  // paint, erase and walk - so the usual case is writing the same two
+  // numbers back and making the browser lay the pane out again for
+  // nothing. `clearRect` below does the clearing either way.
+  if (canvas.width !== cols * SQUARE) canvas.width = cols * SQUARE;
+  if (canvas.height !== rows * SQUARE) canvas.height = rows * SQUARE;
 
   const px = (x) => (x - box.minX) * SQUARE;
   const py = (y) => (y - box.minY) * SQUARE;
@@ -418,6 +494,16 @@ export function draw(canvas, view) {
         lay(ctx, s.cover, x, y, s.facing, s.x, s.y, s.shape);
         ctx.globalAlpha = 1;
       }
+    }
+
+    // 258. THE SELECTED SQUARE, so the panel and the map agree about
+    // which one is being talked about. Drawn in the square loop rather
+    // than after it, because a creature token standing on the square
+    // should sit ON the outline the way it sits on the terrain.
+    if (view.selected && view.selected.x === s.x && view.selected.y === s.y) {
+      ctx.strokeStyle = "#ffd24d";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, SQUARE - 2, SQUARE - 2);
     }
 
     // A row the declared room does not contain. 232 asked for this to

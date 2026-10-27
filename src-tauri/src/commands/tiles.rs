@@ -867,6 +867,277 @@ pub fn map_at(
     })
 }
 
+/* ========= 258. WHAT ONE SQUARE ACTUALLY HOLDS, FOR A PANEL ========= */
+
+/// One layer of a square: what is STORED beside what the rules DERIVE.
+///
+/// THE TWO ARE SEPARATED ON PURPOSE AND THE PANEL SHOWS THEM APART.
+/// This project keeps one copy of every derived fact and recomputes
+/// the rest, and until now that decision has only been legible in
+/// Rust. A DM looking at a door should be able to see that 25 of 25
+/// hit points is a STORED number and `intact` is a VERDICT about it.
+///
+/// It is also the cheapest bug detector we have. Paint `door_broken`
+/// today and the square reads `25 / 25 - intact`: the word says broken
+/// and the rules say fine, which is the whole argument for this panel
+/// in one line of it.
+#[derive(Debug, Clone, Serialize)]
+pub struct LayerDetail {
+    /// `sub`, `surface` or `cover`.
+    pub layer: &'static str,
+    pub word: String,
+
+    /* ---- stored ---- */
+    /// The hit points column AS IT SITS, null included.
+    ///
+    /// NULL IS NOT ZERO AND NOT THE MAXIMUM - it is "nobody has
+    /// damaged this". Kept separate from `hp_now` because the two
+    /// being confusable is exactly the trap a damage control would
+    /// fall into: writing the maximum on an undamaged square gives
+    /// "undamaged" two spellings that will eventually disagree.
+    pub stored_hp: Option<i64>,
+
+    /* ---- derived, all null for a word with no integrity ---- */
+    pub ac: Option<i64>,
+    /// What it has now - the stored number, or the maximum if nothing
+    /// has touched it.
+    pub hp_now: Option<i64>,
+    pub hp_max: Option<i64>,
+    pub threshold: Option<i64>,
+    /// Moving parts that can jam. Only a mechanism can be `broken`.
+    pub mechanism: bool,
+    /// The hit points at or below which a mechanism jams - `hp / 10`,
+    /// one division rather than a number written beside every door.
+    pub breaks_at: Option<i64>,
+    /// `intact`, `broken` or `destroyed`. Null when nothing can hurt
+    /// it, which is most of the vocabulary.
+    pub wear: Option<&'static str>,
+    /// What is left when it is destroyed, in words.
+    pub destruction: String,
+}
+
+/// Something that hurts you for standing there.
+#[derive(Debug, Clone, Serialize)]
+pub struct HazardDetail {
+    pub dice: String,
+    pub kind: String,
+}
+
+/// Everything one square holds, for the tile panel.
+///
+/// ---------------------------------------------------------------------
+/// A COMMAND OF ITS OWN RATHER THAN A FATTER `MapView`
+/// ---------------------------------------------------------------------
+///
+/// `map_at` sends every square on the level and is called on every
+/// redraw. Twenty more fields times four hundred squares is a large
+/// answer to a question nobody asked: the panel wants ONE square, and
+/// only when somebody points at it.
+///
+/// It also keeps `Square` honest. That struct exists so a renderer can
+/// draw; this one exists so a person can read. They will want
+/// different things and should be free to.
+#[derive(Debug, Clone, Serialize)]
+pub struct SquareDetail {
+    pub x: i32,
+    pub y: i32,
+    pub z: i16,
+
+    /// Is there a ROW here, or is this the room's recipe talking?
+    ///
+    /// 226: A MISSING ROW MEANS UNMAPPED, NOT EMPTY FLOOR. A square
+    /// the recipe implies has no stored anything - no damage, no
+    /// shape, no link - and the panel must not offer a tidy set of
+    /// blanks that look like data.
+    pub drawn: bool,
+    /// A row beyond the room's declared bounds. 232 wants it to look
+    /// wrong rather than vanish.
+    pub outside: bool,
+
+    pub facing: i16,
+    pub shape: Option<String>,
+    /// Bottom to top: `sub` if there is one, `surface` always, `cover`
+    /// if there is one.
+    pub layers: Vec<LayerDetail>,
+
+    /* ---- crossing it, all derived by `Stack::footing` ---- */
+    /// `normal`, `difficult` or `blocked`.
+    pub going: &'static str,
+    /// Squares of movement to enter, or null where nothing can.
+    pub cost: Option<i64>,
+    /// `swim`, `climb` or `fly` - a GATE, not a surcharge.
+    pub needs: Option<&'static str>,
+    pub blocks_sight: bool,
+    pub hazard: Option<HazardDetail>,
+    /// Stairs and ramps, which are how a creature changes level.
+    pub links_levels: bool,
+
+    /* ---- where it goes ---- */
+    pub leads_to: Option<String>,
+    pub to_x: Option<i32>,
+    pub to_y: Option<i32>,
+    pub to_z: Option<i16>,
+
+    /* ---- what is on it ---- */
+    pub standing: Vec<Standing>,
+}
+
+fn wear_word(w: crate::terrain::Wear) -> &'static str {
+    match w {
+        crate::terrain::Wear::Intact => "intact",
+        crate::terrain::Wear::Broken => "broken",
+        crate::terrain::Wear::Destroyed => "destroyed",
+    }
+}
+
+fn destruction_word(d: crate::terrain::Destruction) -> String {
+    use crate::terrain::Destruction::*;
+    match d {
+        Indestructible => "cannot be attacked".to_string(),
+        Leaves(t) => format!("leaves {}", t.key()),
+        Clears => "clears, leaving nothing".to_string(),
+        Reveals => "reveals what is beneath".to_string(),
+    }
+}
+
+/// One layer, stored and derived.
+fn layer_detail(
+    layer: &'static str,
+    t: crate::terrain::Terrain,
+    stored_hp: Option<i64>,
+) -> LayerDetail {
+    let integ = t.integrity();
+    // AN UNDAMAGED THING HAS ITS MAXIMUM. Null in the column means
+    // nobody has hurt it, so the verdict is asked about a full one -
+    // and `wear` is asked ONCE, here, rather than by the panel.
+    let hp_now = integ.map(|i| stored_hp.unwrap_or(i.hp));
+    LayerDetail {
+        layer,
+        word: t.key().to_string(),
+        stored_hp,
+        ac: integ.map(|i| i.ac),
+        hp_now,
+        hp_max: integ.map(|i| i.hp),
+        threshold: integ.map(|i| i.threshold),
+        mechanism: integ.is_some_and(|i| i.mechanism),
+        breaks_at: integ.and_then(|i| i.breaks_at()),
+        wear: integ.map(|i| wear_word(i.wear(hp_now.unwrap_or(0)))),
+        destruction: destruction_word(t.destruction()),
+    }
+}
+
+/// Everything about the square at (x, y, z), or null if nothing is
+/// there at all.
+///
+/// NULL IS AN ANSWER, NOT A FAILURE. A map can be sparse - rows at
+/// (0,0) and (10,10) and nothing between - so a click inside the
+/// canvas can land where no square exists and no recipe implies one.
+/// `ground::at` already says so by returning `None`, and an error
+/// would make pointing at a gap look like a fault.
+#[tauri::command]
+pub fn inspect_square(
+    state: State<AppState>,
+    location_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+) -> Result<Option<SquareDetail>, String> {
+    let token = state.token()?;
+    let (bounds, default) = map_of(&token, &location_id)?;
+
+    // ONE SQUARE, ASKED FOR AS ONE SQUARE. Filtering here rather than
+    // fetching the level and searching it keeps the panel's cost
+    // independent of how big the map has grown.
+    let rows = supabase::rest_get(
+        &token,
+        "tiles",
+        &[
+            ("select", COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("x", &format!("eq.{}", x)),
+            ("y", &format!("eq.{}", y)),
+            ("z", &format!("eq.{}", z)),
+        ],
+    )?;
+    let tiles: Vec<Tile> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the square: {}", e))?;
+    let tile = tiles.into_iter().next();
+
+    let row = match tile.as_ref() {
+        Some(t) => Some(t.stack()?),
+        None => None,
+    };
+    let Some(stack) = crate::ground::at(row, default, bounds, x, y) else {
+        return Ok(None);
+    };
+
+    // THE STORED HIT POINTS COME FROM THE ROW, NOT THE RECIPE. A
+    // square the room merely implies has never been damaged, because
+    // there is nowhere to have recorded it.
+    let mut layers = Vec::new();
+    if let Some(sub) = stack.sub {
+        // No hit points column for a sub: it is under the floor, and
+        // nothing has ever reached it.
+        layers.push(layer_detail("sub", sub, None));
+    }
+    layers.push(layer_detail(
+        "surface",
+        stack.surface,
+        tile.as_ref().and_then(|t| t.surface_hp),
+    ));
+    if let Some(cover) = stack.cover {
+        layers.push(layer_detail(
+            "cover",
+            cover,
+            tile.as_ref().and_then(|t| t.cover_hp),
+        ));
+    }
+
+    let f = stack.footing();
+    let here: Vec<Standing> = standing_in(state, location_id)?
+        .into_iter()
+        .filter(|c| c.x == x && c.y == y && c.z == z)
+        .collect();
+
+    Ok(Some(SquareDetail {
+        x,
+        y,
+        z,
+        drawn: tile.is_some(),
+        outside: !bounds.allows(x, y),
+        facing: stack.facing.quarter(),
+        shape: tile
+            .as_ref()
+            .and_then(|t| t.shape.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        layers,
+        going: match f.going {
+            crate::terrain::Going::Normal => "normal",
+            crate::terrain::Going::Difficult => "difficult",
+            crate::terrain::Going::Blocked => "blocked",
+        },
+        cost: f.going.step_cost(),
+        needs: f.needs.map(|m| match m {
+            crate::terrain::Mode::Swim => "swim",
+            crate::terrain::Mode::Climb => "climb",
+            crate::terrain::Mode::Fly => "fly",
+        }),
+        blocks_sight: f.blocks_sight,
+        hazard: f.hazard.map(|h| HazardDetail {
+            dice: h.dice.to_string(),
+            kind: h.kind.to_string(),
+        }),
+        links_levels: stack.surface.links_levels(),
+        leads_to: tile.as_ref().and_then(|t| t.leads_to.clone()),
+        to_x: tile.as_ref().and_then(|t| t.to_x),
+        to_y: tile.as_ref().and_then(|t| t.to_y),
+        to_z: tile.as_ref().and_then(|t| t.to_z),
+        standing: here,
+    }))
+}
+
 /* ================ 237. THE VOCABULARY, FOR A PICKER ================ */
 
 /// One terrain word and where it may sit.
@@ -1618,6 +1889,103 @@ fn halfway(e: String, done: usize, verb: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* ===== 258. ONE LAYER, STORED BESIDE DERIVED ===== */
+    //
+    // `inspect_square` itself is plumbing - a token, a filtered read,
+    // a struct - and this project does not test plumbing. `layer_detail`
+    // is not: it decides what an absent hit points column MEANS, which
+    // is a rule wearing a helper's clothes.
+
+    use crate::terrain::Terrain;
+
+    #[test]
+    fn an_undamaged_thing_reads_as_its_maximum() {
+        // NULL IS NOT ZERO. The column is empty because nobody has hurt
+        // this door, so the verdict must be asked about a whole one.
+        // Read the other way, every untouched door in the world would
+        // be `destroyed`.
+        let l = layer_detail("cover", Terrain::DoorClosed, None);
+        assert_eq!(l.stored_hp, None, "nothing was written and nothing is invented");
+        assert_eq!(l.hp_now, Some(25));
+        assert_eq!(l.hp_max, Some(25));
+        assert_eq!(l.wear, Some("intact"));
+    }
+
+    #[test]
+    fn a_door_at_the_jamming_point_reads_broken() {
+        // 25 / 10 is 2, and `breaks_at` is the only place that division
+        // happens.
+        let l = layer_detail("cover", Terrain::DoorClosed, Some(2));
+        assert_eq!(l.breaks_at, Some(2));
+        assert_eq!(l.wear, Some("broken"));
+        assert!(l.mechanism);
+
+        // One point above it is still a working door.
+        let ok = layer_detail("cover", Terrain::DoorClosed, Some(3));
+        assert_eq!(ok.wear, Some("intact"));
+    }
+
+    #[test]
+    fn a_wall_is_never_broken_only_destroyed() {
+        // A wall at a tenth of its hit points is a BREACH, which is
+        // passable. Only a mechanism jams.
+        let l = layer_detail("cover", Terrain::StoneWall, Some(1));
+        assert!(!l.mechanism);
+        assert_eq!(l.breaks_at, None);
+        assert_eq!(l.wear, Some("intact"));
+        assert_eq!(
+            layer_detail("cover", Terrain::StoneWall, Some(0)).wear,
+            Some("destroyed")
+        );
+    }
+
+    #[test]
+    fn a_word_nothing_can_hurt_offers_no_numbers_at_all() {
+        // NOT ZEROES. A floor with "AC 0, 0 / 0 hp" would be a panel
+        // inventing a fight nobody can have.
+        let l = layer_detail("surface", Terrain::Dirt, None);
+        assert_eq!(l.ac, None);
+        assert_eq!(l.hp_now, None);
+        assert_eq!(l.hp_max, None);
+        assert_eq!(l.wear, None);
+        assert_eq!(l.destruction, "cannot be attacked");
+    }
+
+    #[test]
+    fn destruction_is_said_in_words_including_what_is_left() {
+        assert_eq!(
+            layer_detail("cover", Terrain::StoneWall, None).destruction,
+            "leaves rubble"
+        );
+        assert_eq!(
+            layer_detail("cover", Terrain::DoorClosed, None).destruction,
+            "clears, leaving nothing"
+        );
+    }
+
+    #[test]
+    fn painting_door_broken_does_not_make_a_broken_door() {
+        // THIS TEST PINS A KNOWN FAULT RATHER THAN A BEHAVIOUR WE WANT.
+        //
+        // `door_broken` is a terrain word a DM can paint; `Wear::Broken`
+        // is a verdict derived from hit points. Nothing connects them,
+        // so a freshly painted broken door is mechanically pristine -
+        // the word says broken and the rules say fine.
+        //
+        // The panel puts those two lines next to each other, which is
+        // how it was found. When a later cycle makes painting stamp the
+        // condition, THIS TEST SHOULD FAIL - and that failure is the
+        // signal to delete it, not to work around it.
+        let l = layer_detail("cover", Terrain::DoorBroken, None);
+        assert_eq!(l.hp_now, Some(25));
+        assert_eq!(
+            l.wear,
+            Some("intact"),
+            "if this now says broken, painting has started stamping the \
+             condition and this test has done its job"
+        );
+    }
 
     fn t(surface: &str) -> Tile {
         Tile {

@@ -1152,59 +1152,6 @@
               <button id="mv-art" class="ghost tiny" title="re-read the tile images from disk">Reload art</button>
             </div>
 
-            <!-- The room: how big, and what it is made of where
-                 nobody has said otherwise. 20x20 is a 100ft battle
-                 map, which is the usual size of a fight. -->
-            <div class="row maprow">
-              <span class="maplabel">room</span>
-              <input id="mv-w" type="number" value="20" class="narrow" title="squares across" />
-              <input id="mv-h" type="number" value="20" class="narrow" title="squares down" />
-              <select id="mv-dsurface" title="default ground"></select>
-              <select id="mv-dcover" title="default cover"></select>
-              <button id="mv-describe" class="ghost tiny">Describe</button>
-            </div>
-
-            <!-- The brush. The mode decides what a click does, so one
-                 click never means two things. -->
-            <div class="row maprow">
-              <span class="maplabel">brush</span>
-              <select id="mv-surface"></select>
-              <select id="mv-cover"></select>
-              <!-- 254. WHICH PIECE OF A WALL, not which wall. A corner
-                   blocks, breaks and costs exactly what a straight run
-                   does, so it is one column on the square rather than
-                   five more terrain words - see the migration. -->
-              <select id="mv-shape" title="which piece of a wall">
-                <option value="">plain</option>
-                <option value="corner">corner</option>
-                <option value="end">end</option>
-                <option value="t">T-junction</option>
-                <option value="center">centre run</option>
-                <option value="diag">diagonal</option>
-                <option value="diag_corner_l">diagonal corner, left</option>
-                <option value="diag_corner_r">diagonal corner, right</option>
-              </select>
-              <select id="mv-facing" title="quarter turns clockwise from north">
-                <option value="0">N</option>
-                <option value="1">E</option>
-                <option value="2">S</option>
-                <option value="3">W</option>
-              </select>
-              <select id="mv-mode">
-                <option value="paint">click paints</option>
-                <option value="erase">click erases</option>
-                <!-- 247. TWO CREATURE MODES, AND THE DIFFERENCE IS THE
-                     RULES. "places" is 230's deliberately dumb
-                     teleport - it will put a monster inside a wall,
-                     because a DM placing one mid-sentence should not
-                     be argued with. "walks" goes through
-                     `stride::walk`, which prices every square and
-                     stops at the first thing in the way. -->
-                <option value="stand">click places the creature</option>
-                <option value="walk">click walks the creature</option>
-              </select>
-            </div>
-
             <div class="row maprow">
               <span class="maplabel">who</span>
               <select id="mv-who"></select>
@@ -1225,11 +1172,108 @@
               <button id="mv-save" class="ghost tiny">Save as</button>
             </div>
 
-            <div id="mv-say" class="muted"></div>
+            <div id="mv-say" class="muted mapsay"></div>
             <!-- What is under the cursor, including what it COSTS -
                  the only way to check the rules without reading SQL. -->
             <div id="mv-at" class="muted mapat">&nbsp;</div>
-            <canvas id="mv-canvas" class="mapcanvas"></canvas>
+
+            <!-- 258. THE TILE PANEL. Until now the map pane was
+                 WRITE-ONLY: five controls that change a square and one
+                 hover line that describes it. This reads one square
+                 back, and keeps STORED facts visibly apart from what
+                 the rules DERIVE from them. -->
+            <div class="mapstage">
+              <aside class="tilepanel">
+                <div class="sub">Tile Properties</div>
+                <!-- Inspect is the DEFAULT and suppresses the click
+                     action entirely: you turn the ability to change
+                     things ON, deliberately. Edit and Play are named
+                     here but not yet wired - see the note the panel
+                     prints under them rather than pretending. -->
+                <div class="tpmodes">
+                  <button class="tpmode on" data-tpmode="inspect">Inspect</button>
+                  <button class="tpmode" data-tpmode="edit">Edit</button>
+                  <button class="tpmode" data-tpmode="play">Play</button>
+                </div>
+                <div id="tp-body" class="tpbody"></div>
+
+                <!-- 259. THE EDITING CONTROLS LIVE WITH THE SQUARE
+                     THEY CHANGE. They used to sit in two rows above
+                     the map, which meant the thing you were painting
+                     and the thing you were painting WITH were in
+                     different places - and the panel could only ever
+                     describe the result after the fact.
+
+                     STACKED, NOT IN A ROW. The panel is a narrow
+                     column; five selects side by side would need the
+                     width the map wants. -->
+
+                <!-- WHAT A CLICK DOES. Shown for Edit and Play both,
+                     because both of them act on a click - and its
+                     options are filtered to the ones that mode means,
+                     so "click paints" cannot be chosen while playing. -->
+                <div id="tp-act" class="tptools" hidden>
+                  <div class="tpband">what a click does</div>
+                  <select id="mv-mode" class="tpfield">
+                    <option value="paint">click paints</option>
+                    <option value="erase">click erases</option>
+                    <!-- 247. TWO CREATURE MODES, AND THE DIFFERENCE IS
+                         THE RULES. "places" is 230's deliberately dumb
+                         teleport - it will put a monster inside a
+                         wall, because a DM placing one mid-sentence
+                         should not be argued with. "walks" goes
+                         through `stride::walk`, which prices every
+                         square and stops at the first thing in the
+                         way. -->
+                    <option value="stand">click places the creature</option>
+                    <option value="walk">click walks the creature</option>
+                  </select>
+                </div>
+
+                <div id="tp-edit" class="tptools" hidden>
+                  <div class="tpband">brush</div>
+                  <select id="mv-surface" class="tpfield"></select>
+                  <select id="mv-cover" class="tpfield"></select>
+                  <div class="tppair">
+                    <!-- 254. WHICH PIECE OF A WALL, not which wall. A
+                         corner blocks, breaks and costs exactly what a
+                         straight run does, so it is one column on the
+                         square rather than five more terrain words. -->
+                    <select id="mv-shape" title="which piece of a wall">
+                      <option value="">plain</option>
+                      <option value="corner">corner</option>
+                      <option value="end">end</option>
+                      <option value="t">T-junction</option>
+                      <option value="center">centre run</option>
+                      <option value="diag">diagonal</option>
+                      <option value="diag_corner_l">diagonal corner, left</option>
+                      <option value="diag_corner_r">diagonal corner, right</option>
+                    </select>
+                    <select id="mv-facing" title="quarter turns clockwise from north">
+                      <option value="0">N</option>
+                      <option value="1">E</option>
+                      <option value="2">S</option>
+                      <option value="3">W</option>
+                    </select>
+                  </div>
+
+                  <!-- The room: how big, and what it is made of where
+                       nobody has said otherwise. 20x20 is a 100ft
+                       battle map, the usual size of a fight. -->
+                  <div class="tpband">room</div>
+                  <div class="tppair">
+                    <input id="mv-w" type="number" value="20" title="squares across" />
+                    <input id="mv-h" type="number" value="20" title="squares down" />
+                  </div>
+                  <select id="mv-dsurface" class="tpfield" title="default ground"></select>
+                  <select id="mv-dcover" class="tpfield" title="default cover"></select>
+                  <button id="mv-describe" class="ghost tiny tpfield">Describe</button>
+                </div>
+              </aside>
+              <div class="mapscroll">
+                <canvas id="mv-canvas" class="mapcanvas"></canvas>
+              </div>
+            </div>
           </div>
 
           <div class="world-pane" data-world="world">

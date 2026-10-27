@@ -1718,6 +1718,7 @@ pub fn run() {
             commands::tiles::walk_to,
             commands::tiles::set_map,
             commands::tiles::map_at,
+            commands::tiles::inspect_square,
             commands::tiles::terrain_words,
             commands::tiles::save_map_as,
             commands::tiles::list_map_versions,

@@ -269,9 +269,8 @@ const PAINT = {
   vines: "#3d6b33",
   // 265. FOUR KINDS OF DEBRIS, and `rubble` is the stone one - it kept
   // its name because its art is already drawn and every row that says
-  // `rubble` already means masonry. The other three have no art yet and
-  // will show as flat colour, which is the renderer saying "unfinished"
-  // out loud rather than guessing.
+  // `rubble` already means masonry. All four are drawn now; these stay
+  // as the floor under the art, which is what every other word has.
   rubble: "#7d7368",
   rubble_timber: "#6b5433",
   rubble_wood: "#8a7147",

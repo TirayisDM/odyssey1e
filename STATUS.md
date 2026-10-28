@@ -11923,7 +11923,10 @@ attackable too**. Clear the breach, then dig. 1374 tests.
 ### Carried forward
 
 - **Construction is still unbuilt**, and is next.
-- The three debris words still draw as flat colour.
+- ~~The three debris words still draw as flat colour.~~ Dave drew
+  them: `rubble_timber`, `rubble_wood` and `rubble_earth`, two
+  variants each, all 32x32. The flat colours stay as the floor under
+  the art, which is what every other word has.
 - `depth`, so "60 per 5 feet" has a second number.
 - `painting_door_broken_does_not_make_a_broken_door` still passes.
 

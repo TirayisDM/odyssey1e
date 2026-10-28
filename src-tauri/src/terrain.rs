@@ -1087,6 +1087,67 @@ impl Stack {
         Ok(())
     }
 
+    /// Can a blow even land on that layer, with the square as it is?
+    ///
+    /// ---------------------------------------------------------------
+    /// 266. A WALL HAS TO COME DOWN BEFORE THE FLOOR UNDER IT
+    /// ---------------------------------------------------------------
+    ///
+    /// Dave, ruling on the behaviour 265 left unruled: *"wall should
+    /// have to be destroyed first"*.
+    ///
+    /// THE RULE IS NOT ABOUT WALLS. Stated as one it would be a second
+    /// rule about covers, competing with 262's - which says a lid goes
+    /// down the hole with the floor it was lying on. Stated once, with
+    /// the edge in the right place, both are the same sentence:
+    ///
+    ///   **The floor is out of reach while something stands on it that
+    ///   could have been attacked in its own right.**
+    ///
+    /// A cover with hit points is in the way. A cover without them is a
+    /// lid, and rides down. Snow and grass are the only covers with no
+    /// integrity, and that is now precisely WHY they ride down rather
+    /// than an exception to a rule about walls. The edge is one the
+    /// player can already see: the layer picker offers exactly the
+    /// layers with an AC. If you could have targeted it, you must.
+    ///
+    /// IT ALSO CLOSES A PRICE. A stone wall is sixty and the stone
+    /// floor under it is thirty, so undermining was half price to
+    /// remove a wall AND it erased the fifteen rubble instead of
+    /// yielding it - the cheap way to delete a wall was to delete the
+    /// ground and get nothing for it. See
+    /// `undermining_undercut_the_wall_it_went_under`.
+    ///
+    /// REFUSED WHOLE, not at the last blow. You cannot reach the floor
+    /// at all while the wall stands; letting someone whittle it to one
+    /// and then discover it can never drop is a trap, and a trap is a
+    /// fault wearing the costume of an ordinary answer.
+    pub fn reachable(&self, layer: Layer) -> Result<(), String> {
+        match layer {
+            // Nothing stands on a cover. It is the top of the square by
+            // definition, which is also why spoil lands there.
+            Layer::Cover => Ok(()),
+
+            Layer::Surface => match self.cover {
+                Some(c) if c.integrity().is_some() => Err(format!(
+                    "{} stands on it - destroy that first",
+                    c.key()
+                )),
+                _ => Ok(()),
+            },
+
+            // THE SAME RULE, NOT A SPECIAL CASE. A surface always
+            // exists and always has hit points, so the sub is always
+            // under something attackable. It is doubly out of reach -
+            // `tiles` has no column to damage it in either - but this
+            // answer would stand even once it has one.
+            Layer::Sub => Err(format!(
+                "{} lies over it - destroy that first",
+                self.surface.key()
+            )),
+        }
+    }
+
     /// What this square becomes when one of its layers is destroyed.
     ///
     /// 263. THE FIRST PLACE A `Destruction` IS ACTUALLY APPLIED.
@@ -1886,6 +1947,100 @@ mod tests {
             assert_eq!(wall.spoil().unwrap().0, debris);
             assert_eq!(debris.makeup().unwrap().0, m, "{}", wall.key());
         }
+    }
+
+    /* ====== 266. WHAT IS IN THE WAY ====== */
+
+    #[test]
+    fn a_wall_has_to_come_down_before_the_floor_under_it() {
+        // 266, Dave's ruling. Undermining is out: the wall is the thing
+        // in the way, so the wall is the thing you break.
+        let wall = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
+        let no = wall.reachable(Layer::Surface).unwrap_err();
+        assert!(no.contains("stone_wall"), "{}", no);
+        assert!(no.contains("destroy that first"), "{}", no);
+        // And the wall itself is reachable, so the refusal names a way
+        // forward rather than a dead end.
+        assert!(wall.reachable(Layer::Cover).is_ok());
+        let after = wall.destroyed(Layer::Cover);
+        assert_eq!(after.cover, Some(Terrain::Rubble));
+        // The heap is attackable too, so it is in the way in its turn -
+        // clear the breach and then the floor is yours.
+        assert!(after.reachable(Layer::Surface).is_err());
+        assert!(after.destroyed(Layer::Cover).reachable(Layer::Surface).is_ok());
+    }
+
+    #[test]
+    fn a_lid_is_not_in_the_way() {
+        // 262 AND 266 ARE ONE SENTENCE. Snow cannot be attacked, so
+        // nothing can break it first - which is exactly why it is not
+        // in the way and why it rides down the hole. Stated as a rule
+        // about walls instead, these two would be rival rules about
+        // covers and one of them would eventually win by accident.
+        let snowy = Stack::of(Terrain::Ice)
+            .over(Terrain::DeepWater)
+            .under(Terrain::Snow);
+        assert!(snowy.reachable(Layer::Surface).is_ok());
+        let gone = snowy.destroyed(Layer::Surface);
+        assert_eq!(gone.surface, Terrain::DeepWater);
+        assert_eq!(gone.cover, None, "the snow went with the ice");
+    }
+
+    #[test]
+    fn in_the_way_means_exactly_what_the_player_can_target() {
+        // THE SWEEP, and the reason the edge sits where it does: the
+        // layer picker offers the layers with an AC, so "if you could
+        // have targeted it, you must" is a rule the screen already
+        // teaches. A cover that was in the way for some OTHER reason
+        // would be an invisible one.
+        for t in ALL {
+            if !t.may(Layer::Cover) {
+                continue;
+            }
+            let square = Stack::of(Terrain::StoneFloor).under(t);
+            assert_eq!(
+                square.reachable(Layer::Surface).is_err(),
+                t.integrity().is_some(),
+                "{} is in the way but cannot be attacked, or the reverse",
+                t.key()
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_floor_is_always_reachable_and_a_cover_always_is() {
+        for t in ALL {
+            if t.may(Layer::Surface) {
+                assert!(Stack::of(t).reachable(Layer::Surface).is_ok(), "{}", t.key());
+            }
+            if t.may(Layer::Cover) {
+                let square = Stack::of(Terrain::StoneFloor).under(t);
+                assert!(square.reachable(Layer::Cover).is_ok(), "{}", t.key());
+            }
+        }
+    }
+
+    #[test]
+    fn nothing_reaches_the_sub() {
+        // Not because of the missing column - because the surface is
+        // over it, and a surface always exists. The answer survives the
+        // day `sub_hp` lands.
+        let square = Stack::of(Terrain::Dirt).over(Terrain::Rock);
+        let no = square.reachable(Layer::Sub).unwrap_err();
+        assert!(no.contains("dirt"), "{}", no);
+    }
+
+    #[test]
+    fn undermining_undercut_the_wall_it_went_under() {
+        // THE PRICE THAT MADE IT A BUG RATHER THAN A STYLE CHOICE. The
+        // floor under a wall is worth less than the wall, so digging
+        // was the cheap way to remove one - and it yielded dug earth
+        // instead of the wall's own fifteen rubble, so the cheap way
+        // also destroyed the debris. The rule prices that out.
+        let floor = Terrain::StoneFloor.integrity().unwrap().hp;
+        let wall = Terrain::StoneWall.integrity().unwrap().hp;
+        assert!(floor < wall, "{} vs {}", floor, wall);
+        assert!(Terrain::StoneFloor.spoil().unwrap().1 < Terrain::StoneWall.spoil().unwrap().1);
     }
 
     #[test]

@@ -1065,6 +1065,15 @@ pub fn damage_square(
         .integrity()
         .ok_or_else(|| format!("{} cannot be attacked", word.key()))?;
 
+    // 266. AND IS ANYTHING STANDING ON IT?
+    //
+    // BEFORE ANY NUMBER MOVES. Dave ruled the whole strike is refused
+    // rather than only the killing blow - you cannot reach the floor at
+    // all while the wall stands, and a floor whittled to one hit point
+    // that can never drop is a trap. This is the only door: a square is
+    // destroyed here or nowhere, because `set_square_hp` refuses zero.
+    stack.reachable(which)?;
+
     // WHERE THE NUMBER COMES FROM. Null means nobody has hurt this,
     // which is the maximum - not zero. Read the other way every
     // untouched door in the world would already be destroyed.

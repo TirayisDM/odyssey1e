@@ -11857,6 +11857,78 @@ renderer saying "unfinished" out loud rather than guessing.
 
 ---
 
+## 266. A wall has to come down before the floor under it
+
+**2026-10-28.** Dave, ruling on what 265 left open: *"wall should have
+to be destroyed first"*, and then *"refuse the whole strike"*.
+
+### The rule is not about walls
+
+Written as one it would be a SECOND rule about covers, competing with
+262's - which says a lid goes down the hole with the floor it was lying
+on. Two rules about the same layer, and one of them eventually wins by
+accident. Written once, with the edge in the right place, they are the
+same sentence:
+
+> **The floor is out of reach while something stands on it that could
+> have been attacked in its own right.**
+
+A cover with hit points is in the way. A cover without them is a lid,
+and rides down. **Snow and grass are the only covers with no
+integrity** - so that is now precisely WHY they ride down, rather than
+an exception to a rule about walls.
+
+The edge is one the player can already see. The layer picker offers
+exactly the layers with an AC, so the rule reads: **if you could have
+targeted it, you must.** A cover that was in the way for some other
+reason would be an invisible one.
+
+### It closes a price, which is what made it a bug
+
+A stone wall is 60 and the stone floor under it is 30. Undermining was
+**half price to remove a wall** - and it yielded dug earth instead of
+the wall's own 15 rubble, so the cheap way to delete a wall also
+destroyed the debris. `undermining_undercut_the_wall_it_went_under`
+pins both halves of that so the numbers cannot drift back into it.
+
+### Refused whole, not at the last blow
+
+Dave's call. You cannot reach the floor at all while the wall stands,
+and letting someone whittle it to one hit point and then discover it
+can never drop is a trap - a fault wearing the costume of an ordinary
+answer. The cost is that a fight cannot soften the ground in advance.
+
+`Stack::reachable(layer) -> Result<(), String>` lives in `terrain.rs`
+with the rest of the rules, and `damage_square` asks it **before any
+number moves**. One door to guard: `set_square_hp` already refuses
+zero, so a square is destroyed there or nowhere.
+
+### The sub answers the same rule, not a special case
+
+`reachable(Layer::Sub)` refuses because the SURFACE is over it, and a
+surface always exists. Until now the only reason the sub was out of
+reach was the missing `sub_hp` column - a plumbing accident standing in
+for a rule. This answer survives the day the column lands.
+
+### What it looks like
+
+The panel says the refusal verbatim: *"stone_wall stands on it -
+destroy that first"*. The picker still offers the surface, which is
+deliberate - clicking it teaches the rule, where a greyed-out control
+would only say no.
+
+Breaking the wall does not open the floor either, because **the heap is
+attackable too**. Clear the breach, then dig. 1374 tests.
+
+### Carried forward
+
+- **Construction is still unbuilt**, and is next.
+- The three debris words still draw as flat colour.
+- `depth`, so "60 per 5 feet" has a second number.
+- `painting_door_broken_does_not_make_a_broken_door` still passes.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

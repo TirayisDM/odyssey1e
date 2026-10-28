@@ -267,7 +267,15 @@ const PAINT = {
   brush: "#44632f",
   trees: "#2f5223",
   vines: "#3d6b33",
+  // 265. FOUR KINDS OF DEBRIS, and `rubble` is the stone one - it kept
+  // its name because its art is already drawn and every row that says
+  // `rubble` already means masonry. The other three have no art yet and
+  // will show as flat colour, which is the renderer saying "unfinished"
+  // out loud rather than guessing.
   rubble: "#7d7368",
+  rubble_timber: "#6b5433",
+  rubble_wood: "#8a7147",
+  rubble_earth: "#6e5d45",
   door_open: "#8a6b3f",
   door_closed: "#8a6b3f",
   door_broken: "#6b4f2c",

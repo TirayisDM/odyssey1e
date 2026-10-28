@@ -11725,6 +11725,138 @@ rule on stone and wood as well as the ice pair that suggested it.
 
 ---
 
+## 265. Destroying one thing does two things
+
+**2026-10-27.** Dave: *"do the pair and the fork together - going to
+bed so you can dig into this one - check it in the morning"*.
+
+They are one cycle because digging produces debris and debris has to
+know what it came from. Building the pair first would have meant
+writing a second half that could only ever say `Rubble`, and rewriting
+it immediately.
+
+### `Destruction` is a pair
+
+```rust
+pub struct Destruction {
+    pub remains: Remains,          // what becomes of the layer
+    pub spoil: Option<Terrain>,    // what lands on the square
+}
+```
+
+The old enum could say the hole **or** the heap. Digging a floor does
+both - it opens, revealing what is under it, AND the diggings land on
+top - so one answer always had to be dropped, and the dropped one was
+always the debris. Which is the half 262's whole construction economy
+is made of.
+
+**It also simplified the walls.** `Leaves(Rubble)` meant "the cover
+layer is replaced by rubble", which bundled two ideas into one variant
+and then could not be reused for a floor. A wall now `Clears` and
+leaves `Rubble` behind. Same square, truer sentence, and the second
+half is now the same fact a dug floor produces.
+
+`Leaves` became `Becomes`, which is what it always meant for the two
+words that still use it: a filled pit becomes ground, drained deep
+water becomes shallow.
+
+### Order matters inside `destroyed`
+
+The spoil lands **after** the cover has been cleared. 262 ruled that a
+lid takes what was lying on it; piling first would bury the snow and
+keep both. There is a test: dirt over rock under snow, dug, is rock
+with spoil on it and no snow anywhere.
+
+### Debris forks, and `rubble` keeps its name
+
+Three new words - `rubble_timber`, `rubble_wood`, `rubble_earth` - and
+**`rubble` stays, meaning stone.**
+
+The tidier spelling was `rubble_stone`. It would have renamed every row
+that already says `rubble`, thrown away art that is already drawn, and
+bought a prettier word with a migration over live data - for a word
+whose picture is grey masonry and which only walls and stone floors
+have ever produced.
+
+**Ice and greenery leave nothing.** A frozen wall shatters, brambles
+are cut away, a grate is cut out, a door comes off its hinges. Not
+every destruction is a quarry.
+
+### Its hit points are its volume
+
+262's ruling, built: attacking debris and spending it to build are the
+same subtraction from the same number, and at zero the square is clear.
+
+Rubble used to be **indestructible**, which made a breached wall a dead
+end in the destruction graph - debris nobody could ever shift.
+
+**The word gives the maximum and the square stores the amount.** A
+debris word is a `Bulk::Quarter` - a quarter span of its material - so
+`rubble` holds 15. A stone WALL is a span and gives back exactly 15; a
+stone FLOOR is half a span and gives 7 of that 15. Both numbers are
+derived. Nothing has to remember what a heap used to be, which is what
+made the fork worth a vocabulary change rather than a stored maximum
+nobody could re-derive.
+
+And four-to-one falls out: 60 into 15 means **four squares of rubble
+rebuild one wall**, and you cannot un-break a wall from its own debris.
+
+### Dug spoil is loose, and a sweep made me change it
+
+The first version gave `rubble_earth` the `EARTH` material, and
+`every_material_that_leaves_debris_leaves_its_own` failed on mud.
+
+Loose ground - mud, sand, scree, marsh - is `LOOSE` at 20 per span, and
+it was leaving spoil made of `EARTH` at 30. **Digging a sandbank would
+have quietly minted better fill than the sand was.**
+
+The fix is the honest one rather than a softer test: spoil is `LOOSE`,
+because **earth that has been dug is no longer packed earth**. Dirt now
+yields something worth less per span than the ground it came out of,
+which is correct, and the sweep asserts the direction: debris may go
+down the scale and never up.
+
+`no_heap_is_ever_fuller_than_a_heap_can_be` is the other guard - spoil
+is stored in `cover_hp`, and an amount above the word's own maximum
+would give a panel reading "18 / 15", a remainder larger than the
+whole.
+
+### Migration 265
+
+The three new words go in `a_cover_stands_on_something` and nowhere
+else. **Debris lands on top of a square whichever layer was broken**,
+so it is cover and only cover - you do not stand on a heap of spoil as
+your floor, you stand on the floor with spoil heaped on it.
+
+115: it does not edit 226 or 263. All three constraints are restated
+because the drift guard reads ONE file and diffs all three lists
+against `terrain::ALL`. Applied; confirmed in `pg_constraint`.
+
+### What it looks like
+
+The panel says both halves now: a wall reads *"clears, leaving rubble"*
+and a dirt floor reads *"reveals what is beneath, leaving
+rubble_earth"*. The layer picker offers the debris afterwards, so
+clearing a breach is a thing you can do.
+
+The three new words have no art and draw as flat colour, which is the
+renderer saying "unfinished" out loud rather than guessing.
+
+1368 tests.
+
+### Carried forward
+
+- **Construction is still unbuilt.** Everything needed to spend debris
+  now exists - a quantity, a material, a rate - but there is no verb
+  that spends it. That is the next cycle, and it is the first one that
+  will need an action cost.
+- Digging out the floor under a wall takes the wall with it, because
+  `Reveals` clears the cover. Arguably right, unruled.
+- `depth`, so "60 per 5 feet" has a second number.
+- `painting_door_broken_does_not_make_a_broken_door` still passes.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

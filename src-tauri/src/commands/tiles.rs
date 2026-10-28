@@ -1087,7 +1087,7 @@ pub fn damage_square(
     // worse than a refusal.
     next.legal()?;
 
-    let (surface_hp, cover_hp) = columns_after(
+    let (surface_hp, mut cover_hp) = columns_after(
         &stack,
         &next,
         which,
@@ -1095,6 +1095,21 @@ pub fn damage_square(
         tile.as_ref().and_then(|t| t.cover_hp),
         (!gone).then_some(after),
     );
+
+    // 265. AND THE SPOIL ARRIVES WITH AN AMOUNT.
+    //
+    // `columns_after` gives a changed layer a null, which is right for
+    // a thing that simply became something else - but debris is a
+    // QUANTITY, and the quantity is a quarter of what it came from.
+    // Null here would mean a full heap however little was broken, so a
+    // dug floor would yield as much stone as a collapsed wall.
+    if gone {
+        if let Some((mess, amount)) = word.spoil() {
+            if next.cover == Some(mess) {
+                cover_hp = Some(amount);
+            }
+        }
+    }
     save_square(
         &token,
         &location_id,
@@ -1324,13 +1339,20 @@ fn wear_word(w: crate::terrain::Wear) -> &'static str {
     }
 }
 
+/// 265. BOTH HALVES, IN ONE SENTENCE. A destruction says what becomes
+/// of the layer AND what is left lying on the square, so the panel has
+/// to say both or it is describing half of what will happen.
 fn destruction_word(d: crate::terrain::Destruction) -> String {
-    use crate::terrain::Destruction::*;
-    match d {
-        Indestructible => "cannot be attacked".to_string(),
-        Leaves(t) => format!("leaves {}", t.key()),
-        Clears => "clears, leaving nothing".to_string(),
+    use crate::terrain::Remains::*;
+    let what = match d.remains {
+        Indestructible => return "cannot be attacked".to_string(),
+        Becomes(t) => format!("becomes {}", t.key()),
+        Clears => "clears".to_string(),
         Reveals => "reveals what is beneath".to_string(),
+    };
+    match d.spoil {
+        None => what,
+        Some(t) => format!("{}, leaving {}", what, t.key()),
     }
 }
 
@@ -2300,13 +2322,22 @@ mod tests {
 
     #[test]
     fn destruction_is_said_in_words_including_what_is_left() {
+        // 265. BOTH HALVES. A wall clears AND leaves debris; a door
+        // clears and leaves nothing, and the sentence has to tell them
+        // apart or the panel is describing half of what will happen.
         assert_eq!(
             layer_detail("cover", Terrain::StoneWall, None).destruction,
-            "leaves rubble"
+            "clears, leaving rubble"
         );
         assert_eq!(
             layer_detail("cover", Terrain::DoorClosed, None).destruction,
-            "clears, leaving nothing"
+            "clears"
+        );
+        // A dug floor is the case the pair exists for: it opens AND
+        // piles the diggings up.
+        assert_eq!(
+            layer_detail("surface", Terrain::Dirt, None).destruction,
+            "reveals what is beneath, leaving rubble_earth"
         );
     }
 

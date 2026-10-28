@@ -299,6 +299,13 @@ pub enum Bulk {
     Span,
     /// Half of one. A floor, or water you can stand up in.
     Slab,
+    /// 265. A QUARTER, WHICH IS WHAT DESTRUCTION GIVES BACK.
+    ///
+    /// 262: debris is 25% of what it came from, so a square of rubble
+    /// is a quarter span of its material. The consequence Dave kept
+    /// rather than rounding away: **four squares of rubble rebuild one
+    /// wall**, and you cannot un-break a wall from its own debris.
+    Quarter,
 }
 
 impl Bulk {
@@ -306,6 +313,7 @@ impl Bulk {
         match self {
             Bulk::Span => hp,
             Bulk::Slab => hp / 2,
+            Bulk::Quarter => hp / 4,
         }
     }
 }
@@ -373,24 +381,47 @@ impl Integrity {
     }
 }
 
-/// What is left when something is destroyed.
+/// What becomes of the layer itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Destruction {
-    /// Cannot be attacked. Grass, a road, open water.
+pub enum Remains {
+    /// Cannot be attacked. Grass, a lawn, a hole in a wall.
     Indestructible,
-    /// It collapses into debris that stays in the square: a wall into
-    /// rubble. The layer is REPLACED, not emptied.
-    Leaves(Terrain),
+    /// It turns into something else in place: a pit filled becomes
+    /// ground, deep water drained becomes shallow.
+    Becomes(Terrain),
     /// It is simply gone - vines cut away, a grate cut out, a door
-    /// broken open. The layer becomes empty.
+    /// broken open, a wall collapsed. The layer becomes empty.
     Clears,
     /// It was a lid. What was beneath it is now the surface.
     ///
     /// ONLY MEANINGFUL ON A SURFACE, and only when that square has a
     /// `sub`. Ice over water becomes water; ice over a road becomes the
-    /// road; ice over nothing is a question the map answers, not this
-    /// file - which is exactly why it was wrong to name a terrain here.
+    /// road; ice over nothing is a `Pit` - which 226 refused to answer
+    /// and 262 answered.
     Reveals,
+}
+
+/// What is left when something is destroyed: the layer, and the mess.
+///
+/// 265. A PAIR, BECAUSE DESTROYING ONE THING DOES TWO THINGS.
+///
+/// This was a single choice until now, and it could not say what
+/// digging a floor actually does: the floor OPENS, revealing what is
+/// under it, AND the spoil lands on top of the hole. One answer had to
+/// be dropped, and the dropped one was always the debris - which is
+/// the half 262's construction economy is built out of.
+///
+/// IT ALSO SIMPLIFIED THE WALLS. `Leaves(Rubble)` used to mean "the
+/// cover layer is replaced by rubble", which bundled two ideas into one
+/// variant and then could not be reused for a floor. A wall now
+/// `Clears` and leaves `Rubble` behind, which is the same square and a
+/// truer sentence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Destruction {
+    pub remains: Remains,
+    /// What lands on the square, on top of whatever is left. `None` is
+    /// a clean break - cut vines, shattered ice, a door off its hinges.
+    pub spoil: Option<Terrain>,
 }
 
 /* ========================== THE LAYERS ========================== */
@@ -459,7 +490,21 @@ pub enum Terrain {
     Brush,
     Trees,
     Vines,
+    /// 265. STONE DEBRIS, and the word keeps its old name on purpose.
+    ///
+    /// The fork could have made this `rubble_stone` and left `rubble`
+    /// to mean nothing in particular. It would have renamed every row
+    /// that already says `rubble`, thrown away the art, and bought a
+    /// tidier spelling with a migration over live data - for a word
+    /// whose picture is grey chunks of masonry and which only walls
+    /// and floors have ever produced.
     Rubble,
+    /// Splintered beams, from timber and from felled trees.
+    RubbleTimber,
+    /// Broken boards.
+    RubbleWood,
+    /// Dug spoil - loose earth, sand, the bed of a drained marsh.
+    RubbleEarth,
     DoorOpen,
     DoorClosed,
     DoorBroken,
@@ -476,7 +521,7 @@ pub enum Terrain {
 ///
 /// A SLICE, because the migration's CHECK is built from it and a
 /// variant missing here is a terrain the database refuses.
-pub const ALL: [Terrain; 33] = [
+pub const ALL: [Terrain; 36] = [
     Terrain::Rock,
     Terrain::Dirt,
     Terrain::Mud,
@@ -501,6 +546,9 @@ pub const ALL: [Terrain; 33] = [
     Terrain::Trees,
     Terrain::Vines,
     Terrain::Rubble,
+    Terrain::RubbleTimber,
+    Terrain::RubbleWood,
+    Terrain::RubbleEarth,
     Terrain::DoorOpen,
     Terrain::DoorClosed,
     Terrain::DoorBroken,
@@ -561,6 +609,9 @@ impl Terrain {
             Trees => "trees",
             Vines => "vines",
             Rubble => "rubble",
+            RubbleTimber => "rubble_timber",
+            RubbleWood => "rubble_wood",
+            RubbleEarth => "rubble_earth",
             DoorOpen => "door_open",
             DoorClosed => "door_closed",
             DoorBroken => "door_broken",
@@ -680,7 +731,12 @@ impl Terrain {
             Grass => Footing::plain(Normal),
 
             // ---- covers that do ----
-            Snow | Brush | Vines | Rubble => Footing::plain(Difficult),
+            // 265. Every kind of debris walks the same: a heap you
+            // pick your way over. What it is MADE of decides what it is
+            // worth, not what it costs to cross.
+            Snow | Brush | Vines | Rubble | RubbleTimber | RubbleWood | RubbleEarth => {
+                Footing::plain(Difficult)
+            }
 
             // A tree fills the square. You go round it.
             Trees => Footing {
@@ -838,8 +894,24 @@ impl Terrain {
             // question nobody has answered, and answering it quietly
             // here would be inventing a rule.
             Doorway | Ledge | Lava => return None,
+            // 265. DEBRIS IS A QUANTITY NOW. Its hit points ARE its
+            // volume: attacking it subtracts, and spending it to build
+            // will subtract from the same number. One mechanism, two
+            // narrations.
+            Rubble => (Material::STONE, Quarter),
+            RubbleTimber => (Material::TIMBER, Quarter),
+            RubbleWood => (Material::WOOD, Quarter),
+            // 265. SPOIL IS LOOSE BY DEFINITION, which is why this is
+            // `LOOSE` and not `EARTH` even though packed earth is what
+            // most of it is dug out of. Earth that has been dug is no
+            // longer packed earth, and the sweep below catches the
+            // alternative: debris must never be worth MORE per span
+            // than the thing it came out of, or digging a sandbank
+            // would quietly mint better fill than the sand was.
+            RubbleEarth => (Material::LOOSE, Quarter),
+
             // Cover that is in the way and nothing more.
-            Grass | Snow | Rubble => return None,
+            Grass | Snow => return None,
             // A DOOR IS NOT A SLAB OF ANYTHING. Twenty-five where wood
             // is thirty, and it has moving parts - see `integrity`.
             DoorOpen | DoorClosed | DoorBroken => return None,
@@ -875,46 +947,73 @@ impl Terrain {
 
     /// What is left when it is destroyed.
     pub fn destruction(self) -> Destruction {
-        use Destruction::*;
+        use Remains::*;
         use Terrain::*;
-        match self {
-            // A wall collapses into its own debris, ON the floor it
-            // stood on - which the surface layer still holds.
-            StoneWall | RockWall | TimberWall | WoodenWall | IceWall | Trees => Leaves(Rubble),
-            // Cut away, cut out, broken open. Nothing remains.
-            Vines | Brush | IronGrate | DoorOpen | DoorClosed | DoorBroken => Clears,
-            // A lid. The map says what is under it.
-            Ice => Reveals,
-
-            // 264. EVERY GROUND YOU CAN DIG THROUGH IS A LID TOO.
+        let (remains, spoil) = match self {
+            // ---- things that stand up, and come down ----
             //
-            // Breaking a floor opens what is under it - the sub, or a
-            // `Pit` where the map says nothing. That is 262's "cleared
-            // to open passage", and it is the same answer ice has
-            // always given, which is why it is the same word.
-            //
-            // IT DOES NOT YET PRODUCE RUBBLE. Digging both opens a
-            // floor AND leaves debris on it, and `Destruction` can say
-            // one thing. 262 agreed it becomes a pair; until it does,
-            // the hole is the half that matters and the spoil is the
-            // half that is missing. Said out loud rather than quietly
-            // dropped.
-            Rock | Dirt | Mud | Sand | Scree | Road | StoneFloor | WoodFloor | Marsh
-            | Ramp | Stairs => Reveals,
+            // 265. CLEARS PLUS SPOIL, where this used to say
+            // `Leaves(Rubble)`. The wall is gone and its debris is what
+            // is left - two facts, and the second one is now the same
+            // fact a dug floor produces.
+            StoneWall | RockWall => (Clears, Some(Rubble)),
+            TimberWall | Trees => (Clears, Some(RubbleTimber)),
+            WoodenWall => (Clears, Some(RubbleWood)),
+            // Ice shatters. There is nothing left to pile up, which is
+            // why a frozen wall gives you nothing to build with.
+            IceWall => (Clears, None),
+            // Cut away, cut out, broken open. Clean breaks.
+            Vines | Brush | IronGrate | DoorOpen | DoorClosed | DoorBroken => (Clears, None),
 
-            // 262. A VOLUME IS DESTROYED BY FILLING IT, so what is left
-            // is what you filled it with - solid ground, not a hole and
-            // not a reveal. A pit does not uncover anything; it stops
-            // being a pit.
-            Pit => Leaves(Rock),
-            // Over your head becomes wadeable, and wadeable becomes a
-            // drained bed. TWO STEPS, which is what Dave described, and
-            // the existing word does it with no new machinery.
-            DeepWater => Leaves(ShallowWater),
-            ShallowWater => Leaves(Mud),
-            _ => Indestructible,
-        }
+            // 262. DEBRIS REDUCES TO NOTHING. Dave's words. Spending it
+            // is subtracting from its hit points, and at zero the
+            // square is clear.
+            Rubble | RubbleTimber | RubbleWood | RubbleEarth => (Clears, None),
+
+            // ---- ground, dug through ----
+            //
+            // 264 made every floor a lid; 265 gives the digging its
+            // spoil. The hole AND the heap, which is the whole reason
+            // this became a pair.
+            Rock | Road | StoneFloor | Ramp | Stairs => (Reveals, Some(Rubble)),
+            WoodFloor => (Reveals, Some(RubbleWood)),
+            Dirt | Mud | Sand | Scree | Marsh => (Reveals, Some(RubbleEarth)),
+            // A lid of ice leaves nothing behind either.
+            Ice => (Reveals, None),
+
+            // ---- volumes, destroyed by filling them ----
+            //
+            // These CONSUME debris rather than making it, which is why
+            // none of them has spoil. A pit does not uncover what is
+            // beneath it; it stops being a pit.
+            Pit => (Becomes(Rock), None),
+            DeepWater => (Becomes(ShallowWater), None),
+            ShallowWater => (Becomes(Mud), None),
+
+            // ---- nothing to break ----
+            Grass | Snow | Doorway | Ledge | Lava => (Indestructible, None),
+        };
+        Destruction { remains, spoil }
     }
+
+    /// What this leaves lying on the square, and how much of it.
+    ///
+    /// 262. A QUARTER OF WHAT IT CAME FROM, which is where four-to-one
+    /// comes from: a stone wall is 60 and gives back 15, so rebuilding
+    /// one takes four squares of debris. Destruction is lossy, and
+    /// that is the point - breaching a wall is a decision rather than
+    /// a loan.
+    ///
+    /// THE WORD GIVES THE MAXIMUM AND THE SQUARE STORES THE AMOUNT.
+    /// `rubble` is a quarter span of stone, so 15; a stone FLOOR is
+    /// half a span and gives 7 of that 15. Both numbers are derived -
+    /// nothing has to remember what a heap used to be.
+    pub fn spoil(self) -> Option<(Terrain, i64)> {
+        let word = self.destruction().spoil?;
+        let amount = self.integrity()?.hp / 4;
+        Some((word, amount.max(1)))
+    }
+
 }
 
 impl fmt::Display for Terrain {
@@ -1000,7 +1099,16 @@ impl Stack {
     /// here with tests; writing the answer to Postgres is plumbing and
     /// belongs in a command.
     pub fn destroyed(mut self, layer: Layer) -> Stack {
-        use Destruction::*;
+        use Remains::*;
+        let Some(word) = (match layer {
+            Layer::Sub => self.sub,
+            Layer::Surface => Some(self.surface),
+            Layer::Cover => self.cover,
+        }) else {
+            return self;
+        };
+        let d = word.destruction();
+
         match layer {
             // THE SUB IS OUT OF REACH. There is no hit points column
             // for it - `tiles` has two and the square has three layers -
@@ -1008,39 +1116,20 @@ impl Stack {
             // in earnest yet. Unchanged rather than a panic: 262 has
             // already agreed it becomes reachable, and the day the
             // column lands this arm is where the rule goes.
-            Layer::Sub => self,
+            Layer::Sub => return self,
 
-            Layer::Cover => {
-                let Some(cover) = self.cover else { return self };
-                match cover.destruction() {
-                    Indestructible => self,
-                    // The debris stays in the square, ON the floor the
-                    // thing stood on - which the surface layer holds and
-                    // this does not touch.
-                    Leaves(into) => {
-                        self.cover = Some(into);
-                        self
-                    }
-                    Clears => {
-                        self.cover = None;
-                        self
-                    }
-                    // A cover is not a lid; there is nothing under it
-                    // but the floor, which is already there. No word
-                    // currently reaches this arm.
-                    Reveals => {
-                        self.cover = None;
-                        self
-                    }
-                }
-            }
+            Layer::Cover => match d.remains {
+                Indestructible => return self,
+                Becomes(into) => self.cover = Some(into),
+                // A cover has nothing under it but the floor, which is
+                // already there, so a lid and a clean break are the
+                // same thing up here.
+                Clears | Reveals => self.cover = None,
+            },
 
-            Layer::Surface => match self.surface.destruction() {
-                Indestructible => self,
-                Leaves(into) => {
-                    self.surface = into;
-                    self
-                }
+            Layer::Surface => match d.remains {
+                Indestructible => return self,
+                Becomes(into) => self.surface = into,
                 // 263. A FLOOR THAT SIMPLY GOES IS A HOLE. No surface
                 // word reaches this arm today; the answer is written
                 // down so that the day one does, it is not invented in
@@ -1048,7 +1137,6 @@ impl Stack {
                 Clears => {
                     self.surface = Terrain::Pit;
                     self.cover = None;
-                    self
                 }
                 // THE LID COMES OFF.
                 //
@@ -1059,18 +1147,24 @@ impl Stack {
                 // what held it up. True of every cover, not just this
                 // one, which is why it is one line here rather than a
                 // list of exceptions.
-                //
-                // AND NO SUB MEANS A PIT. 226 said "ice over nothing is
-                // a question the map answers, not this file"; 262
-                // answered it.
                 Reveals => {
                     self.surface = self.sub.unwrap_or(Terrain::Pit);
                     self.sub = None;
                     self.cover = None;
-                    self
                 }
             },
         }
+
+        // 265. AND THE SPOIL LANDS ON TOP, whichever layer was broken.
+        //
+        // AFTER the cover has been cleared, never before: digging a
+        // floor takes what was lying on it down the hole and then piles
+        // the diggings where it stood. Doing this first would bury the
+        // old cover under the new one and keep both.
+        if let Some(mess) = d.spoil {
+            self.cover = Some(mess);
+        }
+        self
     }
 
     /// What crossing this square actually costs.
@@ -1133,7 +1227,7 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), before, "a key is duplicated");
-        assert_eq!(before, 33);
+        assert_eq!(before, 36);
     }
 
     #[test]
@@ -1474,12 +1568,12 @@ mod tests {
         // digging through it opens what is under it. Grass is still
         // scenery - there is nothing there to break.
         assert_eq!(Terrain::Grass.integrity(), None);
-        assert_eq!(Terrain::Grass.destruction(), Destruction::Indestructible);
+        assert_eq!(Terrain::Grass.destruction().remains, Remains::Indestructible);
 
         let road = Terrain::Road.integrity().unwrap();
         assert_eq!(road.hp, 30, "half of stone's span");
         assert_eq!(road.ac, Material::STONE.ac);
-        assert_eq!(Terrain::Road.destruction(), Destruction::Reveals);
+        assert_eq!(Terrain::Road.destruction().remains, Remains::Reveals);
     }
 
     /* ============ 264. THE MATERIAL TABLE ============ */
@@ -1588,7 +1682,7 @@ mod tests {
         // A pit does not uncover what is beneath it - it STOPS BEING a
         // pit. That is the difference between breaking a lid and
         // filling a hole, and it is why they are different words.
-        assert_eq!(Terrain::Pit.destruction(), Destruction::Leaves(Terrain::Rock));
+        assert_eq!(Terrain::Pit.destruction().remains, Remains::Becomes(Terrain::Rock));
         let hole = Stack::of(Terrain::Pit).over(Terrain::Lava);
         let filled = hole.destroyed(Layer::Surface);
         assert_eq!(filled.surface, Terrain::Rock);
@@ -1621,6 +1715,179 @@ mod tests {
         }
     }
 
+    /* ====== 265. THE PAIR, AND WHAT DEBRIS IS WORTH ====== */
+
+    #[test]
+    fn digging_a_floor_opens_it_and_leaves_the_diggings() {
+        // THE CASE THE PAIR EXISTS FOR. A single-choice `Destruction`
+        // could say the hole or the heap and had to drop one; this is
+        // both, and the dropped one was always the half 262's whole
+        // construction economy is made of.
+        let floor = Stack::of(Terrain::StoneFloor).over(Terrain::Rock);
+        let dug = floor.destroyed(Layer::Surface);
+        assert_eq!(dug.surface, Terrain::Rock, "what was under it is the floor now");
+        assert_eq!(dug.sub, None);
+        assert_eq!(dug.cover, Some(Terrain::Rubble), "and the spoil is on top of it");
+    }
+
+    #[test]
+    fn what_was_lying_there_goes_down_the_hole_before_the_spoil_lands() {
+        // ORDER MATTERS AND IT IS NOT ARBITRARY. 262 ruled a lid takes
+        // its cover with it; the spoil arrives afterwards. Piling first
+        // would bury the snow and keep both.
+        let snowy = Stack::of(Terrain::Dirt)
+            .over(Terrain::Rock)
+            .under(Terrain::Snow);
+        let dug = snowy.destroyed(Layer::Surface);
+        assert_eq!(dug.cover, Some(Terrain::RubbleEarth), "spoil, not snow");
+    }
+
+    #[test]
+    fn a_wall_says_the_same_square_in_two_facts_now() {
+        // `Leaves(Rubble)` and `Clears` + spoil are the same square.
+        // The point of the change is that the second sentence can also
+        // be said by a floor, and the first never could.
+        let wall = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
+        let after = wall.destroyed(Layer::Cover);
+        assert_eq!(after.cover, Some(Terrain::Rubble));
+        assert_eq!(after.surface, Terrain::StoneFloor, "debris lands ON the floor");
+    }
+
+    #[test]
+    fn debris_is_a_quarter_of_what_it_came_from() {
+        // 262. Dave kept the consequence rather than rounding it away:
+        // a stone wall is 60 and gives back 15, so FOUR SQUARES OF
+        // RUBBLE REBUILD ONE WALL and you cannot un-break a wall from
+        // its own debris.
+        let (word, amount) = Terrain::StoneWall.spoil().unwrap();
+        assert_eq!(word, Terrain::Rubble);
+        assert_eq!(amount, 15);
+        assert_eq!(Terrain::StoneWall.integrity().unwrap().hp, amount * 4);
+    }
+
+    #[test]
+    fn the_word_gives_the_maximum_and_the_square_stores_the_amount() {
+        // A stone WALL is a span and fills a heap; a stone FLOOR is
+        // half a span and half fills one. Both are `rubble`, whose
+        // maximum is a quarter span either way - so nothing has to
+        // remember what a heap used to be.
+        let full = Terrain::StoneWall.spoil().unwrap().1;
+        let half = Terrain::StoneFloor.spoil().unwrap().1;
+        assert_eq!(full, Terrain::Rubble.integrity().unwrap().hp);
+        assert_eq!(half, 7, "half a span, a quarter of it");
+        assert!(half < full);
+    }
+
+    #[test]
+    fn no_heap_is_ever_fuller_than_a_heap_can_be() {
+        // THE SWEEP. Spoil is stored in `cover_hp`, and a number above
+        // the word's own maximum would make a square whose panel reads
+        // "18 / 15" - a remainder larger than the whole.
+        for t in ALL {
+            let Some((word, amount)) = t.spoil() else { continue };
+            let max = word
+                .integrity()
+                .unwrap_or_else(|| panic!("{} leaves {}, which has no hit points", t.key(), word.key()))
+                .hp;
+            assert!(
+                amount <= max,
+                "{} leaves {} of {}, but {} holds {}",
+                t.key(),
+                amount,
+                word.key(),
+                word.key(),
+                max
+            );
+            assert!(amount >= 1, "{} leaves nothing measurable", t.key());
+        }
+    }
+
+    #[test]
+    fn debris_reduces_to_nothing() {
+        // 262, Dave's words. Its hit points ARE its volume: attacking
+        // it and spending it are the same subtraction, and at zero the
+        // square is clear. It used to be indestructible, which made a
+        // breached wall a dead end - debris nobody could ever shift.
+        for t in [
+            Terrain::Rubble,
+            Terrain::RubbleTimber,
+            Terrain::RubbleWood,
+            Terrain::RubbleEarth,
+        ] {
+            assert!(t.integrity().is_some(), "{}", t.key());
+            assert_eq!(t.destruction().remains, Remains::Clears, "{}", t.key());
+            assert_eq!(t.destruction().spoil, None, "{} must not breed", t.key());
+            assert!(t.may(Layer::Cover) && !t.may(Layer::Surface), "{}", t.key());
+        }
+        let heap = Stack::of(Terrain::Dirt).under(Terrain::Rubble);
+        assert_eq!(heap.destroyed(Layer::Cover).cover, None);
+    }
+
+    #[test]
+    fn what_shatters_or_is_cut_leaves_nothing_to_build_with() {
+        // Not every destruction is a quarry. Ice shatters, brambles are
+        // cut away, a grate is cut out, a door comes off its hinges.
+        for t in [
+            Terrain::IceWall,
+            Terrain::Ice,
+            Terrain::Vines,
+            Terrain::Brush,
+            Terrain::IronGrate,
+            Terrain::DoorClosed,
+        ] {
+            assert_eq!(t.spoil(), None, "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn filling_a_volume_consumes_debris_rather_than_making_it() {
+        // A pit and a depth of water are the OTHER side of the economy:
+        // they are destroyed by being filled, so none of them leaves
+        // anything behind.
+        for t in [Terrain::Pit, Terrain::DeepWater, Terrain::ShallowWater] {
+            assert_eq!(t.spoil(), None, "{}", t.key());
+            assert!(matches!(t.destruction().remains, Remains::Becomes(_)), "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn every_material_that_leaves_debris_leaves_its_own() {
+        // The fork, as a rule rather than a list. Two promises:
+        //
+        // DEBRIS IS A QUARTER SPAN of something, always - that is what
+        // makes four-to-one a rule instead of a number.
+        //
+        // AND IT NEVER UPGRADES THE MATERIAL. Shattered granite cannot
+        // become a timber wall, and nobody had to write that down; the
+        // vocabulary refuses it. Going the other way is allowed and
+        // happens: dug earth is loose spoil, which is worth less per
+        // span than the packed ground it came out of.
+        for t in ALL {
+            let (Some((mine, _)), Some((word, _))) = (t.makeup(), t.spoil()) else {
+                continue;
+            };
+            let (theirs, bulk) = word.makeup().unwrap();
+            assert_eq!(bulk, Bulk::Quarter, "{} is not a quarter span", word.key());
+            assert!(
+                theirs.hp <= mine.hp,
+                "{} leaves {}, which is worth more per span than it was",
+                t.key(),
+                word.key()
+            );
+        }
+
+        // And the promise stated plainly for the case it was made for.
+        for (wall, debris) in [
+            (Terrain::StoneWall, Terrain::Rubble),
+            (Terrain::TimberWall, Terrain::RubbleTimber),
+            (Terrain::WoodenWall, Terrain::RubbleWood),
+        ] {
+            let (m, _) = wall.makeup().unwrap();
+            assert_eq!(wall.spoil().unwrap().0, debris);
+            assert_eq!(debris.makeup().unwrap().0, m, "{}", wall.key());
+        }
+    }
+
     #[test]
     fn anything_destructible_has_integrity_and_the_reverse() {
         // The two tables cannot drift: a thing with hit points must say
@@ -1628,26 +1895,30 @@ mod tests {
         // attackable.
         for t in ALL {
             let has = t.integrity().is_some();
-            let dies = t.destruction() != Destruction::Indestructible;
+            let dies = t.destruction().remains != Remains::Indestructible;
             assert_eq!(has, dies, "{} disagrees with itself", t.key());
         }
     }
 
     #[test]
     fn a_wall_collapses_onto_the_floor_it_stood_on() {
-        assert_eq!(
-            Terrain::StoneWall.destruction(),
-            Destruction::Leaves(Terrain::Rubble)
-        );
+        // 265. TWO FACTS WHERE THERE WAS ONE. `Leaves(Rubble)` bundled
+        // "the wall is gone" with "there is rubble here" into a single
+        // variant, which is why it could never describe a dug floor -
+        // that one opens AND leaves spoil, and the old shape had to
+        // drop one of them.
+        let d = Terrain::StoneWall.destruction();
+        assert_eq!(d.remains, Remains::Clears);
+        assert_eq!(d.spoil, Some(Terrain::Rubble));
         // and rubble is a cover, so the surface is untouched
         assert!(Terrain::Rubble.may(Layer::Cover));
     }
 
     #[test]
     fn things_that_are_cut_away_leave_nothing() {
-        assert_eq!(Terrain::Vines.destruction(), Destruction::Clears);
-        assert_eq!(Terrain::IronGrate.destruction(), Destruction::Clears);
-        assert_eq!(Terrain::DoorClosed.destruction(), Destruction::Clears);
+        assert_eq!(Terrain::Vines.destruction().remains, Remains::Clears);
+        assert_eq!(Terrain::IronGrate.destruction().remains, Remains::Clears);
+        assert_eq!(Terrain::DoorClosed.destruction().remains, Remains::Clears);
     }
 
     /* ---------------- doorways and doors ---------------- */
@@ -1664,7 +1935,7 @@ mod tests {
     #[test]
     fn a_doorway_cannot_be_attacked_because_it_is_a_hole() {
         assert_eq!(Terrain::Doorway.integrity(), None);
-        assert_eq!(Terrain::Doorway.destruction(), Destruction::Indestructible);
+        assert_eq!(Terrain::Doorway.destruction().remains, Remains::Indestructible);
     }
 
     #[test]
@@ -1810,7 +2081,7 @@ mod tests {
     fn ice_reveals_whatever_the_map_says_is_under_it() {
         // AND NAMES NO TERRAIN, which was the bug in 225: ice over a
         // road is not water.
-        assert_eq!(Terrain::Ice.destruction(), Destruction::Reveals);
+        assert_eq!(Terrain::Ice.destruction().remains, Remains::Reveals);
     }
 
     /* ============ 263. APPLYING A DESTRUCTION ============ */
@@ -1887,7 +2158,7 @@ mod tests {
         // THE SWEEP. A destruction that produces an illegal stack would
         // be a square nothing could read back.
         for t in ALL {
-            if t.destruction() == Destruction::Indestructible {
+            if t.destruction().remains == Remains::Indestructible {
                 continue;
             }
             if t.may(Layer::Cover) {
@@ -1907,14 +2178,25 @@ mod tests {
 
     #[test]
     fn whatever_a_wall_leaves_is_legal_where_the_wall_was() {
-        // A cover must collapse into something that can BE a cover, or
-        // the square ends up holding an illegal stack.
+        // Spoil always lands as a COVER, whichever layer was broken -
+        // debris sits on top of a square by definition. A word whose
+        // spoil cannot be a cover would make an unreadable stack.
         for t in ALL {
-            if let Destruction::Leaves(into) = t.destruction() {
-                if t.may(Layer::Cover) {
+            if let Some(into) = t.destruction().spoil {
+                assert!(
+                    into.may(Layer::Cover),
+                    "{} leaves {}, which cannot be a cover",
+                    t.key(),
+                    into.key()
+                );
+            }
+            // And a layer that BECOMES something stays in its own
+            // layer, so what it becomes has to be legal there.
+            if let Remains::Becomes(into) = t.destruction().remains {
+                if t.may(Layer::Surface) {
                     assert!(
-                        into.may(Layer::Cover),
-                        "{} leaves {}, which cannot be a cover",
+                        into.may(Layer::Surface),
+                        "{} becomes {}, which cannot be a surface",
                         t.key(),
                         into.key()
                     );
@@ -1966,7 +2248,7 @@ mod tests {
         // record rather than a draft, so narrowing the ground layers
         // meant a new file - and the guard has to read whichever file
         // is currently the database's copy of the vocabulary.
-        let sql = include_str!("../../supabase/migrations/263_a_wall_is_not_a_floor.sql");
+        let sql = include_str!("../../supabase/migrations/265_debris_remembers_what_it_was.sql");
 
         for (name, layer) in [
             ("a_surface_is_ground", Layer::Surface),

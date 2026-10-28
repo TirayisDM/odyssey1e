@@ -521,6 +521,48 @@ pub enum Terrain {
 ///
 /// A SLICE, because the migration's CHECK is built from it and a
 /// variant missing here is a terrain the database refuses.
+/// One action's worth of building.
+///
+/// -------------------------------------------------------------------
+/// 268. ONE ACTION MOVES ONE HEAP, AND THAT IS NOT A NEW NUMBER
+/// -------------------------------------------------------------------
+///
+/// Dave's ruling, and the thing worth noticing about it: there is no
+/// rate constant anywhere in this file. A heap is a [`Bulk::Quarter`]
+/// and can never hold more than a quarter span, so an action capped at
+/// "whatever the heap has" is capped at one heap by construction.
+///
+/// Which makes 262's four-to-one the price AND the effort in one
+/// number. A stone wall is sixty, a heap is fifteen: four heaps, and
+/// therefore four actions. Had the rate been a separate five or ten
+/// per action, the ratio a player feels and the ratio the economy
+/// charges would be two numbers, free to drift.
+///
+/// `wanted` IS WHAT IS STILL MISSING, which each arm works out for
+/// itself - a volume counts DOWN to nothing and a wall counts UP to
+/// full, and the two cannot share a direction. They share this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Work {
+    /// How much went in. Never more than the heap had, never more than
+    /// the work still wanted.
+    pub placed: i64,
+    /// Did this action finish it?
+    pub done: bool,
+}
+
+impl Work {
+    pub fn of(heap_has: i64, wanted: i64) -> Work {
+        let placed = heap_has.min(wanted).max(0);
+        Work {
+            placed,
+            // A HEAP THAT HAD NOTHING FINISHES NOTHING. `placed ==
+            // wanted` alone would call an empty heap meeting a finished
+            // wall a completed day's work.
+            done: placed > 0 && placed == wanted,
+        }
+    }
+}
+
 pub const ALL: [Terrain; 36] = [
     Terrain::Rock,
     Terrain::Dirt,
@@ -1012,6 +1054,66 @@ impl Terrain {
         let word = self.destruction().spoil?;
         let amount = self.integrity()?.hp / 4;
         Some((word, amount.max(1)))
+    }
+
+    /* ====== 268. THE OTHER DIRECTION ====== */
+
+    /// Is this word a heap of debris - something spendable?
+    ///
+    /// A QUARTER SPAN IS WHAT DEBRIS IS. 265 made that the definition
+    /// rather than a list, so this asks the definition. A fifth kind of
+    /// rubble would be spendable the day it is added and nothing here
+    /// would need editing.
+    pub fn is_debris(self) -> bool {
+        matches!(self.makeup(), Some((_, Bulk::Quarter)))
+    }
+
+    /// Is this ground a volume - destroyed by being FILLED rather than
+    /// broken open?
+    ///
+    /// 262: *"you destroy a pit by using rubble"*. The answer was
+    /// already in the table - a pit, deep water and shallow water are
+    /// the three words whose `Remains` is `Becomes`, because filling
+    /// one IS destroying it. Construction needed no second table for
+    /// volumes; it needed to notice that one.
+    pub fn is_volume(self) -> bool {
+        matches!(self.destruction().remains, Remains::Becomes(_))
+    }
+
+    /// Could a heap of `self` raise `wall`?
+    ///
+    /// ---------------------------------------------------------------
+    /// 268. CONSTRUCTION RAISES WALLS, AND ONLY WALLS
+    /// ---------------------------------------------------------------
+    ///
+    /// Two conditions, and together they are one sentence: **debris
+    /// raises a BUILT thing of its own material.**
+    ///
+    /// THE MATERIAL RULE IS THE WHOLE PRICE. It is the same comparison
+    /// 265's fork is swept by, read backwards: masonry raises masonry,
+    /// splintered beams raise timber, boards raise board walls.
+    /// Shattered granite cannot become a timber wall and nobody had to
+    /// write that down.
+    ///
+    /// AND IT NEEDS NO EXCEPTION FOR DUG EARTH. `rubble_earth` is
+    /// `LOOSE`, and no cover in the vocabulary is made of loose earth -
+    /// so spoil raises nothing, by the same rule that lets masonry
+    /// raise a wall, rather than by a line saying so. The same is true
+    /// of ice from the other end: an ice wall is `ICE` and nothing
+    /// leaves `ICE` debris, so a shattered one is gone for good.
+    ///
+    /// WALLS, NOT EVERY COVER OF THE RIGHT STUFF. `trees` are `TIMBER`
+    /// too, and a heap of splintered beams must not grow one: trees are
+    /// grown, a grate is forged, a door is hung. What rubble builds is
+    /// masonry and carpentry, which is what `is_wall` already names.
+    pub fn may_raise(self, wall: Terrain) -> bool {
+        if !self.is_debris() || !wall.is_wall() {
+            return false;
+        }
+        match (self.makeup(), wall.makeup()) {
+            (Some((mine, _)), Some((theirs, _))) => mine == theirs,
+            _ => false,
+        }
     }
 
 }
@@ -1947,6 +2049,182 @@ mod tests {
             assert_eq!(wall.spoil().unwrap().0, debris);
             assert_eq!(debris.makeup().unwrap().0, m, "{}", wall.key());
         }
+    }
+
+    /* ====== 268. SPENDING A HEAP ====== */
+
+    #[test]
+    fn a_wall_takes_four_actions_because_it_takes_four_heaps() {
+        // THE CYCLE'S ONE NUMBER, spent rather than asserted. The
+        // arithmetic lives here and not in the command for exactly this
+        // reason: a command that wants a test is a rule wearing a
+        // wrapper.
+        let heap = Terrain::Rubble.integrity().unwrap().hp;
+        let full = Terrain::StoneWall.integrity().unwrap().hp;
+        let mut has = 0;
+        let mut actions = 0;
+        while has < full {
+            let w = Work::of(heap, full - has);
+            has += w.placed;
+            actions += 1;
+            assert_eq!(w.done, has == full);
+            assert!(actions <= 9, "a wall that never finishes");
+        }
+        assert_eq!(actions, 4);
+    }
+
+    #[test]
+    fn a_half_empty_heap_buys_half_an_action() {
+        // The cap is what the heap HAS, not what a heap holds - a floor
+        // yields seven and a wall yields fifteen, so a wall rebuilt
+        // from dug floors takes more trips.
+        let (_, dug) = Terrain::StoneFloor.spoil().unwrap();
+        assert_eq!(dug, 7);
+        let w = Work::of(dug, 60);
+        assert_eq!(w.placed, 7);
+        assert!(!w.done);
+    }
+
+    #[test]
+    fn the_last_action_places_only_what_is_missing() {
+        // No overfilling, which is what would put a wall above its own
+        // maximum and make a panel read "63 of 60".
+        let w = Work::of(15, 4);
+        assert_eq!(w.placed, 4);
+        assert!(w.done);
+    }
+
+    #[test]
+    fn an_empty_heap_finishes_nothing() {
+        // `placed == wanted` alone would call this a completed day's
+        // work, and the square would be written as finished for free.
+        assert_eq!(Work::of(0, 0), Work { placed: 0, done: false });
+        assert_eq!(Work::of(0, 15), Work { placed: 0, done: false });
+    }
+
+    #[test]
+    fn filling_a_pit_is_the_same_arithmetic_downward() {
+        // A volume counts down and a wall counts up, which is the one
+        // thing the two arms do not share - so `Work` is given what is
+        // MISSING and never has to know which direction it is.
+        let heap = Terrain::Rubble.integrity().unwrap().hp;
+        let mut left = Terrain::Pit.integrity().unwrap().hp;
+        let mut actions = 0;
+        while left > 0 {
+            let w = Work::of(heap, left);
+            left -= w.placed;
+            actions += 1;
+        }
+        assert_eq!(actions, 4, "a pit is a wall's worth of filling");
+        assert!(Terrain::Pit.is_volume());
+    }
+
+
+    #[test]
+    fn debris_raises_a_built_thing_of_its_own_material() {
+        // 262's "use instead of attack", as a rule rather than a list.
+        assert!(Terrain::Rubble.may_raise(Terrain::StoneWall));
+        assert!(Terrain::Rubble.may_raise(Terrain::RockWall));
+        assert!(Terrain::RubbleTimber.may_raise(Terrain::TimberWall));
+        assert!(Terrain::RubbleWood.may_raise(Terrain::WoodenWall));
+        // Across the grain, never.
+        assert!(!Terrain::Rubble.may_raise(Terrain::TimberWall));
+        assert!(!Terrain::RubbleWood.may_raise(Terrain::StoneWall));
+        assert!(!Terrain::RubbleTimber.may_raise(Terrain::WoodenWall));
+    }
+
+    #[test]
+    fn a_heap_of_beams_does_not_grow_a_tree() {
+        // `trees` ARE timber - the same material, the same span, so the
+        // material rule alone would let a pile of splintered beams
+        // become a living tree. Trees are grown, a grate is forged, a
+        // door is hung; what rubble builds is masonry and carpentry.
+        assert_eq!(
+            Terrain::Trees.makeup().unwrap().0,
+            Terrain::TimberWall.makeup().unwrap().0
+        );
+        assert!(!Terrain::RubbleTimber.may_raise(Terrain::Trees));
+        for t in [Terrain::IronGrate, Terrain::DoorClosed, Terrain::Brush, Terrain::Vines] {
+            for heap in ALL.iter().filter(|h| h.is_debris()) {
+                assert!(!heap.may_raise(t), "{} raised {}", heap.key(), t.key());
+            }
+        }
+    }
+
+    #[test]
+    fn dug_earth_builds_nothing_without_a_rule_saying_so() {
+        // THE EXCEPTION THAT IS NOT ONE. Spoil is `LOOSE`, and no cover
+        // in the vocabulary is made of loose earth - so it raises
+        // nothing BY the material rule rather than by a line excluding
+        // it. Dirt fills holes. That is what dirt is for.
+        for t in ALL {
+            assert!(!Terrain::RubbleEarth.may_raise(t), "{}", t.key());
+        }
+        assert!(Terrain::Pit.is_volume());
+    }
+
+    #[test]
+    fn a_shattered_ice_wall_is_gone_for_good() {
+        // From the other end of the same rule: an ice wall is ICE and
+        // nothing in the world leaves ICE debris, so no heap can raise
+        // one. Nobody wrote that either.
+        assert_eq!(Terrain::IceWall.spoil(), None);
+        for t in ALL {
+            assert!(!t.may_raise(Terrain::IceWall), "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn only_a_heap_is_spendable() {
+        for t in ALL {
+            assert_eq!(
+                t.is_debris(),
+                t.key().starts_with("rubble"),
+                "{}",
+                t.key()
+            );
+        }
+    }
+
+    #[test]
+    fn the_three_volumes_are_the_three_that_are_filled() {
+        // Construction needed no second table. These are the words
+        // whose destruction is `Becomes`, which is 262 saying filling
+        // one IS destroying it.
+        for t in ALL {
+            assert_eq!(
+                t.is_volume(),
+                matches!(t, Terrain::Pit | Terrain::DeepWater | Terrain::ShallowWater),
+                "{}",
+                t.key()
+            );
+        }
+    }
+
+    #[test]
+    fn four_heaps_raise_a_wall_and_no_heap_raises_one_alone() {
+        // 262's four-to-one, now spent instead of only produced. A
+        // heap holds fifteen, a wall wants sixty, and one action moves
+        // at most one heap - so a wall is four actions and four heaps,
+        // which is the price and the effort agreeing by construction.
+        let heap = Terrain::Rubble.integrity().unwrap().hp;
+        let wall = Terrain::StoneWall.integrity().unwrap().hp;
+        assert_eq!(wall / heap, 4);
+        assert!(heap < wall, "a heap must never finish a wall by itself");
+    }
+
+    #[test]
+    fn a_wall_being_built_is_a_wall() {
+        // NO NEW VOCABULARY, Dave's ruling. A half-raised wall is the
+        // wall word holding fewer hit points - so it blocks, and a good
+        // blow flattens it. The alternative was an `under_construction`
+        // word, which would need its own art, its own footing and its
+        // own destruction, and would be a second place the wall's own
+        // facts lived.
+        let hasty = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
+        assert!(hasty.walled());
+        assert!(hasty.blocks_sight());
+        assert!(!hasty.enterable());
     }
 
     /* ====== 266. WHAT IS IN THE WAY ====== */

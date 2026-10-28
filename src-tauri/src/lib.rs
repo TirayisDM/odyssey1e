@@ -1720,6 +1720,7 @@ pub fn run() {
             commands::tiles::map_at,
             commands::tiles::inspect_square,
             commands::tiles::damage_square,
+            commands::tiles::build_square,
             commands::tiles::set_square_hp,
             commands::tiles::terrain_words,
             commands::tiles::save_map_as,

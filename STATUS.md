@@ -11932,6 +11932,147 @@ attackable too**. Clear the breach, then dig. 1374 tests.
 
 ---
 
+## 268. The verb that spends the debris
+
+**2026-10-28.** Dave: *"one action one heap, wall blocks, refuse
+occupied - build it"*.
+
+262 designed a destruction economy and 265 built its producer. Every
+number it needed has existed since - a quantity, a material, a rate -
+and **nothing spent any of it**. Rubble was a dead end you could only
+ever clear. This is the consumer.
+
+### One action moves one heap, and that is not a new number
+
+Dave's ruling, and the thing worth noticing about it: **there is no
+rate constant anywhere in the file.** A heap is a `Bulk::Quarter` and
+can never hold more than a quarter span, so an action capped at
+"whatever the heap has" is capped at one heap by construction.
+
+Which makes 262's four-to-one the price AND the effort in one number.
+A stone wall is 60, a heap is 15: **four heaps, four actions**. Had
+the rate been a separate 5 or 10 per action, the ratio a player feels
+and the ratio the economy charges would have been two numbers, free to
+drift apart - the two-places problem in the shape of a difficulty dial.
+
+`Work::of(heap_has, wanted)` is in `terrain.rs`, not in the command,
+because **a command that wants a test is a rule wearing a wrapper**
+and this one wanted five. One of them spends an actual wall up from
+nothing and counts the actions.
+
+### Filling needed no new rules at all
+
+This was the surprise. **Destroying a pit already MEANS filling it** -
+262 ruled that, and `destruction()` has said since that a pit becomes
+rock, deep water becomes shallow, shallow becomes mud. So the fill arm
+is `destroyed(Layer::Surface)` with debris as the currency instead of
+dice: same table, same words, same tests.
+
+`is_volume()` is the three words whose `Remains` is `Becomes`, which is
+262's ruling read back out of the table rather than restated beside it.
+
+**The only genuinely new thing in this cycle is raising a cover**,
+which creates a word where damage had only ever removed one.
+
+### You shovel from the pile you are standing in
+
+The source is the builder's own square and **not a parameter**. That is
+a rule, not a convenience: moving debris from somewhere else is
+HAULING, a different verb with its own cost, and inventing it here as a
+free side effect of building would price it at nothing.
+
+It also means reach is one check - the target is beside the builder -
+and the UI needs no source control at all. The gesture is: stand in
+the rubble, click the square beside you.
+
+### The material rule needs no exceptions, in either direction
+
+`may_raise` is two conditions that read as one sentence: **debris
+raises a BUILT thing of its own material.** Masonry raises stone and
+rock walls, beams raise timber, boards raise board walls.
+
+Two things fall out without being written:
+
+- **Dug earth builds nothing.** `rubble_earth` is `LOOSE` and no cover
+  in the vocabulary is made of loose earth, so spoil raises nothing BY
+  the material rule rather than by a line excluding it. Dirt fills
+  holes, which is what dirt is for.
+- **A shattered ice wall is gone for good.** An ice wall is `ICE` and
+  nothing leaves `ICE` debris.
+
+And one that had to be: **a heap of beams must not grow a tree.**
+`trees` are `TIMBER`, the same material and the same span as a timber
+wall, so the material rule alone would allow it. Trees are grown, a
+grate is forged, a door is hung; what rubble builds is masonry and
+carpentry, which `is_wall` already names.
+
+### A wall being built is a wall
+
+Dave's second ruling. No `under_construction` word - which would have
+needed its own art, its own footing and its own destruction, and would
+have been a second place the wall's own facts lived. **A half-raised
+wall is the wall word holding fewer hit points**, so it blocks sight
+and movement from the first action and a good blow flattens it. A hasty
+barricade is a real thing to be able to build.
+
+### Nobody is built into
+
+Dave's third ruling, on the target square. The refusal **names who**,
+because "that square is occupied" when the occupant is you reads as a
+bug rather than a rule.
+
+### It spends before it places
+
+There is no transaction across two squares, so one of the two writes
+can fail alone. Spending first means a failure costs the player their
+rubble; placing first would mean a failure **mints a wall**, which is
+repeatable. The annoying failure beats the exploitable one.
+
+### What 263 and 266 lent it
+
+- `columns_after` is **unchanged and now read backwards**. It compares
+  the words before and after and keeps the numbers of the layers that
+  did not change - nothing in it knows whether the change was a blow or
+  a day's work, which is why building needed no second version of it.
+- `reachable` applies to filling **unchanged**: filling is destroying
+  the surface, so a cover that could be attacked is still in the way.
+  266 was built two cycles ago for a different question and answered
+  this one for free.
+- `cover_hp` null still means WHOLE, so a finished wall writes null and
+  a partial one writes what it holds. No new state.
+
+### What it looks like
+
+A third play mode, `click builds here`, and a word picker filled from
+`Word::raisable` - `may_raise` asked over the whole vocabulary. 237's
+rule: a dropdown that guessed by looking for keys ending in `_wall`
+would be the rule inferred rather than asked for, and it would be
+wrong, because `ice_wall` ends in `_wall` and can never be raised.
+
+The pane says `stone_wall: 15 placed · 15 of 60 · rubble left 0 · now
+stone_floor + stone_wall`.
+
+**Timber and wooden walls have no art**, which players can now make on
+purpose rather than only find. Dave is drawing them.
+
+1387 tests.
+
+### Carried forward
+
+- **`who_is_on` sees what RLS lets it see.** If another player's
+  creature is hidden from the builder, the occupancy check passes and a
+  wall goes up on top of them. The same visibility question
+  `standing_in` has had since 230, now with a consequence.
+- **Hauling.** Debris cannot be moved, so a wall can only be built
+  beside its own wreckage. The verb that moves a heap is the obvious
+  next one if building turns out to be worth doing.
+- No action is *refused* for cost - 051 still stands, the budget
+  informs and gates nothing. A creature can build all day.
+- `depth`, so "60 per 5 feet" has a second number.
+- `painting_door_broken_does_not_make_a_broken_door` still passes.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

@@ -1161,6 +1161,343 @@ pub fn damage_square(
     })
 }
 
+/* ============ 268. THE VERB THAT SPENDS THE DEBRIS ============ */
+
+/// What one action of building did.
+#[derive(Debug, Serialize)]
+pub struct Built {
+    /// Which layer the work went into.
+    pub layer: &'static str,
+    /// What is being made, or the volume being filled.
+    pub what: String,
+    /// How much of the heap went in. Never more than one heap holds.
+    pub placed: i64,
+    /// What the work stands at now, out of what it wants.
+    pub hp_now: i64,
+    pub hp_full: i64,
+    pub done: bool,
+    /// Set when finishing it changed the word - a filled pit is rock.
+    pub became: Option<String>,
+    /// The heap that paid for it, and what is left in it.
+    pub heap: String,
+    pub heap_left: i64,
+    /// The square after, in the order the panel reads layers.
+    pub now: Vec<String>,
+}
+
+/// Who is standing on exactly this square.
+fn who_is_on(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+) -> Result<Option<String>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "name"),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("x", &format!("eq.{}", x)),
+            ("y", &format!("eq.{}", y)),
+            ("z", &format!("eq.{}", z)),
+            ("limit", "1"),
+        ],
+    )?;
+    Ok(rows
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|r| r.get("name"))
+        .and_then(|n| n.as_str())
+        .map(str::to_string))
+}
+
+/// Spend the heap you are standing in on the square beside you.
+///
+/// -------------------------------------------------------------------
+/// 268. THE CONSUMER THE ECONOMY HAS BEEN MISSING
+/// -------------------------------------------------------------------
+///
+/// 262 designed a destruction economy and 265 built its producer.
+/// Every number it needs has existed since - a quantity, a material
+/// and a rate - and nothing spent any of it. This is the verb.
+///
+/// **ONE ACTION MOVES ONE HEAP**, which is Dave's ruling and, it turns
+/// out, not a new constant at all. A heap is a `Bulk::Quarter` and can
+/// never hold more than a quarter span, so capping an action at "what
+/// the heap has" caps it at one heap by construction. The rate was
+/// already in the vocabulary: a stone wall is sixty and a heap is
+/// fifteen, so a wall is four heaps and therefore four actions, and
+/// 262's four-to-one is the price AND the effort in one number.
+///
+/// **YOU SHOVEL FROM THE PILE YOU ARE STANDING IN.** The source is the
+/// builder's own square, not a parameter. That is a rule and not a
+/// convenience: moving debris from somewhere else is HAULING, a
+/// different verb with its own cost, and inventing it here as a free
+/// side effect of building would price it at nothing.
+///
+/// **TWO ARMS, CHOSEN BY WHAT THE TARGET IS.** A volume is filled, a
+/// floor is built on. You cannot wall a hole - fill it first - and
+/// that refusal is the honest answer for a square that is both.
+///
+/// IT SPENDS BEFORE IT PLACES. There is no transaction across two
+/// squares, so one of the two writes can fail alone. Spending first
+/// means a failure costs the player their rubble; placing first would
+/// mean a failure MINTS a wall, which is repeatable. The annoying
+/// failure beats the exploitable one.
+#[tauri::command]
+pub fn build_square(
+    state: State<AppState>,
+    character_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+    word: Option<String>,
+) -> Result<Built, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "name,game_id,location_id,x,y,z"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let mut who: Vec<Standpoint> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the builder: {}", e))?;
+    let who = who.pop().ok_or("no such creature")?;
+
+    let Some(location_id) = who.location_id else {
+        return Err(format!("{} is not anywhere", who.name));
+    };
+    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
+        return Err(format!("{} is not on the map - place them first", who.name));
+    };
+
+    // WITHIN ARM'S REACH, and on the same level. Building across a gap
+    // is throwing rubble at a wall and hoping.
+    if fz != z || (x - fx).abs() > 1 || (y - fy).abs() > 1 {
+        return Err(format!(
+            "{} is at ({}, {}) and cannot reach ({}, {}) - stand beside it",
+            who.name, fx, fy, x, y
+        ));
+    }
+
+    // THE HEAP IS UNDERFOOT.
+    let (from_tile, from) = square_at(&token, &location_id, fx, fy, fz)?;
+    let heap = from
+        .cover
+        .filter(|c| c.is_debris())
+        .ok_or_else(|| format!("{} is not standing in any debris to build with", who.name))?;
+    let heap_full = heap
+        .integrity()
+        .ok_or_else(|| format!("{} cannot be spent", heap.key()))?
+        .hp;
+    let heap_has = from_tile
+        .as_ref()
+        .and_then(|t| t.cover_hp)
+        .unwrap_or(heap_full);
+
+    let (tile, stack) = square_at(&token, &location_id, x, y, z)?;
+
+    // NOBODY IS BUILT INTO. Dave's ruling. It names who, because "that
+    // square is occupied" when the occupant is you reads as a bug.
+    if let Some(name) = who_is_on(&token, &location_id, x, y, z)? {
+        return Err(format!("{} is standing there", name));
+    }
+
+    let filling = stack.surface.is_volume();
+    if filling && word.is_some() {
+        return Err(format!(
+            "there is {} here - fill it before you build on it",
+            stack.surface.key()
+        ));
+    }
+
+    // Which layer the work goes into, what it wants, and what it has.
+    let (which, into, full, has) = match filling {
+        true => {
+            // 266 APPLIES UNCHANGED: filling is destroying the surface,
+            // so a cover that could be attacked is still in the way.
+            stack.reachable(Layer::Surface)?;
+            let integ = stack
+                .surface
+                .integrity()
+                .ok_or_else(|| format!("{} cannot be filled", stack.surface.key()))?;
+            let has = tile.as_ref().and_then(|t| t.surface_hp).unwrap_or(integ.hp);
+            (Layer::Surface, stack.surface, integ.hp, has)
+        }
+        false => {
+            let key = word
+                .as_deref()
+                .ok_or("say what to build - a heap could raise any wall of its material")?;
+            let wall = Terrain::of_key(key).ok_or_else(|| format!("\"{}\" is not a word", key))?;
+            if !heap.may_raise(wall) {
+                return Err(format!(
+                    "{} cannot raise {} - debris builds a wall of its own material",
+                    heap.key(),
+                    wall.key()
+                ));
+            }
+            if let Some(c) = stack.cover {
+                if c != wall {
+                    return Err(format!("{} is in the way", c.key()));
+                }
+            }
+            let full = wall
+                .integrity()
+                .ok_or_else(|| format!("{} has no hit points", wall.key()))?
+                .hp;
+            // A wall part built holds what it holds; a square with no
+            // cover holds nothing yet. Null means WHOLE for a thing
+            // that exists, which is why it is only read when one does.
+            let has = match stack.cover == Some(wall) {
+                true => tile.as_ref().and_then(|t| t.cover_hp).unwrap_or(full),
+                false => 0,
+            };
+            (Layer::Cover, wall, full, has)
+        }
+    };
+
+    // HOW MUCH THIS ACTION MOVES. Filling counts a volume DOWN to
+    // nothing and raising counts a wall UP to full, so "what is still
+    // wanted" is the one of the two things that differs.
+    let wanted = match filling {
+        true => has,
+        false => full - has,
+    };
+    if wanted <= 0 {
+        return Err(format!("{} is already finished", into.key()));
+    }
+    let crate::terrain::Work { placed, done } = crate::terrain::Work::of(heap_has, wanted);
+    // AND AN ACTION THAT MOVES NOTHING IS NOT AN ACTION. Nothing should
+    // be able to leave a heap at zero - it is destroyed at zero and
+    // `set_square_hp` refuses the number - but a no-op here would write
+    // two squares and log a day's work for an empty barrow, which is
+    // exactly the shape of thing that looks like an ordinary answer.
+    if placed <= 0 {
+        return Err(format!("there is nothing left in the {}", heap.key()));
+    }
+    let left = match filling {
+        true => has - placed,
+        false => has + placed,
+    };
+
+    let next = match done {
+        true if filling => stack.destroyed(Layer::Surface),
+        // A finished wall is simply the word, whole.
+        _ => Stack {
+            cover: Some(into),
+            ..stack
+        },
+    };
+    next.legal()?;
+
+    // 263'S COMPARISON, UNCHANGED AND NOW READ BACKWARDS. It asks which
+    // words changed and keeps the numbers of the ones that did not -
+    // nothing in it knows whether the change was a blow or a day's
+    // work, which is why building needed no second version of it.
+    let (surface_hp, cover_hp) = columns_after(
+        &stack,
+        &next,
+        which,
+        tile.as_ref().and_then(|t| t.surface_hp),
+        tile.as_ref().and_then(|t| t.cover_hp),
+        (!done).then_some(left),
+    );
+
+    /* ---- SPENT FIRST, for the reason in the doc above ---- */
+    let heap_left = heap_has - placed;
+    let spent = match heap_left {
+        0 => from.destroyed(Layer::Cover),
+        _ => from,
+    };
+    save_square(
+        &token,
+        &location_id,
+        fx,
+        fy,
+        fz,
+        from_tile.is_some(),
+        &spent,
+        from_tile.as_ref().and_then(|t| t.surface_hp),
+        (heap_left > 0).then_some(heap_left),
+    )?;
+
+    save_square(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        tile.is_some(),
+        &next,
+        surface_hp,
+        cover_hp,
+    )?;
+
+    /* ---- 253'S DIARY, FOR THE SAME REASONS ----
+
+       Recorded whether or not anybody is counting, and FAILING QUIET:
+       the wall is up, and refusing to report it in order to complain
+       about the log would be a lie about the map.
+
+       NO QUANTITY COLUMN. `squares` is movement's, and borrowing it for
+       hit points of masonry would be the two-places problem with a
+       straight face. The prose carries the amount until something
+       actually needs to sum a day's work. */
+    let fight = fighting_in(&token, &character_id);
+    let mut row = json!({
+        "game_id": who.game_id,
+        "character_id": character_id,
+        "key": "build",
+        "cost": "build",
+        "request": "build",
+        "label": format!("placed {} of {}", placed, into.key()),
+        "status": "done",
+    });
+    if let Some((actor_id, encounter_id)) = &fight {
+        row["actor_id"] = json!(actor_id);
+        row["encounter_id"] = json!(encounter_id);
+    }
+    let _ = supabase::rest_insert(&token, "actions", &json!([row]));
+
+    let became = (done && filling).then(|| match word_in(&next, which) {
+        Some(t) => t.key().to_string(),
+        None => "nothing".to_string(),
+    });
+    let mut now = Vec::new();
+    if let Some(t) = next.sub {
+        now.push(t.key().to_string());
+    }
+    now.push(next.surface.key().to_string());
+    if let Some(t) = next.cover {
+        now.push(t.key().to_string());
+    }
+
+    Ok(Built {
+        layer: match which {
+            Layer::Sub => "sub",
+            Layer::Surface => "surface",
+            Layer::Cover => "cover",
+        },
+        what: into.key().to_string(),
+        placed,
+        hp_now: match filling {
+            true => full - left,
+            false => left,
+        },
+        hp_full: full,
+        done,
+        became,
+        heap: heap.key().to_string(),
+        heap_left,
+        now,
+    })
+}
+
 /// State a layer's condition outright.
 ///
 /// 245'S OTHER HALF. Painting is authoring, so authoring is allowed to
@@ -1520,6 +1857,15 @@ pub struct Word {
     pub sub: bool,
     pub surface: bool,
     pub cover: bool,
+    /// 268. CAN ANY HEAP OF DEBRIS RAISE THIS?
+    ///
+    /// 237 again, and the reason it is a flag rather than a filter in
+    /// JavaScript: "the words you can build" is `may_raise` asked over
+    /// the vocabulary, and a dropdown that guessed by looking for keys
+    /// ending in `_wall` would be the rule inferred rather than asked
+    /// for. It would also be wrong - an ice wall ends in `_wall` and
+    /// nothing can ever raise one.
+    pub raisable: bool,
 }
 
 /// Every terrain word, with the layers it is legal in.
@@ -1546,6 +1892,7 @@ pub fn terrain_words() -> Vec<Word> {
             sub: t.may(crate::terrain::Layer::Sub),
             surface: t.may(crate::terrain::Layer::Surface),
             cover: t.may(crate::terrain::Layer::Cover),
+            raisable: crate::terrain::ALL.iter().any(|d| d.may_raise(*t)),
         })
         .collect()
 }

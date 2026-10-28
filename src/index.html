@@ -1227,6 +1227,14 @@
                          way. -->
                     <option value="stand">click places the creature</option>
                     <option value="walk">click walks the creature</option>
+                    <!-- 268. THE THIRD PLAY MODE, and the only one that
+                         MAKES something. The creature stands in a heap
+                         of debris and the click says where it goes -
+                         which is why there is no source control: you
+                         shovel from the pile you are standing in, and
+                         hauling it somewhere else is a verb that does
+                         not exist yet. -->
+                    <option value="build">click builds here</option>
                   </select>
                 </div>
 
@@ -1243,6 +1251,13 @@
                     <input id="mv-hit" type="number" value="0" min="0" title="damage dealt" />
                     <button id="mv-strike" class="ghost tiny">Hit it</button>
                   </div>
+
+                  <!-- 268. SPENDING THE DEBRIS. The word is only read
+                       when there is something to raise: a hole is
+                       filled with whatever the heap is, so clicking a
+                       pit ignores this entirely. -->
+                  <div class="tpband">build with debris</div>
+                  <select id="mv-buildword" class="tpfield"></select>
                 </div>
 
                 <div id="tp-edit" class="tptools" hidden>

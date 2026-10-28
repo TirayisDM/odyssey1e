@@ -10013,7 +10013,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   /// change a SQUARE and two that move a CREATURE - and nothing said
   /// which was which. These are the two halves, and the panel mode
   /// picks one, so "click paints" cannot be selected while playing.
-  const TP_ACTS = { edit: ["paint", "erase"], play: ["stand", "walk"] };
+  const TP_ACTS = { edit: ["paint", "erase"], play: ["stand", "walk", "build"] };
 
   /// Show the controls the current mode owns, and no others.
   function syncTpMode() {
@@ -10365,6 +10365,34 @@ window.addEventListener("DOMContentLoaded", async () => {
       return drawLevel();
     }
 
+    // 268. BUILDING, WHICH IS THE ONE CLICK MODE THAT MAKES SOMETHING.
+    //
+    // The word is sent even when the target is a hole, and Rust
+    // refuses that - "fill it before you build on it" - rather than
+    // this deciding which arm it is. Two places guessing at one rule
+    // is how they come to disagree.
+    if (mode === "build") {
+      const who = pick("#mv-who");
+      if (!who) return mvSay("pick a creature first", true);
+      const r = await tryCall("build_square", {
+        characterId: who,
+        x: at.x,
+        y: at.y,
+        z: z,
+        word: pick("#mv-buildword") || null,
+      });
+      if (!r.ok) return mvSay(r.error, true);
+      const v = r.value;
+      await drawLevel();
+      return mvSay(
+        v.what + ": " + v.placed + " placed · " + v.hp_now + " of " + v.hp_full +
+          (v.done ? " · DONE" : "") +
+          (v.became ? " · became " + v.became : "") +
+          " · " + v.heap + " left " + v.heap_left +
+          " · now " + v.now.join(" + ")
+      );
+    }
+
     // 247. WALKING, WHICH IS THE ONE CLICK MODE THAT OBEYS THE RULES.
     // `stand` teleports because a DM placing a monster should not be
     // argued with; this goes through `stride::walk`, so it pays for
@@ -10464,6 +10492,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     fill("#mv-dsurface", (w) => w.surface, "— no default ground —");
     fill("#mv-dcover", (w) => w.cover, "— no default cover —");
     fill("#mv-dsub", (w) => w.sub, "— nothing underneath —");
+    // 268. FROM `w.raisable`, which is `may_raise` asked over the whole
+    // vocabulary. `ice_wall` ends in `_wall` and belongs nowhere near
+    // this list, because nothing leaves ice to rebuild one with.
+    fill("#mv-buildword", (w) => w.raisable, "— pick what to build —");
   })();
 
   document.querySelector("#refresh-games").addEventListener("click", loadGames);

@@ -11609,6 +11609,122 @@ stamp itself is its own ruling.
 
 ---
 
+## 264. Thirteen numbers became five facts and a multiplier
+
+**2026-10-27.** Dave: *"material table next, pits and water 60 hp per
+5', this should differ from cover height as you can smash a hole
+through a wall but you have to fill a deep hole from the bottom"*. Then:
+*"threshold belongs to the material, split depth out, build it"*.
+
+Hit points used to be written per WORD. Thirteen `solid(17, 60, 10)`
+calls, each one a number somebody typed - which meant a stone wall and
+a stone floor could disagree about stone and nothing would notice.
+
+### A material, and how much of it there is
+
+`Material { ac, hp, threshold }`, where **`hp` is for a five-foot span**
+- one wall square's worth. `Bulk` says how much a word holds: `Span`
+for a wall or five feet of depth, `Slab` for a floor, which is half.
+
+Nine materials now carry what thirteen words used to:
+
+```
+STONE    17 / 60 / 10    both stone walls, rock, stone_floor,
+                         road, ramp, stairs
+TIMBER   15 / 40 /  5    timber_wall, trees
+WOOD     15 / 30 /  5    wooden_wall, wood_floor
+ICE      13 / 30 /  5    ice_wall, ice
+IRON     19 / 30 / 10    iron_grate
+GREENERY 15 / 15 /  0    brush, vines
+EARTH    12 / 30 /  0    dirt
+LOOSE    10 / 20 /  0    mud, sand, scree, marsh
+FILL     10 / 60 /  0    pit, deep_water, shallow_water
+```
+
+**Dave's 60 was not arbitrary and the table shows why.** `FILL.hp`
+equals `STONE.hp`, so filling five feet of hole costs what raising five
+feet of wall costs - the four squares of rubble that raise a wall are
+the four that fill a pit. A test asserts the two are equal rather than
+leaving it as a coincidence two constants happen to share.
+
+### The test that earned the refactor its keep
+
+262 agreed the table was worth having **only if it gave back the
+numbers already there**. `the_table_reproduces_every_number_that_was_hand_written`
+lists all thirteen by hand, copied from the code it replaced.
+
+**Twelve are identical.** The thirteenth is the one that could not
+derive: `ice_wall` had a threshold of 5 and `ice` had 0, and halving 5
+gives 2, not 0.
+
+Dave ruled it: **a threshold belongs to the material and does not
+scale.** It is how much force the STUFF shrugs off, not how much of it
+there is - half a slab of stone is still stone. Ice is 5 in both layers
+now, and `exactly_one_number_changed_and_it_was_ruled` says so by name
+rather than letting it pass in a diff.
+
+`a_thing_with_no_threshold_takes_everything` used to ask ice, which
+turns out to have been testing an accident. It asks brush now, which
+genuinely shrugs off nothing.
+
+### Everything you stand on can be dug through
+
+Seventeen of the eighteen grounds were `Indestructible` - a disintegrate
+or a mine had nothing to target on the floor. They are all `Reveals`
+now: break the floor and what is under it comes up, or a `Pit` where
+the map says nothing. That is 262's *"cleared to open passage"*, and it
+is the same answer ice has always given, which is why it is the same
+word.
+
+**It does not yet produce rubble.** Digging both opens a floor AND
+leaves spoil on it, and `Destruction` can say one thing. 262 already
+agreed it becomes a pair; until then the hole is the half that works
+and the comment says the other half is missing.
+
+### A volume filled is not a volume revealed
+
+`pit` leaves `rock`. `deep_water` leaves `shallow_water`, which leaves
+`mud` - Dave's two steps, with no new machinery.
+
+**A pit does not uncover what is beneath it; it stops being a pit.**
+That is the difference between breaking a lid and filling a hole, and
+there is a test for it: a pit over lava, filled, is solid rock with the
+lava still underneath.
+
+### Three words left with no numbers, each for a reason
+
+A **doorway** is a hole in a wall - there is no doorway to attack, only
+the wall it was cut in. A **ledge** is the lip of a drop, a fact about
+a floor rather than a substance. **Lava** has no ruling about filling
+it, and inventing one here would be a rule nobody agreed to.
+
+`three_things_are_still_waiting_on_a_ruling` names all three so they
+stay visible instead of becoming permanent by neglect.
+
+### Four tests that could not have existed before
+
+`one_material_cannot_disagree_with_itself` walks every pair of words
+sharing a material and checks they agree on AC and threshold. It is the
+guard against the exact fault the table removes - and with the numbers
+hand-written it would have had nothing to compare.
+
+`a_floor_is_half_the_wall_and_they_share_everything_else` checks the
+rule on stone and wood as well as the ice pair that suggested it.
+
+### Carried forward
+
+- **Depth is split out, by Dave's ruling.** Every pit and every depth
+  of water is one five-foot span today. "60 per 5 feet" needs a second
+  number that no column holds, so a `depth` column is its own cycle
+  with its own migration.
+- The numbers most likely to move: `LOOSE` at 20 - sand and mud are 10
+  as a floor, which is very soft - and `EARTH` at 30.
+- A road is masonry, and was indestructible until today.
+
+1358 tests.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

@@ -230,6 +230,86 @@ impl Footing {
 /// **THE THRESHOLD IS THE POINT.** Damage below it does nothing at all,
 /// which is what stops a dagger felling a stone wall over twenty
 /// patient rounds.
+/// What a thing is made of.
+///
+/// 264. SO THIRTEEN HAND-WRITTEN NUMBERS BECOME FIVE FACTS AND A
+/// MULTIPLIER. Hit points used to be assigned per WORD, which meant a
+/// stone wall and a stone floor could disagree about stone and nothing
+/// would notice. A material is asked once and every word made of it
+/// agrees by construction.
+///
+/// `hp` IS FOR A FIVE-FOOT SPAN - one wall square's worth. That is the
+/// unit the whole table is in, and it is why a pit works: filling five
+/// feet of hole costs what raising five feet of wall costs, because
+/// both are five feet of the same arithmetic.
+///
+/// THE THRESHOLD BELONGS HERE AND DOES NOT SCALE. Dave's ruling: it is
+/// how much force the STUFF shrugs off, not how much of it there is.
+/// Half a slab of stone is still stone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Material {
+    pub ac: i64,
+    /// Hit points for a five-foot span.
+    pub hp: i64,
+    pub threshold: i64,
+}
+
+impl Material {
+    const fn of(ac: i64, hp: i64, threshold: i64) -> Self {
+        Material { ac, hp, threshold }
+    }
+
+    /// Masonry and bedrock. One material, because `stone_wall` and
+    /// `rock_wall` have never differed by a point.
+    pub const STONE: Material = Material::of(17, 60, 10);
+    /// Beams and standing timber.
+    pub const TIMBER: Material = Material::of(15, 40, 5);
+    /// Planks and boards.
+    pub const WOOD: Material = Material::of(15, 30, 5);
+    pub const ICE: Material = Material::of(13, 30, 5);
+    pub const IRON: Material = Material::of(19, 30, 10);
+    /// Growing things that are in the way rather than holding anything
+    /// up. No threshold - there is nothing in a bramble to shrug a blow
+    /// off with.
+    pub const GREENERY: Material = Material::of(15, 15, 0);
+    /// Packed earth.
+    pub const EARTH: Material = Material::of(12, 30, 0);
+    /// Sand, scree, mud, marsh - anything that will not hold an edge.
+    pub const LOOSE: Material = Material::of(10, 20, 0);
+    /// WHAT IT COSTS TO FILL FIVE FEET OF VOLUME.
+    ///
+    /// 262. Dave's ruling: a pit and a depth of water are destroyed by
+    /// FILLING them, at the same rate as building. Sixty is `STONE`'s
+    /// span, which is the point - four squares of rubble fill a pit
+    /// exactly as four raise a wall.
+    ///
+    /// ONE MATERIAL FOR BOTH, because the number is about the volume
+    /// and not about what is currently in it.
+    pub const FILL: Material = Material::of(10, 60, 0);
+}
+
+/// How much of a material a square holds.
+///
+/// 264. A WALL IS A SPAN AND A FLOOR IS A SLAB. Dave's rule - a surface
+/// is half - with the one case that already existed as the proof:
+/// `ice_wall` was 30 and `ice` was 15 before any of this was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bulk {
+    /// A five-foot span: a wall square, or five feet of depth.
+    Span,
+    /// Half of one. A floor, or water you can stand up in.
+    Slab,
+}
+
+impl Bulk {
+    pub fn of(self, hp: i64) -> i64 {
+        match self {
+            Bulk::Span => hp,
+            Bulk::Slab => hp / 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Integrity {
     pub ac: i64,
@@ -717,42 +797,80 @@ impl Terrain {
         matches!(self, Terrain::Ramp | Terrain::Stairs)
     }
 
+    /// What this is made of, and how much of it there is.
+    ///
+    /// 264. THE ONLY PLACE A WORD MEETS A MATERIAL. `None` is "there is
+    /// nothing here to break" - a hole in a wall, the lip of a drop, a
+    /// lawn - and is checked against `destruction()` by a test, so the
+    /// two tables cannot drift.
+    pub fn makeup(self) -> Option<(Material, Bulk)> {
+        use Bulk::*;
+        use Terrain::*;
+        Some(match self {
+            // ---- things that stand up ----
+            StoneWall | RockWall => (Material::STONE, Span),
+            TimberWall | Trees => (Material::TIMBER, Span),
+            WoodenWall => (Material::WOOD, Span),
+            IceWall => (Material::ICE, Span),
+            IronGrate => (Material::IRON, Span),
+            Brush | Vines => (Material::GREENERY, Span),
+
+            // ---- things you stand on: half a span, by Dave's rule ----
+            Rock | StoneFloor | Road | Stairs | Ramp => (Material::STONE, Slab),
+            WoodFloor => (Material::WOOD, Slab),
+            Dirt => (Material::EARTH, Slab),
+            Sand | Scree | Mud | Marsh => (Material::LOOSE, Slab),
+            // THE NUMBER THAT PROVED THE RULE. 30 halved is 15, which
+            // is what `ice` was before the table existed.
+            Ice => (Material::ICE, Slab),
+
+            // ---- volumes, destroyed by filling them ----
+            Pit | DeepWater => (Material::FILL, Span),
+            // Ankle deep rather than over your head.
+            ShallowWater => (Material::FILL, Slab),
+
+            // ---- nothing to break ----
+            //
+            // A DOORWAY IS A HOLE IN A WALL; there is no doorway there
+            // to attack, only the wall it was cut in. A LEDGE is the lip
+            // of a drop, which is a fact about the floor rather than a
+            // substance. LAVA is not ruled yet - filling it is a
+            // question nobody has answered, and answering it quietly
+            // here would be inventing a rule.
+            Doorway | Ledge | Lava => return None,
+            // Cover that is in the way and nothing more.
+            Grass | Snow | Rubble => return None,
+            // A DOOR IS NOT A SLAB OF ANYTHING. Twenty-five where wood
+            // is thirty, and it has moving parts - see `integrity`.
+            DoorOpen | DoorClosed | DoorBroken => return None,
+        })
+    }
+
     /// Can this be attacked, and how tough is it?
+    ///
+    /// 264. DERIVED FROM `makeup`, with doors as the single exception
+    /// the table does not fit.
     pub fn integrity(self) -> Option<Integrity> {
         use Terrain::*;
-        let solid = |ac, hp, threshold| {
-            Some(Integrity {
-                ac,
-                hp,
-                threshold,
-                mechanism: false,
-            })
-        };
-        let works = |ac, hp, threshold| {
-            Some(Integrity {
-                ac,
-                hp,
-                threshold,
+        // A door is 25 where wood is 30, and it is the only thing in
+        // the vocabulary with a MECHANISM - which is what `Wear::Broken`
+        // needs to mean anything. Both reasons are about this being a
+        // fitting rather than a quantity of material.
+        if matches!(self, DoorOpen | DoorClosed | DoorBroken) {
+            return Some(Integrity {
+                ac: 15,
+                hp: 25,
+                threshold: 5,
                 mechanism: true,
-            })
-        };
-        match self {
-            StoneWall | RockWall => solid(17, 60, 10),
-            TimberWall => solid(15, 40, 5),
-            WoodenWall => solid(15, 30, 5),
-            Trees => solid(15, 40, 5),
-            IceWall => solid(13, 30, 5),
-            Ice => solid(13, 15, 0),
-            Vines | Brush => solid(15, 15, 0),
-            // THE SAME DOOR THROUGHOUT. All three words are one leaf of
-            // timber in one frame; only its position differs, so they
-            // must not differ in how hard it is to break.
-            DoorOpen | DoorClosed | DoorBroken => works(15, 25, 5),
-            // A grate is barred, not hinged - there is nothing in it to
-            // jam, so it is cut out rather than broken.
-            IronGrate => solid(19, 30, 10),
-            _ => None,
+            });
         }
+        let (m, bulk) = self.makeup()?;
+        Some(Integrity {
+            ac: m.ac,
+            hp: bulk.of(m.hp),
+            threshold: m.threshold,
+            mechanism: false,
+        })
     }
 
     /// What is left when it is destroyed.
@@ -767,6 +885,33 @@ impl Terrain {
             Vines | Brush | IronGrate | DoorOpen | DoorClosed | DoorBroken => Clears,
             // A lid. The map says what is under it.
             Ice => Reveals,
+
+            // 264. EVERY GROUND YOU CAN DIG THROUGH IS A LID TOO.
+            //
+            // Breaking a floor opens what is under it - the sub, or a
+            // `Pit` where the map says nothing. That is 262's "cleared
+            // to open passage", and it is the same answer ice has
+            // always given, which is why it is the same word.
+            //
+            // IT DOES NOT YET PRODUCE RUBBLE. Digging both opens a
+            // floor AND leaves debris on it, and `Destruction` can say
+            // one thing. 262 agreed it becomes a pair; until it does,
+            // the hole is the half that matters and the spoil is the
+            // half that is missing. Said out loud rather than quietly
+            // dropped.
+            Rock | Dirt | Mud | Sand | Scree | Road | StoneFloor | WoodFloor | Marsh
+            | Ramp | Stairs => Reveals,
+
+            // 262. A VOLUME IS DESTROYED BY FILLING IT, so what is left
+            // is what you filled it with - solid ground, not a hole and
+            // not a reveal. A pit does not uncover anything; it stops
+            // being a pit.
+            Pit => Leaves(Rock),
+            // Over your head becomes wadeable, and wadeable becomes a
+            // drained bed. TWO STEPS, which is what Dave described, and
+            // the existing word does it with no new machinery.
+            DeepWater => Leaves(ShallowWater),
+            ShallowWater => Leaves(Mud),
             _ => Indestructible,
         }
     }
@@ -1323,10 +1468,157 @@ mod tests {
     }
 
     #[test]
-    fn grass_and_roads_cannot_be_attacked() {
+    fn a_lawn_cannot_be_attacked_but_a_road_can_be_dug_up() {
+        // 264. THE ROAD MOVED SIDES. It was indestructible because no
+        // ground had hit points; it is masonry at half a span now, and
+        // digging through it opens what is under it. Grass is still
+        // scenery - there is nothing there to break.
         assert_eq!(Terrain::Grass.integrity(), None);
-        assert_eq!(Terrain::Road.integrity(), None);
         assert_eq!(Terrain::Grass.destruction(), Destruction::Indestructible);
+
+        let road = Terrain::Road.integrity().unwrap();
+        assert_eq!(road.hp, 30, "half of stone's span");
+        assert_eq!(road.ac, Material::STONE.ac);
+        assert_eq!(Terrain::Road.destruction(), Destruction::Reveals);
+    }
+
+    /* ============ 264. THE MATERIAL TABLE ============ */
+
+    #[test]
+    fn the_table_reproduces_every_number_that_was_hand_written() {
+        // THE TEST THAT EARNS THE REFACTOR ITS KEEP.
+        //
+        // 262 agreed the material table was worth having only if it
+        // gave back the numbers that were already there rather than
+        // quietly restating thirteen of them. These are those numbers,
+        // copied from the hand-written `integrity` that this replaced.
+        for (t, ac, hp, threshold) in [
+            (Terrain::StoneWall, 17, 60, 10),
+            (Terrain::RockWall, 17, 60, 10),
+            (Terrain::TimberWall, 15, 40, 5),
+            (Terrain::WoodenWall, 15, 30, 5),
+            (Terrain::IceWall, 13, 30, 5),
+            (Terrain::Trees, 15, 40, 5),
+            (Terrain::Brush, 15, 15, 0),
+            (Terrain::Vines, 15, 15, 0),
+            (Terrain::IronGrate, 19, 30, 10),
+            (Terrain::DoorOpen, 15, 25, 5),
+            (Terrain::DoorClosed, 15, 25, 5),
+            (Terrain::DoorBroken, 15, 25, 5),
+            // ICE KEEPS ITS AC AND ITS HIT POINTS. Only the threshold
+            // moved, which is the next test.
+            (Terrain::Ice, 13, 15, 5),
+        ] {
+            let i = t.integrity().unwrap_or_else(|| panic!("{} lost its integrity", t.key()));
+            assert_eq!((i.ac, i.hp), (ac, hp), "{}", t.key());
+            assert_eq!(i.threshold, threshold, "{} threshold", t.key());
+        }
+    }
+
+    #[test]
+    fn exactly_one_number_changed_and_it_was_ruled() {
+        // Ice as a floor had a threshold of 0 while `ice_wall` had 5 -
+        // the single value in the table the material rule could not
+        // derive. Dave's ruling: a threshold is how much force the
+        // STUFF shrugs off, so it does not halve when the slab does.
+        assert_eq!(Terrain::Ice.integrity().unwrap().threshold, 5);
+        assert_eq!(
+            Terrain::Ice.integrity().unwrap().threshold,
+            Terrain::IceWall.integrity().unwrap().threshold,
+            "one material, one threshold"
+        );
+    }
+
+    #[test]
+    fn a_floor_is_half_the_wall_and_they_share_everything_else() {
+        // The rule, and the pair that demonstrated it before it was
+        // written down.
+        let wall = Terrain::IceWall.integrity().unwrap();
+        let floor = Terrain::Ice.integrity().unwrap();
+        assert_eq!(floor.hp * 2, wall.hp);
+        assert_eq!(floor.ac, wall.ac);
+        assert_eq!(floor.threshold, wall.threshold);
+
+        // And it is a rule rather than a coincidence of ice.
+        for (span, slab) in [
+            (Terrain::StoneWall, Terrain::StoneFloor),
+            (Terrain::WoodenWall, Terrain::WoodFloor),
+        ] {
+            assert_eq!(
+                slab.integrity().unwrap().hp * 2,
+                span.integrity().unwrap().hp,
+                "{}",
+                slab.key()
+            );
+        }
+    }
+
+    #[test]
+    fn one_material_cannot_disagree_with_itself() {
+        // The fault the table exists to make impossible: stone as a
+        // wall and stone as a floor differing about stone.
+        for a in ALL {
+            for b in ALL {
+                let (Some((ma, _)), Some((mb, _))) = (a.makeup(), b.makeup()) else {
+                    continue;
+                };
+                if ma == mb {
+                    let (ia, ib) = (a.integrity().unwrap(), b.integrity().unwrap());
+                    assert_eq!(ia.ac, ib.ac, "{} and {}", a.key(), b.key());
+                    assert_eq!(ia.threshold, ib.threshold, "{} and {}", a.key(), b.key());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn filling_five_feet_costs_what_raising_five_feet_costs() {
+        // 262. Dave's ruling, as arithmetic: a pit is sixty because a
+        // span of stone is sixty, so the four squares of rubble that
+        // raise a wall are the four that fill a hole.
+        assert_eq!(Material::FILL.hp, Material::STONE.hp);
+        assert_eq!(Terrain::Pit.integrity().unwrap().hp, 60);
+        assert_eq!(Terrain::DeepWater.integrity().unwrap().hp, 60);
+        // Water you can stand up in is half the volume.
+        assert_eq!(Terrain::ShallowWater.integrity().unwrap().hp, 30);
+    }
+
+    #[test]
+    fn a_volume_filled_is_not_a_volume_revealed() {
+        // A pit does not uncover what is beneath it - it STOPS BEING a
+        // pit. That is the difference between breaking a lid and
+        // filling a hole, and it is why they are different words.
+        assert_eq!(Terrain::Pit.destruction(), Destruction::Leaves(Terrain::Rock));
+        let hole = Stack::of(Terrain::Pit).over(Terrain::Lava);
+        let filled = hole.destroyed(Layer::Surface);
+        assert_eq!(filled.surface, Terrain::Rock);
+        assert_eq!(filled.sub, Some(Terrain::Lava), "what was under it is still under it");
+    }
+
+    #[test]
+    fn deep_water_drains_in_two_steps() {
+        let deep = Stack::of(Terrain::DeepWater);
+        let shallow = deep.destroyed(Layer::Surface);
+        assert_eq!(shallow.surface, Terrain::ShallowWater);
+        assert_eq!(shallow.footing().needs, None, "you can stand up in it");
+        let bed = shallow.destroyed(Layer::Surface);
+        assert_eq!(bed.surface, Terrain::Mud);
+    }
+
+    #[test]
+    fn three_things_are_still_waiting_on_a_ruling() {
+        // NAMED RATHER THAN FORGOTTEN. Each of these has a reason to be
+        // `None` today and a reason it might not stay that way.
+        //
+        // A DOORWAY is a hole in a wall - there is no doorway to
+        // attack, only the wall it was cut in. A LEDGE is the lip of a
+        // drop, a fact about a floor rather than a substance. LAVA has
+        // no ruling about filling it, and inventing one quietly here
+        // would be exactly the kind of fact nobody agreed to.
+        for t in [Terrain::Doorway, Terrain::Ledge, Terrain::Lava] {
+            assert_eq!(t.makeup(), None, "{}", t.key());
+            assert_eq!(t.integrity(), None, "{}", t.key());
+        }
     }
 
     #[test]
@@ -1441,7 +1733,10 @@ mod tests {
         // one extra fact. None of them may borrow another's.
         assert!(!Terrain::Doorway.links_levels());
         assert!(!Terrain::StoneFloor.links_levels());
-        assert_eq!(Terrain::Ramp.integrity(), None);
+        // 264. A ramp is masonry like the floor it joins; what makes it
+        // a ramp is `links_levels`, not being unbreakable.
+        assert!(Terrain::Ramp.links_levels());
+        assert_eq!(Terrain::Ramp.integrity(), Terrain::StoneFloor.integrity());
     }
 
     /* ---------------- wear ---------------- */
@@ -1498,9 +1793,17 @@ mod tests {
 
     #[test]
     fn a_thing_with_no_threshold_takes_everything() {
-        let ice = Terrain::Ice.integrity().unwrap();
-        assert_eq!(ice.threshold, 0);
-        assert_eq!(ice.lands(1), 1);
+        // 264. THIS USED TO ASK ICE, which had a threshold of 0 while
+        // `ice_wall` had 5 - the one number in the whole table that the
+        // material rule could not derive. Dave ruled that a threshold
+        // belongs to the MATERIAL and does not scale with how much of
+        // it there is, so ice is 5 in both layers now and this asks
+        // something that genuinely shrugs off nothing.
+        let brush = Terrain::Brush.integrity().unwrap();
+        assert_eq!(brush.threshold, 0);
+        assert_eq!(brush.lands(1), 1);
+
+        assert_eq!(Terrain::Ice.integrity().unwrap().threshold, 5);
     }
 
     #[test]
@@ -1563,7 +1866,10 @@ mod tests {
     fn destroying_what_cannot_be_destroyed_changes_nothing() {
         // The command refuses before it gets here, but a rule that is
         // only correct when it is called correctly is not a rule.
-        let meadow = Stack::of(Terrain::Dirt).under(Terrain::Grass);
+        // 264. DIRT IS DIGGABLE NOW, so this asks lava - which has no
+        // ruling about filling it and therefore no hit points - under a
+        // lawn, which is scenery.
+        let meadow = Stack::of(Terrain::Lava).under(Terrain::Grass);
         assert_eq!(meadow.destroyed(Layer::Cover), meadow);
         assert_eq!(meadow.destroyed(Layer::Surface), meadow);
     }
@@ -1729,3 +2035,4 @@ mod tests {
         assert_eq!(Terrain::Ledge.footing().hazard, None);
     }
 }
+

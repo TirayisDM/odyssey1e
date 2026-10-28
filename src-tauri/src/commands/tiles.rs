@@ -2288,7 +2288,9 @@ mod tests {
     fn a_word_nothing_can_hurt_offers_no_numbers_at_all() {
         // NOT ZEROES. A floor with "AC 0, 0 / 0 hp" would be a panel
         // inventing a fight nobody can have.
-        let l = layer_detail("surface", Terrain::Dirt, None);
+        // 264. DIRT CAN BE DUG NOW, so the word with no numbers at all
+        // has to be one that is genuinely scenery.
+        let l = layer_detail("cover", Terrain::Grass, None);
         assert_eq!(l.ac, None);
         assert_eq!(l.hp_now, None);
         assert_eq!(l.hp_max, None);

@@ -11314,6 +11314,183 @@ the layout.
 
 ---
 
+## 261. The third layer got a control
+
+**2026-10-27.** Dave: *"just noticed there does not appear to be a way
+to see or edit, or set Sub"*.
+
+He was right, and it was worse than missing a picker.
+
+**226 gave a square a `sub` and Rust has carried it on every path
+since** - `Tile.sub` is validated through `word()` into the `Stack`,
+`set_map` takes it into the recipe, `inspect_square` builds a layer for
+it, `save_map_as` writes it out. Every one of those has worked for
+cycles. Nothing on screen could set one.
+
+So `main.js` sent `sub: null` on Describe and **omitted the field
+entirely** when painting, where serde defaulted it to `None`. The layer
+has been empty in the live database for its whole life. The only place
+it was ever exercised is a test - `Stack::of(Ice).over(DeepWater)`.
+
+Two selects, in Edit, under the two that were already there.
+
+### The picker asks for `sub`, not for `surface`
+
+`may()` gives `Layer::Sub` and `Layer::Surface` the same arm - ground or
+a wall - so filtering the new dropdown on `w.surface` would have been
+correct today and silently wrong the day the two diverge. **A rule
+inferred rather than asked for**, which is the shape this project keeps
+finding. `Word` carries a `sub` boolean now.
+
+The test that guards it asserts `x.sub == x.surface` for every word and
+**says in its own comment that it is a tautology**. It is there for the
+day they split: the pickers already ask the right question and would
+follow a change without a sound, and this is the line that makes the
+change visible instead.
+
+Layer legality was never in JavaScript - `terrain.rs:825` checks
+`!s.may(Layer::Sub)` on the stack. The dropdown filter is a courtesy.
+
+### The first square with something underneath it
+
+`deep_water` + `ice` + `snow`, and the panel reads all three. That is
+also what raised the next question, which is its own entry.
+
+---
+
+## 262. The rules of breaking things, agreed before any of it is built
+
+**2026-10-27.** No code. Dave looked at `deep_water + ice + snow` in the
+panel, saw *"snow - cannot be attacked"*, and asked what happens to the
+snow when the ice is destroyed.
+
+**Nothing, twice over.** `Destruction` only ever described the layer
+that was destroyed; there is no clause about what sits on top of a lid
+that goes. And `destruction()` has exactly one caller in the binary -
+the panel, which turns it into English. **No code applies a
+`Destruction` to anything.** Nothing in this app can damage a square.
+
+That turned into a design session. These are the rulings, recorded
+before anything is built, because they change what the damage cycle has
+to be.
+
+### Walls leave the ground layers
+
+`may()` gave `Surface | Sub => ground || is_wall()`, so a wall was legal
+as a floor - sixty hit points of ground, by accident. It is being
+narrowed to `ground`.
+
+**Free to change: zero rows in `tiles` have a wall in `surface` or
+`sub`.** The existing comment already assumed it - a wall `Leaves(Rubble)`
+*"ON the floor it stood on, which the surface layer still holds"*, which
+only parses if the wall was cover.
+
+### Hit points come from a material, and a surface is half of it
+
+Dave's rule, and **the numbers were already obeying it**. `ice_wall` is
+AC 13 / 30 hp; `ice` as a surface is AC 13 / 15 hp. Same material, same
+AC, exactly half. A material table would reproduce today's thirteen
+numbers rather than overwrite them, which is what earns it the right to
+exist.
+
+Threshold does NOT scale - `ice_wall` is 5 and `ice` is 0. A threshold
+is about how brittle a material is, not how thick the slab is.
+
+### Rubble forks per material, and its hit points are its volume
+
+**This is the ruling the rest hangs on.**
+
+`Destruction::Leaves(Terrain)` returns a WORD, and `Terrain` is a closed
+vocabulary - there is nowhere for "rubble that remembers it used to be
+stone" to live. So rubble forks: `rubble_stone`, `rubble_wood`. The
+alternative was writing the amount into `cover_hp` at the moment of
+collapse, which makes it the first stored number whose MAXIMUM nobody
+can re-derive on read - the two-places problem with extra steps.
+
+And then the part that makes the whole construction idea cheap:
+
+**A square of rubble's hit points ARE its volume.** Attacking it
+subtracts; spending it to build subtracts; at zero it clears. One
+number, one mechanism, two narrations. No inventory, no new column, no
+second system.
+
+Rubble stops being indestructible, which it is today - and which made it
+a dead end in the destruction graph: a breached wall left debris that
+could never be cleared.
+
+### Destruction is lossy at four to one
+
+Rubble is 25% of what it came from. Stone wall 60 leaves rubble 15.
+**Four squares of rubble rebuild one wall.** That falls straight out of
+the percentage rather than being chosen, and it is being kept rather
+than rounded to something friendlier: you cannot un-break a wall from
+its own debris, so breaching one is a decision instead of a loan.
+
+The fork pays for itself here too. `rubble_stone` builds stone walls and
+`rubble_wood` builds wooden ones, and **nobody has to write a rule
+forbidding a timber wall made of shattered granite** - the vocabulary
+refuses it for free.
+
+### Pits and water break the same way, and rubble is the weapon
+
+Dave: *"Pits and water should function like walls and rubble, same with
+HP - you destroy a pit by using rubble, you destroy water by using
+rubble, at same rate of use and recovery as building."*
+
+So voids and liquids are **not** indestructible after all - they have
+hit points like everything else, and the thing that damages them is
+rubble rather than a weapon. Filling is priced identically to building,
+which settles the exchange rate the economy needed: a 60-point pit takes
+four squares of rubble, the same four that would raise a wall.
+
+Deep water to shallow water to dry ground reads as two steps of
+`Leaves`, which the existing enum can already say. **Not yet ruled** -
+and the hit points of a pit and of each depth of water still have to be
+assigned with the material table.
+
+### `Destruction` has to stop being single-choice
+
+Digging rock for rubble does **two things at once**: it opens the floor
+(revealing the sub, or a pit where there is none) AND it leaves debris
+on top. The enum can say one or the other.
+
+It becomes a pair - what the surface becomes, and what lands as cover.
+That is a change to the shape of a type rather than to a number, so it
+gets its own cycle and its own tests.
+
+### A floor destroyed over nothing is a pit
+
+`Reveals` currently says *"ice over nothing is a question the map
+answers, not this file"*. It is answered: no sub means `pit`. Ruled now
+and left inert, because falling is not built.
+
+### The order, and why
+
+**Damage first.** Then the material table. Then construction.
+
+Everything above is the economy of a resource that **cannot currently be
+produced**. No command writes `surface_hp` or `cover_hp`, so there is no
+rubble, and a build verb would have nothing to spend. The construction
+system is the third thing, and it will be easier to design after
+watching a wall actually come down.
+
+### Carried forward
+
+- `tiles` has `surface_hp` and `cover_hp` - **two columns, three
+  layers**. Destructible subs need a migration, not a rules change.
+- A wall repainted stone to timber keeps stone's damage. Same shape of
+  question as the snow: what happens to layer B when layer A changes
+  underneath it.
+- Whether 50% has the direction right. A floor is backed by earth and a
+  wall is free-standing, so the floor should arguably be harder. Ice is
+  a LID, which is the one case where thinner is literally true - the
+  leap is generalising from a lid to every floor.
+- Area effects - a mine, a disintegrate - are adjacent-square targeting,
+  which is a different problem from per-square hit points and is not in
+  any of the three cycles above.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

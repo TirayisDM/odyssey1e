@@ -1144,6 +1144,15 @@ pub fn inspect_square(
 #[derive(Debug, Clone, Serialize)]
 pub struct Word {
     pub key: String,
+    /// 261. ASKED FOR SEPARATELY EVEN THOUGH IT IS CURRENTLY THE SAME
+    /// ANSWER AS `surface`.
+    ///
+    /// `may()` happens to give `Sub` and `Surface` the same list today -
+    /// ground or a wall. A picker that read `surface` and called it
+    /// close enough would be a rule inferred rather than asked for, and
+    /// the day `may()` splits them the dropdown would be quietly wrong
+    /// with nothing to catch it. One more boolean costs nothing.
+    pub sub: bool,
     pub surface: bool,
     pub cover: bool,
 }
@@ -1169,6 +1178,7 @@ pub fn terrain_words() -> Vec<Word> {
         .iter()
         .map(|t| Word {
             key: t.key().to_string(),
+            sub: t.may(crate::terrain::Layer::Sub),
             surface: t.may(crate::terrain::Layer::Surface),
             cover: t.may(crate::terrain::Layer::Cover),
         })
@@ -2264,6 +2274,19 @@ mod tests {
         // The five walls are the only words legal in both.
         let both = w.iter().filter(|x| x.surface && x.cover).count();
         assert_eq!(both, 5);
+
+        // 261. AND THE SUB LAYER IS CARRIED RATHER THAN INFERRED.
+        //
+        // `may()` gives `Sub` and `Surface` the same list, so this
+        // assertion is a tautology TODAY and says so plainly. It is
+        // here for the day the two layers diverge: the picker asks for
+        // `sub` and would follow a change silently, and this is the
+        // line that makes the change visible instead.
+        for x in &w {
+            assert_eq!(x.sub, x.surface, "{} - the two ground layers have                  split, which is fine; the pickers are already asking                  the right question, so update this test", x.key);
+        }
+        assert!(w.iter().find(|x| x.key == "deep_water").unwrap().sub);
+        assert!(!w.iter().find(|x| x.key == "grass").unwrap().sub);
     }
 
     #[test]

@@ -9848,7 +9848,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       height: Number(document.querySelector("#mv-h").value) || null,
       surface: pick("#mv-dsurface"),
       cover: pick("#mv-dcover"),
-      sub: null,
+      // 261. Was hardcoded `null` here, which is how the layer stayed
+      // empty: `set_map` has always taken it.
+      sub: pick("#mv-dsub"),
     });
     if (!r.ok) return mvSay(r.error, true);
     await drawLevel();
@@ -10342,6 +10344,10 @@ window.addEventListener("DOMContentLoaded", async () => {
           z: z,
           surface: surface,
           cover: pick("#mv-cover"),
+          // 261. `Tile.sub` has existed since 226 and the field was
+          // simply never sent, so serde defaulted it to None on every
+          // paint this app has ever done.
+          sub: pick("#mv-sub"),
           facing: Number(document.querySelector("#mv-facing").value) || 0,
           // 254. Empty means plain, which is what `shape.rs` reads an
           // empty string as.
@@ -10356,7 +10362,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   /* ---- the pickers, from Rust ---- */
 
   // 237/240. BOTH VOCABULARIES FROM THE ONE CALL. `terrain_words`
-  // already says which layers each word is legal in, so four pickers
+  // already says which layers each word is legal in, so six pickers
   // cost one round trip and none can drift from `terrain::ALL`.
   (async () => {
     const words = await call("terrain_words");
@@ -10374,8 +10380,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     };
     fill("#mv-surface", (w) => w.surface, "— pick ground —");
     fill("#mv-cover", (w) => w.cover, "— no cover —");
+    // 261. FROM `w.sub`, NOT FROM `w.surface`. They are the same list
+    // today; asking the question that is actually being answered is
+    // what keeps them the same list.
+    fill("#mv-sub", (w) => w.sub, "— nothing underneath —");
     fill("#mv-dsurface", (w) => w.surface, "— no default ground —");
     fill("#mv-dcover", (w) => w.cover, "— no default cover —");
+    fill("#mv-dsub", (w) => w.sub, "— nothing underneath —");
   })();
 
   document.querySelector("#refresh-games").addEventListener("click", loadGames);

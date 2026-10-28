@@ -45,7 +45,7 @@ use crate::commands::Ctx;
 use crate::supabase::{self, AppState};
 use crate::grid::Point;
 use crate::ground::Bounds;
-use crate::terrain::{Facing, Stack, Terrain};
+use crate::terrain::{Facing, Layer, Stack, Terrain};
 
 /// How many rows go out in one request.
 ///
@@ -865,6 +865,340 @@ pub fn map_at(
         squares,
         standing: here,
     })
+}
+
+/* ============== 263. SOMETHING CAN FINALLY BREAK ============== */
+
+/// What one blow did.
+///
+/// SAID BACK RATHER THAN LEFT TO BE RE-READ. The threshold means the
+/// amount that lands is not the amount that was typed, and a player
+/// watching a wall not budge deserves to be told why.
+#[derive(Debug, Serialize)]
+pub struct Hit {
+    pub layer: &'static str,
+    pub word: String,
+    /// What was typed.
+    pub rolled: i64,
+    /// What got through the threshold. Zero is a legitimate answer.
+    pub landed: i64,
+    pub hp_before: i64,
+    pub hp_after: i64,
+    pub wear: &'static str,
+    /// Set when the layer stopped existing as it was.
+    pub became: Option<String>,
+    /// The square after, in the order the panel reads layers.
+    pub now: Vec<String>,
+}
+
+/// Which layer a caller means.
+fn layer_of(k: &str) -> Result<Layer, String> {
+    match k {
+        "sub" => Ok(Layer::Sub),
+        "surface" => Ok(Layer::Surface),
+        "cover" => Ok(Layer::Cover),
+        other => Err(format!("\"{}\" is not a layer - sub, surface or cover", other)),
+    }
+}
+
+fn word_in(stack: &Stack, layer: Layer) -> Option<Terrain> {
+    match layer {
+        Layer::Sub => stack.sub,
+        Layer::Surface => Some(stack.surface),
+        Layer::Cover => stack.cover,
+    }
+}
+
+/// Read one square the way the panel does: the row if there is one, the
+/// recipe if there is not.
+fn square_at(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+) -> Result<(Option<Tile>, Stack), String> {
+    let (bounds, default) = map_of(token, location_id)?;
+    let rows = supabase::rest_get(
+        token,
+        "tiles",
+        &[
+            ("select", COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("x", &format!("eq.{}", x)),
+            ("y", &format!("eq.{}", y)),
+            ("z", &format!("eq.{}", z)),
+        ],
+    )?;
+    let tiles: Vec<Tile> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the square: {}", e))?;
+    let tile = tiles.into_iter().next();
+    let row = match tile.as_ref() {
+        Some(t) => Some(t.stack()?),
+        None => None,
+    };
+    let stack = crate::ground::at(row, default, bounds, x, y)
+        .ok_or_else(|| format!("({}, {}, {}) is not mapped", x, y, z))?;
+    Ok((tile, stack))
+}
+
+/// Write a square's layers and hit points.
+///
+/// PATCH WHEN THE ROW EXISTS, INSERT WHEN IT DOES NOT, and never an
+/// upsert of the whole row: `leads_to`, `to_x`, `to_y` and `to_z` live
+/// on the same row and a full overwrite would quietly take a staircase
+/// out of a square somebody hit.
+///
+/// 226. AND HITTING AN IMPLIED SQUARE WRITES IT DOWN. A square the room
+/// merely implies has nowhere to record damage, so the first blow is
+/// also the moment it stops being a recipe and becomes a row. That is
+/// not a side effect to apologise for - it is the only honest place to
+/// put the number.
+#[allow(clippy::too_many_arguments)]
+fn save_square(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+    existing: bool,
+    stack: &Stack,
+    surface_hp: Option<i64>,
+    cover_hp: Option<i64>,
+) -> Result<(), String> {
+    let body = json!({
+        "surface": stack.surface.key(),
+        "cover": stack.cover.map(|t| t.key()),
+        "sub": stack.sub.map(|t| t.key()),
+        "surface_hp": surface_hp,
+        "cover_hp": cover_hp,
+    });
+    if existing {
+        let filter = [
+            ("location_id", format!("eq.{}", location_id)),
+            ("x", format!("eq.{}", x)),
+            ("y", format!("eq.{}", y)),
+            ("z", format!("eq.{}", z)),
+        ];
+        let filter: Vec<(&str, &str)> =
+            filter.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        supabase::rest_update(token, "tiles", &filter, &body)
+            .map_err(|e| denied(e, "change the map"))?;
+        return Ok(());
+    }
+    let mut body = body;
+    body["location_id"] = json!(location_id);
+    body["x"] = json!(x);
+    body["y"] = json!(y);
+    body["z"] = json!(z);
+    body["facing"] = json!(stack.facing as i16);
+    supabase::rest_insert(token, "tiles", &json!([body]))
+        .map_err(|e| denied(e, "change the map"))?;
+    Ok(())
+}
+
+/// Which hit points the square still has after a blow.
+///
+/// 263. A LAYER THAT CHANGED WORD IS A NEW THING and starts whole, so
+/// its number goes back to null rather than carrying the old one's
+/// wounds across. A layer that did NOT change keeps what it had.
+///
+/// THAT SECOND HALF IS THE WHOLE POINT. The first version of this reset
+/// both columns whenever anything was destroyed, which meant breaching
+/// a wall standing on damaged ice silently healed the ice - a repair
+/// nobody asked for, arriving as the ordinary answer to a different
+/// question. 245 exists to stop exactly that, and it was reintroduced
+/// three layers down from where 245 is written.
+///
+/// The test is the comparison itself: the words before and the words
+/// after. Nothing here has to know WHICH destruction fired.
+fn columns_after(
+    before: &Stack,
+    after: &Stack,
+    hit: Layer,
+    was_surface_hp: Option<i64>,
+    was_cover_hp: Option<i64>,
+    // What is left on the layer that was hit - `None` if it is gone.
+    left: Option<i64>,
+) -> (Option<i64>, Option<i64>) {
+    let surface = match hit == Layer::Surface {
+        true => left,
+        false => (after.surface == before.surface).then_some(was_surface_hp).flatten(),
+    };
+    let cover = match hit == Layer::Cover {
+        true => left,
+        false => (after.cover == before.cover).then_some(was_cover_hp).flatten(),
+    };
+    // The column cannot hold a number for a cover that is not there.
+    (surface, after.cover.is_some().then_some(cover).flatten())
+}
+
+/// Hit one layer of one square.
+///
+/// 245 SAID DAMAGE IS PLAY, and this is the play half. It SUBTRACTS,
+/// through `Integrity::lands`, and fires `destruction()` at zero. The
+/// authoring half is `set_square_hp`, which assigns and fires nothing.
+///
+/// THE FIRST CALLER `Wear`, `integrity()` AND `destruction()` HAVE EVER
+/// HAD outside `terrain.rs`. Thirteen words have carried hit points
+/// since 226 and not one of them had ever been reachable.
+#[tauri::command]
+pub fn damage_square(
+    state: State<AppState>,
+    location_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+    layer: String,
+    amount: i64,
+) -> Result<Hit, String> {
+    if amount < 0 {
+        return Err("damage is not negative - to repair, set the hit points".to_string());
+    }
+    let which = layer_of(&layer)?;
+    let token = state.token()?;
+    let (tile, stack) = square_at(&token, &location_id, x, y, z)?;
+
+    let word = word_in(&stack, which)
+        .ok_or_else(|| format!("there is no {} on ({}, {}, {})", layer, x, y, z))?;
+    let integ = word
+        .integrity()
+        .ok_or_else(|| format!("{} cannot be attacked", word.key()))?;
+
+    // WHERE THE NUMBER COMES FROM. Null means nobody has hurt this,
+    // which is the maximum - not zero. Read the other way every
+    // untouched door in the world would already be destroyed.
+    let stored = match which {
+        Layer::Surface => tile.as_ref().and_then(|t| t.surface_hp),
+        Layer::Cover => tile.as_ref().and_then(|t| t.cover_hp),
+        // Two columns, three layers - see `Stack::destroyed`.
+        Layer::Sub => return Err("a sub has no hit points yet".to_string()),
+    };
+    let before = stored.unwrap_or(integ.hp);
+    let landed = integ.lands(amount);
+    let after = (before - landed).max(0);
+
+    let gone = after == 0;
+    let next = match gone {
+        true => stack.destroyed(which),
+        false => stack,
+    };
+    // A rule that produced a square nothing could read back would be
+    // worse than a refusal.
+    next.legal()?;
+
+    let (surface_hp, cover_hp) = columns_after(
+        &stack,
+        &next,
+        which,
+        tile.as_ref().and_then(|t| t.surface_hp),
+        tile.as_ref().and_then(|t| t.cover_hp),
+        (!gone).then_some(after),
+    );
+    save_square(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        tile.is_some(),
+        &next,
+        surface_hp,
+        cover_hp,
+    )?;
+
+    let became = gone.then(|| match word_in(&next, which) {
+        Some(t) => t.key().to_string(),
+        None => "nothing".to_string(),
+    });
+    let mut now = Vec::new();
+    if let Some(t) = next.sub {
+        now.push(t.key().to_string());
+    }
+    now.push(next.surface.key().to_string());
+    if let Some(t) = next.cover {
+        now.push(t.key().to_string());
+    }
+
+    Ok(Hit {
+        layer: match which {
+            Layer::Sub => "sub",
+            Layer::Surface => "surface",
+            Layer::Cover => "cover",
+        },
+        word: word.key().to_string(),
+        rolled: amount,
+        landed,
+        hp_before: before,
+        hp_after: after,
+        wear: wear_word(integ.wear(after)),
+        became,
+        now,
+    })
+}
+
+/// State a layer's condition outright.
+///
+/// 245'S OTHER HALF. Painting is authoring, so authoring is allowed to
+/// SAY a door is half shattered without anyone having hit it - that is
+/// a DM placing a broken door, not a repair happening by accident.
+///
+/// NO THRESHOLD AND NO DESTRUCTION. This is not a blow. Zero is
+/// refused for the same reason: a destroyed thing is a different word,
+/// and reaching that by assignment would skip the rule that decides
+/// which word. `None` puts it back to untouched.
+#[tauri::command]
+pub fn set_square_hp(
+    state: State<AppState>,
+    location_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+    layer: String,
+    hp: Option<i64>,
+) -> Result<(), String> {
+    let which = layer_of(&layer)?;
+    let token = state.token()?;
+    let (tile, stack) = square_at(&token, &location_id, x, y, z)?;
+
+    let word = word_in(&stack, which)
+        .ok_or_else(|| format!("there is no {} on ({}, {}, {})", layer, x, y, z))?;
+    let integ = word
+        .integrity()
+        .ok_or_else(|| format!("{} has no hit points to set", word.key()))?;
+
+    if let Some(n) = hp {
+        if n < 1 {
+            return Err(format!(
+                "{} is destroyed at zero, which is a different word - break it instead",
+                word.key()
+            ));
+        }
+        if n > integ.hp {
+            return Err(format!(
+                "{} is worth {} hit points at most",
+                word.key(),
+                integ.hp
+            ));
+        }
+    }
+
+    let (surface_hp, cover_hp) = match which {
+        Layer::Surface => (hp, tile.as_ref().and_then(|t| t.cover_hp)),
+        Layer::Cover => (tile.as_ref().and_then(|t| t.surface_hp), hp),
+        Layer::Sub => return Err("a sub has no hit points yet".to_string()),
+    };
+    save_square(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        tile.is_some(),
+        &stack,
+        surface_hp,
+        cover_hp,
+    )
 }
 
 /* ========= 258. WHAT ONE SQUARE ACTUALLY HOLDS, FOR A PANEL ========= */
@@ -1974,6 +2308,54 @@ mod tests {
         );
     }
 
+    /* ===== 263. WHAT A BLOW LEAVES IN THE OTHER COLUMN ===== */
+
+    #[test]
+    fn breaching_a_wall_does_not_heal_the_floor_under_it() {
+        // THE FAULT THIS FUNCTION WAS EXTRACTED TO FIX. Damaged ice,
+        // a stone wall standing on it, the wall destroyed. The ice is
+        // not party to that and keeps its wounds.
+        let before = Stack::of(Terrain::Ice).under(Terrain::StoneWall);
+        let after = before.destroyed(Layer::Cover);
+        assert_eq!(after.cover, Some(Terrain::Rubble));
+
+        let (s, c) = columns_after(&before, &after, Layer::Cover, Some(5), Some(0), None);
+        assert_eq!(s, Some(5), "the ice was damaged and nothing touched it");
+        assert_eq!(c, None, "rubble is a new thing and starts whole");
+    }
+
+    #[test]
+    fn a_lid_coming_off_takes_both_columns_with_it() {
+        // Dave's square. The surface becomes water and the snow is
+        // gone, so neither number describes anything that still exists.
+        let before = Stack::of(Terrain::Ice)
+            .over(Terrain::DeepWater)
+            .under(Terrain::Snow);
+        let after = before.destroyed(Layer::Surface);
+        let (s, c) = columns_after(&before, &after, Layer::Surface, Some(3), None, None);
+        assert_eq!(s, None);
+        assert_eq!(c, None);
+    }
+
+    #[test]
+    fn a_blow_that_does_not_finish_the_job_writes_only_its_own_column() {
+        let st = Stack::of(Terrain::StoneFloor).under(Terrain::DoorClosed);
+        let (s, c) = columns_after(&st, &st, Layer::Cover, None, None, Some(12));
+        assert_eq!(s, None, "an untouched floor stays untouched");
+        assert_eq!(c, Some(12));
+    }
+
+    #[test]
+    fn an_empty_cover_cannot_carry_a_number() {
+        // `only_a_cover_can_be_damaged` in the migration refuses this
+        // at the database. It should never get that far.
+        let before = Stack::of(Terrain::Doorway).under(Terrain::DoorClosed);
+        let after = before.destroyed(Layer::Cover);
+        assert_eq!(after.cover, None, "a door clears");
+        let (_, c) = columns_after(&before, &after, Layer::Cover, None, Some(2), None);
+        assert_eq!(c, None);
+    }
+
     #[test]
     fn painting_door_broken_does_not_make_a_broken_door() {
         // THIS TEST PINS A KNOWN FAULT RATHER THAN A BEHAVIOUR WE WANT.
@@ -2271,9 +2653,11 @@ mod tests {
         let grass = w.iter().find(|x| x.key == "grass").unwrap();
         assert!(grass.cover && !grass.surface);
 
-        // The five walls are the only words legal in both.
+        // 263. NOTHING IS LEGAL IN BOTH ANY MORE. This asserted FIVE -
+        // the walls - until applying a destruction showed that a wall
+        // used as a floor becomes rubble, and rubble is not a floor.
         let both = w.iter().filter(|x| x.surface && x.cover).count();
-        assert_eq!(both, 5);
+        assert_eq!(both, 0, "a word is either ground or it stands on it");
 
         // 261. AND THE SUB LAYER IS CARRIED RATHER THAN INFERRED.
         //

@@ -540,7 +540,21 @@ impl Terrain {
                 | Stairs
         );
         match layer {
-            Layer::Surface | Layer::Sub => ground || self.is_wall(),
+            // 263. A WALL IS NOT A FLOOR.
+            //
+            // This read `ground || self.is_wall()`, so a wall was legal
+            // as a surface - sixty hit points of ground, by accident,
+            // from one arm covering two layers. Agreed out in 262 and
+            // pulled forward here because the damage sweep found what
+            // it costs: a wall destroyed as a SURFACE becomes rubble,
+            // rubble cannot be a surface, and the square could not be
+            // read back. Free to change - no row in `tiles` ever had
+            // one.
+            //
+            // A wall stands ON a floor, which is why `Leaves(Rubble)`
+            // works: the debris lands on the surface layer, which is
+            // still there because the wall was never in it.
+            Layer::Surface | Layer::Sub => ground,
             Layer::Cover => !ground,
         }
     }
@@ -829,6 +843,91 @@ impl Stack {
         Ok(())
     }
 
+    /// What this square becomes when one of its layers is destroyed.
+    ///
+    /// 263. THE FIRST PLACE A `Destruction` IS ACTUALLY APPLIED.
+    /// `destruction()` has described what is left since 226 and nothing
+    /// has ever acted on it - the panel turned it into English and that
+    /// was all. This is the rule that spends it.
+    ///
+    /// IT RETURNS A NEW STACK RATHER THAN EDITING THE SQUARE. Destroying
+    /// a thing is a question about terrain, which is a rule and belongs
+    /// here with tests; writing the answer to Postgres is plumbing and
+    /// belongs in a command.
+    pub fn destroyed(mut self, layer: Layer) -> Stack {
+        use Destruction::*;
+        match layer {
+            // THE SUB IS OUT OF REACH. There is no hit points column
+            // for it - `tiles` has two and the square has three layers -
+            // so nothing can have damaged it and this cannot be called
+            // in earnest yet. Unchanged rather than a panic: 262 has
+            // already agreed it becomes reachable, and the day the
+            // column lands this arm is where the rule goes.
+            Layer::Sub => self,
+
+            Layer::Cover => {
+                let Some(cover) = self.cover else { return self };
+                match cover.destruction() {
+                    Indestructible => self,
+                    // The debris stays in the square, ON the floor the
+                    // thing stood on - which the surface layer holds and
+                    // this does not touch.
+                    Leaves(into) => {
+                        self.cover = Some(into);
+                        self
+                    }
+                    Clears => {
+                        self.cover = None;
+                        self
+                    }
+                    // A cover is not a lid; there is nothing under it
+                    // but the floor, which is already there. No word
+                    // currently reaches this arm.
+                    Reveals => {
+                        self.cover = None;
+                        self
+                    }
+                }
+            }
+
+            Layer::Surface => match self.surface.destruction() {
+                Indestructible => self,
+                Leaves(into) => {
+                    self.surface = into;
+                    self
+                }
+                // 263. A FLOOR THAT SIMPLY GOES IS A HOLE. No surface
+                // word reaches this arm today; the answer is written
+                // down so that the day one does, it is not invented in
+                // a hurry.
+                Clears => {
+                    self.surface = Terrain::Pit;
+                    self.cover = None;
+                    self
+                }
+                // THE LID COMES OFF.
+                //
+                // 262, Dave's ruling: the cover goes with it. Snow lying
+                // on ice over deep water does not stay lying there when
+                // the ice is gone - "cannot be attacked" means nothing
+                // can TARGET the snow, not that the snow survives losing
+                // what held it up. True of every cover, not just this
+                // one, which is why it is one line here rather than a
+                // list of exceptions.
+                //
+                // AND NO SUB MEANS A PIT. 226 said "ice over nothing is
+                // a question the map answers, not this file"; 262
+                // answered it.
+                Reveals => {
+                    self.surface = self.sub.unwrap_or(Terrain::Pit);
+                    self.sub = None;
+                    self.cover = None;
+                    self
+                }
+            },
+        }
+    }
+
     /// What crossing this square actually costs.
     ///
     /// THE COMBINATION, in one place:
@@ -1073,11 +1172,19 @@ mod tests {
     }
 
     #[test]
-    fn only_walls_are_legal_in_all_three() {
+    fn no_word_is_legal_in_all_three() {
+        // 263. THE WALLS USED TO BE, and that was the bug. A word is
+        // either something you stand ON or something that stands on it;
+        // nothing is both.
         for t in ALL {
             let all_three =
                 t.may(Layer::Sub) && t.may(Layer::Surface) && t.may(Layer::Cover);
-            assert_eq!(all_three, t.is_wall(), "{}", t.key());
+            assert!(!all_three, "{} is legal in every layer", t.key());
+        }
+        // The two ground layers remain one list - see the `sub` flag on
+        // `Word`, which asks for this rather than assuming it.
+        for t in ALL {
+            assert_eq!(t.may(Layer::Sub), t.may(Layer::Surface), "{}", t.key());
         }
     }
 
@@ -1403,6 +1510,95 @@ mod tests {
         assert_eq!(Terrain::Ice.destruction(), Destruction::Reveals);
     }
 
+    /* ============ 263. APPLYING A DESTRUCTION ============ */
+
+    #[test]
+    fn the_lid_comes_off_and_the_snow_goes_with_it() {
+        // Dave's square: deep water, under ice, under snow.
+        let frozen = Stack::of(Terrain::Ice)
+            .over(Terrain::DeepWater)
+            .under(Terrain::Snow);
+        let open = frozen.destroyed(Layer::Surface);
+
+        assert_eq!(open.surface, Terrain::DeepWater, "what was beneath is now the floor");
+        assert_eq!(open.sub, None, "and there is nothing beneath it any more");
+        assert_eq!(
+            open.cover, None,
+            "262: a lid takes what sat on it - snow does not float"
+        );
+
+        // AND THE CROSSING CHANGES WITH IT, which is the whole point of
+        // doing this to a stack rather than to a word.
+        assert_eq!(frozen.footing().needs, None, "ice is walked on");
+        assert_eq!(open.footing().needs, Some(Mode::Swim), "water is swum");
+    }
+
+    #[test]
+    fn ice_over_nothing_leaves_a_hole() {
+        let thin = Stack::of(Terrain::Ice);
+        assert_eq!(thin.destroyed(Layer::Surface).surface, Terrain::Pit);
+    }
+
+    #[test]
+    fn a_wall_becomes_its_own_debris_and_the_floor_is_untouched() {
+        let wall = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
+        let after = wall.destroyed(Layer::Cover);
+        assert_eq!(after.cover, Some(Terrain::Rubble));
+        assert_eq!(after.surface, Terrain::StoneFloor, "debris lands ON the floor");
+        // A breach is passable; a wall is not.
+        assert_eq!(wall.footing().going, Going::Blocked);
+        assert_eq!(after.footing().going, Going::Difficult);
+    }
+
+    #[test]
+    fn a_door_broken_open_leaves_the_doorway_behind() {
+        let door = Stack::of(Terrain::Doorway).under(Terrain::DoorClosed);
+        let after = door.destroyed(Layer::Cover);
+        assert_eq!(after.cover, None, "clears - nothing remains of it");
+        assert_eq!(after.surface, Terrain::Doorway);
+        assert!(!after.footing().blocks_sight);
+    }
+
+    #[test]
+    fn destroying_what_cannot_be_destroyed_changes_nothing() {
+        // The command refuses before it gets here, but a rule that is
+        // only correct when it is called correctly is not a rule.
+        let meadow = Stack::of(Terrain::Dirt).under(Terrain::Grass);
+        assert_eq!(meadow.destroyed(Layer::Cover), meadow);
+        assert_eq!(meadow.destroyed(Layer::Surface), meadow);
+    }
+
+    #[test]
+    fn the_sub_is_out_of_reach() {
+        // Two hit points columns, three layers. Until that changes this
+        // is unreachable, and saying so is better than a half-rule.
+        let s = Stack::of(Terrain::Ice).over(Terrain::DeepWater);
+        assert_eq!(s.destroyed(Layer::Sub), s);
+    }
+
+    #[test]
+    fn everything_destructible_lands_somewhere_legal() {
+        // THE SWEEP. A destruction that produces an illegal stack would
+        // be a square nothing could read back.
+        for t in ALL {
+            if t.destruction() == Destruction::Indestructible {
+                continue;
+            }
+            if t.may(Layer::Cover) {
+                let s = Stack::of(Terrain::StoneFloor).under(t);
+                s.destroyed(Layer::Cover)
+                    .legal()
+                    .unwrap_or_else(|e| panic!("{} as cover: {}", t.key(), e));
+            }
+            if t.may(Layer::Surface) {
+                let s = Stack::of(t).over(Terrain::Rock);
+                s.destroyed(Layer::Surface)
+                    .legal()
+                    .unwrap_or_else(|e| panic!("{} as surface: {}", t.key(), e));
+            }
+        }
+    }
+
     #[test]
     fn whatever_a_wall_leaves_is_legal_where_the_wall_was() {
         // A cover must collapse into something that can BE a cover, or
@@ -1459,7 +1655,12 @@ mod tests {
         // rather than trusted: add a word to the enum and forget the
         // migration and this fails, instead of a map refusing to save
         // in front of a table of players.
-        let sql = include_str!("../../supabase/migrations/226_a_square_in_three_layers.sql");
+        // 263. THE NEWEST FILE THAT DEFINES THESE LISTS, not the one
+        // that first wrote them. 115 says an applied migration is a
+        // record rather than a draft, so narrowing the ground layers
+        // meant a new file - and the guard has to read whichever file
+        // is currently the database's copy of the vocabulary.
+        let sql = include_str!("../../supabase/migrations/263_a_wall_is_not_a_floor.sql");
 
         for (name, layer) in [
             ("a_surface_is_ground", Layer::Surface),

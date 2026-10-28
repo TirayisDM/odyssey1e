@@ -1230,6 +1230,21 @@
                   </select>
                 </div>
 
+                <!-- 263. THE PLAY HALF OF 245. A blow SUBTRACTS, through
+                     the threshold, and fires the destruction at zero.
+                     The DM types the number they already rolled at the
+                     table - nothing here rolls anything, because an
+                     attack roll is a creature's problem and not a
+                     square's. -->
+                <div id="tp-play" class="tptools" hidden>
+                  <div class="tpband">deal damage</div>
+                  <select id="mv-hitlayer" class="tpfield"></select>
+                  <div class="tppair">
+                    <input id="mv-hit" type="number" value="0" min="0" title="damage dealt" />
+                    <button id="mv-strike" class="ghost tiny">Hit it</button>
+                  </div>
+                </div>
+
                 <div id="tp-edit" class="tptools" hidden>
                   <div class="tpband">brush</div>
                   <select id="mv-surface" class="tpfield"></select>
@@ -1280,6 +1295,20 @@
                   <select id="mv-dcover" class="tpfield" title="default cover"></select>
                   <select id="mv-dsub" class="tpfield" title="default sub - what is under the floor"></select>
                   <button id="mv-describe" class="ghost tiny tpfield">Describe</button>
+
+                  <!-- 263. THE AUTHORING HALF OF 245. This ASSIGNS: no
+                       threshold, nothing destroyed, no rule fired. It is
+                       a DM stating that this door is already half
+                       shattered when the players walk in, which is what
+                       a placeable broken door actually needs. Clear puts
+                       it back to untouched. -->
+                  <div class="tpband">condition</div>
+                  <select id="mv-hplayer" class="tpfield"></select>
+                  <div class="tppair">
+                    <input id="mv-hp" type="number" value="0" min="1" title="hit points left" />
+                    <button id="mv-sethp" class="ghost tiny">Set</button>
+                    <button id="mv-clearhp" class="ghost tiny">Clear</button>
+                  </div>
                 </div>
               </aside>
               <div class="mapscroll">

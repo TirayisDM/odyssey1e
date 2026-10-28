@@ -10024,8 +10024,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     // click is suppressed, so there is nothing for a control to do.
     const act = document.querySelector("#tp-act");
     const edit = document.querySelector("#tp-edit");
+    const play = document.querySelector("#tp-play");
     if (act) act.hidden = tpMode === "inspect";
     if (edit) edit.hidden = tpMode !== "edit";
+    if (play) play.hidden = tpMode !== "play";
 
     const sel = document.querySelector("#mv-mode");
     const allowed = TP_ACTS[tpMode] || [];
@@ -10199,6 +10201,32 @@ window.addEventListener("DOMContentLoaded", async () => {
     // the truth rather than left out or filled with a blank.
     body.append(tpEl("div", "tpderived", "fixtures cannot be attached to a square yet"));
 
+    // 263. THE LAYER PICKERS COME FROM THIS SQUARE, not from the
+    // vocabulary. Only a layer with an `Integrity` can be hurt, and
+    // offering "surface" over a dirt floor would be offering a blow
+    // that Rust is about to refuse. A control that cannot be wrong is
+    // better than an error message that explains why it was.
+    const hurtable = d.layers.filter((l) => l.ac != null);
+    for (const id of ["#mv-hitlayer", "#mv-hplayer"]) {
+      const sel = document.querySelector(id);
+      if (!sel) continue;
+      const was = sel.value;
+      sel.replaceChildren();
+      for (const l of hurtable) {
+        const o = document.createElement("option");
+        o.value = l.layer;
+        o.textContent = l.layer + " · " + l.word;
+        sel.append(o);
+      }
+      if (!hurtable.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = "— nothing here can be hurt —";
+        sel.append(o);
+      }
+      if (hurtable.some((l) => l.layer === was)) sel.value = was;
+    }
+
     show();
 
     // LAST, because the canvas must be in the document before it can
@@ -10213,6 +10241,55 @@ window.addEventListener("DOMContentLoaded", async () => {
       shape: d.shape,
     } : null);
   }
+
+  /// Everything the two condition controls share: which square, which
+  /// layer, and what to do with the answer.
+  async function onSquare(cmd, extra, sel) {
+    if (!mvSelected) return mvSay("click a square first", true);
+    const loc = mvWhere();
+    if (!loc) return mvSay("pick a place", true);
+    const layer = document.querySelector(sel).value;
+    if (!layer) return mvSay("nothing on this square can be hurt", true);
+    const r = await tryCall(cmd, {
+      locationId: loc,
+      x: mvSelected.x,
+      y: mvSelected.y,
+      z: mvZ(),
+      layer: layer,
+      ...extra,
+    });
+    if (!r.ok) return mvSay(r.error, true);
+    // THE MAP REDRAWS BECAUSE THE WORD MAY HAVE CHANGED. A destroyed
+    // wall is rubble now, and `drawLevel` renders the panel too.
+    await drawLevel();
+    return r.value;
+  }
+
+  document.querySelector("#mv-strike").addEventListener("click", async () => {
+    const amount = Number(document.querySelector("#mv-hit").value) || 0;
+    const hit = await onSquare("damage_square", { amount }, "#mv-hitlayer");
+    if (!hit) return;
+    // SAID BACK, because the threshold means what landed is often not
+    // what was typed, and a wall that does not budge should say why
+    // rather than look broken.
+    mvSay(
+      hit.word + ": " + hit.landed + " of " + hit.rolled + " landed · " +
+        hit.hp_before + " to " + hit.hp_after + " · " + hit.wear +
+        (hit.became ? " · became " + hit.became : "") +
+        " · now " + hit.now.join(" + ")
+    );
+  });
+
+  document.querySelector("#mv-sethp").addEventListener("click", async () => {
+    const hp = Number(document.querySelector("#mv-hp").value) || 0;
+    const r = await onSquare("set_square_hp", { hp }, "#mv-hplayer");
+    if (r !== undefined) mvSay("condition set to " + hp);
+  });
+
+  document.querySelector("#mv-clearhp").addEventListener("click", async () => {
+    const r = await onSquare("set_square_hp", { hp: null }, "#mv-hplayer");
+    if (r !== undefined) mvSay("put back to untouched");
+  });
 
   mvCanvas.addEventListener("mousemove", (ev) => {
     const at = squareUnder(ev);

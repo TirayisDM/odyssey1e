@@ -11491,6 +11491,124 @@ watching a wall actually come down.
 
 ---
 
+## 263. Something can finally break
+
+**2026-10-27.** Dave: *"yes - snow clears with the ice, build it"*. And
+afterwards: *"tested the snow then hit a wall till it turned to
+rubble"*.
+
+Thirteen terrain words have carried hit points since 226. Until today
+not one of them was reachable by anything - `Wear`, `integrity()` and
+`destruction()` had no caller outside `terrain.rs` except the panel,
+which turned them into English and stopped.
+
+### The rule is a stack in and a stack out
+
+`Stack::destroyed(layer)` is the first place a `Destruction` is APPLIED
+rather than described. It takes the square and returns the square it
+becomes, which is why it lives in `terrain.rs` with tests and not in a
+command: destroying a thing is a question about terrain, and writing
+the answer to Postgres is plumbing.
+
+**Dave's ruling is one arm of it.** `Reveals` sets the surface to the
+sub, empties the sub, **and empties the cover**. Snow on ice over deep
+water does not stay lying there when the ice goes - *"cannot be
+attacked"* means nothing can TARGET the snow, not that the snow
+survives losing what held it up. One line, true of every cover, rather
+than a list of exceptions.
+
+The test asserts the footing flips from walking to swimming, which is
+the point of doing this to a stack instead of to a word.
+
+And `Reveals` over nothing is a `pit`, which 226 explicitly refused to
+answer and 262 answered.
+
+### Two halves of 245, as two controls
+
+**Play deals damage.** It SUBTRACTS, through `Integrity::lands`, so the
+threshold is real for the first time: four damage at a stone wall does
+nothing and the status line says `0 of 4 landed`. At zero the
+destruction fires.
+
+**Edit states a condition.** It ASSIGNS - no threshold, nothing
+destroyed, no rule fired. That is the DM saying this door is already
+half shattered when the players walk in, which is what a placeable
+broken door actually needs. Zero is refused, because a destroyed thing
+is a different word and reaching it by assignment would skip the rule
+that decides which word.
+
+Nothing rolls. The DM types the number they already rolled at the
+table; an attack roll is a creature's problem, not a square's.
+
+**The layer pickers are filled from the SQUARE, not from the
+vocabulary.** Only a layer with an `Integrity` is offered, so a control
+that cannot be wrong replaces an error message explaining why it was.
+
+### Hitting an implied square writes it down
+
+226 says a missing row means unmapped, and a square the room merely
+IMPLIES has nowhere to record damage. So the first blow is also the
+moment it stops being a recipe and becomes a row. Not a side effect to
+apologise for - the only honest place to put the number.
+
+The write is a PATCH when the row exists and an INSERT when it does
+not, never an upsert of the whole row: `leads_to` and its three
+coordinates live on the same row, and a full overwrite would quietly
+take a staircase out of a square somebody hit.
+
+### A sweep test found walls-as-floors, so 262's ruling came forward
+
+`everything_destructible_lands_somewhere_legal` destroys every
+destructible word in every layer it is legal in and asserts the result
+is a readable square. It failed on the first run:
+
+**`stone_wall` as a SURFACE destroys into `rubble`, and rubble cannot
+be a surface.**
+
+`may()` read `ground || self.is_wall()` for both ground layers, so a
+wall was legal as a floor - sixty hit points of ground, from one arm
+covering two cases. 262 had already agreed to narrow it; this is why it
+could not wait. Shipping damage first would have let a square be
+written that could not be read back.
+
+**And that needed a migration**, which was not foreseen. The three
+layer constraints are a copy of `may()` living in SQL, and
+`the_migration_and_the_enum_cannot_drift` reads the file and diffs it
+against `terrain::ALL` - so narrowing the enum without narrowing the
+database fails the build, by design. That guard did its job.
+
+`263_a_wall_is_not_a_floor.sql` drops and re-adds all three by name.
+115: it does not edit 226. It restates the cover list unchanged,
+because the guard reads ONE file and a partial file would be a partial
+guard. Applied; zero rows affected, checked before the ruling.
+
+### Breaching a wall was healing the floor under it
+
+Found while reading back the first version, before it was committed.
+
+The hit points bookkeeping reset BOTH columns whenever anything was
+destroyed. So a stone wall standing on damaged ice, breached, put the
+ice back to full.
+
+**A silent repair, arriving as the ordinary answer to a different
+question.** 245 exists to stop precisely that, and it had been
+reintroduced three layers below where 245 is written - not by ignoring
+the rule but by being careless in the plumbing underneath it.
+
+It is now `columns_after`, which compares the words before against the
+words after and keeps what did not change. Nothing in it knows which
+destruction fired. Four tests, one of them that exact wall-on-ice case.
+
+### Still true
+
+`painting_door_broken_does_not_make_a_broken_door` still passes. Edit's
+condition control reaches a broken door in two steps; making the word
+stamp itself is its own ruling.
+
+1350 tests.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

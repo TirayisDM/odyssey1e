@@ -10263,6 +10263,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     return workers > 1 ? " by " + workers : "";
   }
 
+  // 270. AND WHAT IT WAS WORKED WITH. "by hand" is said OUT LOUD rather
+  // than left blank: bare hands are legal on sand and brambles and on
+  // nothing else, so seeing it is how a DM knows the rule fired rather
+  // than wondering whether the tool was read at all.
+  function with_(tool) {
+    return tool ? " with " + tool : " by hand";
+  }
+
   async function onSquare(cmd, extra, sel) {
     if (!mvSelected) return mvSay("click a square first", true);
     const loc = mvWhere();
@@ -10406,6 +10414,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       await drawLevel();
       return mvSay(
         v.what + ": " + v.placed + " placed in " + v.took + crew(v.workers) +
+          with_(v.tool) +
           " · " + v.hp_now + " of " + v.hp_full +
           (v.done ? " · DONE" : "") +
           (v.became ? " · became " + v.became : "") +
@@ -10436,6 +10445,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       await drawLevel();
       return mvSay(
         v.word + ": " + v.worked + " worked off in " + v.took + crew(v.workers) +
+          with_(v.tool) +
           " · " + v.hp_before + " to " + v.hp_after + " · " + v.wear +
           (v.became ? " · became " + v.became : "") +
           " · now " + v.now.join(" + ")

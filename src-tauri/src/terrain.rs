@@ -230,6 +230,68 @@ impl Footing {
 /// **THE THRESHOLD IS THE POINT.** Damage below it does nothing at all,
 /// which is what stops a dagger felling a stone wall over twenty
 /// patient rounds.
+/// What has to meet a material before any work can begin.
+///
+/// -------------------------------------------------------------------
+/// 270. A PICK IS USELESS ON A TREE
+/// -------------------------------------------------------------------
+///
+/// Dave's list - shovels, picks, digging bars, chisels, hammers - is not
+/// really a list of tools. It is a question every material asks: WHAT
+/// WILL BITE ME. That is a physical fact about the stuff, so it belongs
+/// here beside `ac`, `hp` and `threshold` and not in a table of jobs.
+///
+/// Three words cover the whole vocabulary, and each one names its own
+/// satisfiers for the refusal, so nothing downstream ever has to know
+/// what a pick is.
+///
+/// **YES OR NO, NEVER A MULTIPLIER.** The right tool works at 269's rate
+/// and the wrong one is refused outright. A "slower with the wrong tool"
+/// penalty would be a SECOND rate constant beside [`PER_POINT`], and
+/// 269's whole value is that there is exactly one - every duration in
+/// the game falls out of the material table with nothing else written
+/// down anywhere. A dial put beside that would get tuned, and the first
+/// tuning would stop five hours being five hours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bite {
+    /// Driven into something that will not yield: a pick, a bar, a
+    /// sledge, a hammer and chisel.
+    Point,
+    /// Cut, sawn or chopped through: an axe, a saw, a billhook.
+    Edge,
+    /// Lifted and carried rather than broken: a shovel, a spade.
+    Scoop,
+}
+
+impl Bite {
+    /// 237'S RULE AGAIN: the vocabulary is a rule and lives in Rust.
+    /// Postgres needs a copy to refuse nonsense and that copy is
+    /// CHECKED by `the_bite_words_and_the_migration_cannot_drift`.
+    pub const ALL: [Bite; 3] = [Bite::Point, Bite::Edge, Bite::Scoop];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Bite::Point => "point",
+            Bite::Edge => "edge",
+            Bite::Scoop => "scoop",
+        }
+    }
+
+    pub fn of_key(key: &str) -> Option<Bite> {
+        Bite::ALL.into_iter().find(|b| b.key() == key)
+    }
+
+    /// WHAT TO GO AND FETCH - said in a refusal, which is the only
+    /// place this rule has to turn back into English.
+    pub fn tools(self) -> &'static str {
+        match self {
+            Bite::Point => "a pick, a digging bar, a sledge, or a hammer and chisel",
+            Bite::Edge => "an axe, a saw or a billhook",
+            Bite::Scoop => "a shovel or a spade",
+        }
+    }
+}
+
 /// What a thing is made of.
 ///
 /// 264. SO THIRTEEN HAND-WRITTEN NUMBERS BECOME FIVE FACTS AND A
@@ -252,30 +314,53 @@ pub struct Material {
     /// Hit points for a five-foot span.
     pub hp: i64,
     pub threshold: i64,
+    /// 270. WHAT HAS TO BITE IT TO WORK IT. `None` is "hands will do",
+    /// which Dave ruled for the two materials that will not hold an
+    /// edge in the first place.
+    ///
+    /// NOT A FACT ABOUT HOW MUCH THERE IS, which is why it sits beside
+    /// the threshold rather than being scaled by [`Bulk`]. Half a slab
+    /// of stone still wants a pick. What bulk DOES change is handled in
+    /// [`Terrain::bite`], and for a different reason.
+    pub bite: Option<Bite>,
 }
 
 impl Material {
-    const fn of(ac: i64, hp: i64, threshold: i64) -> Self {
-        Material { ac, hp, threshold }
+    const fn of(ac: i64, hp: i64, threshold: i64, bite: Option<Bite>) -> Self {
+        Material {
+            ac,
+            hp,
+            threshold,
+            bite,
+        }
     }
 
     /// Masonry and bedrock. One material, because `stone_wall` and
     /// `rock_wall` have never differed by a point.
-    pub const STONE: Material = Material::of(17, 60, 10);
+    pub const STONE: Material = Material::of(17, 60, 10, Some(Bite::Point));
     /// Beams and standing timber.
-    pub const TIMBER: Material = Material::of(15, 40, 5);
+    pub const TIMBER: Material = Material::of(15, 40, 5, Some(Bite::Edge));
     /// Planks and boards.
-    pub const WOOD: Material = Material::of(15, 30, 5);
-    pub const ICE: Material = Material::of(13, 30, 5);
-    pub const IRON: Material = Material::of(19, 30, 10);
+    pub const WOOD: Material = Material::of(15, 30, 5, Some(Bite::Edge));
+    pub const ICE: Material = Material::of(13, 30, 5, Some(Bite::Point));
+    pub const IRON: Material = Material::of(19, 30, 10, Some(Bite::Point));
     /// Growing things that are in the way rather than holding anything
     /// up. No threshold - there is nothing in a bramble to shrug a blow
     /// off with.
-    pub const GREENERY: Material = Material::of(15, 15, 0);
+    ///
+    /// 270. AND NO TOOL EITHER. Dave's ruling: brambles come up by
+    /// hand. Slowly and unpleasantly, which is what the hour and a
+    /// quarter is for.
+    pub const GREENERY: Material = Material::of(15, 15, 0, None);
     /// Packed earth.
-    pub const EARTH: Material = Material::of(12, 30, 0);
+    pub const EARTH: Material = Material::of(12, 30, 0, Some(Bite::Scoop));
     /// Sand, scree, mud, marsh - anything that will not hold an edge.
-    pub const LOOSE: Material = Material::of(10, 20, 0);
+    ///
+    /// 270. AND NOTHING IS NEEDED TO MOVE IT. Dave's ruling, and the
+    /// reason it is the right one: a rule that made a beach impassable
+    /// without ironmongery would be a worse lie than bare hands on
+    /// stone ever was.
+    pub const LOOSE: Material = Material::of(10, 20, 0, None);
     /// WHAT IT COSTS TO FILL FIVE FEET OF VOLUME.
     ///
     /// 262. Dave's ruling: a pit and a depth of water are destroyed by
@@ -285,7 +370,10 @@ impl Material {
     ///
     /// ONE MATERIAL FOR BOTH, because the number is about the volume
     /// and not about what is currently in it.
-    pub const FILL: Material = Material::of(10, 60, 0);
+    ///
+    /// 270. FILLING IS SHOVEL WORK, which agrees with the debris going
+    /// in from the other side - see [`Terrain::bite`].
+    pub const FILL: Material = Material::of(10, 60, 0, Some(Bite::Scoop));
 }
 
 /// How much of a material a square holds.
@@ -1053,6 +1141,50 @@ impl Terrain {
             threshold: m.threshold,
             mechanism: false,
         })
+    }
+
+    /// What has to bite this before work on it can begin.
+    ///
+    /// ---------------------------------------------------------------
+    /// 270. IT IS MATERIAL **TIMES** BULK, NOT MATERIAL
+    /// ---------------------------------------------------------------
+    ///
+    /// Breaking a stone wall wants a pick. **Shovelling a heap of broken
+    /// stone wants a shovel** - the same material, a different tool. Had
+    /// this lived on [`Material`] alone a pick would shift rubble and a
+    /// shovel never would, which is backwards.
+    ///
+    /// So a [`Bulk::Quarter`] is scoop work whatever it is made of,
+    /// because it has ALREADY BEEN BROKEN: you are not cutting it, you
+    /// are moving it. And that prices 268 for free, with no second
+    /// decision taken - building spends debris, so building reads scoop,
+    /// and filling a pit agrees from both sides at once.
+    ///
+    /// UNLESS THE MATERIAL NEEDED NOTHING TO BEGIN WITH. Dug sand is
+    /// still sand, and hands that could dig the bank can move the spoil.
+    /// Without this, digging a beach bare-handed would pile up a heap
+    /// that then needed a shovel - which is the kind of near-miss that
+    /// reads as an ordinary answer.
+    ///
+    /// `None` MEANS NOTHING IS NEEDED. It also covers the words with no
+    /// material at all, and the two never have to be told apart: every
+    /// caller has already asked [`Terrain::integrity`] and been refused
+    /// if there was nothing here to work.
+    pub fn bite(self) -> Option<Bite> {
+        use Terrain::*;
+        // THE SAME SHAPE AS `integrity`, AND FOR ITS REASON. A door is a
+        // fitting rather than a quantity of material, so it has no
+        // makeup - but it is still made of wood and you still take an
+        // axe to it. Without this a door would be the one thing in the
+        // game that bare hands could take apart.
+        if matches!(self, DoorOpen | DoorClosed | DoorBroken) {
+            return Some(Bite::Edge);
+        }
+        let (m, bulk) = self.makeup()?;
+        match bulk {
+            Bulk::Quarter => m.bite.map(|_| Bite::Scoop),
+            _ => m.bite,
+        }
     }
 
     /// What is left when it is destroyed.
@@ -2121,6 +2253,125 @@ mod tests {
 
     /* ====== 268. SPENDING A HEAP ====== */
 
+    /* ====== 270. WHAT BITES WHAT ====== */
+
+    /// The words that need no tool at all.
+    ///
+    /// The first six are Dave's ruling outright - sand and brambles.
+    /// The seventh is on this list by DERIVATION rather than by
+    /// ruling, and `dug_sand_is_still_sand` is where that is argued.
+    #[cfg(test)]
+    const BY_HAND: [Terrain; 7] = [
+        Terrain::Sand,
+        Terrain::Scree,
+        Terrain::Mud,
+        Terrain::Marsh,
+        Terrain::Brush,
+        Terrain::Vines,
+        Terrain::RubbleEarth,
+    ];
+
+    #[test]
+    fn a_pick_is_useless_on_a_tree() {
+        assert_eq!(Terrain::StoneWall.bite(), Some(Bite::Point));
+        assert_eq!(Terrain::RockWall.bite(), Some(Bite::Point));
+        assert_eq!(Terrain::IceWall.bite(), Some(Bite::Point));
+        assert_eq!(Terrain::IronGrate.bite(), Some(Bite::Point));
+        assert_eq!(Terrain::Trees.bite(), Some(Bite::Edge));
+        assert_eq!(Terrain::TimberWall.bite(), Some(Bite::Edge));
+        assert_eq!(Terrain::WoodFloor.bite(), Some(Bite::Edge));
+        assert_eq!(Terrain::Dirt.bite(), Some(Bite::Scoop));
+        assert_eq!(Terrain::Pit.bite(), Some(Bite::Scoop));
+    }
+
+    #[test]
+    fn half_a_slab_of_stone_still_wants_a_pick() {
+        // THE BITE DOES NOT SCALE, which is the threshold's argument
+        // again: it is about what the stuff is, not how much of it
+        // there is. A floor is half a wall and takes the same tool.
+        assert_eq!(Terrain::StoneFloor.bite(), Terrain::StoneWall.bite());
+    }
+
+    #[test]
+    fn sand_and_brambles_come_up_by_hand() {
+        // DAVE'S RULING. A rule that made a beach impassable without
+        // ironmongery would be a worse lie than bare hands on stone.
+        for t in BY_HAND {
+            assert_eq!(t.bite(), None, "{} should need no tool", t.key());
+        }
+    }
+
+    #[test]
+    fn breaking_a_wall_and_shifting_its_debris_want_different_tools() {
+        // THE WHOLE FIND OF THE CYCLE, stated as the case that proves
+        // the bite cannot live on Material alone. Same stone, and a
+        // pick for one and a shovel for the other.
+        let wall = Terrain::StoneWall;
+        let heap = wall.destruction().spoil.expect("a stone wall leaves rubble");
+        assert_eq!(wall.bite(), Some(Bite::Point));
+        assert_eq!(heap.bite(), Some(Bite::Scoop));
+        assert_ne!(wall.bite(), heap.bite());
+    }
+
+    #[test]
+    fn a_broken_thing_is_shovelled_whatever_it_was() {
+        assert_eq!(Terrain::Rubble.bite(), Some(Bite::Scoop));
+        assert_eq!(Terrain::RubbleTimber.bite(), Some(Bite::Scoop));
+        assert_eq!(Terrain::RubbleWood.bite(), Some(Bite::Scoop));
+    }
+
+    #[test]
+    fn dug_sand_is_still_sand() {
+        // AND SO THE SPOIL NEEDS WHAT THE BANK NEEDED - nothing.
+        // Otherwise digging a beach bare-handed would pile up a heap
+        // that then needed a shovel, and the hole would have appeared
+        // out of the arithmetic rather than out of a ruling.
+        let heap = Terrain::Sand
+            .destruction()
+            .spoil
+            .expect("sand leaves spoil");
+        assert_eq!(heap, Terrain::RubbleEarth);
+        assert_eq!(heap.bite(), None);
+    }
+
+    #[test]
+    fn a_door_is_still_wood() {
+        // A door has hit points and no makeup - the one word in the
+        // vocabulary like that - so without its own arm it would be the
+        // single thing bare hands could take apart.
+        for t in [Terrain::DoorOpen, Terrain::DoorClosed, Terrain::DoorBroken] {
+            assert!(t.integrity().is_some());
+            assert_eq!(t.makeup(), None);
+            assert_eq!(t.bite(), Some(Bite::Edge), "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn everything_with_hit_points_says_what_bites_it() {
+        // THE GUARD ON ADDING A WORD. A new material with hit points and
+        // no bite would be diggable with bare hands, which is 269's
+        // flagged wrongness coming back in through the table.
+        for t in ALL {
+            if t.integrity().is_none() {
+                continue;
+            }
+            assert!(
+                t.bite().is_some() || BY_HAND.contains(&t),
+                "{} has hit points but nothing is said to bite it",
+                t.key()
+            );
+        }
+    }
+
+    #[test]
+    fn every_bite_word_round_trips() {
+        for b in Bite::ALL {
+            assert_eq!(Bite::of_key(b.key()), Some(b));
+            assert!(!b.tools().is_empty());
+        }
+        assert_eq!(Bite::of_key("trowel"), None);
+    }
+
     /* ====== 269. WHAT WORK COSTS ====== */
 
     #[test]
@@ -2814,6 +3065,45 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    /// Pull an `array['a','b']` list out of the migration.
+    ///
+    /// 270. A SECOND ANCHOR, because `bites` is a `text[]` and the way
+    /// Postgres refuses an array against a list is `<@ array[...]`
+    /// rather than `in (...)`. A CHECK cannot hold a subquery, so this
+    /// is not a style choice and `constraint_words` cannot read it.
+    #[cfg(test)]
+    fn array_words(sql: &str, name: &str) -> Vec<String> {
+        let at = sql
+            .find(&format!("constraint {}", name))
+            .unwrap_or_else(|| panic!("no constraint named {}", name));
+        let open = sql[at..].find("array[").expect("constraint has no array") + at + 6;
+        let close = sql[open..].find(']').expect("unterminated array") + open;
+        sql[open..close]
+            .split(',')
+            .filter_map(|w| {
+                let w = w.trim().trim_matches('\'');
+                match w.is_empty() {
+                    true => None,
+                    false => Some(w.to_string()),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_bite_words_and_the_migration_cannot_drift() {
+        // 226'S GUARD, POINTED AT THE NEW VOCABULARY. Add a bite to the
+        // enum and forget the migration and this fails here, instead of
+        // the database refusing to save a tool in front of a table of
+        // players.
+        let sql = include_str!("../../supabase/migrations/270_what_bites_what.sql");
+        let mut in_sql = array_words(sql, "a_bite_is_a_word_the_rules_know");
+        let mut in_rust: Vec<String> = Bite::ALL.iter().map(|b| b.key().to_string()).collect();
+        in_sql.sort();
+        in_rust.sort();
+        assert_eq!(in_sql, in_rust, "the bite check disagrees with Bite::ALL");
     }
 
     #[test]

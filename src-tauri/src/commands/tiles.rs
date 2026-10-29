@@ -547,6 +547,18 @@ struct Standpoint {
     name: String,
     /// 253. Which game, so a recorded move lands in the right one.
     game_id: String,
+    /// 270. THE HOLDER, WHICH IS NOT THE CHARACTER. 031 moved objects
+    /// onto entities and `list_inventory` carries the scar: passing a
+    /// character id where a holder id belongs still compiles, and every
+    /// inventory came back empty, so a give that had worked looked like
+    /// a give that had failed. Here the same slip would refuse a dig
+    /// for having no tools while the shovel sat in the pack - which is
+    /// why this is a field on the standpoint and not a parameter
+    /// anybody could pass the wrong variable to.
+    ///
+    /// NOT `#[serde(default)]`. A select that forgets this column fails
+    /// loudly in the one place that would otherwise be silent.
+    entity_id: Option<String>,
     location_id: Option<String>,
     x: Option<i32>,
     y: Option<i32>,
@@ -1035,7 +1047,6 @@ fn columns_after(
 
 /// What a square became, once something had worn a layer down.
 struct Broke {
-    gone: bool,
     became: Option<String>,
     now: Vec<String>,
 }
@@ -1125,7 +1136,7 @@ fn wear_away(
     if let Some(t) = next.cover {
         now.push(t.key().to_string());
     }
-    Ok(Broke { gone, became, now })
+    Ok(Broke { became, now })
 }
 
 /// Hit one layer of one square.
@@ -1193,7 +1204,7 @@ pub fn damage_square(
         word,
         after,
     )?;
-    let (gone, became, now) = (broke.gone, broke.became, broke.now);
+    let (became, now) = (broke.became, broke.now);
 
     Ok(Hit {
         layer: match which {
@@ -1239,8 +1250,94 @@ pub struct Built {
     /// The heap that paid for it, and what is left in it.
     pub heap: String,
     pub heap_left: i64,
+    /// 270. What it was shifted with. None is bare hands.
+    pub tool: Option<String>,
     /// The square after, in the order the panel reads layers.
     pub now: Vec<String>,
+}
+
+/// Whether the worker is carrying something that will bite this, and
+/// what it turned out to be.
+///
+/// -------------------------------------------------------------------
+/// 270. CARRIED, NOT IN HAND
+/// -------------------------------------------------------------------
+///
+/// Dave's ruling, and the reason it is the right one: `objects.slot`
+/// says what is held, which is the correct question inside a six-second
+/// round and the wrong one across a shift measured in hours. Nobody
+/// digs all afternoon without taking the shovel out of the pack, and
+/// refusals like "the shovel is in their pack" read as fussy rather
+/// than tactical.
+///
+/// `Ok(None)` IS SUCCESS WITH BARE HANDS - sand and brambles, which the
+/// rule in `terrain.rs` says need nothing. `Ok(Some(name))` names the
+/// tool so the panel can say what the work was done with.
+///
+/// TWO REQUESTS AND A SERVER-SIDE FILTER, not an embedded join, for the
+/// reason `load_loadout` states: a join that a policy trims looks like
+/// missing data instead of a permission problem.
+fn tooled(token: &str, who: &Standpoint, word: Terrain) -> Result<Option<String>, String> {
+    let Some(wants) = word.bite() else {
+        return Ok(None);
+    };
+    let refuse = || {
+        format!(
+            "{} has nothing to work {} with - it wants {}: {}",
+            who.name,
+            word.key(),
+            wants.key(),
+            wants.tools()
+        )
+    };
+
+    let Some(entity_id) = who.entity_id.as_deref() else {
+        return Err(refuse());
+    };
+    let held = supabase::rest_get(
+        token,
+        "objects",
+        &[("select", "item_key"), ("holder_id", &format!("eq.{}", entity_id))],
+    )?;
+    let keys: Vec<String> = held
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.get("item_key"))
+                .filter_map(|v| v.as_str())
+                .map(crate::narrative::quoted)
+                .collect()
+        })
+        .unwrap_or_default();
+    // AN EMPTY `in.()` IS NOT VALID PostgREST, so this guard is
+    // load-bearing rather than tidiness - the same note load_loadout
+    // carries over the same hole.
+    if keys.is_empty() {
+        return Err(refuse());
+    }
+
+    let rows = supabase::rest_get(
+        token,
+        "items",
+        &[
+            ("select", "name,bites"),
+            ("or", &format!("(game_id.is.null,game_id.eq.{})", who.game_id)),
+            ("key", &format!("in.({})", keys.join(","))),
+            // `cs` IS ARRAY-CONTAINS. The question is asked where the
+            // rows are rather than dragged back and sifted here.
+            ("bites", &format!("cs.{{{}}}", wants.key())),
+            ("limit", "1"),
+        ],
+    )?;
+    match rows
+        .as_array()
+        .and_then(|r| r.first())
+        .and_then(|r| r.get("name"))
+        .and_then(|v| v.as_str())
+    {
+        Some(name) => Ok(Some(name.to_string())),
+        None => Err(refuse()),
+    }
 }
 
 /// Who is standing on exactly this square.
@@ -1326,7 +1423,7 @@ pub fn build_square(
         &token,
         "characters",
         &[
-            ("select", "name,game_id,location_id,x,y,z"),
+            ("select", "name,game_id,entity_id,location_id,x,y,z"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -1334,7 +1431,9 @@ pub fn build_square(
         serde_json::from_value(rows).map_err(|e| format!("could not read the builder: {}", e))?;
     let who = who.pop().ok_or("no such creature")?;
 
-    let Some(location_id) = who.location_id else {
+    // CLONED, so `who` stays whole - 270 asks it for the holder further
+    // down and a partial move here would take the name with it.
+    let Some(location_id) = who.location_id.clone() else {
         return Err(format!("{} is not anywhere", who.name));
     };
     let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
@@ -1364,6 +1463,13 @@ pub fn build_square(
         .as_ref()
         .and_then(|t| t.cover_hp)
         .unwrap_or(heap_full);
+
+    // 270. AND THE BITE COMES OFF THE HEAP, NOT OFF THE WALL. You are
+    // spending debris, and debris is shovel work whatever it used to
+    // be - so building was priced by the tool rule with no second
+    // decision taken anywhere. Filling a pit agrees from both sides at
+    // once: the fill wants a scoop and so does the rubble going in.
+    let tool = tooled(&token, &who, heap)?;
 
     let (tile, stack) = square_at(&token, &location_id, x, y, z)?;
 
@@ -1580,6 +1686,7 @@ pub fn build_square(
         heap: heap.key().to_string(),
         heap_left,
         now,
+        tool,
         spent,
         took: crate::clock::said(spent),
         workers,
@@ -1596,6 +1703,9 @@ pub struct Dug {
     pub hp_before: i64,
     pub hp_after: i64,
     pub wear: &'static str,
+    /// 270. What it was worked with. None is bare hands, which the rule
+    /// allows for sand and brambles and nothing else.
+    pub tool: Option<String>,
     pub spent: i64,
     pub took: String,
     pub workers: i64,
@@ -1648,7 +1758,7 @@ pub fn dig_square(
         &token,
         "characters",
         &[
-            ("select", "name,game_id,location_id,x,y,z"),
+            ("select", "name,game_id,entity_id,location_id,x,y,z"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;
@@ -1656,7 +1766,9 @@ pub fn dig_square(
         serde_json::from_value(rows).map_err(|e| format!("could not read the digger: {}", e))?;
     let who = who.pop().ok_or("no such creature")?;
 
-    let Some(location_id) = who.location_id else {
+    // CLONED, so `who` stays whole - 270 asks it for the holder further
+    // down and a partial move here would take the name with it.
+    let Some(location_id) = who.location_id.clone() else {
         return Err(format!("{} is not anywhere", who.name));
     };
     let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
@@ -1685,6 +1797,14 @@ pub fn dig_square(
     // 266 UNCHANGED: a wall standing on the floor is still in the way,
     // whether you are swinging a sword at it or a pick.
     stack.reachable(which)?;
+
+    // 270. AND SOMETHING HAS TO BITE IT. This is what closes the hole
+    // 269 flagged out loud - bare hands dug stone until this line.
+    //
+    // ASKED BEFORE ANY NUMBER MOVES, like 266's check, because a
+    // refusal that had already spent the clock would be worse than no
+    // refusal at all.
+    let tool = tooled(&token, &who, word)?;
 
     let stored = match which {
         Layer::Surface => tile.as_ref().and_then(|t| t.surface_hp),
@@ -1744,6 +1864,7 @@ pub fn dig_square(
         hp_before: before,
         hp_after: after,
         wear: wear_word(integ.wear(after)),
+        tool,
         spent,
         took: crate::clock::said(spent),
         workers,
@@ -2254,7 +2375,7 @@ pub fn walk_to(
         &token,
         "characters",
         &[
-            ("select", "name,game_id,location_id,x,y,z"),
+            ("select", "name,game_id,entity_id,location_id,x,y,z"),
             ("id", &format!("eq.{}", character_id)),
         ],
     )?;

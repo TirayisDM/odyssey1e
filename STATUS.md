@@ -12222,6 +12222,173 @@ reason.
 
 ---
 
+## 270. What bites what
+
+**2026-10-29.** Dave: *"you need shovels, picks, digging bars, chisels
+hammers to dig (or magic or creature features)"*, and then on the two
+open questions: *"carried, bare hands for sand and brambles"*.
+
+269 named its own wrongness out loud - **bare hands dug stone**. This is
+the cycle that closes it.
+
+### The catalogue had no tools at all
+
+115 weapons. 13 armour. 9 instruments. 9 pieces of "equipment" that are
+lanterns and rope. **Not one shovel, pick, crowbar or mason's kit.**
+
+So a party could fell a forest with a battleaxe and could not dig a
+hole, because **nothing in the game could scoop.** That asymmetry turned
+out to be the shape of the whole cycle.
+
+### The rule is not "tool / no tool"
+
+A pick is useless on a tree. So the question a material asks is not *do
+you have a tool*, it is **what will bite me** - and that is a physical
+fact about the stuff, so it lives on `Material` beside `ac`, `hp` and
+`threshold`. Three words cover the table:
+
+| bite | materials | things that provide it |
+|---|---|---|
+| **point** | STONE, ICE, IRON | miner's pick, mattock, digging bar, crowbar, sledgehammer, mason's tools - and `war_pick`, `horsemans_pick`, `warhammer`, `light_hammer` |
+| **edge** | TIMBER, WOOD | woodcutter's axe, handsaw, billhook, carpenter's tools - and `battleaxe`, `greataxe`, `handaxe`, `bearded_axe`, `bardiche`, `sickle`, `war_scythe` |
+| **scoop** | EARTH, FILL | shovel, spade, mattock |
+| *nothing* | GREENERY, LOOSE | Dave's ruling: brambles and sand come up by hand |
+
+`items.bites` is NOT restricted to `kind = 'tool'`, on purpose: a
+warhammer IS a point, and saying so on the catalogue row is why no
+command needs a special case for "but they are holding a weapon".
+
+### The find: it is Material **times** Bulk, not Material
+
+Breaking a stone wall wants a pick. **Shovelling a heap of broken stone
+wants a shovel** - the same material, a different tool. Had the bite
+lived on `Material` alone, a pick would shift rubble and a shovel never
+would, which is backwards.
+
+`makeup()` already returns the pair, so the rule is one line: **a
+`Bulk::Quarter` is scoop work whatever it is made of, because it has
+already been broken.** You are not cutting it, you are moving it.
+
+And that **priced 268 for free, with no second decision taken.**
+Building spends debris, so building reads scoop - and filling a pit
+agrees from both sides at once, because FILL is a scoop and so is the
+rubble going into it.
+
+With one exception, which is where the near-miss was: **unless the
+material needed nothing to begin with.** Dug sand is still sand, and
+hands that could dig the bank can move the spoil. Without that clause,
+digging a beach bare-handed would pile up a heap that then needed a
+shovel - a hole that would have arrived out of the arithmetic rather
+than out of a ruling.
+
+### Yes or no, never a multiplier
+
+The tool bites or it does not. Right tool, 269's rate unchanged; wrong
+tool, refused, and the refusal names what is wanted: *"Bron has nothing
+to work stone_wall with - it wants point: a pick, a digging bar, a
+sledge, or a hammer and chisel"*.
+
+**A "slower with the wrong tool" penalty would have been a SECOND rate
+constant beside `PER_POINT`**, and 269's whole value is that there is
+exactly one - every duration in the game falls out of the material table
+with nothing else written down anywhere. A dial beside that gets tuned,
+and the first tuning stops five hours being five hours.
+
+### Carried, not in hand
+
+Dave's ruling. `objects.slot` says what is HELD, which is the right
+question inside a six-second round and the wrong one across a shift
+measured in hours - nobody digs all afternoon without taking the shovel
+out of the pack, and *"the shovel is in their pack"* reads as fussy
+rather than tactical.
+
+`entity_id` went onto `Standpoint` rather than being passed as a
+parameter, because `list_inventory` carries the scar of exactly this
+slip: 031 moved objects onto entities, a caller kept passing the
+character id, it still compiled, and **every inventory came back empty -
+so a give that had worked looked like a give that had failed.** The same
+slip here would refuse a dig for having no tools while the shovel sat in
+the pack. It is also NOT `#[serde(default)]`: a select that forgets the
+column now fails loudly instead of silently refusing.
+
+### Creature features needed no new mechanism
+
+Dave listed them, and this project had already solved them without
+noticing. **A claw is an `items` row here** - `claws`, `bite`, `talons`,
+`tusks`, `slam` - so a burrowing creature satisfies the rule through the
+same column a shovel does, with nothing written twice.
+
+Conservative on purpose: `claws` and `tusks` scoop, `slam` points.
+**Teeth get nothing.** A beaver felling a timber wall is a beaver
+speciality and not a property of jaws in general, and a wolf gnawing
+down a palisade in three hours twenty is precisely the ordinary-looking
+wrong answer. A creature that really does chew through beams wants its
+own row, not a loosened rule.
+
+### A door is still wood
+
+`door_closed` is the one word in the vocabulary with hit points and no
+`makeup()` - 264 says a door is a fitting rather than a quantity of
+material. So `bite()` has the same door arm `integrity()` has, for the
+same reason: a door is still made of wood and you still take an axe to
+it. **Without it, a door would have been the single thing in the game
+bare hands could take apart.**
+
+### What it looks like
+
+Nothing new to click. The dig and build panes now say what the work was
+done with - `stone_floor: 12 worked off in 1 hour with a Miner's Pick ·
+30 to 18 · scarred` - and **"by hand" is printed out loud** rather than
+left blank, so a DM can see the ruling fire instead of wondering whether
+the tool was read at all.
+
+`give_item` already existed, so handing somebody a shovel needs no new
+command.
+
+1404 tests. One of them is a new drift guard: `bites` is a `text[]` and
+Postgres refuses an array with `<@ array[...]` rather than `in (...)`, so
+226's guard got a second anchor rather than a second copy of the
+vocabulary.
+
+### Also fixed
+
+269 left `Broke.gone` dead and a warning with it. Removed rather than
+underscored - a field nothing reads is the two-places problem waiting to
+start.
+
+### Carried forward
+
+- **Transport is next, and the fork still wants your ruling.** Debris on
+  the map is terrain; debris in a wagon would be an item. The
+  recommendation is unchanged: debris never leaves the map, hauling
+  moves it square to square, and a cart is a multiplier on the hauling
+  verb rather than a container of rubble. Pick the other way only if
+  players should ever sell rubble or carry it upstairs in a sack.
+- **One tool for a whole crew.** 269's helpers are a NUMBER, not
+  characters, so only the named worker's kit is checked and three
+  diggers share one pick. Making helpers real characters is its own
+  cycle - and it is the same thing transport will want when a cart has
+  to belong to somebody.
+- **Magic is deliberately not a tool.** `mold earth` and `stone shape`
+  do not help you dig, they remove the stone outright. Pricing a spell
+  at five minutes a hit point so it could pose as a shovel would be a
+  fault wearing the costume of an ordinary answer. Terrain-moving spells
+  want their own verb and their own cycle.
+- **No proficiency.** 075 trains a character on an instrument by name
+  and digging does not join that list. Nobody needs a lesson to use a
+  shovel, and 269 has no roll in it anywhere.
+- A crowbar is listed as a point and is worse at rock than a digging
+  bar. The rules do not distinguish them.
+- `damage_square` still needs no tool and should not: a blow is a blow,
+  the DM types what they rolled, and gating it would mean characters for
+  trebuchets.
+- Nothing refuses work for having no action left. 051 still stands.
+- `depth`, so "60 per 5 feet" has a second number.
+- Falling, so digging the floor you stand on has a consequence.
+- `painting_door_broken_does_not_make_a_broken_door` still passes.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

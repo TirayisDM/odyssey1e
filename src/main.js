@@ -10013,7 +10013,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   /// change a SQUARE and two that move a CREATURE - and nothing said
   /// which was which. These are the two halves, and the panel mode
   /// picks one, so "click paints" cannot be selected while playing.
-  const TP_ACTS = { edit: ["paint", "erase"], play: ["stand", "walk", "build"] };
+  const TP_ACTS = {
+    edit: ["paint", "erase"],
+    play: ["stand", "walk", "build", "dig"],
+  };
 
   /// Show the controls the current mode owns, and no others.
   function syncTpMode() {
@@ -10244,6 +10247,22 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   /// Everything the two condition controls share: which square, which
   /// layer, and what to do with the answer.
+  // 269. THE SHIFT, read once for both verbs. Minutes and helpers are
+  // the same question whether the work is going into a wall or coming
+  // out of a floor, and Rust refuses a fourth worker rather than this
+  // clamping one away where nobody would see it.
+  function shift() {
+    return {
+      minutes: Number(document.querySelector("#mv-minutes").value) || 0,
+      helpers: Number(document.querySelector("#mv-helpers").value) || 0,
+    };
+  }
+
+  // SAID ONLY WHEN THERE WAS HELP, because "by 1" is noise.
+  function crew(workers) {
+    return workers > 1 ? " by " + workers : "";
+  }
+
   async function onSquare(cmd, extra, sel) {
     if (!mvSelected) return mvSay("click a square first", true);
     const loc = mvWhere();
@@ -10380,15 +10399,45 @@ window.addEventListener("DOMContentLoaded", async () => {
         y: at.y,
         z: z,
         word: pick("#mv-buildword") || null,
+        ...shift(),
       });
       if (!r.ok) return mvSay(r.error, true);
       const v = r.value;
       await drawLevel();
       return mvSay(
-        v.what + ": " + v.placed + " placed · " + v.hp_now + " of " + v.hp_full +
+        v.what + ": " + v.placed + " placed in " + v.took + crew(v.workers) +
+          " · " + v.hp_now + " of " + v.hp_full +
           (v.done ? " · DONE" : "") +
           (v.became ? " · became " + v.became : "") +
           " · " + v.heap + " left " + v.heap_left +
+          " · now " + v.now.join(" + ")
+      );
+    }
+
+    // 269. DIGGING, which is the same labour pointed the other way.
+    // The layer picker is the one damage uses: in play mode it means
+    // "which layer are you working on", and a second copy of it would
+    // be two controls for one question.
+    if (mode === "dig") {
+      const who = pick("#mv-who");
+      if (!who) return mvSay("pick a creature first", true);
+      const layer = document.querySelector("#mv-hitlayer").value;
+      if (!layer) return mvSay("nothing on this square can be worked", true);
+      const r = await tryCall("dig_square", {
+        characterId: who,
+        x: at.x,
+        y: at.y,
+        z: z,
+        layer: layer,
+        ...shift(),
+      });
+      if (!r.ok) return mvSay(r.error, true);
+      const v = r.value;
+      await drawLevel();
+      return mvSay(
+        v.word + ": " + v.worked + " worked off in " + v.took + crew(v.workers) +
+          " · " + v.hp_before + " to " + v.hp_after + " · " + v.wear +
+          (v.became ? " · became " + v.became : "") +
           " · now " + v.now.join(" + ")
       );
     }

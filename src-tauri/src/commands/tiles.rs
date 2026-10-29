@@ -1033,6 +1033,101 @@ fn columns_after(
     (surface, after.cover.is_some().then_some(cover).flatten())
 }
 
+/// What a square became, once something had worn a layer down.
+struct Broke {
+    gone: bool,
+    became: Option<String>,
+    now: Vec<String>,
+}
+
+/// Take a layer down to `after`, and write whatever that makes it.
+///
+/// -------------------------------------------------------------------
+/// 269. ONE DESTRUCTION PATH, NOW THAT TWO THINGS CAUSE IT
+/// -------------------------------------------------------------------
+///
+/// Lifted whole out of `damage_square` without a line changed, because
+/// `dig_square` needs every step of it and a second copy would be the
+/// two-places problem in its most literal form - two routes to
+/// destroying a square, drifting apart one bug fix at a time.
+///
+/// A BLOW AND A SHIFT DIFFER ONLY IN WHAT THEY SUBTRACT. One is dice
+/// through a threshold, the other is hours at Dave's rate. Everything
+/// after the subtraction - the destruction, the spoil and its amount,
+/// which hit point columns survive, the row written - is the same
+/// square either way, and now says so in one place.
+#[allow(clippy::too_many_arguments)]
+fn wear_away(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+    tile: &Option<Tile>,
+    stack: Stack,
+    which: Layer,
+    word: Terrain,
+    after: i64,
+) -> Result<Broke, String> {
+    let gone = after == 0;
+    let next = match gone {
+        true => stack.destroyed(which),
+        false => stack,
+    };
+    // A rule that produced a square nothing could read back would be
+    // worse than a refusal.
+    next.legal()?;
+
+    let (surface_hp, mut cover_hp) = columns_after(
+        &stack,
+        &next,
+        which,
+        tile.as_ref().and_then(|t| t.surface_hp),
+        tile.as_ref().and_then(|t| t.cover_hp),
+        (!gone).then_some(after),
+    );
+
+    // 265. AND THE SPOIL ARRIVES WITH AN AMOUNT.
+    //
+    // `columns_after` gives a changed layer a null, which is right for
+    // a thing that simply became something else - but debris is a
+    // QUANTITY, and the quantity is a quarter of what it came from.
+    // Null here would mean a full heap however little was broken, so a
+    // dug floor would yield as much stone as a collapsed wall.
+    if gone {
+        if let Some((mess, amount)) = word.spoil() {
+            if next.cover == Some(mess) {
+                cover_hp = Some(amount);
+            }
+        }
+    }
+    save_square(
+        token,
+        location_id,
+        x,
+        y,
+        z,
+        tile.is_some(),
+        &next,
+        surface_hp,
+        cover_hp,
+    )?;
+
+    let became = gone.then(|| match word_in(&next, which) {
+        Some(t) => t.key().to_string(),
+        None => "nothing".to_string(),
+    });
+    let mut now = Vec::new();
+    if let Some(t) = next.sub {
+        now.push(t.key().to_string());
+    }
+    now.push(next.surface.key().to_string());
+    if let Some(t) = next.cover {
+        now.push(t.key().to_string());
+    }
+    Ok(Broke { gone, became, now })
+}
+
 /// Hit one layer of one square.
 ///
 /// 245 SAID DAMAGE IS PLAY, and this is the play half. It SUBTRACTS,
@@ -1086,63 +1181,19 @@ pub fn damage_square(
     let before = stored.unwrap_or(integ.hp);
     let landed = integ.lands(amount);
     let after = (before - landed).max(0);
-
-    let gone = after == 0;
-    let next = match gone {
-        true => stack.destroyed(which),
-        false => stack,
-    };
-    // A rule that produced a square nothing could read back would be
-    // worse than a refusal.
-    next.legal()?;
-
-    let (surface_hp, mut cover_hp) = columns_after(
-        &stack,
-        &next,
-        which,
-        tile.as_ref().and_then(|t| t.surface_hp),
-        tile.as_ref().and_then(|t| t.cover_hp),
-        (!gone).then_some(after),
-    );
-
-    // 265. AND THE SPOIL ARRIVES WITH AN AMOUNT.
-    //
-    // `columns_after` gives a changed layer a null, which is right for
-    // a thing that simply became something else - but debris is a
-    // QUANTITY, and the quantity is a quarter of what it came from.
-    // Null here would mean a full heap however little was broken, so a
-    // dug floor would yield as much stone as a collapsed wall.
-    if gone {
-        if let Some((mess, amount)) = word.spoil() {
-            if next.cover == Some(mess) {
-                cover_hp = Some(amount);
-            }
-        }
-    }
-    save_square(
+    let broke = wear_away(
         &token,
         &location_id,
         x,
         y,
         z,
-        tile.is_some(),
-        &next,
-        surface_hp,
-        cover_hp,
+        &tile,
+        stack,
+        which,
+        word,
+        after,
     )?;
-
-    let became = gone.then(|| match word_in(&next, which) {
-        Some(t) => t.key().to_string(),
-        None => "nothing".to_string(),
-    });
-    let mut now = Vec::new();
-    if let Some(t) = next.sub {
-        now.push(t.key().to_string());
-    }
-    now.push(next.surface.key().to_string());
-    if let Some(t) = next.cover {
-        now.push(t.key().to_string());
-    }
+    let (gone, became, now) = (broke.gone, broke.became, broke.now);
 
     Ok(Hit {
         layer: match which {
@@ -1168,6 +1219,13 @@ pub fn damage_square(
 pub struct Built {
     /// Which layer the work went into.
     pub layer: &'static str,
+    /// 269. How long it actually took, and that said in words.
+    ///
+    /// WHAT WAS DONE, NOT WHAT WAS ASKED FOR. A shift that finishes the
+    /// wall early is not billed for the rest of the afternoon.
+    pub spent: i64,
+    pub took: String,
+    pub workers: i64,
     /// What is being made, or the volume being filled.
     pub what: String,
     /// How much of the heap went in. Never more than one heap holds.
@@ -1223,13 +1281,13 @@ fn who_is_on(
 /// Every number it needs has existed since - a quantity, a material
 /// and a rate - and nothing spent any of it. This is the verb.
 ///
-/// **ONE ACTION MOVES ONE HEAP**, which is Dave's ruling and, it turns
-/// out, not a new constant at all. A heap is a `Bulk::Quarter` and can
-/// never hold more than a quarter span, so capping an action at "what
-/// the heap has" caps it at one heap by construction. The rate was
-/// already in the vocabulary: a stone wall is sixty and a heap is
-/// fifteen, so a wall is four heaps and therefore four actions, and
-/// 262's four-to-one is the price AND the effort in one number.
+/// **269 REPRICED IT IN TIME.** It was one action per heap; it is now a
+/// shift of so many minutes by up to three workers, at five minutes a
+/// hit point. A heap is an hour and a quarter of shifting and a stone
+/// wall is five hours of masonry - and the four heaps that feed it are
+/// five hours of hauling, which nothing arranged. What survives from
+/// 268 is the heap CAP: you still cannot place stone you do not have.
+/// That was never the rate, it only looked like one.
 ///
 /// **YOU SHOVEL FROM THE PILE YOU ARE STANDING IN.** The source is the
 /// builder's own square, not a parameter. That is a rule and not a
@@ -1254,8 +1312,15 @@ pub fn build_square(
     y: i32,
     z: i16,
     word: Option<String>,
+    minutes: i64,
+    helpers: i64,
 ) -> Result<Built, String> {
     let token = state.token()?;
+    // 269. HOW MANY HANDS, refused rather than capped - a fourth worker
+    // quietly ignored would make the job take longer than the party was
+    // told, with nothing on screen to explain why.
+    let workers = crate::terrain::crew(1 + helpers)?;
+    let shift = minutes.saturating_mul(crate::clock::MINUTE);
 
     let rows = supabase::rest_get(
         &token,
@@ -1371,14 +1436,24 @@ pub fn build_square(
     if wanted <= 0 {
         return Err(format!("{} is already finished", into.key()));
     }
-    let crate::terrain::Work { placed, done } = crate::terrain::Work::of(heap_has, wanted);
+    // WHICHEVER RAN OUT FIRST - the heap, or the hours. 268 had only
+    // the first of these; 269 gave the second a number.
+    let bought = crate::terrain::earned(shift, workers);
+    let crate::terrain::Work { placed, done } =
+        crate::terrain::Work::of(heap_has.min(bought), wanted);
     // AND AN ACTION THAT MOVES NOTHING IS NOT AN ACTION. Nothing should
     // be able to leave a heap at zero - it is destroyed at zero and
     // `set_square_hp` refuses the number - but a no-op here would write
     // two squares and log a day's work for an empty barrow, which is
     // exactly the shape of thing that looks like an ordinary answer.
     if placed <= 0 {
-        return Err(format!("there is nothing left in the {}", heap.key()));
+        return Err(match bought {
+            0 => format!(
+                "{} is not long enough to shift anything - a hit point of work is five minutes",
+                crate::clock::said(shift)
+            ),
+            _ => format!("there is nothing left in the {}", heap.key()),
+        });
     }
     let left = match filling {
         true => has - placed,
@@ -1464,6 +1539,16 @@ pub fn build_square(
     }
     let _ = supabase::rest_insert(&token, "actions", &json!([row]));
 
+    /* ---- 269. AND THE CLOCK MOVES ----
+       Charged for the work DONE, which is why `costs` rounds up where
+       `earned` rounds down: a job that finished early is not billed for
+       the shift that was asked for, and no point is ever had for less
+       than five minutes. Failing quiet for 253's reason - the wall is
+       up, and refusing to report it because the diary would not take
+       the hour would be a lie about the map. */
+    let spent = crate::terrain::costs(placed, workers);
+    let _ = crate::commands::time::tick_on(&token, &who.game_id, spent);
+
     let became = (done && filling).then(|| match word_in(&next, which) {
         Some(t) => t.key().to_string(),
         None => "nothing".to_string(),
@@ -1495,6 +1580,175 @@ pub fn build_square(
         heap: heap.key().to_string(),
         heap_left,
         now,
+        spent,
+        took: crate::clock::said(spent),
+        workers,
+    })
+}
+
+/// What a shift of digging did.
+#[derive(Debug, Serialize)]
+pub struct Dug {
+    pub layer: &'static str,
+    pub word: String,
+    /// Hit points of work done. Five minutes each, divided by the crew.
+    pub worked: i64,
+    pub hp_before: i64,
+    pub hp_after: i64,
+    pub wear: &'static str,
+    pub spent: i64,
+    pub took: String,
+    pub workers: i64,
+    /// Set when the layer stopped existing as it was.
+    pub became: Option<String>,
+    pub now: Vec<String>,
+}
+
+/// Work a layer down with hours instead of dice.
+///
+/// -------------------------------------------------------------------
+/// 269. A BLOW AND A SHIFT
+/// -------------------------------------------------------------------
+///
+/// `damage_square` is a blow: the DM types what they rolled, it goes
+/// through the threshold, and anything can deal it - a trebuchet, a
+/// spell, a dragon. It needs no actor and 245 says the DM is not
+/// argued with. **This is the other thing**: deliberate work by a
+/// creature, priced in Dave's hours, which is what a pick is for.
+///
+/// Both subtract, and from the same number. Everything after the
+/// subtraction is `wear_away`, shared, so the two cannot drift.
+///
+/// **NO THRESHOLD.** A threshold models one blow being too feeble to
+/// mark the stuff at all - a dagger on masonry. Sustained work with
+/// the right tool is not that, so an hour of digging is an hour of
+/// progress.
+///
+/// WHICH IS EXACTLY THE HOLE TOOLS FILL, and they are the next cycle.
+/// Until then bare hands dig stone, which is wrong and is not a
+/// regression: `damage_square` has let anybody break anything with a
+/// typed number since 263.
+#[tauri::command]
+pub fn dig_square(
+    state: State<AppState>,
+    character_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+    layer: String,
+    minutes: i64,
+    helpers: i64,
+) -> Result<Dug, String> {
+    let which = layer_of(&layer)?;
+    let workers = crate::terrain::crew(1 + helpers)?;
+    let shift = minutes.saturating_mul(crate::clock::MINUTE);
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "characters",
+        &[
+            ("select", "name,game_id,location_id,x,y,z"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let mut who: Vec<Standpoint> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the digger: {}", e))?;
+    let who = who.pop().ok_or("no such creature")?;
+
+    let Some(location_id) = who.location_id else {
+        return Err(format!("{} is not anywhere", who.name));
+    };
+    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
+        return Err(format!("{} is not on the map - place them first", who.name));
+    };
+
+    // WITHIN REACH, AND THEIR OWN SQUARE COUNTS. Digging the floor you
+    // are standing on is the ordinary case - unlike building, where the
+    // square has to be empty because you cannot raise a wall through
+    // yourself. What happens to somebody standing on a floor that goes
+    // is 262's unbuilt falling rule, and nothing here pretends to know.
+    if fz != z || (x - fx).abs() > 1 || (y - fy).abs() > 1 {
+        return Err(format!(
+            "{} is at ({}, {}) and cannot reach ({}, {}) - stand beside it",
+            who.name, fx, fy, x, y
+        ));
+    }
+
+    let (tile, stack) = square_at(&token, &location_id, x, y, z)?;
+    let word = word_in(&stack, which)
+        .ok_or_else(|| format!("there is no {} on ({}, {}, {})", layer, x, y, z))?;
+    let integ = word
+        .integrity()
+        .ok_or_else(|| format!("{} cannot be worked", word.key()))?;
+
+    // 266 UNCHANGED: a wall standing on the floor is still in the way,
+    // whether you are swinging a sword at it or a pick.
+    stack.reachable(which)?;
+
+    let stored = match which {
+        Layer::Surface => tile.as_ref().and_then(|t| t.surface_hp),
+        Layer::Cover => tile.as_ref().and_then(|t| t.cover_hp),
+        Layer::Sub => return Err("a sub has no hit points yet".to_string()),
+    };
+    let before = stored.unwrap_or(integ.hp);
+    let worked = crate::terrain::earned(shift, workers).min(before);
+    if worked <= 0 {
+        return Err(format!(
+            "{} is not long enough to make a mark - a hit point of work is five minutes",
+            crate::clock::said(shift)
+        ));
+    }
+    let after = before - worked;
+
+    let broke = wear_away(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        &tile,
+        stack,
+        which,
+        word,
+        after,
+    )?;
+
+    let fight = fighting_in(&token, &character_id);
+    let mut row = json!({
+        "game_id": who.game_id,
+        "character_id": character_id,
+        "key": "dig",
+        "cost": "dig",
+        "request": "dig",
+        "label": format!("worked {} off {}", worked, word.key()),
+        "status": "done",
+    });
+    if let Some((actor_id, encounter_id)) = &fight {
+        row["actor_id"] = json!(actor_id);
+        row["encounter_id"] = json!(encounter_id);
+    }
+    let _ = supabase::rest_insert(&token, "actions", &json!([row]));
+
+    let spent = crate::terrain::costs(worked, workers);
+    let _ = crate::commands::time::tick_on(&token, &who.game_id, spent);
+
+    Ok(Dug {
+        layer: match which {
+            Layer::Sub => "sub",
+            Layer::Surface => "surface",
+            Layer::Cover => "cover",
+        },
+        word: word.key().to_string(),
+        worked,
+        hp_before: before,
+        hp_after: after,
+        wear: wear_word(integ.wear(after)),
+        spent,
+        took: crate::clock::said(spent),
+        workers,
+        became: broke.became,
+        now: broke.now,
     })
 }
 

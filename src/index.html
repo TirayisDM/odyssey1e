@@ -1235,6 +1235,12 @@
                          hauling it somewhere else is a verb that does
                          not exist yet. -->
                     <option value="build">click builds here</option>
+                    <!-- 269. WORK, AS OPPOSED TO A BLOW. "Hit it" is
+                         the DM typing what they rolled, for anything
+                         that can deal damage. This is a creature
+                         spending hours, and it ignores the threshold
+                         because sustained work is not one swing. -->
+                    <option value="dig">click digs here</option>
                   </select>
                 </div>
 
@@ -1258,6 +1264,19 @@
                        pit ignores this entirely. -->
                   <div class="tpband">build with debris</div>
                   <select id="mv-buildword" class="tpfield"></select>
+
+                  <!-- 269. THE SHIFT, shared by digging and building,
+                       because they are the same labour at the same
+                       rate: five minutes a hit point, divided by the
+                       crew. Three is as many as can swing at one face,
+                       so helpers go no higher than two. -->
+                  <div class="tpband">the shift</div>
+                  <div class="tppair">
+                    <input id="mv-minutes" type="number" value="60" min="0" step="5"
+                           title="minutes worked" />
+                    <input id="mv-helpers" type="number" value="0" min="0" max="2"
+                           title="helpers (two at most)" />
+                  </div>
                 </div>
 
                 <div id="tp-edit" class="tptools" hidden>

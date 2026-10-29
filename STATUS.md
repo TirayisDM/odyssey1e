@@ -12073,6 +12073,155 @@ purpose rather than only find. Dave is drawing them.
 
 ---
 
+## 269. Work is time
+
+**2026-10-29.** Dave, who has done a lot of digging: *"a 5' dig in
+stone should for game be 5 hrs of work - multiple people can reduce it
+but a max of 3 people - use that rate for the base"*. Then, on the
+contradiction it created: *"work is time everywhere"*.
+
+### One constant, measured rather than invented
+
+Stone is 60 hit points a span, and Dave's five hours divides into it
+exactly: **a hit point of work is five minutes.** Twelve an hour. 50
+ticks, in the six-second unit `clock.rs` has used since 092, so work
+spends the same clock as travel and rest.
+
+**Every other duration falls out of the material table**, with no
+second number written anywhere:
+
+| the job | hp | one worker |
+|---|---|---|
+| 5' through stone | 60 | **5 h** (Dave's) |
+| a stone floor | 30 | 2 h 30 |
+| 5' through packed earth | 30 | 2 h 30 |
+| a timber wall | 40 | 3 h 20 |
+| a dirt floor | 15 | 1 h 15 |
+| sand, scree, mud | 20 | 1 h 40 |
+| clearing brambles | 15 | 1 h 15 |
+| filling a 5' pit | 60 | 5 h |
+| shifting one heap of rubble | 15 | 1 h 15 |
+
+`every_other_duration_falls_out_of_the_material_table` asserts those
+rather than defining them. **If one of them ever reads wrong, the
+material is wrong** - which is the point of having one rate.
+
+Three workers at most, Dave's cap and a physical one: that is how many
+can swing at one face. Stone at full crew is 1 h 40. `crew()` REFUSES a
+fourth rather than clamping silently, because a worker quietly ignored
+would make a job take longer than the party was told with nothing on
+screen to explain it.
+
+### It repriced 268, which is why it needed a ruling
+
+268 made building cost **one action per heap** - four actions, 24
+seconds, a wall - and its best property was needing no rate constant at
+all. A heap cannot be both an action and an hour and a quarter. Dave
+ruled time, everywhere.
+
+What 268 keeps is the heap **cap**: you still cannot place stone you do
+not have. *That was never the rate, it only looked like one.*
+
+The consequence Dave accepted: **no raising a barricade mid-fight.**
+True to life, and it does not touch 268's ruling that a partial wall
+blocks - interrupted work is exactly when that matters.
+
+### And it checks against itself
+
+A stone wall is five hours of masonry. The four heaps that feed it are
+an hour and a quarter each - **five hours of hauling to supply five
+hours of building.** Nothing arranged that; it is 262's four-to-one
+meeting Dave's rate, and
+`a_wall_is_five_hours_of_masonry_and_five_hours_of_hauling` pins it.
+
+### Rounding in two directions, which is a trap unless they meet
+
+`earned` rounds DOWN, so four minutes of digging achieves nothing and
+the man who clocks on and off all morning achieves nothing all morning.
+`costs` rounds UP, so the clock is charged for work actually done -
+a job that finishes early is not billed for the shift that was asked
+for - and no point is ever had for less than five minutes.
+
+Opposite directions on one quantity is how change goes missing, so
+`the_two_directions_never_give_work_away` sweeps every job size from 1
+to 60 by every crew and asserts that time billed always buys the job
+back.
+
+### A blow and a shift
+
+`damage_square` is a blow: the DM types what they rolled, it goes
+through the threshold, and **anything** can deal it - a trebuchet, a
+spell, a dragon. It needs no actor and 245 says the DM is not argued
+with. **`dig_square` is the other thing**: deliberate work by a
+creature, priced in hours.
+
+**NO THRESHOLD on a shift.** A threshold models one blow being too
+feeble to mark the stuff - a dagger on masonry. Sustained work is not
+that, so an hour of digging is an hour of progress.
+
+Which is exactly the hole tools fill, and they are the next cycle.
+**Until then bare hands dig stone.** That is wrong and it is not a
+regression: `damage_square` has let anybody break anything with a typed
+number since 263.
+
+### One destruction path, now that two things cause it
+
+`wear_away` is `damage_square`'s whole tail, lifted out without a line
+changed: the destruction, the spoil and its amount, which hit point
+columns survive, the row written. A blow and a shift **differ only in
+what they subtract**, and a second copy of everything after the
+subtraction would have been the two-places problem in its most literal
+form - two routes to destroying a square, drifting apart one bug fix at
+a time.
+
+266 applied unchanged again: a wall standing on a floor is in the way
+whether you swing a sword at it or a pick.
+
+### Digging your own square is allowed; building it is not
+
+268 refuses an occupied target because you cannot raise a wall through
+somebody. Digging the floor you stand on is the ordinary case, so the
+reach check includes distance zero. **What happens to somebody standing
+on a floor that goes is 262's unbuilt falling rule**, and nothing here
+pretends to know.
+
+### What it looks like
+
+A fourth play mode, `click digs here`, and a shared **shift** band -
+minutes and helpers - because the question is the same whether work is
+going into a wall or coming out of a floor. Digging reuses the damage
+layer picker: in play mode it means "which layer are you working on",
+and a second copy would be two controls for one question.
+
+The pane says `stone_floor: 12 worked off in 1 hour · 30 to 18 ·
+scarred · now stone_floor`. The clock moves by what the work cost,
+through `time::tick_on` like everything else, and fails quiet for 253's
+reason.
+
+1394 tests.
+
+### Carried forward
+
+- **Tools, which is the next cycle.** Dave's list: shovels, picks,
+  digging bars, chisels, hammers - or magic, or creature features. The
+  catalogue has none of them. The rule belongs on `Material`, beside
+  `ac`, `hp` and `threshold`, because it is another fact about the
+  stuff.
+- **Transport after that, and a fork to rule first.** Debris on the map
+  is terrain; debris in a wagon would be an item. Three ways out, and
+  the recommendation is the third: debris never leaves the map, hauling
+  moves it square to square, and a cart is a multiplier on the hauling
+  verb rather than a container of rubble. Pick the first - rubble as a
+  real object - only if players should ever sell it or carry it
+  upstairs in a sack.
+- Nothing refuses work for having no action left. 051 still stands: the
+  budget informs and gates nothing.
+- `who_is_on` sees what RLS lets it see (268).
+- `depth`, so "60 per 5 feet" has a second number.
+- `painting_door_broken_does_not_make_a_broken_door` still passes.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

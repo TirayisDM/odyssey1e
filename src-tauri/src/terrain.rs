@@ -521,24 +521,89 @@ pub enum Terrain {
 ///
 /// A SLICE, because the migration's CHECK is built from it and a
 /// variant missing here is a terrain the database refuses.
-/// One action's worth of building.
-///
 /// -------------------------------------------------------------------
-/// 268. ONE ACTION MOVES ONE HEAP, AND THAT IS NOT A NEW NUMBER
+/// 269. WORK IS TIME, EVERYWHERE
 /// -------------------------------------------------------------------
 ///
-/// Dave's ruling, and the thing worth noticing about it: there is no
-/// rate constant anywhere in this file. A heap is a [`Bulk::Quarter`]
-/// and can never hold more than a quarter span, so an action capped at
-/// "whatever the heap has" is capped at one heap by construction.
+/// Dave, from having done it: **a five-foot dig in stone is five hours
+/// of work, and at most three people can work at it.**
 ///
-/// Which makes 262's four-to-one the price AND the effort in one
-/// number. A stone wall is sixty, a heap is fifteen: four heaps, and
-/// therefore four actions. Had the rate been a separate five or ten
-/// per action, the ratio a player feels and the ratio the economy
-/// charges would be two numbers, free to drift.
+/// Stone is sixty hit points a span, so five hours divides into ONE
+/// CONSTANT: a hit point of work is five minutes. Twelve an hour. Every
+/// other duration in the game then falls out of the material table
+/// without a second number - a stone floor is two and a half hours, a
+/// dirt floor an hour and a quarter, a timber wall three and twenty,
+/// filling a pit five hours, shifting a heap of rubble an hour and a
+/// quarter.
 ///
-/// `wanted` IS WHAT IS STILL MISSING, which each arm works out for
+/// **IT REPRICES 268.** That cycle made building cost one ACTION per
+/// heap - four actions and twenty-four seconds for a wall - and said
+/// its best property was needing no rate constant at all. It cannot
+/// both be true that a heap is an action and that a heap is an hour and
+/// a quarter, so the action framing goes. What 268 keeps is the heap
+/// CAP: you still cannot place stone you do not have. That was never
+/// the rate, it only looked like one.
+///
+/// The consequence Dave accepted: **no raising a barricade mid-fight.**
+/// Which is true to life, and does not touch his ruling that a partial
+/// wall blocks - interrupted work is exactly when that matters.
+///
+/// AND IT CHECKS AGAINST ITSELF. A stone wall is five hours of masonry,
+/// and the four heaps that feed it are an hour and a quarter each: five
+/// hours of hauling to supply five hours of building. Nothing arranged
+/// that - it is 262's four-to-one meeting Dave's rate.
+pub const PER_POINT: i64 = 50;
+
+/// How many can swing at one face. Dave's cap, and a physical one.
+pub const CREW: i64 = 3;
+
+/// How many workers may share one job.
+///
+/// REFUSED RATHER THAN CAPPED SILENTLY. A fourth digger who was quietly
+/// ignored would make a job take longer than the party was told, and
+/// the DM would have no way to see why.
+pub fn crew(workers: i64) -> Result<i64, String> {
+    match workers {
+        n if n < 1 => Err("somebody has to do the work".to_string()),
+        n if n > CREW => Err(format!(
+            "{} cannot work one square - {} is as many as can swing at a face",
+            n, CREW
+        )),
+        n => Ok(n),
+    }
+}
+
+/// What a shift of `ticks` by `workers` earns, in hit points of work.
+///
+/// ROUNDED DOWN, which is why four minutes of digging achieves nothing.
+/// A point is five minutes; part of one is part of a point, and the
+/// alternative is a free point for anybody who clocks on and off.
+pub fn earned(ticks: i64, workers: i64) -> i64 {
+    match ticks <= 0 || workers <= 0 {
+        true => 0,
+        false => ticks.saturating_mul(workers) / PER_POINT,
+    }
+}
+
+/// What `points` of work costs, in ticks.
+///
+/// ROUNDED UP, and in the other direction from [`earned`] on purpose.
+/// The clock is charged for work actually done, so a job that finishes
+/// early is not billed for the shift that was asked for - but neither
+/// is a point ever had for less than it costs.
+pub fn costs(points: i64, workers: i64) -> i64 {
+    match points <= 0 || workers <= 0 {
+        true => 0,
+        false => {
+            let ticks = points.saturating_mul(PER_POINT);
+            (ticks + workers - 1) / workers
+        }
+    }
+}
+
+/// What one shift of work moved.
+///
+/// `wanted` IS WHAT IS STILL MISSING, which each caller works out for
 /// itself - a volume counts DOWN to nothing and a wall counts UP to
 /// full, and the two cannot share a direction. They share this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -551,11 +616,14 @@ pub struct Work {
 }
 
 impl Work {
-    pub fn of(heap_has: i64, wanted: i64) -> Work {
-        let placed = heap_has.min(wanted).max(0);
+    /// `supply` is whatever is scarcest: the time the shift bought, or
+    /// the debris there is to place. 269 made the first of those a
+    /// number; 268 had only the second.
+    pub fn of(supply: i64, wanted: i64) -> Work {
+        let placed = supply.min(wanted).max(0);
         Work {
             placed,
-            // A HEAP THAT HAD NOTHING FINISHES NOTHING. `placed ==
+            // A SHIFT THAT MOVED NOTHING FINISHES NOTHING. `placed ==
             // wanted` alone would call an empty heap meeting a finished
             // wall a completed day's work.
             done: placed > 0 && placed == wanted,
@@ -2053,11 +2121,93 @@ mod tests {
 
     /* ====== 268. SPENDING A HEAP ====== */
 
+    /* ====== 269. WHAT WORK COSTS ====== */
+
     #[test]
-    fn a_wall_takes_four_actions_because_it_takes_four_heaps() {
-        // THE CYCLE'S ONE NUMBER, spent rather than asserted. The
-        // arithmetic lives here and not in the command for exactly this
-        // reason: a command that wants a test is a rule wearing a
+    fn five_hours_to_cut_five_feet_of_stone() {
+        // DAVE'S NUMBER, WHICH IS WHERE THE RATE COMES FROM. Everything
+        // else in this module is derived; this one was measured with a
+        // pick.
+        let stone = Terrain::StoneWall.integrity().unwrap().hp;
+        assert_eq!(stone, 60);
+        assert_eq!(costs(stone, 1), 5 * crate::clock::HOUR);
+    }
+
+    #[test]
+    fn a_point_of_work_is_five_minutes() {
+        assert_eq!(PER_POINT, 5 * crate::clock::MINUTE);
+        assert_eq!(earned(crate::clock::HOUR, 1), 12);
+    }
+
+    #[test]
+    fn every_other_duration_falls_out_of_the_material_table() {
+        // NO SECOND NUMBER ANYWHERE. These are not written down - they
+        // are hit points the table already carried, priced at Dave's
+        // rate. If one of them ever reads wrong, the material is wrong.
+        let hours = |t: Terrain| costs(t.integrity().unwrap().hp, 1);
+        let h = crate::clock::HOUR;
+        assert_eq!(hours(Terrain::StoneFloor), 5 * h / 2, "a stone floor");
+        assert_eq!(hours(Terrain::Dirt), 5 * h / 4, "a dirt floor");
+        assert_eq!(hours(Terrain::TimberWall), 10 * h / 3, "a timber wall");
+        assert_eq!(hours(Terrain::Pit), 5 * h, "filling a pit");
+        assert_eq!(hours(Terrain::Rubble), 5 * h / 4, "shifting a heap");
+    }
+
+    #[test]
+    fn a_crew_of_three_and_no_more() {
+        assert_eq!(crew(1), Ok(1));
+        assert_eq!(crew(3), Ok(3));
+        assert!(crew(4).is_err(), "a fourth has nowhere to stand");
+        assert!(crew(0).is_err());
+        // Three cuts Dave's five hours to one hour forty.
+        assert_eq!(costs(60, 3), crate::clock::HOUR + 40 * crate::clock::MINUTE);
+    }
+
+    #[test]
+    fn part_of_a_point_is_not_a_point() {
+        // Four minutes of digging achieves nothing, and the man who
+        // clocks on and off all morning achieves nothing all morning.
+        assert_eq!(earned(4 * crate::clock::MINUTE, 1), 0);
+        assert_eq!(earned(5 * crate::clock::MINUTE, 1), 1);
+        assert_eq!(earned(9 * crate::clock::MINUTE, 1), 1);
+    }
+
+    #[test]
+    fn the_two_directions_never_give_work_away() {
+        // `earned` rounds down and `costs` rounds up, which is a trap
+        // unless they agree at the boundary: time billed for a job must
+        // always buy that job back.
+        for points in 1..=60 {
+            for workers in 1..=CREW {
+                let ticks = costs(points, workers);
+                assert!(
+                    earned(ticks, workers) >= points,
+                    "{} points by {} cost {} ticks and bought {}",
+                    points,
+                    workers,
+                    ticks,
+                    earned(ticks, workers)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wall_is_five_hours_of_masonry_and_five_hours_of_hauling() {
+        // 262'S FOUR-TO-ONE MEETING DAVE'S RATE, and nothing arranged
+        // it. The wall wants sixty points of building; the four heaps
+        // that supply it are fifteen points of shifting each.
+        let wall = Terrain::StoneWall.integrity().unwrap().hp;
+        let heap = Terrain::Rubble.integrity().unwrap().hp;
+        assert_eq!(costs(wall, 1), costs(heap, 1) * (wall / heap));
+    }
+
+    #[test]
+    fn a_wall_takes_four_shifts_because_it_takes_four_heaps() {
+        // 268'S NUMBER, STILL TRUE WITH 269'S CLOCK ON IT. Four heaps
+        // and therefore four trips, whatever each trip costs in hours.
+        // The arithmetic lives here and not in the command for the
+        // usual reason: a command that wants a test is a rule wearing a
         // wrapper.
         let heap = Terrain::Rubble.integrity().unwrap().hp;
         let full = Terrain::StoneWall.integrity().unwrap().hp;
@@ -2074,7 +2224,7 @@ mod tests {
     }
 
     #[test]
-    fn a_half_empty_heap_buys_half_an_action() {
+    fn a_half_empty_heap_buys_half_a_shift() {
         // The cap is what the heap HAS, not what a heap holds - a floor
         // yields seven and a wall yields fifteen, so a wall rebuilt
         // from dug floors takes more trips.

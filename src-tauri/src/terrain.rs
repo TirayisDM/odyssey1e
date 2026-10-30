@@ -961,6 +961,39 @@ impl Terrain {
         WALLS.contains(&self)
     }
 
+    /// Does this stop debris being poured over it?
+    ///
+    /// ---------------------------------------------------------------
+    /// 272. ONLY WALLS AND DOORS
+    /// ---------------------------------------------------------------
+    ///
+    /// Dave's ruling, correcting 271: *"only walls and doors should stop
+    /// the pour - grass, snow, vines should be covered by pour"*. 271
+    /// had stopped at every cover on the grounds that burying authored
+    /// terrain was worse than putting the spoil next door. Wrong way
+    /// round: a collapsing wall DOES bury a bramble patch, and a rule
+    /// that tiptoed around the grass was protecting the map from the
+    /// game.
+    ///
+    /// STATED AS THE TWO REASONS RATHER THAN THE TWO LISTS, which is
+    /// why trees and an iron grate come along without being named and
+    /// why a sixth kind of barrier will too.
+    ///
+    /// **IT BLOCKS THE WAY**, so there is no "over it" to pour onto. A
+    /// wall, a standing tree, a grate, a shut door: rubble heaped
+    /// against one of those is on the square in FRONT of it, which is
+    /// what the spill is for.
+    ///
+    /// **OR IT HAS MOVING PARTS.** A door is the only such thing - 264
+    /// gave `mechanism` to exactly the three of them - and an OPEN door
+    /// is the case the first reason misses, because it does not block.
+    /// Rubble would JAM it rather than bury it, and jamming is already
+    /// what [`Wear::Broken`] means for a mechanism.
+    pub fn stops_a_pour(self) -> bool {
+        self.footing().going == Going::Blocked
+            || self.integrity().map_or(false, |i| i.mechanism)
+    }
+
     /// May this word sit in that layer?
     ///
     /// ---------------------------------------------------------------
@@ -1688,12 +1721,16 @@ impl Stack {
     /// of neither - so a square holding the wrong debris has no room at
     /// all rather than some.
     ///
-    /// AND NOTHING AUTHORED IS BURIED. A cover that is not this debris
-    /// is in the way whether it could be attacked or not, so rubble
-    /// never deletes the grass or the doorway somebody painted. 262's
-    /// ruling that a lid rides down a hole is about the layer under it
-    /// going; this is about something arriving from outside, which is
-    /// not the same event.
+    /// AND EVERYTHING ELSE IS BURIED. 272 reversed 271 here: only what
+    /// [`Terrain::stops_a_pour`] names - a wall, a tree, a grate, a
+    /// door - is in the way. Grass, snow, brambles and an empty doorway
+    /// go under the rubble, because that is what happens.
+    ///
+    /// ONE COVER SLOT MEANS BURIED IS GONE. The vines do not survive
+    /// under the heap waiting to be uncovered; the square holds one
+    /// cover and the heap is now it. That is a limit of the three-layer
+    /// model rather than a ruling, and it is the honest reading of
+    /// "covered by pour".
     pub fn space_for(
         &self,
         debris: Terrain,
@@ -1713,7 +1750,14 @@ impl Stack {
             // whole heap, which is the same convention every other
             // layer uses, so a full heap has no room.
             Some(c) if c == debris => Space::Pile((mouth - cover_hp.unwrap_or(mouth)).max(0)),
-            Some(_) => Space::None,
+            // SKIP MIXED FIRST, and it has to be first: debris is not
+            // blocked and has no moving parts, so the test below would
+            // happily tip stone onto a timber pile.
+            Some(c) if c.is_debris() => Space::None,
+            Some(c) if c.stops_a_pour() => Space::None,
+            // BURIED, and the mouth is whole because nothing of this
+            // kind was here to part-fill it.
+            Some(_) => Space::Pile(mouth),
             None => match self.surface.is_volume() {
                 // A VOLUME COUNTS DOWN TO NOTHING, so what is left in
                 // it IS the room. 262: you destroy a pit by filling it,
@@ -2310,19 +2354,32 @@ mod tests {
         let dug = snowy.destroyed(Layer::Surface);
         assert_eq!(dug.cover, None, "the snow went down the hole");
 
-        // 271 KEEPS THE ORDER BY CONSTRUCTION RATHER THAN BY SEQUENCE.
-        // The pour asks `destroyed` first, so the cover is already gone
-        // before anything is placed - and this is the proof it has to
-        // be: snow is not this debris, so a square that still had it
-        // would have had NO room at all and the spoil would have gone
-        // next door.
+        // 271 KEEPS THE ORDER BY CONSTRUCTION RATHER THAN BY SEQUENCE,
+        // and 272 made the reason sharper. The pour asks `destroyed`
+        // first, so the cover is already gone before anything lands.
         let (mess, _) = Terrain::Dirt.spoil().unwrap();
         assert_eq!(mess, Terrain::RubbleEarth);
         assert_eq!(dug.space_for(mess, None, None), Space::Pile(5), "spoil, not snow");
+
+        // DO IT THE OTHER WAY ROUND AND THE SPOIL IS WHAT IS LOST. 272
+        // says the snow would be buried rather than be in the way - so
+        // pouring first really would produce a heap, and then
+        // `Reveals` would clear the cover and take the heap with it.
+        // The lid riding down the hole is 262; the spoil surviving that
+        // is only true because of the order.
+        let buried = Stack {
+            cover: Some(mess),
+            ..snowy
+        };
         assert_eq!(
             snowy.space_for(mess, None, None),
-            Space::None,
-            "had the snow stayed, it would have been in the way"
+            Space::Pile(5),
+            "272: the snow would go under rather than be in the way"
+        );
+        assert_eq!(
+            buried.destroyed(Layer::Surface).cover,
+            None,
+            "and then the lid takes the heap with it"
         );
     }
 
@@ -2632,22 +2689,85 @@ mod tests {
     }
 
     #[test]
-    fn rubble_does_not_bury_what_somebody_painted() {
-        // A cover with no hit points is not IN THE WAY of an attack -
-        // 266 says so - but that is about breaking what is underneath.
-        // Something arriving from outside is a different event, and
-        // deleting authored terrain to make room for spoil would be a
-        // worse answer than putting the spoil next door.
-        for lid in [Terrain::Grass, Terrain::Snow, Terrain::Doorway] {
+    fn rubble_buries_what_it_can_lie_on() {
+        // 272, Dave's correction of 271. A collapsing wall buries a
+        // bramble patch, and the rule that tiptoed around the grass was
+        // protecting the map from the game.
+        for lid in [
+            Terrain::Grass,
+            Terrain::Snow,
+            Terrain::Vines,
+            Terrain::Brush,
+            Terrain::Doorway,
+        ] {
             let covered = Stack {
                 cover: Some(lid),
                 ..bare()
             };
             assert_eq!(
                 covered.space_for(Terrain::Rubble, None, None),
-                Space::None,
-                "{}",
+                Space::Pile(15),
+                "{} should go under the rubble",
                 lid.key()
+            );
+        }
+    }
+
+    #[test]
+    fn only_walls_and_doors_stop_the_pour() {
+        // AND THE TWO REASONS REACH FURTHER THAN THE TWO WORDS. Trees
+        // and an iron grate are not walls and not doors, and both stop
+        // it - because they block the way, which is the actual rule.
+        for solid in [
+            Terrain::StoneWall,
+            Terrain::RockWall,
+            Terrain::TimberWall,
+            Terrain::WoodenWall,
+            Terrain::IceWall,
+            Terrain::Trees,
+            Terrain::IronGrate,
+            Terrain::DoorClosed,
+            Terrain::DoorBroken,
+        ] {
+            let covered = Stack {
+                cover: Some(solid),
+                ..bare()
+            };
+            assert_eq!(
+                covered.space_for(Terrain::Rubble, None, None),
+                Space::None,
+                "{} should be in the way",
+                solid.key()
+            );
+        }
+    }
+
+    #[test]
+    fn an_open_door_is_jammed_rather_than_buried() {
+        // THE CASE "IT BLOCKS THE WAY" MISSES. An open door is Normal
+        // footing, so only the moving parts catch it - and a door
+        // packed with rubble is jammed, which this project already has
+        // a word for.
+        assert_eq!(Terrain::DoorOpen.footing().going, Going::Normal);
+        assert!(Terrain::DoorOpen.stops_a_pour());
+        let covered = Stack {
+            cover: Some(Terrain::DoorOpen),
+            ..bare()
+        };
+        assert_eq!(covered.space_for(Terrain::Rubble, None, None), Space::None);
+    }
+
+    #[test]
+    fn everything_that_stops_a_pour_blocks_or_has_moving_parts() {
+        // THE SWEEP, so a word added to the vocabulary cannot quietly
+        // become pour-proof for a third reason nobody wrote down.
+        for t in ALL {
+            assert_eq!(
+                t.stops_a_pour(),
+                t.footing().going == Going::Blocked
+                    || t.integrity().map_or(false, |i| i.mechanism),
+                "{}",
+                t.key()
             );
         }
     }

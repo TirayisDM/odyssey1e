@@ -12460,14 +12460,17 @@ termination is a rule rather than a depth limit: **no volume leaves
 spoil**, so a hole that fills has nothing to pour onward.
 `no_volume_leaves_spoil` checks it instead of trusting it.
 
-### Nothing authored gets buried
+### ~~Nothing authored gets buried~~ — reversed by 272
 
-A cover with no hit points is not *in the way* of an attack - 266 says
+~~A cover with no hit points is not *in the way* of an attack - 266 says
 so - but that is about breaking what is underneath. Debris arriving from
 outside is a different event, so grass, snow and a painted doorway all
 give a pour **no room at all** rather than being deleted to make space.
 Spoil goes next door instead, which is a better answer than silently
-unpainting someone's map.
+unpainting someone's map.~~
+
+**Dave reversed this the same day.** Only walls and doors stop a pour;
+grass, snow and brambles go under it. See 272.
 
 ### Not called `Room`
 
@@ -12518,6 +12521,78 @@ are separated.
 - One tool for a whole crew - 269's helpers are a number, not
   characters.
 - `depth`; falling; 051's budget still informs and gates nothing.
+
+---
+
+## 272. Only walls and doors
+
+**2026-10-30.** Dave, on 271's one piece of invented caution: *"only
+walls and doors should stop the pour - grass, snow, vines should be
+covered by pour"*.
+
+### The judgement call 271 got backwards
+
+271 stopped a pour at **every** cover, reasoning that burying authored
+terrain was worse than putting the spoil next door. Wrong way round: a
+collapsing wall **does** bury a bramble patch, and a rule that tiptoed
+around the grass was protecting the map from the game.
+
+### Two reasons, not two lists
+
+`stops_a_pour` is Dave's ruling stated as the reasons rather than the
+words - which is why **trees and an iron grate come along without being
+named**, and why a sixth kind of barrier will too:
+
+- **IT BLOCKS THE WAY**, so there is no "over it" to pour onto. A wall,
+  a standing tree, a grate, a shut door. Rubble heaped against one of
+  those is on the square in FRONT of it, which is what the spill is for.
+- **OR IT HAS MOVING PARTS.** A door is the only such thing - 264 gave
+  `mechanism` to exactly the three of them - and an **open** door is the
+  case the first reason misses, because it does not block. Rubble would
+  **jam** it rather than bury it, and jamming is already what
+  `Wear::Broken` means for a mechanism.
+
+`footing()` already drew the line in the right place and nobody had
+noticed: grass is `Normal`, snow and brambles are `Difficult`, **trees
+are `Blocked`**. So Dave's three named words and the two he did not name
+fall out of a predicate the vocabulary already had.
+
+`everything_that_stops_a_pour_blocks_or_has_moving_parts` sweeps it, so
+a new word cannot quietly become pour-proof for a third reason nobody
+wrote down.
+
+### Skip mixed has to be tested first
+
+Debris is `Difficult` and has no moving parts, so the new arm would
+cheerfully tip stone onto a timber pile. Dave's earlier ruling stands
+and now runs ahead of it.
+
+### One cover slot means buried is gone
+
+The vines do not survive under the heap waiting to be uncovered - the
+square holds one cover and the heap is now it. That is a limit of the
+three-layer model rather than a ruling, and it is the honest reading of
+"covered by pour". It also means **a pour destroys a 15-point patch of
+brambles for free**, which is the same shape as the unruled finding that
+attacking a heap annihilates it.
+
+### And it sharpened 271's ordering test
+
+271 argued the pour must ask `destroyed` first because snow would
+otherwise be *in the way*. Under 272 snow is not in the way - so the
+argument changes, and gets better: **pour first and it is the SPOIL that
+is lost**, because the heap would be sitting in the cover slot when
+`Reveals` clears it. The lid riding down the hole is 262; the spoil
+surviving that is only true because of the order.
+
+1423 tests.
+
+### Carried forward
+
+Unchanged from 271 - hauling next, with the agreed weights and a refusal
+for a full ring. Plus the two findings still unruled: **debris as a
+legal attack target**, and **an ice wall that can be painted but never
+built.**
 
 ---
 

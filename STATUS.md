@@ -12389,6 +12389,138 @@ start.
 
 ---
 
+## 271. Rubble accumulates, and spills
+
+**2026-10-30.** Dave, after an audit of the production side: *"Rubble
+should accumulate, it should spill to adjacent squares that are not
+covered with a wall. If a pit or deep water is there it can absorb
+rubble"*. Then the four decisions: *"holes before floors, surplus only,
+skip mixed, one ring"*.
+
+### The ruling is one mechanism, and it is a pour
+
+Fill the square; what will not fit runs to the neighbours. That single
+rule covers three things that were separate or missing:
+
+- **a collapse** settles instead of overwriting whatever was there
+- **hauling** - which does not exist - pours onto a square that already
+  has a heap, which is the gathering that is impossible today
+- **filling a pit** stops being a special verb. A pit is a square with
+  a bigger mouth: `FILL` is 60 against a heap's 15, so **a pit swallows
+  four heaps** - 262's four-to-one arriving from the other direction
+  without being asked for
+
+Deep water is the same shape in three stages: 60 to make it shallow, 30
+more to make it mud. **Ninety points - six stone heaps - to walk across
+a lake.** That is a siege works, and it fell out of the table.
+
+### The mouth is not a new number
+
+A square's capacity is `Bulk::Quarter` - stone 15, timber 10, wood 7,
+earth 5 - and spill triggers at that line. So **a whole span still gives
+exactly one full heap with nothing spilled**, because a span over four
+IS a quarter. 262's arithmetic is untouched; spill only ever engages on
+a square that already had something in it.
+
+`nothing_a_collapse_can_make_overflows_its_own_square` sweeps the whole
+vocabulary and proves it: every word that leaves spoil leaves no more
+than one mouthful. **So `surplus` is unreachable from destruction**, and
+the refusal it will need belongs to hauling.
+
+### Which meant `destroyed` had to stop placing spoil
+
+265 ended `Stack::destroyed` by piling the spoil on the cover, and that
+was right while a heap had one place it could go. Dave's ruling gave it
+three, and choosing needs HOW MUCH and WHAT IS AROUND - neither of which
+that function has, because it answers one question about one square and
+takes no hit points.
+
+So `destroyed` now says only what the broken layers BECOME, and `pour`
+says where the debris lands. **265's ordering survives by construction
+rather than by sequencing**: the pour asks `destroyed` first, so the
+cover is already gone before anything is placed, and a lid still rides
+down the hole.
+
+Six tests were asserting the composite and now assert the two halves,
+which made two of them sharper. `what_was_lying_there_goes_down_the_hole`
+used to check that the spoil replaced the snow; it now checks that **a
+square still holding snow would have had NO room at all**, which is the
+actual reason the order matters.
+
+### Spilling into a hole is wearing it down
+
+262 ruled you destroy a pit by filling it - so filling one IS wearing
+its surface down, and `wear_away` already does every step that follows
+from reaching zero. **Spilling into a hole therefore needs no second
+copy of destroy-at-zero**, which is exactly what 269 extracted that
+function for.
+
+It makes `spill_into` and `wear_away` mutually recursive, and the
+termination is a rule rather than a depth limit: **no volume leaves
+spoil**, so a hole that fills has nothing to pour onward.
+`no_volume_leaves_spoil` checks it instead of trusting it.
+
+### Nothing authored gets buried
+
+A cover with no hit points is not *in the way* of an attack - 266 says
+so - but that is about breaking what is underneath. Debris arriving from
+outside is a different event, so grass, snow and a painted doorway all
+give a pour **no room at all** rather than being deleted to make space.
+Spoil goes next door instead, which is a better answer than silently
+unpainting someone's map.
+
+### Not called `Room`
+
+`tiles.rs` has meant "a location's map" by `Room` since 226, so the new
+enum is `Space` and the method is `space_for`. Two Rooms in one project
+is a collision waiting for the first file that imports both - and that
+file was `tiles.rs`, immediately.
+
+### One real behaviour change today
+
+**Dig through a floor into water and the diggings no longer float on
+it.** That is the only case where 271 changes what the map does without
+anybody hauling anything, because it is the only case where the square
+spoil falls onto is itself a hole. Everything else is the same square it
+always was - the pour is doing the same thing 265 did, by a rule that
+can now answer the question when the square is full.
+
+1420 tests.
+
+### A gap the crash exposed
+
+Removing spoil from `destroyed` left the working tree producing **no
+rubble at all** for a while, and **every test still passed.** There is no
+command-level test that a blow leaves a heap on the square - the rules
+are covered thoroughly and the plumbing that joins them is not. Worth
+one, and it is the kind of hole that only shows up when the two halves
+are separated.
+
+### Carried forward
+
+- **Hauling, which is what this was built for.** It is the only caller
+  that can overflow a ring, and it must REFUSE rather than lose the
+  stone. The weights are agreed and unbuilt: 2000 / 1200 / 800 / 400 a
+  span for stone / earth-and-loose / timber / wood, plus ICE 700, IRON
+  600, GREENERY 200, and **FILL nothing at all** - a pit is a volume,
+  not stuff, and you cannot pick up a hole.
+- **Labour not luggage**, Dave's ruling: 269 prices the work in hours
+  and encumbrance prices the carrying in pounds, and neither gates the
+  other. `carry::burden` already exists and already reports.
+- **Attacking a heap still annihilates it** (the audit's finding 2,
+  unruled). Fifteen points of damage deletes half a ton of stone. My
+  recommendation stands: debris should not be a legal target.
+- **An ice wall can never be built, only painted** (finding 4,
+  unruled). It is in `WALLS`, but ice leaves no debris so no heap can
+  satisfy it.
+- **Earth spoil can build nothing.** No wall is made of `LOOSE`, so
+  backfill is its only sink. Probably correct, worth knowing.
+- One tool for a whole crew - 269's helpers are a number, not
+  characters.
+- `depth`; falling; 051's budget still informs and gates nothing.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

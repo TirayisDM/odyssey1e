@@ -45,7 +45,7 @@ use crate::commands::Ctx;
 use crate::supabase::{self, AppState};
 use crate::grid::Point;
 use crate::ground::Bounds;
-use crate::terrain::{Facing, Layer, Stack, Terrain};
+use crate::terrain::{Facing, Layer, Space, Stack, Terrain};
 
 /// How many rows go out in one request.
 ///
@@ -901,6 +901,9 @@ pub struct Hit {
     pub became: Option<String>,
     /// The square after, in the order the panel reads layers.
     pub now: Vec<String>,
+    /// 271. Where the surplus ran, and what had nowhere to go.
+    pub spill: Vec<String>,
+    pub surplus: i64,
 }
 
 /// Which layer a caller means.
@@ -952,6 +955,144 @@ fn square_at(
     let stack = crate::ground::at(row, default, bounds, x, y)
         .ok_or_else(|| format!("({}, {}, {}) is not mapped", x, y, z))?;
     Ok((tile, stack))
+}
+
+/// Read the eight squares around one, skipping any that are not mapped.
+///
+/// 271. ONE REQUEST, NOT EIGHT - the same reason `squares_at` exists.
+///
+/// AND UNMAPPED IS SKIPPED RATHER THAN AN ERROR. 226 says a missing row
+/// means the square is not part of the room, so spoil that reaches the
+/// edge of the map has simply run out of somewhere to go - which is
+/// what `surplus` is for and not something to refuse a blow over.
+fn ring_at(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+) -> Result<Vec<(i32, i32, Option<Tile>, Stack)>, String> {
+    let (bounds, default) = map_of(token, location_id)?;
+    let clauses: Vec<String> = crate::terrain::AROUND
+        .iter()
+        .map(|(dx, dy)| format!("and(x.eq.{},y.eq.{},z.eq.{})", x + dx, y + dy, z))
+        .collect();
+    let rows = supabase::rest_get(
+        token,
+        "tiles",
+        &[
+            ("select", COLUMNS),
+            ("location_id", &format!("eq.{}", location_id)),
+            ("or", &format!("({})", clauses.join(","))),
+        ],
+    )?;
+    let tiles: Vec<Tile> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the ground: {}", e))?;
+
+    let mut out = Vec::new();
+    for (dx, dy) in crate::terrain::AROUND {
+        let (nx, ny) = (x + dx, y + dy);
+        let tile = tiles
+            .iter()
+            .find(|t| t.x == nx && t.y == ny && t.z == z)
+            .cloned();
+        let row = match tile.as_ref() {
+            Some(t) => Some(t.stack()?),
+            None => None,
+        };
+        if let Some(stack) = crate::ground::at(row, default, bounds, nx, ny) {
+            out.push((dx, dy, tile, stack));
+        }
+    }
+    Ok(out)
+}
+
+/// How much of a layer a square is currently holding.
+///
+/// NULL MEANS WHOLE, which is the convention every layer uses, so this
+/// is the one place that has to know it rather than three.
+fn standing_at(tile: &Option<Tile>, which: Layer, word: Terrain) -> i64 {
+    let stored = match which {
+        Layer::Surface => tile.as_ref().and_then(|t| t.surface_hp),
+        Layer::Cover => tile.as_ref().and_then(|t| t.cover_hp),
+        Layer::Sub => None,
+    };
+    stored.unwrap_or_else(|| word.integrity().map(|i| i.hp).unwrap_or(0))
+}
+
+/// Put debris into one NEIGHBOURING square and write it.
+///
+/// -------------------------------------------------------------------
+/// 271. A HOLE IS FILLED BY WEARING IT DOWN
+/// -------------------------------------------------------------------
+///
+/// 262 ruled that you destroy a pit by filling it, so filling one IS
+/// wearing its surface down - and `wear_away` already does every step
+/// that follows from reaching zero. Spilling into a hole therefore
+/// needs no second copy of destroy-at-zero, which is the whole reason
+/// 269 extracted that function.
+///
+/// THE RECURSION TERMINATES, and a test says why: no volume leaves
+/// spoil, so a hole that fills has nothing to pour onward.
+#[allow(clippy::too_many_arguments)]
+fn spill_into(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+    tile: &Option<Tile>,
+    stack: Stack,
+    debris: Terrain,
+    amount: i64,
+) -> Result<(), String> {
+    let surface_hp = tile.as_ref().and_then(|t| t.surface_hp);
+    let cover_hp = tile.as_ref().and_then(|t| t.cover_hp);
+    match stack.space_for(debris, surface_hp, cover_hp) {
+        Space::Hole(_) => {
+            let had = standing_at(tile, Layer::Surface, stack.surface);
+            wear_away(
+                token,
+                location_id,
+                x,
+                y,
+                z,
+                tile,
+                stack,
+                Layer::Surface,
+                stack.surface,
+                had - amount,
+            )?;
+            Ok(())
+        }
+        Space::Pile(_) => {
+            // ADDED TO WHAT WAS THERE, which is the accumulation Dave
+            // ruled. A square with no heap yet was holding nothing, and
+            // `standing_at` must not be asked - it would read the mouth
+            // as a full heap.
+            let had = match stack.cover == Some(debris) {
+                true => standing_at(tile, Layer::Cover, debris),
+                false => 0,
+            };
+            let next = Stack {
+                cover: Some(debris),
+                ..stack
+            };
+            next.legal()?;
+            save_square(
+                token,
+                location_id,
+                x,
+                y,
+                z,
+                tile.is_some(),
+                &next,
+                surface_hp,
+                Some(had + amount),
+            )
+        }
+        Space::None => Ok(()),
+    }
 }
 
 /// Write a square's layers and hit points.
@@ -1049,6 +1190,13 @@ fn columns_after(
 struct Broke {
     became: Option<String>,
     now: Vec<String>,
+    /// 271. Where the surplus ran, said in words for the panel.
+    spill: Vec<String>,
+    /// What had nowhere to go. See `Poured::surplus` - nothing in the
+    /// vocabulary can reach this from a collapse, and it is reported
+    /// rather than swallowed so that if anything ever does, it is on
+    /// screen instead of in the ground.
+    surplus: i64,
 }
 
 /// Take a layer down to `after`, and write whatever that makes it.
@@ -1081,15 +1229,12 @@ fn wear_away(
     after: i64,
 ) -> Result<Broke, String> {
     let gone = after == 0;
-    let next = match gone {
+    let mut next = match gone {
         true => stack.destroyed(which),
         false => stack,
     };
-    // A rule that produced a square nothing could read back would be
-    // worse than a refusal.
-    next.legal()?;
 
-    let (surface_hp, mut cover_hp) = columns_after(
+    let (mut surface_hp, mut cover_hp) = columns_after(
         &stack,
         &next,
         which,
@@ -1098,20 +1243,84 @@ fn wear_away(
         (!gone).then_some(after),
     );
 
-    // 265. AND THE SPOIL ARRIVES WITH AN AMOUNT.
-    //
-    // `columns_after` gives a changed layer a null, which is right for
-    // a thing that simply became something else - but debris is a
-    // QUANTITY, and the quantity is a quarter of what it came from.
-    // Null here would mean a full heap however little was broken, so a
-    // dug floor would yield as much stone as a collapsed wall.
-    if gone {
-        if let Some((mess, amount)) = word.spoil() {
-            if next.cover == Some(mess) {
-                cover_hp = Some(amount);
+    /* ---- 271. AND THE SPOIL POURS ----
+
+       265 put the spoil on this square's cover with an amount, because
+       a heap had only one place it could go. Dave's ruling gave it
+       three, so WHERE is now a rule - `pour` - and this is the plumbing
+       that reads the neighbourhood for it and writes what it decides.
+
+       265'S POINT SURVIVES INTACT: the amount is still a quarter of
+       what it came from, and `columns_after`'s null would still have
+       meant a full heap however little was broken. The pour carries the
+       number now instead of this block correcting it.                 */
+    let mut spill: Vec<String> = Vec::new();
+    let mut surplus = 0;
+    if let Some((mess, amount)) = gone.then(|| word.spoil()).flatten() {
+        let ring = ring_at(token, location_id, x, y, z)?;
+        let home = next.space_for(mess, surface_hp, cover_hp);
+        let mut rooms: Vec<(i32, i32, Space)> = vec![(0, 0, home)];
+        for (dx, dy, t, st) in &ring {
+            rooms.push((
+                *dx,
+                *dy,
+                st.space_for(
+                    mess,
+                    t.as_ref().and_then(|t| t.surface_hp),
+                    t.as_ref().and_then(|t| t.cover_hp),
+                ),
+            ));
+        }
+        let poured = crate::terrain::pour(amount, &rooms);
+        surplus = poured.surplus;
+
+        for (dx, dy, put) in poured.placed {
+            if dx == 0 && dy == 0 {
+                // THIS SQUARE IS FOLDED INTO THE ONE WRITE BELOW. The
+                // row is already being written for the blow, and two
+                // writes to one row is two chances to half-fail.
+                match home {
+                    // IT FELL IN. Dig through a floor into water and
+                    // the diggings do not float on it.
+                    Space::Hole(_) => {
+                        // WHOLE UNLESS THE COLUMN SAYS OTHERWISE, and
+                        // NOT what the tile used to say: a revealed
+                        // surface is a different word, so
+                        // `columns_after` has already nulled the number
+                        // the old floor carried. Reading the tile here
+                        // would charge the water for the floor's
+                        // wounds.
+                        let had = surface_hp.unwrap_or_else(|| {
+                            next.surface.integrity().map(|i| i.hp).unwrap_or(0)
+                        });
+                        match had - put {
+                            0 => {
+                                next = next.destroyed(Layer::Surface);
+                                surface_hp = None;
+                            }
+                            n => surface_hp = Some(n),
+                        }
+                    }
+                    _ => {
+                        next.cover = Some(mess);
+                        cover_hp = Some(put);
+                    }
+                }
+            } else if let Some((_, _, t, st)) =
+                ring.iter().find(|(a, b, _, _)| *a == dx && *b == dy)
+            {
+                spill_into(token, location_id, x + dx, y + dy, z, t, *st, mess, put)?;
+                spill.push(format!("{} into ({}, {})", put, x + dx, y + dy));
             }
         }
     }
+
+    // A rule that produced a square nothing could read back would be
+    // worse than a refusal. ASKED AFTER THE POUR, because the pour can
+    // change which words are here - a hole that filled is no longer a
+    // hole.
+    next.legal()?;
+
     save_square(
         token,
         location_id,
@@ -1136,7 +1345,12 @@ fn wear_away(
     if let Some(t) = next.cover {
         now.push(t.key().to_string());
     }
-    Ok(Broke { became, now })
+    Ok(Broke {
+        became,
+        now,
+        spill,
+        surplus,
+    })
 }
 
 /// Hit one layer of one square.
@@ -1204,8 +1418,6 @@ pub fn damage_square(
         word,
         after,
     )?;
-    let (became, now) = (broke.became, broke.now);
-
     Ok(Hit {
         layer: match which {
             Layer::Sub => "sub",
@@ -1218,8 +1430,10 @@ pub fn damage_square(
         hp_before: before,
         hp_after: after,
         wear: wear_word(integ.wear(after)),
-        became,
-        now,
+        became: broke.became,
+        now: broke.now,
+        spill: broke.spill,
+        surplus: broke.surplus,
     })
 }
 
@@ -1712,6 +1926,9 @@ pub struct Dug {
     /// Set when the layer stopped existing as it was.
     pub became: Option<String>,
     pub now: Vec<String>,
+    /// 271. Where the diggings ran, and what had nowhere to go.
+    pub spill: Vec<String>,
+    pub surplus: i64,
 }
 
 /// Work a layer down with hours instead of dice.
@@ -1870,6 +2087,8 @@ pub fn dig_square(
         workers,
         became: broke.became,
         now: broke.now,
+        spill: broke.spill,
+        surplus: broke.surplus,
     })
 }
 
@@ -3081,10 +3300,21 @@ mod tests {
         // not party to that and keeps its wounds.
         let before = Stack::of(Terrain::Ice).under(Terrain::StoneWall);
         let after = before.destroyed(Layer::Cover);
-        assert_eq!(after.cover, Some(Terrain::Rubble));
+        assert_eq!(after.cover, None, "271: the pour places the heap, not this");
 
         let (s, c) = columns_after(&before, &after, Layer::Cover, Some(5), Some(0), None);
         assert_eq!(s, Some(5), "the ice was damaged and nothing touched it");
+        assert_eq!(c, None, "there is nothing up there to hold a number");
+
+        // AND STILL NULL ONCE THE POUR HAS PLACED THE HEAP: rubble is a
+        // new thing and starts whole, which is the fault this function
+        // was extracted to fix and is unaffected by 271.
+        let settled = Stack {
+            cover: Some(Terrain::Rubble),
+            ..after
+        };
+        let (s, c) = columns_after(&before, &settled, Layer::Cover, Some(5), Some(0), None);
+        assert_eq!(s, Some(5), "the ice still keeps its wounds");
         assert_eq!(c, None, "rubble is a new thing and starts whole");
     }
 

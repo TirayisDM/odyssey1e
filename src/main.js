@@ -10263,6 +10263,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     return workers > 1 ? " by " + workers : "";
   }
 
+  // 271. WHERE THE SURPLUS WENT, and what had nowhere to go.
+  //
+  // SURPLUS IS SAID LOUDLY AND SHOULD NEVER APPEAR. Nothing a collapse
+  // can produce overflows its own square - terrain.rs sweeps for that -
+  // so a number here means either a rule changed or a map ran out of
+  // room, and both want seeing rather than swallowing.
+  function ran(spill, surplus) {
+    let said = spill && spill.length ? " · spilled " + spill.join(", ") : "";
+    if (surplus) said += " · " + surplus + " WITH NOWHERE TO GO";
+    return said;
+  }
+
   // 270. AND WHAT IT WAS WORKED WITH. "by hand" is said OUT LOUD rather
   // than left blank: bare hands are legal on sand and brambles and on
   // nothing else, so seeing it is how a DM knows the rule fired rather
@@ -10303,7 +10315,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       hit.word + ": " + hit.landed + " of " + hit.rolled + " landed · " +
         hit.hp_before + " to " + hit.hp_after + " · " + hit.wear +
         (hit.became ? " · became " + hit.became : "") +
-        " · now " + hit.now.join(" + ")
+        " · now " + hit.now.join(" + ") + ran(hit.spill, hit.surplus)
     );
   });
 
@@ -10448,7 +10460,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           with_(v.tool) +
           " · " + v.hp_before + " to " + v.hp_after + " · " + v.wear +
           (v.became ? " · became " + v.became : "") +
-          " · now " + v.now.join(" + ")
+          " · now " + v.now.join(" + ") + ran(v.spill, v.surplus)
       );
     }
 

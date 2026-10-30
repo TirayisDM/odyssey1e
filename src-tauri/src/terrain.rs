@@ -292,6 +292,137 @@ impl Bite {
     }
 }
 
+/// Where debris could go on one square.
+///
+/// NOT CALLED `Room`, because tiles.rs already means a location's map
+/// by that word and two Rooms in one project would be a collision
+/// waiting for the first file that imports both.
+///
+/// TWO KINDS OF ROOM AND NOT ONE NUMBER, because [`pour`] has to take
+/// them in a different order: Dave's ruling is holes before floors, so
+/// which kind it is has to survive being measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Space {
+    /// Into a volume being filled - a pit, or water. Rubble runs
+    /// downhill, so these are taken before anything piles up.
+    Hole(i64),
+    /// Onto the cover, as a heap.
+    Pile(i64),
+    /// Nowhere. A wall stands here, or debris of another material, or
+    /// something somebody painted that rubble will not bury.
+    None,
+}
+
+impl Space {
+    pub fn amount(self) -> i64 {
+        match self {
+            Space::Hole(n) | Space::Pile(n) => n.max(0),
+            Space::None => 0,
+        }
+    }
+
+    pub fn is_hole(self) -> bool {
+        matches!(self, Space::Hole(_))
+    }
+}
+
+/// The eight squares around one, in a fixed order.
+///
+/// CLOCKWISE FROM NORTH. Which order it is does not matter; that it is
+/// FIXED does - spill has to land in the same squares every time, or
+/// the same collapse would make two different maps and neither the DM
+/// nor a test could say which was right.
+pub const AROUND: [(i32, i32); 8] = [
+    (0, -1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+    (0, 1),
+    (-1, 1),
+    (-1, 0),
+    (-1, -1),
+];
+
+/// Where a quantity of debris ended up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Poured {
+    /// Offsets from the square it was poured on, and how much landed in
+    /// each. Only squares that took something appear.
+    pub placed: Vec<(i32, i32, i64)>,
+    /// What would not fit anywhere in the ring.
+    ///
+    /// ALWAYS ZERO WHEN SOMETHING COLLAPSES, and that is arithmetic
+    /// rather than luck: a span yields exactly one mouthful and the
+    /// square it fell in is empty by then. A caller that CAN overflow -
+    /// hauling, when it exists - must refuse rather than lose the
+    /// stone.
+    pub surplus: i64,
+}
+
+/// Tip `amount` points of debris onto a square and let it settle.
+///
+/// -------------------------------------------------------------------
+/// 271. RUBBLE ACCUMULATES, AND SPILLS
+/// -------------------------------------------------------------------
+///
+/// Dave's ruling, in four parts, and all four are here:
+///
+/// **SURPLUS ONLY.** The square it was tipped on fills first, whatever
+/// kind of room it has, and only what will not fit travels. Scattering
+/// everything would spread a wall's debris thinly over three squares
+/// and blur the clean arithmetic 262 is built on - one span, one heap,
+/// four heaps rebuild it.
+///
+/// **HOLES BEFORE FLOORS.** Rubble runs downhill, so a pit or a depth
+/// of water takes the surplus before any neighbour piles it up. Which
+/// also means a hole beside your works is a tip, and that is true to
+/// life.
+///
+/// **SKIP MIXED, AND SKIP WALLS.** Decided by [`Stack::space_for`],
+/// which gives such a square no room at all - so this needs no list of
+/// exceptions and gains none when a sixth kind of debris is added.
+///
+/// **ONE RING.** The caller passes the neighbourhood it read; a
+/// collapsing wall throws rubble a square, not across the room. Nine
+/// squares of stone is 135 points against the 15 anything can produce,
+/// so in practice `surplus` is unreachable from destruction.
+///
+/// ONE ROOM PER SQUARE PER POUR. A pit that fills to nothing becomes
+/// rock, and rock could then be piled on - but not in the same pour.
+/// Re-reading a square mid-pour to see what it had just become would
+/// make the result depend on the order rather than on the map.
+pub fn pour(amount: i64, ring: &[(i32, i32, Space)]) -> Poured {
+    let mut left = amount.max(0);
+    let mut placed: Vec<(i32, i32, i64)> = Vec::new();
+
+    // THREE PASSES, IN DAVE'S ORDER: the square it fell in, then the
+    // holes, then the floors.
+    for pass in 0..3u8 {
+        for &(dx, dy, room) in ring {
+            if left <= 0 {
+                break;
+            }
+            let home = dx == 0 && dy == 0;
+            let cap = match pass {
+                0 if home => room.amount(),
+                1 if !home && room.is_hole() => room.amount(),
+                2 if !home && !room.is_hole() => room.amount(),
+                _ => 0,
+            };
+            if cap <= 0 {
+                continue;
+            }
+            let put = cap.min(left);
+            left -= put;
+            placed.push((dx, dy, put));
+        }
+    }
+    Poured {
+        placed,
+        surplus: left,
+    }
+}
+
 /// What a thing is made of.
 ///
 /// 264. SO THIRTEEN HAND-WRITTEN NUMBERS BECOME FIVE FACTS AND A
@@ -1518,16 +1649,83 @@ impl Stack {
             },
         }
 
-        // 265. AND THE SPOIL LANDS ON TOP, whichever layer was broken.
-        //
-        // AFTER the cover has been cleared, never before: digging a
-        // floor takes what was lying on it down the hole and then piles
-        // the diggings where it stood. Doing this first would bury the
-        // old cover under the new one and keep both.
-        if let Some(mess) = d.spoil {
-            self.cover = Some(mess);
-        }
+        /* 271. AND THE SPOIL IS NO LONGER PLACED HERE.
+
+           265 ended this function by piling the spoil on the cover, and
+           that was right while a heap had only one place it could go.
+           Dave's ruling gave it three: it fills the square, the surplus
+           runs to the neighbours, and a pit or deep water absorbs it
+           rather than wearing it as a hat.
+
+           Choosing between them needs HOW MUCH and WHAT IS AROUND, and
+           this function has neither - it answers one question about one
+           square and takes no hit points. So `destroyed` now says only
+           what the broken layers BECOME, and [`pour`] says where the
+           debris lands. The order 265 fought for is kept by the pour
+           asking this first: the cover is already gone by the time
+           anything is poured, so a lid still rides down the hole.      */
         self
+    }
+
+    /// How much more of `debris` this square could take.
+    ///
+    /// ---------------------------------------------------------------
+    /// 271. WHAT ROOM A SQUARE HAS
+    /// ---------------------------------------------------------------
+    ///
+    /// ASKED TOP DOWN, because that is how debris arrives. Whatever is
+    /// lying here is met first, and only an empty square is asked what
+    /// its floor is.
+    ///
+    /// THE MOUTH IS A [`Bulk::Quarter`] AND IS NOT A NEW NUMBER. A heap
+    /// of stone holds 15 because a quarter of a span is what debris IS
+    /// - so destroying a whole span still yields exactly one full heap
+    /// with nothing spilled, and 262's four-to-one is untouched. Spill
+    /// only ever engages on a square that already had something in it.
+    ///
+    /// SKIP MIXED, Dave's ruling. One cover slot means one kind of
+    /// debris, and stone poured onto a timber pile would leave a heap
+    /// of neither - so a square holding the wrong debris has no room at
+    /// all rather than some.
+    ///
+    /// AND NOTHING AUTHORED IS BURIED. A cover that is not this debris
+    /// is in the way whether it could be attacked or not, so rubble
+    /// never deletes the grass or the doorway somebody painted. 262's
+    /// ruling that a lid rides down a hole is about the layer under it
+    /// going; this is about something arriving from outside, which is
+    /// not the same event.
+    pub fn space_for(
+        &self,
+        debris: Terrain,
+        surface_hp: Option<i64>,
+        cover_hp: Option<i64>,
+    ) -> Space {
+        // Only debris pours. A wall is built, not tipped.
+        if !debris.is_debris() {
+            return Space::None;
+        }
+        let Some(mouth) = debris.integrity().map(|i| i.hp) else {
+            return Space::None;
+        };
+
+        match self.cover {
+            // ADD TO WHAT IS ALREADY THERE. `None` hit points mean a
+            // whole heap, which is the same convention every other
+            // layer uses, so a full heap has no room.
+            Some(c) if c == debris => Space::Pile((mouth - cover_hp.unwrap_or(mouth)).max(0)),
+            Some(_) => Space::None,
+            None => match self.surface.is_volume() {
+                // A VOLUME COUNTS DOWN TO NOTHING, so what is left in
+                // it IS the room. 262: you destroy a pit by filling it,
+                // and this is the same arithmetic arriving from above
+                // instead of from a builder.
+                true => match self.surface.integrity() {
+                    Some(i) => Space::Hole(surface_hp.unwrap_or(i.hp).max(0)),
+                    None => Space::None,
+                },
+                false => Space::Pile(mouth),
+            },
+        }
     }
 
     /// What crossing this square actually costs.
@@ -2090,7 +2288,15 @@ mod tests {
         let dug = floor.destroyed(Layer::Surface);
         assert_eq!(dug.surface, Terrain::Rock, "what was under it is the floor now");
         assert_eq!(dug.sub, None);
-        assert_eq!(dug.cover, Some(Terrain::Rubble), "and the spoil is on top of it");
+
+        // AND THE DIGGINGS, which 271 moved into the pour. HALF a heap,
+        // because a floor is half a span - the hole and the heap are
+        // still the pair this test exists for.
+        let (mess, amount) = Terrain::StoneFloor.spoil().unwrap();
+        assert_eq!(mess, Terrain::Rubble);
+        let room = dug.space_for(mess, None, None);
+        assert_eq!(room, Space::Pile(15), "rock is solid, so it piles");
+        assert_eq!(pour(amount, &[(0, 0, room)]).placed, vec![(0, 0, 7)]);
     }
 
     #[test]
@@ -2102,7 +2308,22 @@ mod tests {
             .over(Terrain::Rock)
             .under(Terrain::Snow);
         let dug = snowy.destroyed(Layer::Surface);
-        assert_eq!(dug.cover, Some(Terrain::RubbleEarth), "spoil, not snow");
+        assert_eq!(dug.cover, None, "the snow went down the hole");
+
+        // 271 KEEPS THE ORDER BY CONSTRUCTION RATHER THAN BY SEQUENCE.
+        // The pour asks `destroyed` first, so the cover is already gone
+        // before anything is placed - and this is the proof it has to
+        // be: snow is not this debris, so a square that still had it
+        // would have had NO room at all and the spoil would have gone
+        // next door.
+        let (mess, _) = Terrain::Dirt.spoil().unwrap();
+        assert_eq!(mess, Terrain::RubbleEarth);
+        assert_eq!(dug.space_for(mess, None, None), Space::Pile(5), "spoil, not snow");
+        assert_eq!(
+            snowy.space_for(mess, None, None),
+            Space::None,
+            "had the snow stayed, it would have been in the way"
+        );
     }
 
     #[test]
@@ -2112,8 +2333,12 @@ mod tests {
         // be said by a floor, and the first never could.
         let wall = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
         let after = wall.destroyed(Layer::Cover);
-        assert_eq!(after.cover, Some(Terrain::Rubble));
         assert_eq!(after.surface, Terrain::StoneFloor, "debris lands ON the floor");
+        // 271. STILL TWO FACTS ABOUT ONE SQUARE - and now the second
+        // one is said by a rule that can also answer where it goes
+        // when this square has no room.
+        assert_eq!(Terrain::StoneWall.destruction().spoil, Some(Terrain::Rubble));
+        assert!(after.space_for(Terrain::Rubble, None, None).amount() > 0);
     }
 
     #[test]
@@ -2252,6 +2477,231 @@ mod tests {
     }
 
     /* ====== 268. SPENDING A HEAP ====== */
+
+    /* ====== 271. RUBBLE ACCUMULATES, AND SPILLS ====== */
+
+    /// A square with nothing on it and solid ground under it.
+    #[cfg(test)]
+    fn bare() -> Stack {
+        Stack::of(Terrain::Rock)
+    }
+
+    #[test]
+    fn a_whole_span_is_one_mouthful_and_nothing_spills() {
+        // 262'S FOUR-TO-ONE IS UNTOUCHED BY ANY OF THIS. A span yields
+        // a quarter and a mouth IS a quarter, so the common case - a
+        // wall coming down on its own square - never travels.
+        let (mess, amount) = Terrain::StoneWall.spoil().unwrap();
+        let room = bare().space_for(mess, None, None);
+        assert_eq!(room, Space::Pile(15));
+        let got = pour(amount, &[(0, 0, room)]);
+        assert_eq!(got.placed, vec![(0, 0, 15)]);
+        assert_eq!(got.surplus, 0);
+    }
+
+    #[test]
+    fn nothing_a_collapse_can_make_overflows_its_own_square() {
+        // THE SWEEP THAT MAKES THE ABOVE A RULE RATHER THAN A CASE.
+        // Every word in the vocabulary that leaves spoil leaves no more
+        // than one mouthful of it, so `surplus` is unreachable from
+        // destruction and the refusal it will need belongs to hauling.
+        for t in ALL {
+            let Some((mess, amount)) = t.spoil() else {
+                continue;
+            };
+            let mouth = mess.integrity().expect("debris has hit points").hp;
+            assert!(
+                amount <= mouth,
+                "{} leaves {} of {}, which only holds {}",
+                t.key(),
+                amount,
+                mess.key(),
+                mouth
+            );
+        }
+    }
+
+    #[test]
+    fn the_square_it_was_tipped_on_fills_first_and_only_surplus_travels() {
+        // DAVE'S RULING. The alternative - always scatter - would
+        // spread one wall over three squares and blur the arithmetic.
+        let heap = Stack {
+            cover: Some(Terrain::Rubble),
+            ..bare()
+        };
+        // Ten already there, so five will fit and ten must travel.
+        let here = heap.space_for(Terrain::Rubble, None, Some(10));
+        assert_eq!(here, Space::Pile(5));
+        let got = pour(15, &[(0, 0, here), (1, 0, Space::Pile(15))]);
+        assert_eq!(got.placed, vec![(0, 0, 5), (1, 0, 10)]);
+        assert_eq!(got.surplus, 0);
+    }
+
+    #[test]
+    fn holes_before_floors() {
+        // RUBBLE RUNS DOWNHILL. The floor is listed FIRST on purpose -
+        // the order comes from what kind of room it is, not from where
+        // it sits in the list.
+        let got = pour(
+            20,
+            &[
+                (0, 0, Space::None),
+                (1, 0, Space::Pile(15)),
+                (0, 1, Space::Hole(15)),
+            ],
+        );
+        assert_eq!(got.placed, vec![(0, 1, 15), (1, 0, 5)]);
+    }
+
+    #[test]
+    fn no_volume_leaves_spoil() {
+        // THE GUARD THAT MAKES SPILLING TERMINATE. Filling a hole is
+        // destroying it, so a hole that fills runs the whole
+        // destruction path - and a volume that left debris would pour
+        // again from the square that had just been poured into. The
+        // answer is not a depth limit; it is that water and pits leave
+        // nothing behind, and that is now checked rather than assumed.
+        for t in ALL {
+            if t.is_volume() {
+                assert_eq!(
+                    t.destruction().spoil,
+                    None,
+                    "{} fills and would pour again",
+                    t.key()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pit_swallows_four_heaps() {
+        // 262 ARRIVING FROM ABOVE INSTEAD OF FROM A BUILDER, and the
+        // same number: a pit is sixty and a heap is fifteen.
+        let pit = Stack::of(Terrain::Pit);
+        assert_eq!(pit.space_for(Terrain::Rubble, None, None), Space::Hole(60));
+        let mouth = Terrain::Rubble.integrity().unwrap().hp;
+        assert_eq!(60 / mouth, 4);
+    }
+
+    #[test]
+    fn walking_across_a_lake_is_ninety_points_of_stone() {
+        // THREE STAGES, each falling out of the table: deep water is a
+        // span of fill and shallow is half of one.
+        let deep = Stack::of(Terrain::DeepWater);
+        assert_eq!(deep.space_for(Terrain::Rubble, None, None), Space::Hole(60));
+        let shallow = deep.destroyed(Layer::Surface);
+        assert_eq!(shallow.surface, Terrain::ShallowWater);
+        assert_eq!(shallow.space_for(Terrain::Rubble, None, None), Space::Hole(30));
+        assert_eq!(
+            shallow.destroyed(Layer::Surface).surface,
+            Terrain::Mud,
+            "and then it is a bed"
+        );
+    }
+
+    #[test]
+    fn a_half_filled_hole_has_only_what_is_left_of_it() {
+        let pit = Stack::of(Terrain::Pit);
+        assert_eq!(pit.space_for(Terrain::Rubble, Some(12), None), Space::Hole(12));
+        assert_eq!(pit.space_for(Terrain::Rubble, Some(0), None), Space::Hole(0));
+    }
+
+    #[test]
+    fn a_wall_takes_nothing() {
+        let walled = Stack {
+            cover: Some(Terrain::StoneWall),
+            ..bare()
+        };
+        assert_eq!(walled.space_for(Terrain::Rubble, None, None), Space::None);
+    }
+
+    #[test]
+    fn stone_is_not_tipped_onto_a_timber_pile() {
+        // SKIP MIXED, Dave's ruling. One cover slot means one kind, and
+        // mixing would leave a heap that could raise neither wall.
+        let timber = Stack {
+            cover: Some(Terrain::RubbleTimber),
+            ..bare()
+        };
+        assert_eq!(timber.space_for(Terrain::Rubble, None, None), Space::None);
+        assert_eq!(
+            timber.space_for(Terrain::RubbleTimber, None, Some(4)),
+            Space::Pile(6),
+            "its own kind is welcome"
+        );
+    }
+
+    #[test]
+    fn rubble_does_not_bury_what_somebody_painted() {
+        // A cover with no hit points is not IN THE WAY of an attack -
+        // 266 says so - but that is about breaking what is underneath.
+        // Something arriving from outside is a different event, and
+        // deleting authored terrain to make room for spoil would be a
+        // worse answer than putting the spoil next door.
+        for lid in [Terrain::Grass, Terrain::Snow, Terrain::Doorway] {
+            let covered = Stack {
+                cover: Some(lid),
+                ..bare()
+            };
+            assert_eq!(
+                covered.space_for(Terrain::Rubble, None, None),
+                Space::None,
+                "{}",
+                lid.key()
+            );
+        }
+    }
+
+    #[test]
+    fn a_full_heap_has_no_room() {
+        let full = Stack {
+            cover: Some(Terrain::Rubble),
+            ..bare()
+        };
+        assert_eq!(full.space_for(Terrain::Rubble, None, None), Space::Pile(0));
+        assert_eq!(full.space_for(Terrain::Rubble, None, Some(15)), Space::Pile(0));
+    }
+
+    #[test]
+    fn only_debris_pours() {
+        // A wall is BUILT, not tipped - 268's verb, and it refuses for
+        // its own reasons. Asking this of a wall would be asking the
+        // wrong question, so it has no room rather than some.
+        for t in [Terrain::StoneWall, Terrain::StoneFloor, Terrain::Grass] {
+            assert_eq!(bare().space_for(t, None, None), Space::None, "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn what_cannot_fit_anywhere_is_surplus_rather_than_lost() {
+        // ONE RING IS THE LIMIT, so a pour CAN run out of somewhere to
+        // go. Nothing in the game reaches it today - see the sweep
+        // above - and the caller that eventually can must refuse,
+        // because quietly deleting half a ton of stone is the exact
+        // shape of fault this project keeps finding.
+        let got = pour(40, &[(0, 0, Space::Pile(15)), (1, 0, Space::None)]);
+        assert_eq!(got.placed, vec![(0, 0, 15)]);
+        assert_eq!(got.surplus, 25);
+    }
+
+    #[test]
+    fn nothing_is_poured_from_nothing() {
+        assert_eq!(pour(0, &[(0, 0, Space::Pile(15))]).placed, Vec::new());
+        assert_eq!(pour(-5, &[(0, 0, Space::Pile(15))]).surplus, 0);
+    }
+
+    #[test]
+    fn the_ring_is_eight_squares_and_every_one_of_them_touches() {
+        assert_eq!(AROUND.len(), 8);
+        for (dx, dy) in AROUND {
+            assert!(dx.abs() <= 1 && dy.abs() <= 1, "({}, {}) is not adjacent", dx, dy);
+            assert!(dx != 0 || dy != 0, "the square itself is not around itself");
+        }
+        let mut seen = AROUND.to_vec();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 8, "a square cannot be offered room twice");
+    }
 
     /* ====== 270. WHAT BITES WHAT ====== */
 
@@ -2641,12 +3091,18 @@ mod tests {
         // And the wall itself is reachable, so the refusal names a way
         // forward rather than a dead end.
         assert!(wall.reachable(Layer::Cover).is_ok());
-        let after = wall.destroyed(Layer::Cover);
-        assert_eq!(after.cover, Some(Terrain::Rubble));
+        // 271. THE HEAP IS WHERE THE POUR PUTS IT RATHER THAN WHERE
+        // `destroyed` LEAVES IT, and 266's answer is the same either
+        // way - which is the point of checking it here.
+        let heap = Stack {
+            cover: Terrain::StoneWall.destruction().spoil,
+            ..wall.destroyed(Layer::Cover)
+        };
+        assert_eq!(heap.cover, Some(Terrain::Rubble));
         // The heap is attackable too, so it is in the way in its turn -
         // clear the breach and then the floor is yours.
-        assert!(after.reachable(Layer::Surface).is_err());
-        assert!(after.destroyed(Layer::Cover).reachable(Layer::Surface).is_ok());
+        assert!(heap.reachable(Layer::Surface).is_err());
+        assert!(heap.destroyed(Layer::Cover).reachable(Layer::Surface).is_ok());
     }
 
     #[test]
@@ -2951,11 +3407,27 @@ mod tests {
     fn a_wall_becomes_its_own_debris_and_the_floor_is_untouched() {
         let wall = Stack::of(Terrain::StoneFloor).under(Terrain::StoneWall);
         let after = wall.destroyed(Layer::Cover);
-        assert_eq!(after.cover, Some(Terrain::Rubble));
+        // 271 SPLIT THIS SENTENCE IN TWO. `destroyed` says the wall is
+        // gone; the pour says where its debris settles.
+        assert_eq!(after.cover, None, "nothing is placed yet");
         assert_eq!(after.surface, Terrain::StoneFloor, "debris lands ON the floor");
+
+        let (mess, amount) = Terrain::StoneWall.spoil().unwrap();
+        let room = after.space_for(mess, None, None);
+        assert_eq!(room, Space::Pile(15), "the floor is solid, so it piles");
+        assert_eq!(
+            pour(amount, &[(0, 0, room)]).placed,
+            vec![(0, 0, 15)],
+            "a whole span is exactly one mouthful, so nothing spills"
+        );
+        let settled = Stack {
+            cover: Some(mess),
+            ..after
+        };
+
         // A breach is passable; a wall is not.
         assert_eq!(wall.footing().going, Going::Blocked);
-        assert_eq!(after.footing().going, Going::Difficult);
+        assert_eq!(settled.footing().going, Going::Difficult);
     }
 
     #[test]

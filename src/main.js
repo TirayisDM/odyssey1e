@@ -10337,7 +10337,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // the one underfoot, so there is no square to point at - and a mode
   // whose click ignored where you clicked would be a control that
   // lies.
-  document.querySelector("#mv-lift").addEventListener("click", async () => {
+  document.querySelector("#mv-haullift").addEventListener("click", async () => {
     const who = pick("#mv-who");
     if (!who) return mvSay("pick a creature first", true);
     const r = await tryCall("take_rubble", {

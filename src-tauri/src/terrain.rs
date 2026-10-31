@@ -353,9 +353,13 @@ pub struct Poured {
     ///
     /// ALWAYS ZERO WHEN SOMETHING COLLAPSES, and that is arithmetic
     /// rather than luck: a span yields exactly one mouthful and the
-    /// square it fell in is empty by then. A caller that CAN overflow -
-    /// hauling, when it exists - must refuse rather than lose the
-    /// stone.
+    /// square it fell in is empty by then.
+    ///
+    /// 273. AND NOW THERE IS A CALLER THAT CAN REACH IT. `tip_rubble`
+    /// arrives with a pack rather than a wall, so it can meet a square
+    /// that is already full - and it REFUSES when nothing fits and
+    /// keeps the remainder in the pack when some of it does. Either
+    /// way the stone is never lost, which is what this number is for.
     pub surplus: i64,
 }
 
@@ -454,27 +458,48 @@ pub struct Material {
     /// of stone still wants a pick. What bulk DOES change is handled in
     /// [`Terrain::bite`], and for a different reason.
     pub bite: Option<Bite>,
+    /// 273. POUNDS FOR A FIVE-FOOT SPAN. Dave's table.
+    ///
+    /// `None` IS NOT ZERO, AND THAT IS THE WHOLE REASON IT IS AN
+    /// OPTION. `FILL` is the only one, because it is the only one that
+    /// is not stuff: a pit is a VOLUME, and you cannot pick up a hole.
+    /// Zero would have said "weightless", which would have let a
+    /// barrow be loaded with five feet of nothing.
+    ///
+    /// AND [`Bulk`] IS NOT MENTIONED HERE. It does not need to be: a
+    /// span's weight divided by a span's hit points is pounds per
+    /// POINT, and a floor already has half a span's points and a heap a
+    /// quarter of them. The division happens once, in the hit points,
+    /// where it already happened.
+    pub weight: Option<i64>,
 }
 
 impl Material {
-    const fn of(ac: i64, hp: i64, threshold: i64, bite: Option<Bite>) -> Self {
+    const fn of(
+        ac: i64,
+        hp: i64,
+        threshold: i64,
+        bite: Option<Bite>,
+        weight: Option<i64>,
+    ) -> Self {
         Material {
             ac,
             hp,
             threshold,
             bite,
+            weight,
         }
     }
 
     /// Masonry and bedrock. One material, because `stone_wall` and
     /// `rock_wall` have never differed by a point.
-    pub const STONE: Material = Material::of(17, 60, 10, Some(Bite::Point));
+    pub const STONE: Material = Material::of(17, 60, 10, Some(Bite::Point), Some(2000));
     /// Beams and standing timber.
-    pub const TIMBER: Material = Material::of(15, 40, 5, Some(Bite::Edge));
+    pub const TIMBER: Material = Material::of(15, 40, 5, Some(Bite::Edge), Some(800));
     /// Planks and boards.
-    pub const WOOD: Material = Material::of(15, 30, 5, Some(Bite::Edge));
-    pub const ICE: Material = Material::of(13, 30, 5, Some(Bite::Point));
-    pub const IRON: Material = Material::of(19, 30, 10, Some(Bite::Point));
+    pub const WOOD: Material = Material::of(15, 30, 5, Some(Bite::Edge), Some(400));
+    pub const ICE: Material = Material::of(13, 30, 5, Some(Bite::Point), Some(700));
+    pub const IRON: Material = Material::of(19, 30, 10, Some(Bite::Point), Some(600));
     /// Growing things that are in the way rather than holding anything
     /// up. No threshold - there is nothing in a bramble to shrug a blow
     /// off with.
@@ -482,16 +507,16 @@ impl Material {
     /// 270. AND NO TOOL EITHER. Dave's ruling: brambles come up by
     /// hand. Slowly and unpleasantly, which is what the hour and a
     /// quarter is for.
-    pub const GREENERY: Material = Material::of(15, 15, 0, None);
+    pub const GREENERY: Material = Material::of(15, 15, 0, None, Some(200));
     /// Packed earth.
-    pub const EARTH: Material = Material::of(12, 30, 0, Some(Bite::Scoop));
+    pub const EARTH: Material = Material::of(12, 30, 0, Some(Bite::Scoop), Some(1200));
     /// Sand, scree, mud, marsh - anything that will not hold an edge.
     ///
     /// 270. AND NOTHING IS NEEDED TO MOVE IT. Dave's ruling, and the
     /// reason it is the right one: a rule that made a beach impassable
     /// without ironmongery would be a worse lie than bare hands on
     /// stone ever was.
-    pub const LOOSE: Material = Material::of(10, 20, 0, None);
+    pub const LOOSE: Material = Material::of(10, 20, 0, None, Some(1200));
     /// WHAT IT COSTS TO FILL FIVE FEET OF VOLUME.
     ///
     /// 262. Dave's ruling: a pit and a depth of water are destroyed by
@@ -504,7 +529,7 @@ impl Material {
     ///
     /// 270. FILLING IS SHOVEL WORK, which agrees with the debris going
     /// in from the other side - see [`Terrain::bite`].
-    pub const FILL: Material = Material::of(10, 60, 0, Some(Bite::Scoop));
+    pub const FILL: Material = Material::of(10, 60, 0, Some(Bite::Scoop), None);
 }
 
 /// How much of a material a square holds.
@@ -1349,6 +1374,52 @@ impl Terrain {
             Bulk::Quarter => m.bite.map(|_| Bite::Scoop),
             _ => m.bite,
         }
+    }
+
+    /* ====== 273. WHAT IT WEIGHS ====== */
+
+    /// Pounds per hit point of this word.
+    ///
+    /// ---------------------------------------------------------------
+    /// 273. A HIT POINT IS NOT A POUND
+    /// ---------------------------------------------------------------
+    ///
+    /// Dave's ruling: **labour not luggage.** 269 prices the WORK in
+    /// hours, [`crate::carry::burden`] prices the LOAD in pounds, and
+    /// neither gates the other. Two questions about the same heap.
+    ///
+    /// AND THE TWO NUMBERS DISAGREE, WHICH IS THE POINT. Hit points are
+    /// how hard a thing is to shift; pounds are how much of it there
+    /// is. Sand is sixty pounds a point and masonry thirty-three - a
+    /// sandbank is easy to dig and heavy to carry, and nothing had to
+    /// say so. The table says each thing once and the ratio falls out.
+    ///
+    /// `None` FOR A VOLUME AND FOR A FITTING. A pit has hit points and
+    /// no mass, because filling it is what its hit points COUNT; a
+    /// door has hit points and no `makeup`, because 264 made it a
+    /// fitting rather than a quantity of material. Neither can be
+    /// lifted, so neither needs a weight - and saying nothing is better
+    /// than inventing one.
+    pub fn per_point(self) -> Option<f64> {
+        let (m, _) = self.makeup()?;
+        Some(m.weight? as f64 / m.hp as f64)
+    }
+
+    /// What `points` of this word weighs.
+    ///
+    /// TAKES THE AMOUNT RATHER THAN READING ONE, because a part-built
+    /// wall and a half-spent heap are the ordinary case and only the
+    /// caller holding the row knows the number.
+    pub fn pounds(self, points: i64) -> Option<f64> {
+        Some(self.per_point()? * points.max(0) as f64)
+    }
+
+    /// What a whole square of it weighs.
+    ///
+    /// ASKS `integrity` FOR THE AMOUNT, so a heap is a quarter and a
+    /// floor a half without this knowing what either of those is.
+    pub fn weight(self) -> Option<f64> {
+        self.pounds(self.integrity()?.hp)
     }
 
     /// What is left when it is destroyed.
@@ -2821,6 +2892,244 @@ mod tests {
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), 8, "a square cannot be offered room twice");
+    }
+
+    /* ====== 273. A HEAP IN THE HANDS ====== */
+
+    /// Pounds, compared the way pounds have to be.
+    #[cfg(test)]
+    fn weighs(t: Terrain, lb: f64) {
+        let got = t.weight().unwrap_or_else(|| panic!("{} has no weight", t.key()));
+        assert!(
+            (got - lb).abs() < 0.01,
+            "{} weighs {} and should weigh {}",
+            t.key(),
+            got,
+            lb
+        );
+    }
+
+    #[test]
+    fn a_span_of_each_material_weighs_what_dave_said() {
+        // THE TABLE ITSELF, read through the words that are a whole
+        // span of it. Stone, earth, loose, timber, wood are Dave's
+        // five; ice, iron and greenery are derived from them on the
+        // same scale, and earth has no span word to read it through.
+        weighs(Terrain::StoneWall, 2000.0);
+        weighs(Terrain::RockWall, 2000.0);
+        weighs(Terrain::TimberWall, 800.0);
+        weighs(Terrain::Trees, 800.0);
+        weighs(Terrain::WoodenWall, 400.0);
+        weighs(Terrain::IceWall, 700.0);
+        weighs(Terrain::IronGrate, 600.0);
+        weighs(Terrain::Brush, 200.0);
+        weighs(Terrain::Vines, 200.0);
+    }
+
+    #[test]
+    fn a_floor_is_half_a_span_in_pounds_and_nothing_divided_it() {
+        // 264'S RULE ARRIVES FOR FREE. Nothing divides a weight by a
+        // `Bulk` anywhere - a floor has half a span's hit points and
+        // the pounds follow the points, which is the one place the
+        // halving is written down.
+        weighs(Terrain::StoneFloor, 1000.0);
+        weighs(Terrain::Rock, 1000.0);
+        weighs(Terrain::WoodFloor, 200.0);
+        weighs(Terrain::Dirt, 600.0);
+        weighs(Terrain::Sand, 600.0);
+        weighs(Terrain::Ice, 350.0);
+    }
+
+    #[test]
+    fn a_heap_is_a_quarter_of_a_span_in_pounds_too() {
+        // AND THE ROUNDING IS VISIBLE IN ONE OF THEM. Wood is 30 hit
+        // points a span, so a quarter is 7 rather than 7.5 and a heap
+        // of boards weighs 93 where a true quarter would be 100. That
+        // is 265's integer arithmetic showing through, not a second
+        // rule, and it loses in the safe direction.
+        weighs(Terrain::Rubble, 500.0);
+        weighs(Terrain::RubbleTimber, 200.0);
+        weighs(Terrain::RubbleWood, 93.33);
+        weighs(Terrain::RubbleEarth, 300.0);
+    }
+
+    #[test]
+    fn four_heaps_weigh_the_wall_they_came_out_of() {
+        // 262'S FOUR-TO-ONE, IN THE OTHER UNIT. Nothing arranged this
+        // either: four quarters of the hit points are four quarters of
+        // the pounds.
+        weighs(Terrain::StoneWall, Terrain::Rubble.weight().unwrap() * 4.0);
+        weighs(Terrain::TimberWall, Terrain::RubbleTimber.weight().unwrap() * 4.0);
+    }
+
+    #[test]
+    fn sand_is_heavier_per_point_than_masonry_and_that_is_the_whole_idea() {
+        // THE TWO NUMBERS ARE ABOUT DIFFERENT THINGS. A hit point is
+        // how hard something is to shift and a pound is how much of it
+        // there is, so a sandbank is cheap to dig and brutal to carry
+        // while a wall is the reverse. Neither number was chosen to
+        // produce this; it is what the two tables say when read
+        // together.
+        let sand = Terrain::Sand.per_point().unwrap();
+        let stone = Terrain::StoneFloor.per_point().unwrap();
+        assert!((sand - 60.0).abs() < 0.01, "{}", sand);
+        assert!((stone - 33.33).abs() < 0.01, "{}", stone);
+        assert!(sand > stone);
+
+        // AND THE WORK SAYS THE OPPOSITE WAY ROUND, which is the
+        // sentence above stated in the units the game actually spends.
+        // Ten points of sand against thirty of stone: half an hour to
+        // lift 600 lb, and two and a half hours to lift 1000.
+        assert!(
+            Terrain::Sand.integrity().unwrap().hp < Terrain::StoneFloor.integrity().unwrap().hp
+        );
+    }
+
+    #[test]
+    fn you_cannot_pick_up_a_hole() {
+        // `FILL` IS THE ONE MATERIAL WITH NO WEIGHT, and the reason is
+        // that it is not a material at all - it is what five feet of
+        // VOLUME costs to fill. A number here would have let a barrow
+        // be loaded with a pit.
+        for t in [Terrain::Pit, Terrain::DeepWater, Terrain::ShallowWater] {
+            assert!(t.is_volume(), "{}", t.key());
+            assert_eq!(t.weight(), None, "{} should weigh nothing", t.key());
+            assert_eq!(t.pounds(10), None, "{} should weigh nothing", t.key());
+        }
+    }
+
+    #[test]
+    fn a_door_has_hit_points_and_no_weight_because_it_is_a_fitting() {
+        // 264 MADE A DOOR THE ONE THING WITH NO `makeup`, and this is
+        // the consequence read out loud rather than patched. A door
+        // cannot be lifted, carried or tipped, so the honest answer to
+        // what it weighs is that the table does not say - and an
+        // invented number would be a fault wearing the costume of an
+        // ordinary answer.
+        for t in [Terrain::DoorOpen, Terrain::DoorClosed, Terrain::DoorBroken] {
+            assert!(t.integrity().is_some(), "{}", t.key());
+            assert_eq!(t.weight(), None, "{}", t.key());
+        }
+    }
+
+    #[test]
+    fn everything_made_of_something_says_what_it_weighs() {
+        // THE SWEEP. A word added to the vocabulary gets a weight the
+        // day it gets a material, and the two exemptions are stated as
+        // reasons rather than as a list: a volume is not stuff, and a
+        // thing with no makeup is a fitting.
+        for t in ALL {
+            let expected = t.makeup().is_some() && !t.is_volume();
+            assert_eq!(
+                t.weight().is_some(),
+                expected,
+                "{} disagrees about having a weight",
+                t.key()
+            );
+        }
+    }
+
+    #[test]
+    fn a_collapse_never_mints_weight() {
+        // CONSERVATION, SWEPT. Destruction is lossy in hit points by
+        // 262's ruling, so it must be lossy in pounds as well - a rule
+        // that let a broken wall leave MORE stone than it was made of
+        // would be a quarry.
+        for t in ALL {
+            if let Some((mess, amount)) = t.spoil() {
+                let left = mess.pounds(amount).unwrap();
+                let was = t.weight().unwrap();
+                assert!(
+                    left <= was,
+                    "{} weighs {} and leaves {} of {}",
+                    t.key(),
+                    was,
+                    left,
+                    mess.key()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_heap_is_an_hour_and_a_quarter_whatever_it_is_made_of() {
+        // 269 PRICED HAULING IN PROSE AND THIS IS THE NUMBER IT MEANT:
+        // *"the four heaps that feed it are an hour and a quarter
+        // each"*. Fifteen points of stone at five minutes a point, and
+        // the clock knows nothing about pounds - which is Dave's
+        // "labour not luggage" from the time side.
+        assert_eq!(costs(15, 1), 75 * crate::clock::MINUTE);
+        // AND A LIGHTER HEAP IS NOT A FASTER ONE PER POINT. Five points
+        // of spoil is twenty-five minutes whether it weighs 300 lb or
+        // 90 - the hours are bought by the point and the pounds are
+        // carried by the body.
+        assert_eq!(costs(5, 1), 25 * crate::clock::MINUTE);
+        assert!(Terrain::RubbleEarth.weight().unwrap() > Terrain::RubbleWood.weight().unwrap());
+        assert!(
+            Terrain::RubbleEarth.integrity().unwrap().hp
+                < Terrain::RubbleWood.integrity().unwrap().hp
+        );
+    }
+
+    #[test]
+    fn the_weights_and_the_migration_cannot_drift() {
+        // 226'S GUARD AGAIN, POINTED AT A COLUMN OF NUMBERS. A heap in
+        // the hands is an `objects` row and its pounds come off
+        // `items.weight`, which is a SECOND copy of a rule that lives
+        // here - so it is checked rather than trusted. The failure it
+        // exists to catch is silent: a heap that weighed nothing would
+        // encumber nobody and look exactly like an inventory.
+        let sql = include_str!("../../supabase/migrations/273_a_heap_in_the_hands.sql");
+        let rows = weighed_words(sql);
+
+        let mut in_sql: Vec<String> = rows.iter().map(|(k, _)| k.clone()).collect();
+        let mut in_rust: Vec<String> = ALL
+            .iter()
+            .filter(|t| t.is_debris())
+            .map(|t| t.key().to_string())
+            .collect();
+        in_sql.sort();
+        in_rust.sort();
+        assert_eq!(in_sql, in_rust, "a heap with no item row cannot be lifted");
+
+        for (key, said) in rows {
+            let t = Terrain::of_key(&key).unwrap_or_else(|| panic!("{} is not a word", key));
+            let rule = t.per_point().unwrap();
+            assert!(
+                (said - rule).abs() < 0.001,
+                "{}: the migration says {} a point and the rule says {}",
+                key,
+                said,
+                rule
+            );
+        }
+    }
+
+    /// Pull `(key, weight)` out of the one insert that carries both.
+    ///
+    /// 273. A THIRD ANCHOR, because this guard is checking NUMBERS
+    /// rather than a word list - `constraint_words` and `array_words`
+    /// both read a CHECK and there is no check to read here. The column
+    /// order is part of the contract and the header string says so.
+    #[cfg(test)]
+    fn weighed_words(sql: &str) -> Vec<(String, f64)> {
+        let head = "insert into public.items (key, name, kind, weight, description) values";
+        let at = sql.find(head).expect("no weighed insert in the migration") + head.len();
+        let close = sql[at..].find(";\n").expect("unterminated insert") + at;
+        let rows: Vec<(String, f64)> = sql[at..close]
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim().strip_prefix('(')?;
+                let mut f = l.split(',');
+                let key = f.next()?.trim().trim_matches('\'').to_string();
+                let _name = f.next()?;
+                let _kind = f.next()?;
+                let weight: f64 = f.next()?.trim().parse().ok()?;
+                Some((key, weight))
+            })
+            .collect();
+        assert!(!rows.is_empty(), "the insert parsed to nothing");
+        rows
     }
 
     /* ====== 270. WHAT BITES WHAT ====== */

@@ -12596,6 +12596,178 @@ built.**
 
 ---
 
+## 273. A heap in the hands
+
+**2026-10-30.** Dave: *"hauling next - build it"*. The caller 271 built
+the pour for, and the one that can overflow it.
+
+### The weights, and Bulk never had to be mentioned
+
+Pounds for a five-foot span, on `Material` beside the armour class and
+the hit points. Dave's five - **stone 2000, earth 1200, loose 1200,
+timber 800, wood 400** - plus **ice 700, iron 600, greenery 200** on the
+same scale, and **fill nothing at all**, because a pit is a volume and
+you cannot pick up a hole.
+
+Then one division, once: a span's pounds over a span's hit points is
+pounds per POINT, and a floor already has half a span's points while a
+heap has a quarter of them. **So a stone floor weighs 1000 and a heap of
+its rubble 500 without `Bulk` appearing anywhere in the weight code.**
+262's four-to-one arrives in pounds for free.
+
+### Sand is heavier per point than masonry
+
+Sixty pounds a point against thirty-three, and it is the most useful
+thing the table says. **Hit points are how hard a thing is to shift;
+pounds are how much of it there is.** A sandbank is ten points and 600
+lb - half an hour's work and a crushing load; a stone floor is thirty
+points and 1000 lb - two and a half hours and barely heavier. Neither
+number was chosen to produce that. It is what Dave's two tables say when
+read together, and it is Dave's "labour not luggage" turning out to be a
+fact about the world rather than a policy about the code.
+
+### A heap is terrain or an object, never both
+
+`take_rubble` subtracts from the square's cover and inserts the object
+in the same breath; `tip_rubble` does it the other way. **The item key
+IS the terrain word** - `rubble` on the floor and `rubble` in the pack
+are the same string - so nothing translates between a map vocabulary and
+a catalogue one.
+
+AND THE POUNDS ARRIVE THROUGH MACHINERY THAT WAS ALREADY THERE.
+`objects.quantity` holds the heap's HIT POINTS, because that is what
+262-271 count in, and `holders::stack_weight` has multiplied a unit
+weight by a quantity for every arrow in the game since 071. So the carry
+line reads 500 lb the moment a square of rubble goes in the pack, **with
+no new code path and no special case for "but it is terrain"** - which
+is why the four `items` rows carry 33.3333 a point rather than 500 a
+heap.
+
+### `rubble` was already taken, and the guard did not notice
+
+**The cycle's own near-miss, and it is worth the whole section.** 218
+built searchable scenery and gave one of its fixtures the key `rubble` -
+a pile of fallen stone with twenty slots to rummage through - eight
+cycles before 226 made `rubble` a word in the terrain vocabulary. Two
+meanings, one key, and nothing had ever asked them to meet.
+
+The first version of the migration inserted over it with `on conflict do
+nothing`, which did exactly what it says. **A heap of masonry in a pack
+would have weighed nothing, encumbered nobody, and looked precisely like
+an ordinary inventory row** - and the new drift guard would have stayed
+green, because it reads the migration FILE and not the table.
+
+So: the scenery becomes `rubble_pile` and keeps its name on screen; the
+terrain word wins, and not by seniority - `rubble` is named in three
+CHECK constraints over `tiles` and in every map anybody has painted,
+while the fixture was one catalogue row with no objects of it anywhere.
+
+**The real fix is the `do $check$` block at the bottom of the file**, in
+218's own habit: the inserts still swallow conflicts so the migration
+can be replayed, and the assertion turns a swallowed row into a failed
+migration instead of a weightless heap. A guard that reads what I wrote
+can only ever catch what I wrote down wrong.
+
+### Deciding and writing had to come apart
+
+271 fused them, which was right while the only caller was a collapse: a
+wall comes down whatever the neighbourhood says, and surplus is reported
+rather than refused.
+
+A tip differs in both directions. It can be **refused** - there may be
+nowhere for the stone to go - and it has a **source to subtract from**.
+So `weigh_up` reads the ring and asks `pour`, `pour_out` writes what it
+decided, and the refusal sits safely between them: a pour that places
+nothing has already written nothing, because `terrain::pour` decides in
+full before anything moves.
+
+**AND THE SECOND CALLER FOUND A BUG IN THE FIRST.** 271 wrote the
+tipped-on square's heap as `cover_hp = Some(put)`. That was
+indistinguishable from correct for a collapse, which always lands on a
+square whose cover has just been cleared - so `put` WAS the whole of it.
+A tip onto a half-full heap is the first caller that can tell the
+difference, and it would have overwritten the heap that was there.
+`spill_into` has had the right rule - add to what was found - since 271;
+now both halves ask it.
+
+### Source before destination, every time
+
+Subtract from where it came from before adding to where it goes. A
+failure between the two writes then **loses** the stone, which is
+visible and annoying; the other order would **duplicate** it, which is a
+quarry. 268 made the same choice spending a heap into a wall, and 273
+reads it from both ends - the ground first for a lift, the hands first
+for a tip.
+
+### What refuses, and what is merely reported
+
+- **Nothing fits**: refused. No square written, pack untouched.
+- **Some of it fits**: tipped, and the remainder **stays in the pack**.
+  That is a barrow that filled the hole and still has stone in it, not a
+  failure, and reporting it beats refusing a tip that did most of its
+  job. Conservation holds either way: what left the hands is what
+  reached the ground.
+- **The load**: reported. `carry::burden` has never refused and does not
+  start now - a halfling may shift half a ton of masonry and be told
+  plainly that they are over capacity while doing it.
+
+### The clock, and a crew of one
+
+Charged at 269's rate, and **269 had already named this in prose**:
+*"the four heaps that feed it are an hour and a quarter each: five hours
+of hauling to supply five hours of building."* Fifteen points at five
+minutes each IS an hour and a quarter. No new number was invented; a
+cheque written three cycles ago was cashed.
+
+**NO HELPERS, and that is the rule rather than an omission.** 269's
+three workers share one FACE of one wall; nobody shares a pair of hands.
+Each hauler lifts their own load and pays `costs(n, 1)`.
+
+**AND NO TOOL TO TIP.** Loading is shovel work - 270's rule asked of the
+heap, exactly as `build_square` asks it - and tipping is gravity. The
+tool is still required somewhere in every chain, because nothing reaches
+the hands without a lift.
+
+### Two helpers that were four copies
+
+`standing` - the twelve lines that read a creature's square - was
+written out by build, dig and walk, and a haul would have been the
+fourth. It is one function now, and the struct is called `Placed`
+because 230 has meant a creature-and-coordinates by `Standing` since
+long before any of this: the same collision 271 hit with `Room`, caught
+the same way. `layers_of` is the other one.
+
+1434 tests.
+
+### Carried forward
+
+- **Carts, barrows, sleds.** Everything in 273 is one body's hands, and
+  a vehicle that multiplies what a body can carry is a thing with a
+  capacity, a speed and somewhere to be parked. The obvious next cycle.
+- **A heap in the pack does not slow a walk.** `carry::burden` reports
+  and refuses nothing, by its own long-standing ruling, so 500 lb of
+  masonry moves at full speed. That is "reported, not refused" showing
+  through rather than a new gap - but hauling is the first verb where
+  somebody will notice.
+- **The object half has no hit points and no armour class.** Dave asked.
+  `objects` has neither column for anything - not a sword, not a door -
+  so giving four rows of debris their own would be inventing "objects
+  have hit points" sideways. On the ground a heap has both, because
+  there it is terrain.
+- **Attacking a heap still annihilates it** (unruled). Fifteen points of
+  damage deletes 500 lb of stone. Recommendation unchanged: debris
+  should not be a legal target.
+- **An ice wall can be painted but never built** (unruled). It is in
+  `WALLS` and nothing leaves `ICE` debris.
+- **A pour still destroys a bramble patch for free** - 272's one cover
+  slot. Same shape as the finding above.
+- Still no command-level test that a blow leaves a heap on the square;
+  271's crash exposed that and it is still true.
+- One tool for a whole crew; `depth`; falling; 051's budget still
+  informs and gates nothing.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

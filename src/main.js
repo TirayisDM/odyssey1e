@@ -10015,7 +10015,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   /// picks one, so "click paints" cannot be selected while playing.
   const TP_ACTS = {
     edit: ["paint", "erase"],
-    play: ["stand", "walk", "build", "dig"],
+    play: ["stand", "walk", "build", "dig", "tip"],
   };
 
   /// Show the controls the current mode owns, and no others.
@@ -10263,12 +10263,26 @@ window.addEventListener("DOMContentLoaded", async () => {
     return workers > 1 ? " by " + workers : "";
   }
 
+  // 273. HOW MUCH TO LIFT OR TIP. BLANK MEANS ALL OF IT, which is why
+  // this returns null rather than zero - Rust reads `None` as "the
+  // whole heap" and zero as a refusal, and they are different answers.
+  function hauling() {
+    const said = document.querySelector("#mv-haul").value.trim();
+    return said === "" ? null : Number(said);
+  }
+
   // 271. WHERE THE SURPLUS WENT, and what had nowhere to go.
   //
-  // SURPLUS IS SAID LOUDLY AND SHOULD NEVER APPEAR. Nothing a collapse
-  // can produce overflows its own square - terrain.rs sweeps for that -
-  // so a number here means either a rule changed or a map ran out of
-  // room, and both want seeing rather than swallowing.
+  // SURPLUS IS SAID LOUDLY AND SHOULD NEVER APPEAR *FROM A COLLAPSE*.
+  // Nothing a collapse can produce overflows its own square -
+  // terrain.rs sweeps for that - so a number here means either a rule
+  // changed or a map ran out of room, and both want seeing rather than
+  // swallowing.
+  //
+  // 273. A TIP IS THE ONE CALLER THAT CAN REACH IT HONESTLY, and it
+  // says so in its own quieter words below: what will not fit stays in
+  // the pack, which is a barrow with stone left in it rather than a
+  // fault.
   function ran(spill, surplus) {
     let said = spill && spill.length ? " · spilled " + spill.join(", ") : "";
     if (surplus) said += " · " + surplus + " WITH NOWHERE TO GO";
@@ -10316,6 +10330,28 @@ window.addEventListener("DOMContentLoaded", async () => {
         hit.hp_before + " to " + hit.hp_after + " · " + hit.wear +
         (hit.became ? " · became " + hit.became : "") +
         " · now " + hit.now.join(" + ") + ran(hit.spill, hit.surplus)
+    );
+  });
+
+  // 273. LIFTING, WHICH IS A BUTTON AND NOT A CLICK MODE. The heap is
+  // the one underfoot, so there is no square to point at - and a mode
+  // whose click ignored where you clicked would be a control that
+  // lies.
+  document.querySelector("#mv-lift").addEventListener("click", async () => {
+    const who = pick("#mv-who");
+    if (!who) return mvSay("pick a creature first", true);
+    const r = await tryCall("take_rubble", {
+      characterId: who,
+      amount: hauling(),
+    });
+    if (!r.ok) return mvSay(r.error, true);
+    const v = r.value;
+    await drawLevel();
+    mvSay(
+      v.word + ": lifted " + v.points + with_(v.tool) + " in " + v.took +
+        " · " + v.pounds + " lb" +
+        " · " + v.left + " still underfoot" +
+        " · now " + v.now.join(" + ")
     );
   });
 
@@ -10461,6 +10497,31 @@ window.addEventListener("DOMContentLoaded", async () => {
           " · " + v.hp_before + " to " + v.hp_after + " · " + v.wear +
           (v.became ? " · became " + v.became : "") +
           " · now " + v.now.join(" + ") + ran(v.spill, v.surplus)
+      );
+    }
+
+    // 273. TIPPING. The click is the DESTINATION and the load comes
+    // out of the pack, which is the one click mode whose subject is
+    // not on the square being clicked.
+    if (mode === "tip") {
+      const who = pick("#mv-who");
+      if (!who) return mvSay("pick a creature first", true);
+      const r = await tryCall("tip_rubble", {
+        characterId: who,
+        x: at.x,
+        y: at.y,
+        z: z,
+        word: pick("#mv-haulword") || null,
+        amount: hauling(),
+      });
+      if (!r.ok) return mvSay(r.error, true);
+      const v = r.value;
+      await drawLevel();
+      return mvSay(
+        v.word + ": tipped " + v.placed + " · " + v.pounds + " lb · " + v.took +
+          " · now " + v.now.join(" + ") + ran(v.spill, 0) +
+          " · carrying " + v.carrying +
+          (v.surplus ? " · " + v.surplus + " would not fit and stayed in the pack" : "")
       );
     }
 

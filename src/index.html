@@ -1231,9 +1231,10 @@
                          MAKES something. The creature stands in a heap
                          of debris and the click says where it goes -
                          which is why there is no source control: you
-                         shovel from the pile you are standing in, and
-                         hauling it somewhere else is a verb that does
-                         not exist yet. -->
+                         shovel from the pile you are standing in.
+                         273 GAVE IT THE OTHER HALF: a heap can be
+                         lifted and carried now, so the pile you are
+                         standing in is one you may have put there. -->
                     <option value="build">click builds here</option>
                     <!-- 269. WORK, AS OPPOSED TO A BLOW. "Hit it" is
                          the DM typing what they rolled, for anything
@@ -1241,6 +1242,13 @@
                          spending hours, and it ignores the threshold
                          because sustained work is not one swing. -->
                     <option value="dig">click digs here</option>
+                    <!-- 273. TIPPING, which is the pour with a person
+                         behind it. The click is the DESTINATION; what
+                         is tipped comes out of the pack, which is why
+                         the heap and the amount are controls below
+                         rather than a square to click on. Lifting has
+                         no click at all - the heap is underfoot. -->
+                    <option value="tip">click tips a carried heap</option>
                   </select>
                 </div>
 
@@ -1277,6 +1285,32 @@
                     <input id="mv-helpers" type="number" value="0" min="0" max="2"
                            title="helpers (two at most)" />
                   </div>
+
+                  <!-- 273. HAULING. NO HELPERS HERE, and that is the
+                       rule rather than an omission: 269's three
+                       workers share one face of one wall, and nobody
+                       shares a pair of hands. Each hauler lifts their
+                       own load at five minutes a hit point.
+
+                       THE AMOUNT IS BLANK FOR "ALL OF IT", because
+                       that is what somebody shovelling a heap into a
+                       barrow actually means, and the heap is blank for
+                       "the only one I am carrying" - named only when
+                       there are two and Rust refuses to guess. -->
+                  <div class="tpband">haul debris</div>
+                  <div class="tppair">
+                    <select id="mv-haulword" class="tpfield"
+                            title="which heap to tip; blank if you carry only one">
+                      <option value="">— whichever —</option>
+                      <option value="rubble">broken stone</option>
+                      <option value="rubble_timber">splintered timber</option>
+                      <option value="rubble_wood">broken boards</option>
+                      <option value="rubble_earth">spoil</option>
+                    </select>
+                    <input id="mv-haul" type="number" min="1" step="1"
+                           placeholder="all" title="hit points to lift or tip" />
+                  </div>
+                  <button id="mv-lift" class="ghost tiny">Lift what is underfoot</button>
                 </div>
 
                 <div id="tp-edit" class="tptools" hidden>

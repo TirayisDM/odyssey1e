@@ -565,6 +565,67 @@ struct Standpoint {
     z: Option<i16>,
 }
 
+/// A creature, placed, with every refusal already made.
+///
+/// NOT CALLED `Standing`, which 230 has meant since before any of this
+/// existed - a creature and their coordinates, sent to a screen. This
+/// is the answer to a different question: the row plus the three
+/// refusals a command has to make before it can do anything with it.
+/// The same collision 271 hit with `Room`, caught the same way.
+///
+/// 273. FOUR COMMANDS ASKED THIS IN THE SAME TWELVE LINES - build,
+/// dig, walk and now a haul - and a fifth copy is how one of them
+/// comes to select a column the others do not. The select is the
+/// interesting part: 270 put `entity_id` on the standpoint so that a
+/// command reaching for the holder could not reach for the character
+/// id by mistake, and a command that forgot the column would refuse a
+/// dig for having no tools while the shovel sat in the pack.
+struct Placed {
+    who: Standpoint,
+    location_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+}
+
+/// Read one, or say why there is nowhere to stand.
+///
+/// `role` IS ONLY FOR THE SENTENCE - "could not read the digger" - and
+/// the two placement refusals are the same words for everybody,
+/// because "not anywhere" and "not on the map" are facts about a row
+/// rather than about what somebody was trying to do with it.
+fn standing(token: &str, character_id: &str, role: &str) -> Result<Placed, String> {
+    let rows = supabase::rest_get(
+        token,
+        "characters",
+        &[
+            ("select", "name,game_id,entity_id,location_id,x,y,z"),
+            ("id", &format!("eq.{}", character_id)),
+        ],
+    )?;
+    let mut rows: Vec<Standpoint> =
+        serde_json::from_value(rows).map_err(|e| format!("could not read the {}: {}", role, e))?;
+    let mut who = rows.pop().ok_or("no such creature")?;
+
+    // TAKEN OUT OF THE ROW RATHER THAN CLONED, and `who` keeps every
+    // other field - 270 asks it for the holder and the name after
+    // this, and a partial move would take the name with it.
+    let location_id = who
+        .location_id
+        .take()
+        .ok_or_else(|| format!("{} is not anywhere", who.name))?;
+    let (Some(x), Some(y), Some(z)) = (who.x, who.y, who.z) else {
+        return Err(format!("{} is not on the map - place them first", who.name));
+    };
+    Ok(Placed {
+        who,
+        location_id,
+        x,
+        y,
+        z,
+    })
+}
+
 /* 247. `step_to` AND `Moved` WERE DELETED HERE.
 
    230 built `step_to`: one step, refused unless adjacent. 241 deleted
@@ -1150,6 +1211,161 @@ fn save_square(
     Ok(())
 }
 
+/// What a pour would do, decided and nothing written yet.
+///
+/// -------------------------------------------------------------------
+/// 273. DECIDING AND WRITING ARE TWO STEPS NOW
+/// -------------------------------------------------------------------
+///
+/// 271 fused them, which was right while the only caller was a
+/// collapse: a wall comes down whatever the neighbourhood says, and
+/// surplus is reported rather than refused.
+///
+/// A TIP IS THE OTHER THING, and it differs in both directions. It can
+/// be REFUSED - there may be nowhere for the stone to go - and it has a
+/// SOURCE to subtract from, so the hands must be emptied before the
+/// ground is filled. Fill first and a failure between the two writes
+/// would mint stone; empty first and the worst case loses it, which is
+/// the right way round for a fault to fall.
+///
+/// Both of those want the answer before anything is written, and
+/// `terrain::pour` was always pure. This is the half that reads.
+struct Pouring {
+    /// The eight squares, as they were read, so the writing half does
+    /// not read them again.
+    ring: Vec<(i32, i32, Option<Tile>, Stack)>,
+    /// What the square it was tipped on can take.
+    home: Space,
+    placed: Vec<(i32, i32, i64)>,
+    surplus: i64,
+}
+
+impl Pouring {
+    /// How much of it found somewhere to be.
+    fn landed(&self) -> i64 {
+        self.placed.iter().map(|(_, _, put)| put).sum()
+    }
+}
+
+/// Ask the neighbourhood where `amount` of `debris` would go.
+#[allow(clippy::too_many_arguments)]
+fn weigh_up(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+    stack: &Stack,
+    surface_hp: Option<i64>,
+    cover_hp: Option<i64>,
+    debris: Terrain,
+    amount: i64,
+) -> Result<Pouring, String> {
+    let ring = ring_at(token, location_id, x, y, z)?;
+    let home = stack.space_for(debris, surface_hp, cover_hp);
+    let mut rooms: Vec<(i32, i32, Space)> = vec![(0, 0, home)];
+    for (dx, dy, t, st) in &ring {
+        rooms.push((
+            *dx,
+            *dy,
+            st.space_for(
+                debris,
+                t.as_ref().and_then(|t| t.surface_hp),
+                t.as_ref().and_then(|t| t.cover_hp),
+            ),
+        ));
+    }
+    let poured = crate::terrain::pour(amount, &rooms);
+    Ok(Pouring {
+        ring,
+        home,
+        placed: poured.placed,
+        surplus: poured.surplus,
+    })
+}
+
+/// What a pour left on the square it was tipped on.
+struct Spread {
+    stack: Stack,
+    surface_hp: Option<i64>,
+    cover_hp: Option<i64>,
+    spill: Vec<String>,
+}
+
+/// Write everything the pour decided, EXCEPT this square.
+///
+/// THIS ONE IS HANDED BACK RATHER THAN WRITTEN, because both callers
+/// are already writing this row for their own reasons and two writes
+/// to one row is two chances to half-fail.
+#[allow(clippy::too_many_arguments)]
+fn pour_out(
+    token: &str,
+    location_id: &str,
+    x: i32,
+    y: i32,
+    z: i16,
+    mut stack: Stack,
+    mut surface_hp: Option<i64>,
+    mut cover_hp: Option<i64>,
+    debris: Terrain,
+    plan: &Pouring,
+) -> Result<Spread, String> {
+    let mut spill: Vec<String> = Vec::new();
+    for &(dx, dy, put) in &plan.placed {
+        if dx == 0 && dy == 0 {
+            match plan.home {
+                // IT FELL IN. Dig through a floor into water and the
+                // diggings do not float on it.
+                Space::Hole(_) => {
+                    // WHOLE UNLESS THE COLUMN SAYS OTHERWISE, and NOT
+                    // what the tile used to say: a revealed surface is
+                    // a different word, so `columns_after` has already
+                    // nulled the number the old floor carried. Reading
+                    // the tile here would charge the water for the
+                    // floor's wounds.
+                    let had = surface_hp
+                        .unwrap_or_else(|| stack.surface.integrity().map(|i| i.hp).unwrap_or(0));
+                    match had - put {
+                        0 => {
+                            stack = stack.destroyed(Layer::Surface);
+                            surface_hp = None;
+                        }
+                        n => surface_hp = Some(n),
+                    }
+                }
+                // ADDED TO WHAT WAS THERE, which is the accumulation
+                // Dave ruled - and 273 is what forced it to be said
+                // here. A collapse always lands on a square whose
+                // cover has just been cleared, so `put` WAS the whole
+                // of it and overwriting was indistinguishable from
+                // adding. A tip onto a half-full heap is the first
+                // caller that can tell the difference, and the rule it
+                // needs is the one `spill_into` has had all along.
+                _ => {
+                    let had = match stack.cover == Some(debris) {
+                        true => cover_hp
+                            .unwrap_or_else(|| debris.integrity().map(|i| i.hp).unwrap_or(0)),
+                        false => 0,
+                    };
+                    stack.cover = Some(debris);
+                    cover_hp = Some(had + put);
+                }
+            }
+        } else if let Some((_, _, t, st)) =
+            plan.ring.iter().find(|(a, b, _, _)| *a == dx && *b == dy)
+        {
+            spill_into(token, location_id, x + dx, y + dy, z, t, *st, debris, put)?;
+            spill.push(format!("{} into ({}, {})", put, x + dx, y + dy));
+        }
+    }
+    Ok(Spread {
+        stack,
+        surface_hp,
+        cover_hp,
+        spill,
+    })
+}
+
 /// Which hit points the square still has after a blow.
 ///
 /// 263. A LAYER THAT CHANGED WORD IS A NEW THING and starts whole, so
@@ -1257,62 +1473,39 @@ fn wear_away(
     let mut spill: Vec<String> = Vec::new();
     let mut surplus = 0;
     if let Some((mess, amount)) = gone.then(|| word.spoil()).flatten() {
-        let ring = ring_at(token, location_id, x, y, z)?;
-        let home = next.space_for(mess, surface_hp, cover_hp);
-        let mut rooms: Vec<(i32, i32, Space)> = vec![(0, 0, home)];
-        for (dx, dy, t, st) in &ring {
-            rooms.push((
-                *dx,
-                *dy,
-                st.space_for(
-                    mess,
-                    t.as_ref().and_then(|t| t.surface_hp),
-                    t.as_ref().and_then(|t| t.cover_hp),
-                ),
-            ));
-        }
-        let poured = crate::terrain::pour(amount, &rooms);
-        surplus = poured.surplus;
-
-        for (dx, dy, put) in poured.placed {
-            if dx == 0 && dy == 0 {
-                // THIS SQUARE IS FOLDED INTO THE ONE WRITE BELOW. The
-                // row is already being written for the blow, and two
-                // writes to one row is two chances to half-fail.
-                match home {
-                    // IT FELL IN. Dig through a floor into water and
-                    // the diggings do not float on it.
-                    Space::Hole(_) => {
-                        // WHOLE UNLESS THE COLUMN SAYS OTHERWISE, and
-                        // NOT what the tile used to say: a revealed
-                        // surface is a different word, so
-                        // `columns_after` has already nulled the number
-                        // the old floor carried. Reading the tile here
-                        // would charge the water for the floor's
-                        // wounds.
-                        let had = surface_hp.unwrap_or_else(|| {
-                            next.surface.integrity().map(|i| i.hp).unwrap_or(0)
-                        });
-                        match had - put {
-                            0 => {
-                                next = next.destroyed(Layer::Surface);
-                                surface_hp = None;
-                            }
-                            n => surface_hp = Some(n),
-                        }
-                    }
-                    _ => {
-                        next.cover = Some(mess);
-                        cover_hp = Some(put);
-                    }
-                }
-            } else if let Some((_, _, t, st)) =
-                ring.iter().find(|(a, b, _, _)| *a == dx && *b == dy)
-            {
-                spill_into(token, location_id, x + dx, y + dy, z, t, *st, mess, put)?;
-                spill.push(format!("{} into ({}, {})", put, x + dx, y + dy));
-            }
-        }
+        // 273. ASKED, THEN WRITTEN. A collapse cannot be refused, so
+        // this reads both halves in a row and reports the surplus -
+        // which nothing in the vocabulary can produce. See `Pouring`
+        // for why a tip cannot do the same.
+        let plan = weigh_up(
+            token,
+            location_id,
+            x,
+            y,
+            z,
+            &next,
+            surface_hp,
+            cover_hp,
+            mess,
+            amount,
+        )?;
+        surplus = plan.surplus;
+        let spread = pour_out(
+            token,
+            location_id,
+            x,
+            y,
+            z,
+            next,
+            surface_hp,
+            cover_hp,
+            mess,
+            &plan,
+        )?;
+        next = spread.stack;
+        surface_hp = spread.surface_hp;
+        cover_hp = spread.cover_hp;
+        spill = spread.spill;
     }
 
     // A rule that produced a square nothing could read back would be
@@ -1337,14 +1530,7 @@ fn wear_away(
         Some(t) => t.key().to_string(),
         None => "nothing".to_string(),
     });
-    let mut now = Vec::new();
-    if let Some(t) = next.sub {
-        now.push(t.key().to_string());
-    }
-    now.push(next.surface.key().to_string());
-    if let Some(t) = next.cover {
-        now.push(t.key().to_string());
-    }
+    let now = layers_of(&next);
     Ok(Broke {
         became,
         now,
@@ -1633,26 +1819,13 @@ pub fn build_square(
     let workers = crate::terrain::crew(1 + helpers)?;
     let shift = minutes.saturating_mul(crate::clock::MINUTE);
 
-    let rows = supabase::rest_get(
-        &token,
-        "characters",
-        &[
-            ("select", "name,game_id,entity_id,location_id,x,y,z"),
-            ("id", &format!("eq.{}", character_id)),
-        ],
-    )?;
-    let mut who: Vec<Standpoint> =
-        serde_json::from_value(rows).map_err(|e| format!("could not read the builder: {}", e))?;
-    let who = who.pop().ok_or("no such creature")?;
-
-    // CLONED, so `who` stays whole - 270 asks it for the holder further
-    // down and a partial move here would take the name with it.
-    let Some(location_id) = who.location_id.clone() else {
-        return Err(format!("{} is not anywhere", who.name));
-    };
-    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
-        return Err(format!("{} is not on the map - place them first", who.name));
-    };
+    let Placed {
+        who,
+        location_id,
+        x: fx,
+        y: fy,
+        z: fz,
+    } = standing(&token, &character_id, "builder")?;
 
     // WITHIN ARM'S REACH, and on the same level. Building across a gap
     // is throwing rubble at a wall and hoping.
@@ -1873,14 +2046,7 @@ pub fn build_square(
         Some(t) => t.key().to_string(),
         None => "nothing".to_string(),
     });
-    let mut now = Vec::new();
-    if let Some(t) = next.sub {
-        now.push(t.key().to_string());
-    }
-    now.push(next.surface.key().to_string());
-    if let Some(t) = next.cover {
-        now.push(t.key().to_string());
-    }
+    let now = layers_of(&next);
 
     Ok(Built {
         layer: match which {
@@ -1971,26 +2137,13 @@ pub fn dig_square(
     let shift = minutes.saturating_mul(crate::clock::MINUTE);
     let token = state.token()?;
 
-    let rows = supabase::rest_get(
-        &token,
-        "characters",
-        &[
-            ("select", "name,game_id,entity_id,location_id,x,y,z"),
-            ("id", &format!("eq.{}", character_id)),
-        ],
-    )?;
-    let mut who: Vec<Standpoint> =
-        serde_json::from_value(rows).map_err(|e| format!("could not read the digger: {}", e))?;
-    let who = who.pop().ok_or("no such creature")?;
-
-    // CLONED, so `who` stays whole - 270 asks it for the holder further
-    // down and a partial move here would take the name with it.
-    let Some(location_id) = who.location_id.clone() else {
-        return Err(format!("{} is not anywhere", who.name));
-    };
-    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
-        return Err(format!("{} is not on the map - place them first", who.name));
-    };
+    let Placed {
+        who,
+        location_id,
+        x: fx,
+        y: fy,
+        z: fz,
+    } = standing(&token, &character_id, "digger")?;
 
     // WITHIN REACH, AND THEIR OWN SQUARE COUNTS. Digging the floor you
     // are standing on is the ordinary case - unlike building, where the
@@ -2090,6 +2243,463 @@ pub fn dig_square(
         spill: broke.spill,
         surplus: broke.surplus,
     })
+}
+
+/* ===================================================================
+   273. A HEAP IN THE HANDS
+   ===================================================================
+
+   Dave: "hauling next - build it". The caller 271 built the pour for.
+
+   THE CONVERSION, AND IT IS NEVER A COPY. A heap is TERRAIN on the
+   ground and an OBJECT in somebody's hands, and never both at once.
+   `take_rubble` subtracts from the square and inserts the object;
+   `tip_rubble` subtracts from the object and pours onto the square.
+   Two homes for one quantity would be the two-places problem with a
+   barrow in it.
+
+   THE ITEM KEY IS THE TERRAIN WORD. `rubble` on the floor and `rubble`
+   in the pack are the same string, so nothing translates between a map
+   vocabulary and a catalogue one, and 273's migration carries a row
+   per debris word with a drift guard over it.
+
+   AND THE POUNDS ARRIVE THROUGH MACHINERY THAT WAS ALREADY THERE.
+   `objects.quantity` holds the heap's HIT POINTS, because that is what
+   262-271 count in, and `holders::stack_weight` has multiplied a unit
+   weight by a quantity for every arrow in the game since 071. So the
+   carry line says 500 lb the moment a square of rubble goes in the
+   pack, with no new code path and no special case for "but it is
+   terrain".
+
+   LABOUR NOT LUGGAGE, Dave's ruling, and both halves are visible here.
+   The CLOCK is charged at 269's rate - five minutes a hit point, which
+   269 already called hauling in prose: *"the four heaps that feed it
+   are an hour and a quarter each"*. The POUNDS are reported by
+   `carry::burden` and refuse nothing. Neither number gates the other,
+   so a halfling may shift a ton of masonry and be told plainly that
+   they are over capacity while doing it.
+
+   ONE BODY, NO CREW. 269's three workers share one FACE of one wall;
+   they cannot share one pair of hands. Each hauler lifts their own
+   load, so these two commands take no `helpers` and pay `costs(n, 1)`.
+
+   NO TOOL TO TIP, AND ONE TO LIFT. Loading is shovel work - 270's rule
+   asked of the heap, exactly as `build_square` asks it - and tipping is
+   gravity. The tool is still required somewhere in every chain,
+   because nothing reaches the hands without a lift.                 */
+
+/// What a lift took off the ground.
+#[derive(Debug, Serialize)]
+pub struct Took {
+    /// The debris word, which is also the item key it went in as.
+    pub word: String,
+    /// Hit points of it. The quantity on the object row.
+    pub points: i64,
+    pub pounds: f64,
+    /// What is still lying on the square.
+    pub left: i64,
+    pub now: Vec<String>,
+    /// 270. What it was shovelled with. None is bare hands, which the
+    /// rule allows for spoil and nothing else.
+    pub tool: Option<String>,
+    pub spent: i64,
+    pub took: String,
+}
+
+/// Pick up the debris you are standing in.
+///
+/// THE HEAP IS UNDERFOOT, like `build_square`'s. Reaching sideways for
+/// a shovelful is the same action as reaching sideways to spend one,
+/// and that question was settled when building chose the square its
+/// worker stands in.
+///
+/// PRICED BY WHAT WAS LIFTED, not by a shift that was asked for. This
+/// is the other way round from `dig_square`, and the reason is that
+/// the two commands are asked different questions: digging says "work
+/// for half an hour and tell me what happened", and a lift says "pick
+/// up ten of it" - nobody shovels for a fixed hour into a barrow of
+/// unknown size.
+#[tauri::command]
+pub fn take_rubble(
+    state: State<AppState>,
+    character_id: String,
+    amount: Option<i64>,
+) -> Result<Took, String> {
+    let token = state.token()?;
+    let Placed {
+        who,
+        location_id,
+        x: fx,
+        y: fy,
+        z: fz,
+    } = standing(&token, &character_id, "hauler")?;
+
+    // 031'S SCAR, REFUSED RATHER THAN WORKED AROUND. An object hangs
+    // off an ENTITY, and a character with no entity row cannot hold
+    // anything - which is a broken row rather than an empty pack, and
+    // saying so is better than an inventory that silently swallows a
+    // ton of stone.
+    let holder = who
+        .entity_id
+        .clone()
+        .ok_or_else(|| format!("{} has no entity row and so cannot hold anything", who.name))?;
+
+    let (tile, stack) = square_at(&token, &location_id, fx, fy, fz)?;
+    let heap = stack
+        .cover
+        .filter(|c| c.is_debris())
+        .ok_or_else(|| format!("{} is not standing in anything loose", who.name))?;
+    let full = heap
+        .integrity()
+        .ok_or_else(|| format!("{} cannot be lifted", heap.key()))?
+        .hp;
+    let has = tile.as_ref().and_then(|t| t.cover_hp).unwrap_or(full);
+
+    // 270. AND SOMETHING HAS TO BITE IT, asked before any number moves
+    // for 266's reason: a refusal that had already spent the clock is
+    // worse than no refusal at all.
+    let tool = tooled(&token, &who, heap)?;
+
+    // WHICHEVER RAN OUT FIRST - the heap, or what was asked for. The
+    // same `Work::of` that building spends a shift with, which is what
+    // it was always for.
+    let crate::terrain::Work { placed: points, .. } =
+        crate::terrain::Work::of(has, amount.unwrap_or(has));
+    if points <= 0 {
+        return Err(match has {
+            0 => format!("there is nothing left of the {}", heap.key()),
+            _ => "a shovelful is at least one hit point".to_string(),
+        });
+    }
+
+    /* ---- THE GROUND FIRST, AND THE HANDS SECOND ----
+
+       Subtract from the source before adding to the destination, every
+       time. A failure between the two writes then LOSES the stone,
+       which is visible and annoying; the other order would DUPLICATE
+       it, which is a quarry. 268 made the same choice spending a heap
+       into a wall and for the same reason. */
+    let left = has - points;
+    let emptied = match left {
+        0 => stack.destroyed(Layer::Cover),
+        _ => stack,
+    };
+    emptied.legal()?;
+    save_square(
+        &token,
+        &location_id,
+        fx,
+        fy,
+        fz,
+        tile.is_some(),
+        &emptied,
+        tile.as_ref().and_then(|t| t.surface_hp),
+        (left > 0).then_some(left),
+    )?;
+
+    // AND IT STACKS LIKE EVERYTHING ELSE. `merge_into` is the same
+    // decision `give_item` makes, so two lifts make one heavier row
+    // rather than two rows of the same stone.
+    let held = crate::objects::load_held(&token, &holder)?;
+    match crate::objects::merge_into(&held, heap.key(), None) {
+        Some(id) => {
+            let had = held
+                .iter()
+                .find(|h| h.id == id)
+                .map(|h| h.quantity)
+                .unwrap_or(0);
+            supabase::rest_update(
+                &token,
+                "objects",
+                &[("id", &format!("eq.{}", id))],
+                &json!({ "quantity": had + points }),
+            )?;
+        }
+        None => {
+            supabase::rest_insert(
+                &token,
+                "objects",
+                &json!({
+                    "game_id": who.game_id,
+                    "holder_id": holder,
+                    "item_key": heap.key(),
+                    "quantity": points,
+                }),
+            )?;
+        }
+    }
+
+    /* ---- 253'S DIARY AND 269'S CLOCK, both failing quiet ----
+       The stone is in the pack; refusing to report that because the
+       log would not take the line would be a lie about the map. */
+    let fight = fighting_in(&token, &character_id);
+    let mut row = json!({
+        "game_id": who.game_id,
+        "character_id": character_id,
+        "key": "haul",
+        "cost": "haul",
+        "request": "haul",
+        "label": format!("lifted {} of {}", points, heap.key()),
+        "status": "done",
+    });
+    if let Some((actor_id, encounter_id)) = &fight {
+        row["actor_id"] = json!(actor_id);
+        row["encounter_id"] = json!(encounter_id);
+    }
+    let _ = supabase::rest_insert(&token, "actions", &json!([row]));
+
+    let spent = crate::terrain::costs(points, 1);
+    let _ = crate::commands::time::tick_on(&token, &who.game_id, spent);
+
+    Ok(Took {
+        word: heap.key().to_string(),
+        points,
+        pounds: round2(heap.pounds(points).unwrap_or(0.0)),
+        left,
+        now: layers_of(&emptied),
+        tool,
+        spent,
+        took: crate::clock::said(spent),
+    })
+}
+
+/// What a tip put down.
+#[derive(Debug, Serialize)]
+pub struct Tipped {
+    pub word: String,
+    /// Hit points that left the hands and reached the ground.
+    pub placed: i64,
+    pub pounds: f64,
+    /// Hit points still being carried, surplus included.
+    pub carrying: i64,
+    pub now: Vec<String>,
+    /// 271. Where it ran to, if this square could not hold it all.
+    pub spill: Vec<String>,
+    /// What would not fit anywhere in the ring and stayed in the pack.
+    pub surplus: i64,
+    pub spent: i64,
+    pub took: String,
+}
+
+/// Tip a carried heap onto a square, and let it settle.
+///
+/// -------------------------------------------------------------------
+/// 271'S CALLER, AND THE ONE THAT CAN OVERFLOW
+/// -------------------------------------------------------------------
+///
+/// A collapse yields exactly one mouthful onto a square that is empty
+/// by then - `nothing_a_collapse_can_make_overflows_its_own_square`
+/// sweeps the vocabulary and proves it. This is the command that can
+/// arrive with a pack full of masonry at a square that already has a
+/// heap on it, so this is where `Poured::surplus` stops being a number
+/// nobody can reach.
+///
+/// **AND IT REFUSES RATHER THAN LOSING THE STONE.** Nothing fits means
+/// nothing happens: no square is written and the pack is untouched.
+/// That refusal is safe where it stands because `terrain::pour` decides
+/// in full before anything is written, so a pour that places nothing
+/// has already written nothing.
+///
+/// WHAT WILL NOT FIT STAYS IN THE PACK. A partial tip is not a
+/// refusal - it is a barrow that filled the hole and still has stone
+/// in it - and reporting the remainder is better than refusing a tip
+/// that did most of its job. Conservation is the invariant either way:
+/// what left the hands is what reached the ground.
+#[tauri::command]
+pub fn tip_rubble(
+    state: State<AppState>,
+    character_id: String,
+    x: i32,
+    y: i32,
+    z: i16,
+    word: Option<String>,
+    amount: Option<i64>,
+) -> Result<Tipped, String> {
+    let token = state.token()?;
+    let Placed {
+        who,
+        location_id,
+        x: fx,
+        y: fy,
+        z: fz,
+    } = standing(&token, &character_id, "hauler")?;
+    let holder = who
+        .entity_id
+        .clone()
+        .ok_or_else(|| format!("{} has no entity row and so cannot hold anything", who.name))?;
+
+    // WITHIN REACH, AND THEIR OWN SQUARE COUNTS - `dig_square`'s rule,
+    // for `dig_square`'s reason. Tipping a barrow out at your feet is
+    // the ordinary case.
+    if fz != z || (x - fx).abs() > 1 || (y - fy).abs() > 1 {
+        return Err(format!(
+            "{} is at ({}, {}) and cannot reach ({}, {}) - stand beside it",
+            who.name, fx, fy, x, y
+        ));
+    }
+
+    // WHICH HEAP, and the refusal names the choice. A hauler carrying
+    // both masonry and spoil has to say, because tipping the wrong one
+    // into a pit is not recoverable at five minutes a point.
+    let held = crate::objects::load_held(&token, &holder)?;
+    let heaps: Vec<_> = held
+        .iter()
+        .filter(|h| {
+            Terrain::of_key(&h.item_key).is_some_and(|t| t.is_debris()) && h.quantity > 0
+        })
+        .collect();
+    let obj = match word.as_deref() {
+        Some(key) => heaps
+            .iter()
+            .find(|h| h.item_key == key)
+            .ok_or_else(|| format!("{} is not carrying any {}", who.name, key))?,
+        None => match heaps.len() {
+            0 => return Err(format!("{} is not carrying any debris", who.name)),
+            1 => &heaps[0],
+            _ => {
+                let kinds: Vec<&str> = heaps.iter().map(|h| h.item_key.as_str()).collect();
+                return Err(format!(
+                    "{} is carrying {} - say which to tip",
+                    who.name,
+                    kinds.join(" and ")
+                ));
+            }
+        },
+    };
+    let debris = Terrain::of_key(&obj.item_key).ok_or("that is not a word")?;
+    let carrying = obj.quantity;
+
+    let crate::terrain::Work { placed: points, .. } =
+        crate::terrain::Work::of(carrying, amount.unwrap_or(carrying));
+    if points <= 0 {
+        return Err("a shovelful is at least one hit point".to_string());
+    }
+
+    let (tile, stack) = square_at(&token, &location_id, x, y, z)?;
+    let surface_hp = tile.as_ref().and_then(|t| t.surface_hp);
+    let cover_hp = tile.as_ref().and_then(|t| t.cover_hp);
+    let plan = weigh_up(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        &stack,
+        surface_hp,
+        cover_hp,
+        debris,
+        points,
+    )?;
+    let landed = plan.landed();
+    if landed <= 0 {
+        return Err(format!(
+            "there is nowhere for {} to go on ({}, {}) or beside it",
+            debris.key(),
+            x,
+            y
+        ));
+    }
+
+    /* ---- THE HANDS FIRST, AND THE GROUND SECOND ----
+       `take_rubble`'s rule, read from the other end: subtract from the
+       source before adding to the destination, so the worst a
+       half-failure can do is lose the stone rather than mint it. */
+    let keeping = carrying - landed;
+    match keeping {
+        0 => {
+            supabase::rest_delete(&token, "objects", &[("id", &format!("eq.{}", obj.id))])?;
+        }
+        n => {
+            supabase::rest_update(
+                &token,
+                "objects",
+                &[("id", &format!("eq.{}", obj.id))],
+                &json!({ "quantity": n }),
+            )?;
+        }
+    }
+
+    let spread = pour_out(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        stack,
+        surface_hp,
+        cover_hp,
+        debris,
+        &plan,
+    )?;
+    spread.stack.legal()?;
+    save_square(
+        &token,
+        &location_id,
+        x,
+        y,
+        z,
+        tile.is_some(),
+        &spread.stack,
+        spread.surface_hp,
+        spread.cover_hp,
+    )?;
+
+    let fight = fighting_in(&token, &character_id);
+    let mut row = json!({
+        "game_id": who.game_id,
+        "character_id": character_id,
+        "key": "haul",
+        "cost": "haul",
+        "request": "haul",
+        "label": format!("tipped {} of {}", landed, debris.key()),
+        "status": "done",
+    });
+    if let Some((actor_id, encounter_id)) = &fight {
+        row["actor_id"] = json!(actor_id);
+        row["encounter_id"] = json!(encounter_id);
+    }
+    let _ = supabase::rest_insert(&token, "actions", &json!([row]));
+
+    let spent = crate::terrain::costs(landed, 1);
+    let _ = crate::commands::time::tick_on(&token, &who.game_id, spent);
+
+    Ok(Tipped {
+        word: debris.key().to_string(),
+        placed: landed,
+        pounds: round2(debris.pounds(landed).unwrap_or(0.0)),
+        carrying: keeping,
+        now: layers_of(&spread.stack),
+        spill: spread.spill,
+        surplus: plan.surplus,
+        spent,
+        took: crate::clock::said(spent),
+    })
+}
+
+/// The three words on a square, in the order they lie.
+///
+/// 273. TWO PLACES WROTE THIS OUT AND TWO MORE WANTED IT. The order is
+/// part of the answer - sub, surface, cover, bottom to top - so a
+/// third copy that listed them another way round would read as a bug
+/// in the panel rather than as a difference between two commands.
+fn layers_of(stack: &Stack) -> Vec<String> {
+    let mut now = Vec::new();
+    if let Some(t) = stack.sub {
+        now.push(t.key().to_string());
+    }
+    now.push(stack.surface.key().to_string());
+    if let Some(t) = stack.cover {
+        now.push(t.key().to_string());
+    }
+    now
+}
+
+/// Pounds, to the nearest hundredth.
+///
+/// THE SAME ROUNDING THE CARRY LINE USES, so a heap that reads 93.33
+/// in the pack does not read 93.33333333 here.
+fn round2(lb: f64) -> f64 {
+    (lb * 100.0).round() / 100.0
 }
 
 /// State a layer's condition outright.
@@ -2590,24 +3200,13 @@ pub fn walk_to(
 ) -> Result<Walk, String> {
     let token = state.token()?;
 
-    let rows = supabase::rest_get(
-        &token,
-        "characters",
-        &[
-            ("select", "name,game_id,entity_id,location_id,x,y,z"),
-            ("id", &format!("eq.{}", character_id)),
-        ],
-    )?;
-    let mut who: Vec<Standpoint> =
-        serde_json::from_value(rows).map_err(|e| format!("could not read the creature: {}", e))?;
-    let who = who.pop().ok_or("no such creature")?;
-
-    let Some(location_id) = who.location_id else {
-        return Err(format!("{} is not anywhere", who.name));
-    };
-    let (Some(fx), Some(fy), Some(fz)) = (who.x, who.y, who.z) else {
-        return Err(format!("{} is not on the map - place them first", who.name));
-    };
+    let Placed {
+        who,
+        location_id,
+        x: fx,
+        y: fy,
+        z: fz,
+    } = standing(&token, &character_id, "creature")?;
 
     let at = Point::new(fx, fy, fz);
     let toward = Point::new(x, y, z);

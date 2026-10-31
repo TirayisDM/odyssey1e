@@ -1722,6 +1722,8 @@ pub fn run() {
             commands::tiles::damage_square,
             commands::tiles::build_square,
             commands::tiles::dig_square,
+            commands::tiles::take_rubble,
+            commands::tiles::tip_rubble,
             commands::tiles::set_square_hp,
             commands::tiles::terrain_words,
             commands::tiles::save_map_as,

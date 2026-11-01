@@ -12,6 +12,10 @@ not schemas, not a repo, and not a database.
 
 ---
 
+**Setting up a new machine?** `NEW-MACHINE.md` is the checklist: what to
+install, what to sign into, what does not travel in the clone, and what
+to clear off the old laptop before you pass it on.
+
 ## Running it
 
 ```powershell

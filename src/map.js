@@ -275,6 +275,11 @@ const PAINT = {
   rubble_timber: "#6b5433",
   rubble_wood: "#8a7147",
   rubble_earth: "#6e5d45",
+  // 274. THE FIFTH, and it is lighter than the wall it falls off
+  // (`ice_wall` is #8fb8c6) because broken ice is white where solid
+  // ice is blue - the shards scatter the light the slab was letting
+  // through. No art yet, so this is what the map will actually show.
+  rubble_ice: "#a9c9d4",
   door_open: "#8a6b3f",
   door_closed: "#8a6b3f",
   door_broken: "#6b4f2c",

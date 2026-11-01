@@ -749,6 +749,14 @@ pub enum Terrain {
     RubbleWood,
     /// Dug spoil - loose earth, sand, the bed of a drained marsh.
     RubbleEarth,
+    /// Shattered ice, from a wall of it or from a broken lid.
+    ///
+    /// 274. THE FIFTH HEAP, AND THE ONE THAT GOES BACK UP. Dave's
+    /// ruling: *"Ice can be built with labor... Ice walls fall and make
+    /// Ice rubble."* Every other debris word was already here; this one
+    /// closes the asymmetry that let an ice wall be painted and
+    /// shattered but never built.
+    RubbleIce,
     DoorOpen,
     DoorClosed,
     DoorBroken,
@@ -875,7 +883,7 @@ impl Work {
     }
 }
 
-pub const ALL: [Terrain; 36] = [
+pub const ALL: [Terrain; 37] = [
     Terrain::Rock,
     Terrain::Dirt,
     Terrain::Mud,
@@ -903,6 +911,7 @@ pub const ALL: [Terrain; 36] = [
     Terrain::RubbleTimber,
     Terrain::RubbleWood,
     Terrain::RubbleEarth,
+    Terrain::RubbleIce,
     Terrain::DoorOpen,
     Terrain::DoorClosed,
     Terrain::DoorBroken,
@@ -966,6 +975,7 @@ impl Terrain {
             RubbleTimber => "rubble_timber",
             RubbleWood => "rubble_wood",
             RubbleEarth => "rubble_earth",
+            RubbleIce => "rubble_ice",
             DoorOpen => "door_open",
             DoorClosed => "door_closed",
             DoorBroken => "door_broken",
@@ -1121,9 +1131,8 @@ impl Terrain {
             // 265. Every kind of debris walks the same: a heap you
             // pick your way over. What it is MADE of decides what it is
             // worth, not what it costs to cross.
-            Snow | Brush | Vines | Rubble | RubbleTimber | RubbleWood | RubbleEarth => {
-                Footing::plain(Difficult)
-            }
+            Snow | Brush | Vines | Rubble | RubbleTimber | RubbleWood | RubbleEarth
+            | RubbleIce => Footing::plain(Difficult),
 
             // A tree fills the square. You go round it.
             Trees => Footing {
@@ -1296,6 +1305,15 @@ impl Terrain {
             // than the thing it came out of, or digging a sandbank
             // would quietly mint better fill than the sand was.
             RubbleEarth => (Material::LOOSE, Quarter),
+            // 274. ICE, AND IT IS THE SAME MATERIAL AS THE WALL IT
+            // RAISES. That is not an exception to anything - it is what
+            // `Rubble` and `StoneWall` have always been to each other.
+            // The four older heaps only LOOK like they need a rule
+            // because three of them cannot reach their own wall:
+            // `LOOSE` has no wall made of it at all. Ice has one, so
+            // ice behaves like masonry, and 268's `mine == theirs` does
+            // the whole of it.
+            RubbleIce => (Material::ICE, Quarter),
 
             // Cover that is in the way and nothing more.
             Grass | Snow => return None,
@@ -1436,16 +1454,21 @@ impl Terrain {
             StoneWall | RockWall => (Clears, Some(Rubble)),
             TimberWall | Trees => (Clears, Some(RubbleTimber)),
             WoodenWall => (Clears, Some(RubbleWood)),
-            // Ice shatters. There is nothing left to pile up, which is
-            // why a frozen wall gives you nothing to build with.
-            IceWall => (Clears, None),
+            // 274. ICE SHATTERS INTO ICE, where this said it shattered
+            // into nothing. Dave's ruling, and it costs no new
+            // machinery: the heap is `ICE` like the wall, so hauling
+            // carries it, the pour spills it and construction raises
+            // the wall back out of it, all by rules that were already
+            // written. What is deferred is the TEMPERATURE that ought
+            // to govern whether it stays frozen - noted and not faked.
+            IceWall => (Clears, Some(RubbleIce)),
             // Cut away, cut out, broken open. Clean breaks.
             Vines | Brush | IronGrate | DoorOpen | DoorClosed | DoorBroken => (Clears, None),
 
             // 262. DEBRIS REDUCES TO NOTHING. Dave's words. Spending it
             // is subtracting from its hit points, and at zero the
             // square is clear.
-            Rubble | RubbleTimber | RubbleWood | RubbleEarth => (Clears, None),
+            Rubble | RubbleTimber | RubbleWood | RubbleEarth | RubbleIce => (Clears, None),
 
             // ---- ground, dug through ----
             //
@@ -1455,8 +1478,13 @@ impl Terrain {
             Rock | Road | StoneFloor | Ramp | Stairs => (Reveals, Some(Rubble)),
             WoodFloor => (Reveals, Some(RubbleWood)),
             Dirt | Mud | Sand | Scree | Marsh => (Reveals, Some(RubbleEarth)),
-            // A lid of ice leaves nothing behind either.
-            Ice => (Reveals, None),
+            // 274. AND A BROKEN LID LEAVES ITS PIECES TOO, because
+            // every other floor in this table does. Breaking the ice
+            // off a pond is the shallowest kind of quarrying and there
+            // was no reason for ice to be the one ground that broke
+            // into nothing - that was the wall's `None` keeping the
+            // floor company rather than a ruling of its own.
+            Ice => (Reveals, Some(RubbleIce)),
 
             // ---- volumes, destroyed by filling them ----
             //
@@ -1534,8 +1562,13 @@ impl Terrain {
     /// `LOOSE`, and no cover in the vocabulary is made of loose earth -
     /// so spoil raises nothing, by the same rule that lets masonry
     /// raise a wall, rather than by a line saying so. The same is true
-    /// of ice from the other end: an ice wall is `ICE` and nothing
-    /// leaves `ICE` debris, so a shattered one is gone for good.
+    /// 274 TOOK ICE OUT OF THAT SENTENCE. It used to read the same
+    /// way from the other end - an ice wall was `ICE` and nothing left
+    /// `ICE` debris, so a shattered one was gone for good - and that
+    /// was an accident of the spoil table rather than a ruling. Ice
+    /// rubble exists now and raises an ice wall by this same
+    /// comparison, so `LOOSE` is the only material left with no wall
+    /// to go back to.
     ///
     /// WALLS, NOT EVERY COVER OF THE RIGHT STUFF. `trees` are `TIMBER`
     /// too, and a heap of splintered beams must not grow one: trees are
@@ -1903,7 +1936,10 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), before, "a key is duplicated");
-        assert_eq!(before, 36);
+        // 274 made this 37 with `rubble_ice`. The number is written
+        // out on purpose: it is the one line that makes ADDING a word a
+        // deliberate act rather than a side effect.
+        assert_eq!(before, 37);
     }
 
     #[test]
@@ -2541,11 +2577,15 @@ mod tests {
 
     #[test]
     fn what_shatters_or_is_cut_leaves_nothing_to_build_with() {
-        // Not every destruction is a quarry. Ice shatters, brambles are
-        // cut away, a grate is cut out, a door comes off its hinges.
+        // Not every destruction is a quarry. Brambles are cut away, a
+        // grate is cut out, a door comes off its hinges.
+        //
+        // 274. ICE LEFT THIS LIST, both halves of it. It was here
+        // because the spoil table said `None`, and that `None` turned
+        // out to be an accident nobody had ruled on - so a wall of it
+        // and a lid of it both leave `rubble_ice` now and the list is
+        // the three CLEAN BREAKS it always meant.
         for t in [
-            Terrain::IceWall,
-            Terrain::Ice,
             Terrain::Vines,
             Terrain::Brush,
             Terrain::IronGrate,
@@ -2951,6 +2991,10 @@ mod tests {
         weighs(Terrain::RubbleTimber, 200.0);
         weighs(Terrain::RubbleWood, 93.33);
         weighs(Terrain::RubbleEarth, 300.0);
+        // 274. AND ICE ROUNDS THE SAME WAY THE BOARDS DO, for the same
+        // reason: thirty hit points a span is 7 at a quarter and not
+        // 7.5, so four heaps of ice are 653 lb where the wall was 700.
+        weighs(Terrain::RubbleIce, 163.33);
     }
 
     #[test]
@@ -3079,7 +3123,11 @@ mod tests {
         // here - so it is checked rather than trusted. The failure it
         // exists to catch is silent: a heap that weighed nothing would
         // encumber nobody and look exactly like an inventory.
-        let sql = include_str!("../../supabase/migrations/273_a_heap_in_the_hands.sql");
+        // 274. THE NEWEST FILE THAT DEFINES THESE ROWS. Same rule the
+        // constraint guard below carries: the guard reads whichever
+        // file is currently the catalogue's copy of the vocabulary,
+        // and 274 restated all five rows to become it.
+        let sql = include_str!("../../supabase/migrations/274_ice_falls_into_ice.sql");
         let rows = weighed_words(sql);
 
         let mut in_sql: Vec<String> = rows.iter().map(|(k, _)| k.clone()).collect();
@@ -3444,14 +3492,64 @@ mod tests {
     }
 
     #[test]
-    fn a_shattered_ice_wall_is_gone_for_good() {
-        // From the other end of the same rule: an ice wall is ICE and
-        // nothing in the world leaves ICE debris, so no heap can raise
-        // one. Nobody wrote that either.
-        assert_eq!(Terrain::IceWall.spoil(), None);
+    fn an_ice_wall_falls_into_ice_and_goes_back_up_out_of_it() {
+        // 274. THE TEST THIS REPLACES WAS CALLED
+        // `a_shattered_ice_wall_is_gone_for_good`, and it asserted the
+        // asymmetry as though it were a rule: an ice wall was `ICE`,
+        // nothing left `ICE` debris, so no heap could raise one. Dave
+        // ruled the other way - ice walls fall and make ice rubble -
+        // and the whole of the change is that one `None` became a
+        // word. Everything below is machinery that was already here.
+        // 265'S PAIR, AND THE AMOUNTS FALL OUT OF 264'S BULK. A wall
+        // is a whole span of thirty, so a quarter of it is seven; the
+        // lid is half a span, so a quarter of THAT is three.
+        assert_eq!(Terrain::IceWall.spoil(), Some((Terrain::RubbleIce, 7)));
+        assert_eq!(Terrain::Ice.spoil(), Some((Terrain::RubbleIce, 3)));
+        assert!(Terrain::RubbleIce.may_raise(Terrain::IceWall));
+
+        // AND NOTHING ELSE RAISES IT, by the material rule rather than
+        // by a line about ice. Masonry cannot freeze into a wall.
         for t in ALL {
-            assert!(!t.may_raise(Terrain::IceWall), "{}", t.key());
+            assert_eq!(
+                t.may_raise(Terrain::IceWall),
+                t == Terrain::RubbleIce,
+                "{}",
+                t.key()
+            );
         }
+
+        // NOR DOES ICE RAISE ANYTHING ELSE. `is_wall` keeps it to the
+        // five, and the material keeps it to the one.
+        for t in ALL {
+            assert_eq!(
+                Terrain::RubbleIce.may_raise(t),
+                t == Terrain::IceWall,
+                "{}",
+                t.key()
+            );
+        }
+    }
+
+    #[test]
+    fn loose_is_the_only_material_with_nowhere_to_go_back_to() {
+        // 274 LEFT EXACTLY ONE HEAP STRANDED, and that one is ruled
+        // rather than accidental: no cover in the vocabulary is made
+        // of loose earth, so spoil raises nothing because there is
+        // nothing made of spoil - not because a line excludes it.
+        // Dirt fills holes. That is what dirt is for.
+        //
+        // THIS IS THE SWEEP THAT WOULD HAVE CAUGHT THE ICE WALL. Any
+        // future material that gets a wall but no heap, or a heap but
+        // no wall, shows up here as a second stranded word and has to
+        // be argued for in writing rather than discovered three
+        // cycles later.
+        let stranded: Vec<&str> = ALL
+            .iter()
+            .filter(|t| t.is_debris())
+            .filter(|h| !ALL.iter().any(|w| h.may_raise(*w)))
+            .map(|t| t.key())
+            .collect();
+        assert_eq!(stranded, vec!["rubble_earth"]);
     }
 
     #[test]
@@ -3943,6 +4041,63 @@ mod tests {
     /* ---------------- and what the database knows ---------------- */
 
     /// Pull a `check (... in ('a','b'))` list out of the migration.
+    /// Every word the map's palette has a colour for.
+    ///
+    /// ---------------------------------------------------------------
+    /// 274. THE THIRD COPY OF THE VOCABULARY, AND NOTHING WATCHED IT
+    /// ---------------------------------------------------------------
+    ///
+    /// The terrain words live in Rust, again in a Postgres CHECK, and
+    /// a THIRD time in `map.js`'s `PAINT` - and only the first two had
+    /// a guard. A word added without a colour falls through to
+    /// `UNKNOWN`, which is `#ff00ff`: the map draws a magenta square
+    /// and says nothing, so the fault is found by somebody noticing it
+    /// with their eyes.
+    ///
+    /// THAT IS THE SAME SHAPE AS 273'S `rubble` COLLISION, one layer
+    /// over. A guard that reads what I wrote can only catch what I
+    /// wrote down wrong - so this reads the FILE the browser loads,
+    /// the way `constraint_words` reads the file Postgres was given.
+    ///
+    /// CRUDE ON PURPOSE. It wants the keys of one object literal, so
+    /// it takes the lines between `const PAINT` and the `};` that ends
+    /// it and keeps whatever looks like `word:`. A JS parser in a test
+    /// helper would be a second thing to maintain for no more
+    /// certainty than this.
+    #[cfg(test)]
+    fn painted_words(js: &str) -> Vec<String> {
+        let at = js.find("const PAINT").expect("no PAINT table in map.js");
+        let close = js[at..].find("\n};").expect("unterminated PAINT") + at;
+        js[at..close]
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                let (word, _) = l.split_once(':')?;
+                match word.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit())
+                    && !word.is_empty()
+                {
+                    true => Some(word.to_string()),
+                    false => None,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_terrain_has_a_colour_and_the_palette_invents_none() {
+        // BOTH DIRECTIONS, because the two failures are different
+        // faults. A word with no colour draws magenta; a colour with
+        // no word is a line nothing can ever reach, which is usually a
+        // typo in the key and therefore the first failure wearing a
+        // costume.
+        let js = include_str!("../../src/map.js");
+        let mut painted = painted_words(js);
+        let mut words: Vec<String> = ALL.iter().map(|t| t.key().to_string()).collect();
+        painted.sort();
+        words.sort();
+        assert_eq!(painted, words, "map.js's PAINT disagrees with terrain::ALL");
+    }
+
     #[cfg(test)]
     fn constraint_words(sql: &str, name: &str) -> Vec<String> {
         let at = sql
@@ -4022,7 +4177,9 @@ mod tests {
         // record rather than a draft, so narrowing the ground layers
         // meant a new file - and the guard has to read whichever file
         // is currently the database's copy of the vocabulary.
-        let sql = include_str!("../../supabase/migrations/265_debris_remembers_what_it_was.sql");
+        // 274. The cover list gained `rubble_ice`, so this file is now
+        // the database's copy and 265 is a record of what it was.
+        let sql = include_str!("../../supabase/migrations/274_ice_falls_into_ice.sql");
 
         for (name, layer) in [
             ("a_surface_is_ground", Layer::Surface),

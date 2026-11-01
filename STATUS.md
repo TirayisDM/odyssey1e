@@ -12768,6 +12768,129 @@ the same way. `layers_of` is the other one.
 
 ---
 
+## 274. Ice falls into ice
+
+**2026-11-01.** Dave, closing a finding carried since 268: *"Ice can be
+built with labor... Ice walls fall and make Ice rubble. We can expand
+this with temperature later but for now it should follow existing
+methodology."*
+
+### The finding was an accident, not a ruling
+
+`ice_wall` was one of the five walls, so a DM could paint one and a
+party could shatter one - but nothing in the world left `ICE` debris,
+so **no heap could raise it and 700 lb of wall vanished when it came
+down.** Three cycles reported this as a gap and one of them (268)
+wrote it into `may_raise`'s doc as though it were a rule: *"an ice wall
+is `ICE` and nothing leaves `ICE` debris, so a shattered one is gone
+for good."*
+
+That sentence was true and it was not a decision. It fell out of a
+`None` in the spoil table. **The test asserting it was called
+`a_shattered_ice_wall_is_gone_for_good`** - a guard holding an accident
+in place, which is the most expensive kind.
+
+### One `None` became a word, and nothing else changed
+
+`rubble_ice` is `ICE` at `Bulk::Quarter`, exactly as `rubble` is
+`STONE` at `Bulk::Quarter`. That is the whole change, and "follow
+existing methodology" is what it bought:
+
+- **265's fork** gives the wall its heap - `(Clears, Some(RubbleIce))`.
+- **268's `mine == theirs`** raises the wall back out of it. No
+  exception, no special case, no line mentioning ice.
+- **270** asks for a shovel, because every quarter-bulk heap scoops.
+- **271** pours and spills it over the ring.
+- **273** weighs and hauls it.
+
+**None of those files was touched.** One variant, one key, one item
+row, one restated CHECK, one palette colour.
+
+AND THE FOUR OLDER HEAPS ONLY LOOKED LIKE THEY NEEDED A RULE. Three of
+them cannot reach their own wall because `LOOSE` has no wall made of
+it at all. Ice has one, so ice behaves like masonry - and the thing
+that looked like a missing rule was a missing row.
+
+### A broken lid leaves its pieces too
+
+Dave ruled on walls. The ice *floor* went the same way, because every
+other floor in the table already does: rock and road leave `rubble`,
+boards leave `rubble_wood`, dirt and sand leave `rubble_earth`, and
+**ice was the one ground that broke into nothing.** That was the
+wall's `None` keeping the floor company rather than a ruling of its
+own. Breaking the ice off a pond is the shallowest kind of quarrying.
+
+A wall is a whole span, so a quarter of thirty is **seven**; the lid is
+half a span, so a quarter of that is **three**.
+
+### Ice rounds like the boards do
+
+Thirty hit points a span is 7 at a quarter rather than 7.5, so a heap
+of ice is **163 lb** and four of them weigh 653 where the wall weighed
+700. That is 265's integer arithmetic showing through, losing in the
+safe direction - the same sentence `rubble_wood` has carried since 273.
+
+### The third copy of the vocabulary, and nothing watched it
+
+**The cycle's own find.** The terrain words live in Rust, again in a
+Postgres CHECK, and a **third** time in `map.js`'s `PAINT` table - and
+only the first two had a drift guard. A word added without a colour
+falls through to `UNKNOWN`, which is `#ff00ff`: **the map draws a
+magenta square and says nothing.**
+
+So `rubble_ice` would have been found by somebody noticing it with
+their eyes, which is 273's `rubble` collision one layer over. There is
+now a guard that reads the file the browser loads, the way the others
+read the file Postgres was given - **both directions**, because a
+colour with no word is usually a typo in a key and therefore the first
+failure in a costume. It passed on its first run: all 37 words have a
+colour and the palette invents none.
+
+`rubble_ice` has **no art yet**, so the map will draw it as that flat
+colour and 242's pane will name it as missing. That is the designed
+fallback working, not a fault.
+
+### The sweep that would have caught this
+
+`loose_is_the_only_material_with_nowhere_to_go_back_to` lists every
+debris word that no wall can be built from. The answer is now exactly
+one, and `rubble_earth` is there **by a ruling** - no cover in the
+vocabulary is made of loose earth, dirt fills holes, that is what dirt
+is for. Any future material that gets a wall but no heap, or a heap
+but no wall, shows up in that list as a second stranded word and has
+to be argued for in writing rather than discovered three cycles later.
+
+1436 tests.
+
+### Carried forward
+
+- **No temperature, and it is Dave's own condition.** His ruling names
+  a frozen landscape and the right temperature, and **neither has
+  anywhere to live**: there is no climate in the model and no clock on
+  a terrain word. So an ice wall built in a desert stands there
+  indefinitely, and a heap of shards never melts. Deferred on purpose
+  and by agreement - *"we can expand this with temperature later"* -
+  and inventing a `temperature` column to satisfy the sentence would
+  be worse than the gap, because nothing would read it and somebody
+  would trust it.
+- **No ice structures beyond the wall.** Dave said "ice wall or ice
+  structures". A structure is a shape over many squares, which this
+  project cannot express for stone either. Not an ice problem.
+- **Attacking a heap still annihilates it** (unruled, and now one word
+  worse). Recommendation unchanged: debris should not be a legal
+  target.
+- **A pour still destroys a bramble patch for free** - 272's one cover
+  slot.
+- **Carts, barrows, sleds.** Still the obvious next cycle; everything
+  in 273 is one body's hands.
+- **A heap in the pack does not slow a walk.** `carry::burden` reports
+  and refuses nothing, by its own long-standing ruling.
+- Still no command-level test that a blow leaves a heap on the square.
+- One tool for a whole crew; `depth`; falling; 051's budget still
+  informs and gates nothing.
+
+---
+
 ## Pick up here
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine

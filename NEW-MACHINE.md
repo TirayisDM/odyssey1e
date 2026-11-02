@@ -146,6 +146,15 @@ to the same path under the new user name. It is two small files -
 this project runs on. Nothing else under `.claude\` needs to move;
 session transcripts are history, not configuration.
 
+**If the old machine is already gone, this one is recoverable and you
+have lost nothing.** The rule it holds is written down in `STATUS.md`,
+under the heading *"The working style, which is now a rule"* - the
+"ONE CYCLE, EXPLAINED, APPROVED, THEN BUILT" entry, along with the
+incident that caused it. Rewrite the memory from that section rather
+than treating the folder as lost. Like the auth table above - which
+`README.md` records and `README.md` is in the clone - the thing that
+does not travel is the *file*, not the knowledge in it.
+
 ### Your fast-login PIN - and do not copy this one
 
 ```
@@ -154,9 +163,31 @@ session transcripts are history, not configuration.
 
 **Set a new PIN in the app on the new machine instead.** Reasons in §5.
 
+### The source material on `G:`, which is not in the repo at all
+
+**"Pick up here" at the end of `STATUS.md` points at a Google Drive
+path, not a tracked file:**
+
+```
+G:\My Drive\appsheet\raw backup
+```
+
+That is the Apps Script system this project is being ported from - 17
+`.js` files, with `diceroller.js` and `characternarrative.js` the ones
+still being read. `WeaponsAttacks.js` there is required reading before
+the versatile-weapons cycle. **`G:\My Drive\appsheet\Application
+Data.xlsx` is the data behind all of it**, 22 tabs, and its `_RAW` tab
+is the honest source the seeds were generated from.
+
+**So install the Google Drive client and sign in, or the next cycle
+has nothing to read.** Nothing here is secret and nothing needs
+rescuing from the old disk - it is in Drive, not on the laptop - but
+the clone alone will not get you there, which is why it belongs in
+this section. Check `G:` resolves before you start a porting cycle.
+
 ### What *does* travel, so stop worrying about it
 
-- **All 62 tile images.** `src/assets/tiles/*.png` is tracked in git.
+- **All 60 tile images.** `src/assets/tiles/*.png` is tracked in git.
   `ART.md` is the brief if you add more.
 - Every migration, the whole Rust and JS source, `STATUS.md`,
   `README.md`, `MAP.md`, the icons, `Cargo.lock` and
@@ -210,6 +241,36 @@ log** and says what the next cycle is.
 
 ## 7. Gotchas that cost an hour each
 
+- **The first build can fail before it compiles anything, and it is not
+  `link.exe`.** If `run.ps1 -Test` dies in seconds - not minutes - with
+
+  ```
+  warning: spurious network error (3 tries remaining): [35] SSL connect error
+  error: failed to get `rand` as a dependency of package `odyssey1e`
+  CRYPT_E_NO_REVOCATION_CHECK (0x80092012)
+  ```
+
+  then **your network is fine and cargo never reached crates.io.**
+  Windows schannel could not fetch certificate *revocation* data, and
+  cargo's libcurl uses schannel. The tell is that `git clone` worked
+  moments earlier - Git ships its own OpenSSL - while
+  `curl.exe https://index.crates.io/config.json` fails identically.
+  "spurious" is a lie; it reproduces every time.
+
+  The fix is one file, `%USERPROFILE%\.cargo\config.toml`:
+
+  ```toml
+  [http]
+  check-revoke = false
+  ```
+
+  **Know what that trades.** Chain, hostname and expiry are still
+  verified and `Cargo.lock` checksums still hold; what stops is
+  rejecting a *revoked* certificate. Delete the file to restore the
+  default. Before reaching for it, rule out a TLS interceptor - see the
+  `reqwest` comment in `src-tauri/Cargo.toml`, where Avast's Web Shield
+  caused a neighbouring problem - because if something *is* standing in
+  the middle, this setting hides it rather than fixing it.
 - **Cargo commands run from inside `src-tauri`,** not the repo root.
   `src-tauri` is a standalone Cargo package.
 - **`error: failed to remove file ...odyssey1e.exe - Access is denied.

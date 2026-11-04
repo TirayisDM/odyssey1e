@@ -555,44 +555,6 @@ function paintUser() {
   paintGate();
 }
 
-/* ---------- folding headers (213) ---------- */
-
-// A section that folds to its heading.
-//
-// NOT REMEMBERED ACROSS A SIGN-IN, on purpose. The rule Dave asked for
-// is "after a successful log in they collapse", which is an event and
-// not a preference - storing the last state would mean a section you
-// opened once stayed open through every future sign-in and the fold
-// would never happen again. Within a session they stay where you put
-// them.
-function setFold(name, open) {
-  const head = document.querySelector('h2.foldhead[data-fold="' + name + '"]');
-  const body = document.querySelector('.foldbody[data-fold-body="' + name + '"]');
-  if (!head || !body) return;
-  body.hidden = !open;
-  head.classList.toggle("shut", !open);
-  const caret = head.querySelector(".caret");
-  if (caret) caret.textContent = open ? "▾" : "▸";
-}
-
-function foldIsOpen(name) {
-  const body = document.querySelector('.foldbody[data-fold-body="' + name + '"]');
-  return !!body && !body.hidden;
-}
-
-function wireFoldingHeaders() {
-  for (const head of document.querySelectorAll("h2.foldhead")) {
-    head.addEventListener("click", (e) => {
-      // A CONTROL IN THE HEADING IS ITS OWN THING. "refresh" lives in
-      // the Games heading, and pressing it must not also fold the
-      // section it is asking to refresh.
-      if (e.target.closest("button")) return;
-      const name = head.dataset.fold;
-      setFold(name, !foldIsOpen(name));
-    });
-  }
-}
-
 function clearData() {
   state.gameId = null;
   state.characterId = null;
@@ -11676,8 +11638,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     await loadWorld();
   });
 
-
-  wireFoldingHeaders();
 
   document.querySelector("#clear-log").addEventListener("click", () => {
     logEl().innerHTML = "";

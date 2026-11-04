@@ -134,18 +134,33 @@ function log(cmd, value, isError) {
 
 /* ---------- the log drawer (207) ---------- */
 
-// Per-device and not per-game, which is why it is the one thing in this
-// app that uses localStorage: whether YOU want the raw command log open
-// on THIS machine is a preference, not state anybody else shares. It
-// can throw in a webview with storage disabled, so every touch is
-// wrapped and the default - shut - is what a failure falls back to.
+// Per-device and not per-game, which is why these are the only things
+// in this app that use localStorage: whether YOU want the feed open on
+// THIS machine, and which tab of it you left showing, are preferences
+// rather than state anybody else shares. Either can throw in a webview
+// with storage disabled, so every touch is wrapped and a failure falls
+// back to the default rather than to nothing.
 const LOG_OPEN_KEY = "odyssey1e.log.open";
+const FEED_TAB_KEY = "odyssey1e.feed.tab";
 
+// 275. OPEN UNLESS TOLD OTHERWISE, which inverts 207 on purpose. A
+// drawer of raw command JSON earns being shut by default; the roll and
+// narrative feed does not, and a feed nobody can see is worse than no
+// feed at all. An explicit "0" is still honoured, so anyone who shut it
+// stays shut.
 function logIsOpen() {
   try {
-    return localStorage.getItem(LOG_OPEN_KEY) === "1";
+    return localStorage.getItem(LOG_OPEN_KEY) !== "0";
   } catch {
-    return false;
+    return true;
+  }
+}
+
+function feedTab() {
+  try {
+    return localStorage.getItem(FEED_TAB_KEY) === "log" ? "log" : "rolls";
+  } catch {
+    return "rolls";
   }
 }
 
@@ -161,35 +176,75 @@ function setLogOpen(open) {
     // A preference that cannot be remembered is still a preference for
     // this session. Nothing else depends on it.
   }
-  if (open) clearLogAlert();
+  // 275. Opening onto the Rolls tab does not mean the log has been
+  // read, so the count survives until the Log tab itself is showing.
+  if (open && logIsVisible()) clearLogAlert();
 }
 
 let logErrors = 0;
 
-function noteLogError() {
+// 275. THE LOG CAN NOW BE INVISIBLE TWO WAYS, which is the whole reason
+// this changed. 207 only had to ask whether the drawer was shut; a
+// tabbed panel can be wide open on the Rolls tab with the log just as
+// unseen. Asking only the old question is how a failed roll goes back
+// to looking like a button that did nothing.
+//
+// It asks the DOM rather than the stored preference, because what is on
+// screen is the question and the two can disagree for a frame.
+function logIsVisible() {
   const cols = document.querySelector("#cols");
-  // Open already? Then it is on screen and there is nothing to flag.
-  if (!cols || !cols.classList.contains("logshut")) return;
+  if (!cols || cols.classList.contains("logshut")) return false;
+  const pane = document.querySelector('.feedpane[data-feed="log"]');
+  return !!pane && !pane.hidden;
+}
+
+function noteLogError() {
+  if (logIsVisible()) return;
   logErrors += 1;
+  paintLogAlert();
+}
+
+// The strip carries the count while the panel is shut; the Log tab
+// carries it while the panel is open on something else. One of the two
+// is always where you would be looking.
+function paintLogAlert() {
   const tab = document.querySelector("#log-tab");
-  const badge = document.querySelector("#log-badge");
-  if (tab) tab.classList.add("alert");
-  if (badge) {
-    badge.hidden = false;
-    badge.textContent = String(logErrors);
-    badge.title = logErrors + " error" + (logErrors === 1 ? "" : "s") + " in the log";
+  const label =
+    logErrors + " error" + (logErrors === 1 ? "" : "s") + " in the log";
+  if (tab) tab.classList.toggle("alert", logErrors > 0);
+  for (const sel of ["#log-badge", "#log-count"]) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    el.hidden = logErrors === 0;
+    el.textContent = logErrors === 0 ? "" : String(logErrors);
+    el.title = label;
   }
 }
 
 function clearLogAlert() {
   logErrors = 0;
-  const tab = document.querySelector("#log-tab");
-  const badge = document.querySelector("#log-badge");
-  if (tab) tab.classList.remove("alert");
-  if (badge) {
-    badge.hidden = true;
-    badge.textContent = "";
+  paintLogAlert();
+}
+
+// 275. Which tab of the feed is showing. The rolls pane is the default
+// and the one a table watches; the log is one tab over.
+function setFeedTab(which) {
+  const name = which === "log" ? "log" : "rolls";
+  for (const pane of document.querySelectorAll(".feedpane")) {
+    pane.hidden = pane.dataset.feed !== name;
   }
+  for (const btn of document.querySelectorAll(".feedtabs .tab")) {
+    btn.classList.toggle("on", btn.dataset.feed === name);
+  }
+  try {
+    localStorage.setItem(FEED_TAB_KEY, name);
+  } catch {
+    // Same bargain as the open/shut preference: this session still has
+    // the tab it asked for.
+  }
+  // Reading the log is what clears its count, so this has to happen
+  // here and not merely on opening the panel.
+  if (logIsVisible()) clearLogAlert();
 }
 
 // A button that WRITES is not allowed to be re-entrant.
@@ -11472,10 +11527,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     clearLogAlert();
   });
 
-  // 207. The drawer. Shut unless this device says otherwise, and the
-  // state is applied here rather than in the markup so there is one
-  // answer to "is it open" - `logshut` in index.html is only the
-  // default the page paints before this runs.
+  // 207, amended by 275. The feed panel. OPEN unless this device says
+  // otherwise, and the state is applied here rather than in the markup
+  // so there is one answer to "is it open" - `logshut` in index.html is
+  // only the default the page paints before this runs.
+  //
+  // THE TAB IS SET FIRST, because `setLogOpen` asks whether the log is
+  // on screen before it clears the error count, and it cannot answer
+  // that until the panes know which of them is showing.
+  setFeedTab(feedTab());
+  for (const btn of document.querySelectorAll(".feedtabs .tab")) {
+    btn.addEventListener("click", () => setFeedTab(btn.dataset.feed));
+  }
   setLogOpen(logIsOpen());
   const logTab = document.querySelector("#log-tab");
   if (logTab) logTab.addEventListener("click", () => setLogOpen(true));

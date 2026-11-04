@@ -274,7 +274,6 @@
         <button id="create-roll">Insert roll</button>
         <input id="patch-narr" placeholder="narrative to patch into newest roll" />
         <button id="patch-roll" class="ghost">Patch narrative</button>
-        <ul id="rolls" class="list"></ul>
       </section>
       </div>
 
@@ -1481,21 +1480,42 @@
     </div>
 
     <div class="right">
-      <!-- THE TAB, and the only thing visible while the drawer is shut.
-           It carries a count when something has gone wrong, because the
-           log is the ONLY place an error is reported - closing it by
-           default would otherwise make a failed roll look like a button
-           that did nothing. -->
+      <!-- THE STRIP, and the only thing visible while the panel is
+           shut. It carries a count when something has gone wrong,
+           because the log is still the ONLY place an error is reported
+           - a shut panel would otherwise make a failed roll look like a
+           button that did nothing. -->
       <button id="log-tab" class="logtab" type="button" aria-expanded="false"
-              title="Show the log">
-        <span class="logtab-word">LOG</span>
+              title="Show the feed">
+        <span class="logtab-word">FEED</span>
         <span class="logtab-count" id="log-badge" hidden></span>
       </button>
-      <h2>Log
-        <button id="clear-log" class="tiny ghost">clear</button>
-        <button id="hide-log" class="tiny ghost">hide</button>
-      </h2>
-      <div id="log"></div>
+
+      <!-- 275. THE FEED, which used to be a developer drawer.
+           The rolls list moved here WHOLE from the Play pane, keeping
+           its id, so `loadRolls` did not have to learn where it now
+           lives - the same move 068 made with the species viewer.
+
+           TABBED BECAUSE THE LOG IS NO LONGER THE POINT. What a table
+           watches is the narrative and roll feed; the log is the
+           developer surface it always was, one tab over. Chat lands as
+           a third tab when there is a chat, which is why this is a tab
+           strip for two things rather than a heading for one. -->
+      <div class="tabs mini feedtabs">
+        <button class="tab on" type="button" data-feed="rolls">Rolls</button>
+        <button class="tab" type="button" data-feed="log">Log<span
+              class="count" id="log-count" hidden></span></button>
+      </div>
+      <div class="feedpane" data-feed="rolls">
+        <ul id="rolls" class="list"></ul>
+      </div>
+      <div class="feedpane" data-feed="log" hidden>
+        <div class="row">
+          <button id="clear-log" class="tiny ghost">clear</button>
+          <button id="hide-log" class="tiny ghost">hide</button>
+        </div>
+        <div id="log"></div>
+      </div>
     </div>
   </div>
 

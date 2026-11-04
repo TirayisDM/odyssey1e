@@ -333,12 +333,18 @@ async function call(cmd, args) {
 // revoked, and a door with no other way in is a trap.
 async function paintUnlock() {
   const st = await call("pin_status");
-  const unlock = document.querySelector("#unlock-panel");
-  const auth = document.querySelector("#auth-panel");
-  const set = !!(st && st.set) && !state.user;
-  unlock.hidden = !set;
-  auth.hidden = set;
-  if (set) {
+  // 276. BOTH ANSWERS ARE IN. `me` resolved before this was called and
+  // `pin_status` just now, so this is the first moment the gate knows
+  // which door to show - and the last moment it should be waiting.
+  // Every panel starts hidden in the markup so nothing flashes before
+  // this decides.
+  //
+  // 277. WHICH PANEL is no longer settled here. This records what it
+  // learned and `paintGate` reads it, so there is one answer rather
+  // than two that can disagree.
+  booting = false;
+  pinSet = !!(st && st.set);
+  if (pinSet && !state.user) {
     document.querySelector("#unlock-who").textContent = st.email || "";
     document.querySelector("#pin").value = "";
     unlockSay("");
@@ -346,11 +352,9 @@ async function paintUnlock() {
   // Offering to set one only makes sense once there is a session to
   // store, so it lives under the password form and appears after.
   document.querySelector("#pin-setup").hidden = !state.user;
-  if (st && st.set) {
-    document.querySelector("#clear-pin").hidden = false;
-  } else {
-    document.querySelector("#clear-pin").hidden = true;
-  }
+  document.querySelector("#clear-pin").hidden = !pinSet;
+  // Clears the waiting line now that a step is showing.
+  paintGate();
 }
 
 // Say what happened to the PIN, beside the buttons that did it.
@@ -433,33 +437,122 @@ function say(selector, text, isError) {
 
 const changeSay = (t, e) => say("#change-msg", t, e);
 
+// 276. THE DOOR, AND WHETHER IT IS SHUT. `booting` is true until
+// `pin_status` and `me` have both answered: before that this cannot
+// know which door to show, and a session lives in memory only, so
+// EVERY launch passes through here. Without the waiting state the gate
+// would flash the wrong door, full width, every time.
+let booting = true;
+let pinSet = false;
+let choosingGame = false;
+
+// 277. ONE FUNCTION DECIDES WHICH STEP IS SHOWING.
+//
+// The door has four states now and they are mutually exclusive, so the
+// only way two of them cannot both be true is to compute them in one
+// place. 276 split this between here and `paintUnlock`, which was
+// survivable only because the gate came down the moment you signed in:
+// `paintUnlock` left `#auth-panel` visible whenever no PIN was set, and
+// with the chooser now keeping the door UP after sign-in, the password
+// form would have been standing beside it.
+function paintGate() {
+  const gate = document.querySelector("#gate");
+  if (!gate) return;
+  const signedIn = !!state.user;
+  // A game is chosen, unless you have asked to choose another.
+  const chosen = !!state.gameId && !choosingGame;
+  gate.hidden = signedIn && chosen;
+
+  const step = booting
+    ? "wait"
+    : !signedIn
+      ? pinSet
+        ? "unlock"
+        : "auth"
+      : "pick";
+  const steps = {
+    "#gate-wait": "wait",
+    "#unlock-panel": "unlock",
+    "#auth-panel": "auth",
+    "#games-panel": "pick",
+  };
+  for (const sel of Object.keys(steps)) {
+    const el = document.querySelector(sel);
+    if (el) el.hidden = steps[sel] !== step;
+  }
+}
+
+// 276. The two facts the bar carries: which person, and which game.
+// Both decide what every tab below shows, which is why they are the
+// two that earn the space.
+function paintWho() {
+  const who = document.querySelector("#who");
+  const where = document.querySelector("#where");
+  const chip = document.querySelector("#game-btn");
+  if (who && state.user) {
+    who.textContent = state.displayName || state.user.email;
+  }
+  // 277. WHERE moved to the left of the bar, beside the mark, and is
+  // its own control rather than half of a string. The email fallback
+  // above is now the unreachable case it always should have been: the
+  // name comes from `list_members`, which needs a game, and the
+  // chooser means there is always a game by the time this is seen.
+  const game = (state.games || []).find((g) => g.id === state.gameId);
+  if (where) where.textContent = game ? game.name : "";
+  if (chip) chip.hidden = !game;
+}
+
+// 276. `list_members` has carried display names since 198 and its own
+// doc comment said "nothing renders this yet". This is that caller.
+// Your own row is the one whose profile_id matches the session's -
+// `me` returns a Session, which has no name on it, so short of a new
+// command this is where the client can learn what you are called.
+async function loadDisplayName() {
+  state.displayName = null;
+  if (!state.user || !state.gameId) return;
+  const rows = await call("list_members", { gameId: state.gameId });
+  if (!Array.isArray(rows)) return;
+  const mine = rows.find((r) => r.profile_id === state.user.profile_id);
+  state.displayName = (mine && mine.profiles && mine.profiles.display_name) || null;
+}
+
+function closeAccountDrop() {
+  const drop = document.querySelector("#account-drop");
+  const btn = document.querySelector("#account-btn");
+  if (drop) drop.hidden = true;
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
 function paintUser() {
   const who = document.querySelector("#who");
-  const out = document.querySelector("#signout");
+  const menu = document.querySelector("#account-menu");
   if (state.user) {
-    who.textContent = state.user.email + "  ·  " + state.user.user_id.slice(0, 8);
-    who.classList.remove("muted");
-    out.hidden = false;
-    // 213. SIGNED IN, THESE TWO FOLD AWAY. Account is a wall of forms
-    // nobody needs again until they sign out, and Games is a list you
-    // use once. The dimming that used to stand in for this is gone -
-    // a faded heading reads as disabled, and a folded one reads as
-    // folded.
-    //
-    // HERE BECAUSE THIS IS THE ONE PLACE THAT KNOWS. All four doors -
-    // sign in, sign up, PIN unlock, sign out - come through
-    // `paintUser`, and it is called on nothing else, so folding here
-    // cannot stamp on a section somebody just opened.
-    setFold("auth", false);
-    setFold("games", false);
+    paintWho();
+    if (menu) menu.hidden = false;
+    // 277. 213 FOLDED THESE TWO AWAY and the folding is gone with
+    // them. Account and Games were a wall of forms and a list you use
+    // once, sitting in the column beside the work - so they were
+    // folded shut once signed in. Both now live in the door, where
+    // there is nothing to fold away FROM and a collapsed heading would
+    // hide the step you are standing on.
   } else {
-    who.textContent = "not signed in";
-    who.classList.add("muted");
-    out.hidden = true;
-    // Signed out, the only thing you can do is sign in.
-    setFold("auth", true);
-    setFold("games", false);
+    who.textContent = "";
+    if (menu) menu.hidden = true;
+    closeAccountDrop();
+    // The account work goes away with the menu that reaches it, and
+    // the name goes with the session it belonged to.
+    const panel = document.querySelector("#account-panel");
+    if (panel) panel.hidden = true;
+    state.displayName = null;
+    // 277. The game goes with the session too - signing in as somebody
+    // else must not land you in the last person's table.
+    state.gameId = null;
+    choosingGame = false;
+    paintWho();
   }
+  // 276. The gate answers to the same four doors this function does,
+  // so it is raised and lowered here and nowhere else.
+  paintGate();
 }
 
 /* ---------- folding headers (213) ---------- */
@@ -763,7 +856,16 @@ function paintTabOffer() {
 async function selectGame(id) {
   state.gameId = id;
   state.dmEncounterId = null;
+  // 277. Choosing is over, whether this came from the chooser or from
+  // the chip asking to see it again.
+  choosingGame = false;
   await loadGames();
+  // 276. The bar names this game and the person playing it. Both read
+  // from what loadGames just refreshed, so they go after it.
+  await loadDisplayName();
+  paintWho();
+  // 277. And the door comes down, which is the point of having chosen.
+  paintGate();
   // 202. AFTER loadGames and before anything paints. `amDM` reads
   // `state.games`, so it cannot be asked until that list is back, and
   // this is the only place the answer can change - the same person is
@@ -9765,6 +9867,60 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.querySelector("#new-pin").focus();
   });
 
+  // 276. The menu behind the name. It shuts on a click anywhere else
+  // and on Escape, because a menu that only closes from its own button
+  // is one you end up clicking twice to get rid of.
+  // 277. The chip reopens the chooser rather than dropping a second
+  // list of games beside the one already in the door.
+  const gameBtn = document.querySelector("#game-btn");
+  if (gameBtn) {
+    gameBtn.addEventListener("click", () => {
+      choosingGame = true;
+      paintGate();
+    });
+  }
+
+  const accountBtn = document.querySelector("#account-btn");
+  if (accountBtn) {
+    accountBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const drop = document.querySelector("#account-drop");
+      const opening = drop.hidden;
+      drop.hidden = !opening;
+      accountBtn.setAttribute("aria-expanded", opening ? "true" : "false");
+    });
+  }
+  document.addEventListener("click", closeAccountDrop);
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape") return;
+    closeAccountDrop();
+    // 277. Opened the chooser and changed your mind? Escape goes back -
+    // but only when there is a game to go back TO, so it can never
+    // strand you outside the app with no way in.
+    if (choosingGame && state.gameId) {
+      choosingGame = false;
+      paintGate();
+    }
+  });
+
+  const openAccount = document.querySelector("#open-account");
+  if (openAccount) {
+    openAccount.addEventListener("click", () => {
+      closeAccountDrop();
+      const panel = document.querySelector("#account-panel");
+      if (!panel) return;
+      panel.hidden = false;
+      panel.scrollIntoView({ block: "start" });
+    });
+  }
+  const closeAccount = document.querySelector("#close-account");
+  if (closeAccount) {
+    closeAccount.addEventListener("click", () => {
+      const panel = document.querySelector("#account-panel");
+      if (panel) panel.hidden = true;
+    });
+  }
+
   document.querySelector("#signout").addEventListener("click", async () => {
     await call("sign_out");
     state.user = null;
@@ -11519,6 +11675,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     dmSay(r.ok ? "moved" : r.error, !r.ok);
     await loadWorld();
   });
+
 
   wireFoldingHeaders();
 

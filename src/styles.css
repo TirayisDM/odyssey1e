@@ -1314,3 +1314,51 @@ h2.foldhead.shut{margin-bottom:.15rem}
   min-width: 14rem;
   flex: 1 1 14rem;
 }
+
+/* 276. THE GATE.
+
+   It covers the WINDOW rather than sitting in a column, because
+   everything behind it is inert until you are through. Fixed rather
+   than absolute so the app underneath cannot scroll out from under the
+   door while it is shut. */
+#gate{position:fixed;inset:0;z-index:50;display:flex;
+      align-items:center;justify-content:center;background:var(--bg)}
+#gate[hidden]{display:none}
+.gatebox{width:min(26rem,calc(100vw - 2rem));padding:1.4rem;
+         background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.gatemark{display:block;color:var(--accent);margin-bottom:1rem}
+.gatewait{color:var(--muted);font-size:12px;padding:.6rem 0}
+.gatebox section{margin-bottom:0}
+/* 5rem was sized for a crowded column. There is room in the door,
+   and a placeholder rendering as "4 - d i g i" is not a placeholder. */
+.gatebox input.narrow{width:8rem}
+
+/* 276. The name in the bar, and the menu behind it. */
+.accountmenu{position:relative;margin-left:auto}
+.accountbtn{display:flex;align-items:center;gap:.4rem;margin:0;
+            padding:.25rem .5rem;background:none;border:1px solid transparent;
+            border-radius:4px;color:var(--fg);font:inherit;font-size:12px;
+            cursor:pointer}
+.accountbtn:hover{border-color:var(--line)}
+.accountbtn .caret{color:var(--muted);font-size:10px}
+.accountdrop{position:absolute;right:0;top:calc(100% + .3rem);z-index:60;
+             min-width:10rem;padding:.25rem;background:var(--panel);
+             border:1px solid var(--line);border-radius:4px}
+.accountdrop[hidden]{display:none}
+.dropitem{display:block;width:100%;margin:0;padding:.35rem .5rem;
+          background:none;border:0;border-radius:3px;color:var(--fg);
+          font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.dropitem:hover{background:var(--bg)}
+
+/* 277. Where you are, beside the mark. The same shape as the account
+   button at the other end of the bar, because they do the same kind of
+   thing: name a fact and open the screen that changes it.
+
+   `display:flex` means [hidden] needs saying out loud. */
+.gamechip{display:flex;align-items:center;gap:.4rem;margin:0;
+          padding:.25rem .5rem;background:none;border:1px solid transparent;
+          border-radius:4px;color:var(--fg);font:inherit;font-size:12px;
+          cursor:pointer}
+.gamechip:hover{border-color:var(--line)}
+.gamechip[hidden]{display:none}
+.gamechip .caret{color:var(--muted);font-size:10px}

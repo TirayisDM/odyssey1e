@@ -10,8 +10,18 @@ header{display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;
        border-bottom:1px solid var(--line);background:var(--panel)}
 header strong{color:var(--accent)}
 .cols{display:flex;flex:1;min-height:0}
-.left{width:46%;overflow-y:auto;padding:.9rem;border-right:1px solid var(--line)}
-.right{flex:1;display:flex;flex-direction:column;min-width:0;padding:.9rem}
+/* 275. THE MAIN PANE TAKES THE REMAINDER and the feed is a FIXED
+   column, not a share of the width. At 46/54 the whole application -
+   all eight tabs, the map among them - lived in the smaller half the
+   moment the right-hand column opened. That was tolerable while the
+   column was a developer log nobody kept open and is backwards now
+   that it is a feed you watch. */
+.left{flex:1;min-width:0;overflow-y:auto;padding:.9rem;
+      border-right:1px solid var(--line)}
+.right{flex:0 0 20rem;display:flex;flex-direction:column;min-width:0;
+       padding:.9rem}
+/* A narrow window gives the map the difference rather than the feed. */
+@media (max-width:1040px){.right{flex-basis:17.5rem}}
 section{margin-bottom:1.3rem}
 h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;
    color:var(--muted);margin:0 0 .5rem;display:flex;align-items:center;gap:.5rem}
@@ -1108,8 +1118,16 @@ button.wide{width:100%}
 .cols.logshut .left{width:auto;flex:1;border-right:0}
 .cols.logshut .right{flex:0 0 auto;width:1.9rem;padding:.5rem 0;
                      border-left:1px solid var(--line);align-items:center}
-.cols.logshut .right h2,
-.cols.logshut .right #log{display:none}
+.cols.logshut .right .feedtabs,
+.cols.logshut .right .feedpane{display:none}
+
+/* 275. One pane per tab, each scrolling on its own so switching tabs
+   does not carry the other one's scroll position with it. `[hidden]`
+   is what the script toggles, so nothing here may set `display` on
+   .feedpane itself or the attribute stops working. */
+.feedtabs{flex:0 0 auto}
+.feedpane{flex:1;min-height:0;overflow-y:auto}
+.feedpane[hidden]{display:none}
 /* THE WHOLE STRIP IS THE BUTTON, not the three letters at the top of
    it. A 15x33 target on the edge of a 700px column is a thing you aim
    at; the full height is a thing you hit, which matters more on the

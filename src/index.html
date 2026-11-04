@@ -10,10 +10,39 @@
 <body>
 <div class="app">
 
+  <!-- 276. WHO AND WHERE, AND THE WAY OUT. The bar carries the two
+       facts that decide what every tab below shows - which person and
+       which game - and the menu behind them holds the account work the
+       gate displaced.
+
+       `#who` keeps its id and its job. What changed is that it names a
+       PERSON rather than an email and a slice of a uuid, and that it
+       sits inside the button rather than beside a loose sign-out. -->
   <header>
     <strong>odyssey1e</strong>
-    <span id="who" class="muted">not signed in</span>
-    <button id="signout" class="ghost" hidden>sign out</button>
+    <!-- 277. WHERE YOU ARE, beside the mark rather than beside the
+         name. Clicking it goes back to the chooser: switching games
+         reloads characters, classes and every tab, so it is the same
+         heavy act as picking one at launch and deserves the same
+         screen rather than a second list that could disagree. -->
+    <button id="game-btn" class="gamechip" type="button" hidden
+            title="Choose a different game">
+      <span id="where"></span>
+      <span class="caret" aria-hidden="true">&#9662;</span>
+    </button>
+    <div id="account-menu" class="accountmenu" hidden>
+      <button id="account-btn" class="accountbtn" type="button"
+              aria-haspopup="menu" aria-expanded="false">
+        <span id="who"></span>
+        <span class="caret" aria-hidden="true">&#9662;</span>
+      </button>
+      <div id="account-drop" class="accountdrop" role="menu" hidden>
+        <button id="open-account" class="dropitem" type="button"
+                role="menuitem">Account&hellip;</button>
+        <button id="signout" class="dropitem" type="button"
+                role="menuitem">Sign out</button>
+      </div>
+    </div>
   </header>
 
   <!-- 207. THE LOG IS A DRAWER NOW, and `logshut` on this row is what
@@ -22,61 +51,100 @@
        class lives up here rather than on the column because BOTH have
        to change, and two elements toggling each other is how they end
        up disagreeing. -->
+  <!-- 276. THE GATE. Sign-in was two sections inside the left column,
+       so the whole application - eight tabs and the feed - sat visible
+       and dead behind a form. It is a door now, and the app is not
+       drawn until you are through it.
+
+       THE LOADING STATE IS NOT DECORATION. `pin_status` and `me` are
+       both awaited before this can know which door to show, and a
+       session lives in memory only - so EVERY launch comes through
+       here. Without this the gate would flash the wrong door, full
+       width, every single time. -->
+  <div id="gate">
+    <div class="gatebox">
+      <strong class="gatemark">odyssey1e</strong>
+      <div id="gate-wait" class="gatewait">one moment…</div>
+      <section id="unlock-panel" hidden>
+      <h2>Unlock <span id="unlock-who" class="muted"></span></h2>
+      <div class="row">
+      <input id="pin" type="password" inputmode="numeric" maxlength="4"
+      placeholder="4-digit PIN" autocomplete="off" class="narrow" />
+      <button id="do-unlock">Unlock</button>
+      <button id="use-password" class="ghost">Use password</button>
+      </div>
+      <div id="unlock-msg" class="dm-msg" hidden></div>
+      </section>
+      <section id="auth-panel" hidden>
+      <!-- 213. A HEADER YOU CAN FOLD. Signed in, this is a wall of
+      forms nobody needs again until they sign out. -->
+      <h2>Account</h2>
+      <!-- 251. autocomplete IS ON NOW, AND THAT IS THE FIX.
+      `autocomplete="off"` here stopped the webview's password
+      manager from ever saving or filling these, so somebody
+      who mistyped a password at sign-up had no record of it,
+      no autofill, and - since 206 removed the reset - no way
+      back in. John made three accounts.
+
+      The tokens are the standard ones: a manager that sees
+      `current-password` beside `email` offers to save the
+      pair, and `new-password` tells it this is a NEW
+      credential rather than one to autofill. -->
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
+      <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+
+      <!-- 251. SIGN-UP ONLY, and shown by the Sign up button rather
+      than always. A confirm box above Sign in would read as a
+      field you must fill to sign in. -->
+      <div id="signup-only" hidden>
+      <input id="password2" type="password" placeholder="repeat the password"
+      autocomplete="new-password" />
+      <input id="display" type="text" placeholder="display name" autocomplete="nickname" />
+      </div>
+
+      <div class="row">
+      <button id="signin">Sign in</button>
+      <button id="signup" class="ghost">Sign up</button>
+      </div>
+
+      <!-- 251. WHAT HAPPENED, SAID OUT LOUD. Both buttons went
+      through `call`, which throws the reason away - so a wrong
+      password did NOTHING VISIBLE AT ALL and the only honest
+      reading was "this account does not work, I will make
+      another". -->
+      <div id="auth-msg" class="dm-msg" hidden></div>
+
+
+      </section>
+      <section id="games-panel" hidden>
+      <h2>Games <button id="refresh-games" class="tiny ghost">refresh</button></h2>
+      <ul id="games" class="list"></ul>
+      <input id="game-name" placeholder="new game name" />
+      <button id="create-game">Create game</button>
+      <input id="join-code" placeholder="join code" />
+      <button id="join-game" class="ghost">Join by code</button>
+      </section>
+    </div>
+  </div>
+
   <div class="cols logshut" id="cols">
     <div class="left">
 
 
-      <section id="unlock-panel" hidden>
-        <h2>Unlock <span id="unlock-who" class="muted"></span></h2>
-        <div class="row">
-          <input id="pin" type="password" inputmode="numeric" maxlength="4"
-                 placeholder="4-digit PIN" autocomplete="off" class="narrow" />
-          <button id="do-unlock">Unlock</button>
-          <button id="use-password" class="ghost">Use password</button>
-        </div>
-        <div id="unlock-msg" class="dm-msg" hidden></div>
-      </section>
+      
 
-      <section id="auth-panel">
-        <!-- 213. A HEADER YOU CAN FOLD. Signed in, this is a wall of
-             forms nobody needs again until they sign out. -->
-        <h2 class="foldhead" data-fold="auth"><span class="caret">▾</span>Account</h2>
-        <div class="foldbody" data-fold-body="auth">
-        <!-- 251. autocomplete IS ON NOW, AND THAT IS THE FIX.
-             `autocomplete="off"` here stopped the webview's password
-             manager from ever saving or filling these, so somebody
-             who mistyped a password at sign-up had no record of it,
-             no autofill, and - since 206 removed the reset - no way
-             back in. John made three accounts.
+      
 
-             The tokens are the standard ones: a manager that sees
-             `current-password` beside `email` offers to save the
-             pair, and `new-password` tells it this is a NEW
-             credential rather than one to autofill. -->
-        <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
-        <input id="password" type="password" placeholder="password" autocomplete="current-password" />
-
-        <!-- 251. SIGN-UP ONLY, and shown by the Sign up button rather
-             than always. A confirm box above Sign in would read as a
-             field you must fill to sign in. -->
-        <div id="signup-only" hidden>
-          <input id="password2" type="password" placeholder="repeat the password"
-                 autocomplete="new-password" />
-          <input id="display" type="text" placeholder="display name" autocomplete="nickname" />
-        </div>
-
-        <div class="row">
-          <button id="signin">Sign in</button>
-          <button id="signup" class="ghost">Sign up</button>
-        </div>
-
-        <!-- 251. WHAT HAPPENED, SAID OUT LOUD. Both buttons went
-             through `call`, which throws the reason away - so a wrong
-             password did NOTHING VISIBLE AT ALL and the only honest
-             reading was "this account does not work, I will make
-             another". -->
-        <div id="auth-msg" class="dm-msg" hidden></div>
-        <div id="pin-setup" hidden>
+      <!-- WHO AND WHERE, always visible. Nothing below works without a
+           game and a character, so these do not belong behind a tab. -->
+      <!-- 276. ACCOUNT, which the gate displaced. 219 folded the PIN
+           and the password change together because both are "this
+           account on this machine" and both only make sense once
+           signed in - which is exactly why neither belongs on the
+           door. Reached from the name in the top bar. -->
+      <section id="account-panel" hidden>
+        <h2>Account <button id="close-account" class="tiny ghost">close</button></h2>
+<div id="pin-setup" hidden>
           <div class="row">
             <input id="new-pin" type="password" inputmode="numeric" maxlength="4"
                    placeholder="set a 4-digit PIN" autocomplete="off" class="narrow" />
@@ -105,22 +173,9 @@
             <div id="change-msg" class="dm-msg" hidden></div>
           </div>
         </div>
+      </section>
 
-              </div>
-</section>
-
-      <!-- WHO AND WHERE, always visible. Nothing below works without a
-           game and a character, so these do not belong behind a tab. -->
-      <section id="games-panel">
-        <h2 class="foldhead" data-fold="games"><span class="caret">▾</span>Games <button id="refresh-games" class="tiny ghost">refresh</button></h2>
-        <div class="foldbody" data-fold-body="games">
-        <ul id="games" class="list"></ul>
-        <input id="game-name" placeholder="new game name" />
-        <button id="create-game">Create game</button>
-        <input id="join-code" placeholder="join code" />
-        <button id="join-game" class="ghost">Join by code</button>
-              </div>
-</section>
+      
 
       <!-- The PICKER, not the manager. Who you are playing decides
            what every tab below shows, so it stays in the strip; making

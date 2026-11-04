@@ -12891,7 +12891,365 @@ to be argued for in writing rather than discovered three cycles later.
 
 ---
 
+## 275. The log drawer is a feed
+
+**2026-11-03.** Dave, after a cycle spent on panel proportions: *"Map
+and Character sheet as tab option - roll as right side panel with tabs
+for chat (its really the narrative and roll feed with future chat
+feature)"*.
+
+### The column was the wrong way round, and nobody had seen it
+
+`.left` carried all eight tabs at **46%** of the window while `.right`
+carried the developer log at **54%** - the map, the sheet, the bestiary
+and the trade floor squeezed into less than half the glass so a drawer
+of command JSON could have the rest. **That was tolerable for exactly
+as long as the drawer stayed shut**, which is what 207 made it, and it
+was backwards the moment the right-hand column became something you
+keep open.
+
+The main pane takes the remainder now and the feed is a fixed
+**20rem**, narrowing to 17.5rem below 1040px. **A fixed feed and a
+fluid pane is the whole decision:** prose wants a column width and
+stops being easier to read when it gets wider, while a map wants every
+pixel there is - so a narrow window gives the difference to the map
+rather than splitting it.
+
+### The feed already existed, which is why this was a layout cycle
+
+`#rolls` moved **whole** out of the Play pane, keeping its id, so
+`loadRolls` did not have to learn where it now lives. Nothing about
+reading rolls changed. What changed is that it is beside the work
+instead of three tabs away, and the data it shows - `rolls.narrative` -
+has been there since the beginning.
+
+**067 made this same move out of the same pane**, taking the whole
+character sheet into the Characters tab. Play is where things get
+built before anybody decides where they live, and twice now the answer
+has been "not here".
+
+### The log can now be invisible two ways, and that needed care
+
+**207's `noteLogError` returned early whenever the drawer was open**,
+on the reasoning that an error you can see does not need counting. The
+reasoning was right and the test it used is now wrong: a tabbed panel
+can be wide open on Rolls with the log just as unseen, so that early
+return would have put a failed roll straight back to looking like a
+button that did nothing - **the exact fault 207 was written to fix**.
+
+`logIsVisible` asks both questions - is the panel open, and is the Log
+tab the one showing - and **asks the DOM rather than the stored
+preference**, because the two can disagree for a frame and the stored
+one is a per-device nicety rather than the truth. The count shows on
+the collapse strip while the panel is shut and on the Log tab while the
+panel is open on something else, and clears only when the log is
+actually on screen.
+
+### Open by default, inverting 207 on purpose
+
+207 shut the drawer because raw command JSON is not something you
+watch. A narrative feed is, so it starts open. **An explicit "0" in
+`localStorage` is still honoured**, so anyone who shut it on this
+machine stays shut: the default moved, the preference did not. 213
+named the difference between an event and a preference while deciding
+the opposite way about its own folding - and that is why 207's
+preference survives this cycle and 213's folding does not survive 278.
+
+### The window was 800x600, and had never been changed
+
+Its own commit, the same conversation, because 275's re-proportion is
+worthless in a window too small to show it: at 800 wide the feed takes
+its 280px and the map gets about **fifteen squares**.
+
+**MAXIMIZED RATHER THAN A BIGGER NUMBER.** Any fixed number is wrong on
+somebody else's screen - 1280x800 suits this laptop's 1536x960 and
+overflows a 1366x768 one. Fantasy Grounds reached the same conclusion
+and ships no default resolution at all: it adopts the desktop's and
+scales its own interface instead. 1280x800 is now the restore-down
+size, and `minWidth` 900 is where the layout was measured to still
+work. 800x600 was the Tauri template's default and had survived 274
+cycles unexamined.
+
+Verified in the browser rig at 1536, 1092 and 900: **37, 23 and 18
+squares**, no horizontal scroll at any of them, and the error count
+surviving a failure raised while the Rolls tab was showing.
+
+1436 tests.
+
+### Carried forward
+
+- **THE FEED IS NOT LIVE, AND THAT IS THIS CYCLE'S OWN GAP.**
+  `loadRolls` runs after every local action that produces a roll -
+  fourteen call sites - so your own rolls appear the moment you make
+  them. Nothing polls and nothing subscribes: a grep for `setInterval`,
+  `realtime`, `subscribe(` and `websocket` across `src/` and
+  `src-tauri/src/` returns **nothing at all**. At a table of two, the
+  other person's roll does not appear until you happen to do something
+  that reloads. A panel you keep open in order to watch it is the
+  reason to build this, and it is not built.
+- **There is no Chat tab.** Dave's words name a future chat feature;
+  the panel has Rolls and Log. Nothing was built towards chat, not even
+  a disabled tab - which is the honest state rather than a stub that
+  looks like a promise.
+- **You read in one place and roll in another.** The roll controls are
+  still in the Play pane. Moving them beside the feed is the obvious
+  next move and was outside what was approved here.
+- **The narrative arrives with the dice, except the half nothing
+  writes.** A canned line goes into the insert body with the roll, so
+  the row is complete the first time anyone reads it - the rule above,
+  *never let a slow optional enrichment gate a fast required result*,
+  and a canned line is not slow. `patch_roll_narrative` is the second
+  phase, it exists for the AI-written prose, and today it is a dev
+  button in the Play pane with a hardcoded line.
+- **The map is not sharp, and the window change did not fix it.**
+  `map.js` has `SQUARE = 32` and sets `canvas.width = cols * SQUARE`,
+  and `devicePixelRatio` appears **nowhere in `src/`**. On a 125%
+  display - Windows' own default at this screen size, not something
+  anybody chose - the browser scales a 32-pixel tile by 1.25, which is
+  precisely the non-integer scale 236 settled ruins pixel art. Forcing
+  the webview to 100% was considered and dropped: **no zoom permission
+  was added to `capabilities/`, deliberately**, because it would shrink
+  the text along with the tiles. The honest fix is backing the canvas
+  at `devicePixelRatio` and drawing at a whole multiple, and it belongs
+  with pan and zoom rather than here.
+- **No UI scale control**, so the fixed 20rem and the 1040px breakpoint
+  are the whole of the adaptation.
+
+---
+
+## 276-277. A door, and the two things behind it
+
+**2026-11-03.** Dave: *"how about a loading panel that handles the
+login. Once logged in we just display User Name and Game Name in small
+top bar that offers a log out option on drop down"* - then, having seen
+it work: *"I would like a follow-up screen that handles the choosing of
+a Game - that info should also reside in the top menu - maybe on the
+left side after the odyssey1e label"*.
+
+**Two cycles in one entry and one commit, because the second rewrote
+the first's code rather than adding beside it.** 258-260 is the
+precedent. The state machine below is the reason.
+
+### Sign-in was a form in a column
+
+`#unlock-panel` and `#auth-panel` sat inside `.left`, which means the
+whole application - every tab, the feed, the map - was drawn and inert
+behind a wall of inputs you scrolled past. Both moved into a gate that
+covers the window, and **the app is not shown until you are through
+it**.
+
+### The waiting state is not decoration
+
+`me` and `pin_status` are both awaited before the gate can know which
+door to show, and **a session lives in memory only, so every launch
+comes through here**. `#auth-panel` had no `hidden` attribute at all -
+invisible as a fault while the gate came down on sign-in, and as a
+full-window door it would have flashed the password form at every PIN
+user, every launch. Every panel starts hidden now and `booting` clears
+at the one moment both answers are in.
+
+### One function decides which step shows, and 277 is why
+
+276 split that between `paintGate` and `paintUnlock`, which survived
+only because the door came down the instant you signed in:
+**`paintUnlock` left `#auth-panel` visible whenever no PIN was set.**
+277 keeps the door up after sign-in so the chooser can stand on it - so
+the password form would have been standing beside the game list, full
+width, for every account without a PIN.
+
+Four mutually exclusive steps - waiting, PIN, password, pick a game -
+computed in one place out of `booting`, `state.user`, `pinSet` and
+`state.gameId`. **The only way two of them cannot both be true is to
+compute them together.** Splitting that across two painters is how 276
+grew the bug in the first place, and it was invisible for exactly as
+long as the door was momentary.
+
+### The chooser takes the Games panel whole
+
+List, create and join together rather than a list on its own, because
+**an account with no games is the first thing a new person has** and a
+chooser that only lists would trap them on the door with no way off it.
+
+### Choose every launch, which was Dave's call
+
+*"Choose every launch"* - asked and answered rather than assumed. No
+last-game memory and no `localStorage` key. Two people sharing a laptop
+each land on their own table, and nobody rolls into the wrong game
+because the app remembered one they had moved on from.
+
+### Who and where, at opposite ends
+
+The person sits behind a menu on the right, with the account work the
+gate displaced: 219 put the PIN and the password change together
+because both are "this account on this machine", **which is exactly why
+neither belongs on the door you walk through to get in**. The game sits
+beside the mark on the left and **reopens the chooser** rather than
+dropping a second list that could disagree with the first.
+
+### The name cost no backend
+
+`list_members` has carried `profiles.display_name` since 198 and its
+own doc comment said *"nothing renders this yet"* - this is that
+caller. `me` returns a Session, which has no name on it, so short of a
+new command this is where the client can learn what you are called.
+
+**The name resolves only once a game is chosen**, which after this
+cycle is always. That is what made the email fallback in the top bar
+unreachable in normal use, where it should have been all along.
+
+Verified in the rig across every transition: booting, the PIN door, the
+password door, the chooser, chosen, the chip, Escape, sign out, and
+signing in as somebody else. 1436 tests.
+
+### Carried forward
+
+- **YOUR NAME IS SET ONCE, AT SIGN-UP, AND NOTHING CAN CHANGE IT.**
+  `sign_up` sends `display_name` as user metadata and 001's
+  `handle_new_user()` writes it; there is no rename command anywhere,
+  and the account menu that now holds the PIN and the password change
+  has no field for it. **001 defaults the column to `'Adventurer'`**,
+  so an account that skipped the box shows that word in the top bar for
+  ever. The gap is old; this cycle is what put it on screen.
+- **The email fallback is still reachable, by failure.** `display_name`
+  is `not null` in the schema, so the only way `paintWho` falls back to
+  the address is `list_members` erroring or not returning your own row -
+  and then the top bar quietly shows your email to whoever is looking at
+  the screen. Small, but it is a fallback that now has an audience.
+- **Nothing tells you the gate is waiting on a slow network.**
+  `#gate-wait` says it is working; two awaited calls on a bad connection
+  say it for as long as they take, with no timeout, no retry and no way
+  to tell a slow network from a dead one.
+- **The chooser can enter a game and cannot leave one.** Pick, create
+  and join are there. `games.archived` and a way out are still the Loose
+  end they were, and that end is now reachable from the first screen
+  anybody sees.
+
+---
+
+## 278. The folding headers come out
+
+**2026-11-03.** Dave, having asked what the mechanism was for -
+*"I don't understand the fold mechanism?"* - and heard the answer:
+*"we don't need that anymore - it was a temporary solution replaced by
+the recent work"*.
+
+**The commit carries no number**, because while it was being written it
+read as cleanup. It is numbered here because it was asked for,
+explained and approved like any other cycle, and because 213 needs
+somewhere to be closed.
+
+### 213 solved a problem that 276-277 deleted
+
+213 let Account and Games collapse to their headings, because both sat
+in the left column beside the work and were a wall of forms plus a list
+you use once. 276-277 moved both into the gate, **where there is
+nothing to fold away FROM and a collapsed heading would hide the step
+you are standing on**. The last two `foldhead` headings went with them,
+leaving the mechanism wired to an empty list.
+
+**213's one named cost is paid, in the way it predicted.** It ended:
+*"nothing auto-selects a game, so a fold on login puts one click
+between signing in and having a game. If that grates, the alternative
+is to fold Games when a game is CHOSEN rather than when you sign in -
+say the word."* 277 did neither and answered it anyway - choosing a
+game is now a step you cannot skip, so there is no fold to time and no
+click to begrudge.
+
+### A mechanism with no callers is worse than one you dislike
+
+`setFold`, `foldIsOpen` and `wireFoldingHeaders` had no markup left to
+act on and the call at startup iterated nothing - **forty lines that
+read as a live feature to anybody grepping for how the panels behave.**
+Four CSS rules went with them, and **two comment blocks**, including
+one explaining why the caret sits inside the heading rather than beside
+it - already outliving the rule it described.
+
+Those two blocks survived the first pass and were found while splitting
+these four commits. They are the only content difference between what
+the rig was tested against and what is committed, and the difference is
+comment lines, with `/*` and `*/` still balanced at 155 each.
+
+### Nothing behavioural
+
+A grep for `setFold`, `foldIsOpen`, `wireFoldingHeaders`, `foldhead`,
+`foldbody` and `data-fold` across `src/` returns nothing. The rig shows
+the chooser, the gate's four steps and the account panel behaving
+exactly as they did before the deletion.
+
+1436 tests.
+
+### Carried forward
+
+- **The left column now has no collapse of any kind**, and nothing in
+  it wants one, because the two panels that did are no longer in it. If
+  a long panel ever needs to fold again, that is a fresh decision
+  rather than a revival - and 213's reasoning about an event versus a
+  preference is the part worth keeping, not the forty lines.
+- **The dimming 213 removed stays removed.** `paintUser` no longer
+  touches opacity and no longer folds; it raises and lowers the gate,
+  which is the same single-place argument 213 made for a different job.
+
+---
+
 ## Pick up here
+
+### THE SHELL CHANGED ON 2026-11-03 - read this before the handoff below
+
+275-278 rebuilt how you get into this application and how it is laid
+out, so two things in the handoff below now describe a window that no
+longer exists.
+
+- **The app opens on a door, not on the tabs.** A full-window gate
+  waits for `me` and `pin_status` to answer, shows the PIN form or the
+  password form, and then **makes you pick a game before anything else
+  is drawn**. There is no last-game memory - Dave's call, every launch.
+  Account work - the PIN, the password change - is behind the menu
+  under your name at the top right. The game name sits at the top left
+  beside the mark and reopens the chooser.
+- **The window opens maximized**, and the right-hand column is the
+  **narrative and roll feed**, open by default, with the developer log
+  as its second tab. The main pane takes the rest. 800x600 was the
+  Tauri template's default and had never been changed.
+
+**THE TABLE BELOW IS FROM 2026-10-24 AND ITS NUMBERS HAVE MOVED.**
+Checked against this machine and the live project on 2026-11-03, not
+remembered. **The art count appears three more times further down -
+"18 of 33", "21 of 33", "the 15 words with no tile yet" - and all
+three are low**; the row below is the counted answer, and 242's pane
+reports it live rather than from a document.
+
+| | 2026-10-24 said | actually |
+|---|---|---|
+| `cargo test` | 1,331 | **1436, 0 failed** |
+| migration files | 167 | **174**, newest `274_ice_falls_into_ice.sql` |
+| ledger rows | 177, "ten applied in parts" | **186**, and it is **eight** files the database split, not ten - 174 + 12 = 186, reconciled by name |
+| tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
+
+`security_doors()` still returns **0 faults**, re-run on 2026-11-03.
+**`README.md` says "1312 tests" in two places and has not been
+corrected** - it is the one document in the clone whose numbers are
+now wrong, and the test count is the first thing anybody checks on a
+fresh machine.
+
+**One thing that looks like a fault and is not**, checked the same
+day so nobody spends an afternoon on it: `authenticated` has `execute`
+on six of the 31 trigger functions in `public` -
+`a_fixture_stays_put`, `a_position_belongs_to_one_map`,
+`a_square_is_inside_its_map`, `identity_follows_profile`,
+`no_templates_in_encounters` and `snapshot_action_name` - where the
+other twenty-five were revoked. `anon` has none of them.
+**`security_doors()` excludes trigger functions on purpose and says
+why**: they reference `NEW`, so they fail outside a trigger and are
+not callable through PostgREST at all - *"a grant on one buys
+nothing"*, in 218's own comment. The inconsistency is in the
+migrations, not in the wall.
+
+**`NEW-MACHINE.md` is new and was written by standing this project up
+on a second laptop rather than from memory.** Read it instead of the
+handoff below if you are on a fresh machine; the handoff is kept for
+the schema and map reasoning it carries, which has not changed.
+
+---
 
 ### HANDOFF, 2026-10-24 - written for John pulling onto his own machine
 

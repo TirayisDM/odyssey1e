@@ -30,6 +30,13 @@ import {
 // DM's selection back to the active encounter — and a roll taken in
 // between would have been attributed to the wrong one.
 let state = {
+  // 279. WHICH ZONE IS SHOWING, and which subtab inside each of them.
+  // Three zones now - what is happening, what is prepared, what can
+  // exist - so "which tab am I on" is two answers rather than one, and
+  // the second has to be remembered PER ZONE: coming back to Rules
+  // should land on the page you left it on, not on its first subtab.
+  tab: "active",
+  sub: { active: "encounter", campaign: "world", rules: "species" },
   // 055. The class catalogue for this game, globals plus any the
   // table has written for itself.
   classes: [],
@@ -751,6 +758,23 @@ function amDM() {
 // loose-object manager. Each of those panes holds exactly ONE panel and
 // that panel is the DM's.
 //
+// 279. THAT LIST IS NOW ONE ENTRY, AND THE TEST IS WHY. "A pane is only
+// a DM pane if EVERYTHING in it is" - count the panels - and 279 moved
+// the panels, so three of the four stopped passing it:
+//
+//   `run`       became Active > Encounter, which is the pane a PLAYER
+//               lives in. `#run-panel` is still the DM's and still
+//               hides itself; the pane around it is not.
+//   `objects`   split in two. The ledger is Active > Things and is
+//               still the DM's; the catalogue is Rules > Items and is
+//               reference anybody may read.
+//   `creatures` became a SUBTAB of Rules, so the gate moved down one
+//               level with it rather than being deleted.
+//
+// Only `campaign` - the world tree and the map workspace - is still a
+// zone where every panel in it is the DM's. The check did not change;
+// what it was pointed at did.
+//
 // `chars` IS NOT ON THIS LIST AND WAS, WHICH BROKE A PLAYER'S SHEET.
 // 202 put it here on the strength of `loadChars`'s own comment - "a
 // player has their own character on the sheet and no business with the
@@ -771,48 +795,63 @@ function amDM() {
 // guards and Postgres enforces it; this decides what is on the strip.
 // The worst case if it is wrong is a dead tab - or, as 202 proved, a
 // live one that somebody needed.
-const DM_ONLY_TABS = ["run", "world", "creatures", "objects"];
+// 279. ONE ENTRY, WHERE THERE WERE FOUR. Active and Rules are open to
+// everybody; Campaign is the DM's two prep surfaces and is the only
+// zone still gated. The reference half of the game - species, spells,
+// items - is READING, and `reveal.rs` already settled what reading
+// costs: "`amDM()` decides what the app OFFERS... neither is a security
+// boundary. The boundary is RLS."
+const DM_ONLY_TABS = ["campaign"];
+
+// 279. AND ONE SUBTAB, which is the bestiary: templates are an
+// authoring surface - import from reference, import from file, edit,
+// place - rather than something a player reads. Species is BESIDE it
+// and open, so "Creatures is the DM's" stays true as a whole sentence
+// instead of becoming a tab with mixed gating.
+const DM_ONLY_SUBS = [["rules", "creatures"]];
+
+function subButton(zone, name) {
+  return document.querySelector(
+    "#" + zone + '-tabs .tab[data-' + zone + '="' + name + '"]'
+  );
+}
 
 function paintTabOffer() {
   const dm = amDM();
   for (const b of document.querySelectorAll("#tabs .tab")) {
     if (DM_ONLY_TABS.includes(b.dataset.tab)) b.hidden = !dm;
   }
+  for (const [zone, name] of DM_ONLY_SUBS) {
+    const b = subButton(zone, name);
+    if (b) b.hidden = !dm;
+  }
 
-  // 211. THE SPELL CATALOGUE IS FOR SOMEBODY WHO CASTS.
-  //
-  // That tab is the CATALOGUE - find, class, level, school - and not a
-  // character's own list, which is why the DM keeps it whatever is
-  // selected: authoring a creature's spells needs it and the DM has no
-  // "my character" to key it off.
-  //
-  // `sheet.caster` IS THE ENGINE'S ANSWER AND THE ONLY ONE. 176 paid
-  // for the alternative: the Prayers subtab asked whether the
-  // character had a CLERIC class by name, so a wizard never saw it,
-  // and the rule for who casts lived in two places with one of them in
-  // a language that has no compiler. `casting::caster` resolves it
-  // once and `list_casting`, `castable` and `cast_spell` all go
-  // through it.
-  const casts = !!(state.sheet && state.sheet.caster);
-  const spells = document.querySelector('#tabs .tab[data-tab="spells"]');
-  if (spells) spells.hidden = !(dm || casts);
-
-  // 211. "CHARACTERS" IS A ROSTER; A PLAYER HAS ONE. The pane is the
-  // DM's list of everybody in the campaign and, for a player, their
-  // own sheet - the same pane answering two different questions, so
-  // it gets the two names.
-  const chars = document.querySelector('#tabs .tab[data-tab="chars"]');
+  // 211/279. "CHARACTERS" IS A ROSTER; A PLAYER HAS ONE. The pane is
+  // the DM's list of everybody in the campaign and, for a player, their
+  // own sheet - the same pane answering two different questions, so it
+  // gets the two names. A subtab of Active now rather than a tab of its
+  // own, which is the only thing that changed about it.
+  const chars = subButton("active", "chars");
   if (chars) chars.textContent = dm ? "Characters" : "Character";
 
   // AND DO NOT LEAVE THEM STANDING ON ONE. Hiding the button while its
   // pane is the open one would take the tab off the strip and leave the
   // blank pane exactly where it was, which is the bug with its label
   // removed. Switching games is the case: DM of one, player of the
-  // next - and now also picking up a fighter while the catalogue is
-  // open. Asked of the BUTTON rather than of a list, so a tab hidden
+  // next. Asked of the BUTTON rather than of a list, so a tab hidden
   // for any reason is covered by one test.
   const here = document.querySelector('#tabs .tab[data-tab="' + state.tab + '"]');
-  if (state.tab !== "play" && here && here.hidden) showTab("play");
+  if (state.tab !== "active" && here && here.hidden) showTab("active");
+
+  // 279. THE SAME GUARD, ONE LEVEL DOWN, and it is not a copy for the
+  // sake of symmetry: a subtab can be hidden under somebody exactly as
+  // a tab could. 211's own cost was this fault one level up - the spell
+  // catalogue vanishing under a player who picked up a fighter - and
+  // the gate it needed for that is gone, but the bestiary's remains.
+  for (const [zone, name] of DM_ONLY_SUBS) {
+    const b = subButton(zone, name);
+    if (b && b.hidden && state.sub[zone] === name) showZone(zone, ZONES[zone]);
+  }
 }
 
 async function selectGame(id) {
@@ -2259,7 +2298,15 @@ function prepareButton(sp) {
 // clock::may_long_rest. A screen that recomputed any of it would be a
 // second opinion that eventually disagrees - which the Karma preview
 // already taught us.
-const CLOCK_PANES = ["play", "run"];
+// 092/279. ONE CLOCK NOW. 092 built the bar twice, with `-play` and
+// `-run` ids, and wrote down why: "Play and Run are different panes and
+// a session lives in whichever one suits it." 279 made them one pane -
+// a player's live screen and the DM's were always the same screen from
+// two sides - so the reason went and the duplicate went with it. The
+// list stays a list because `paintClock`, `paintEffects` and `restSay`
+// all take the suffix, and a single caller is cheaper to read than
+// three rewritten functions.
+const CLOCK_PANES = ["active"];
 
 // WHAT IS RUNNING. 094.
 //
@@ -3630,7 +3677,7 @@ function creatureRow(c) {
   edit.title = "open it on the character sheet - the same one a player uses";
   guard(edit, async () => {
     state.characterId = c.id;
-    showTab("chars");
+    showTab("active", "chars");
     await loadSheet();
   });
 
@@ -4858,7 +4905,11 @@ async function doTrade(free) {
 // So arriving at a tab reads it. CLICKING THE TAB YOU ARE ALREADY ON
 // IS THEREFORE THE REFRESH, with no new control for it: the handler
 // does not check whether the tab changed, and that is worth keeping.
-function showTab(name) {
+// 279. THE SUBTAB EACH ZONE OPENS ON when it has no better idea - and
+// the one the DM-only guard above falls back to.
+const ZONES = { active: "encounter", campaign: "world", rules: "species" };
+
+function showTab(name, sub) {
   for (const b of document.querySelectorAll("#tabs .tab")) {
     b.classList.toggle("on", b.dataset.tab === name);
   }
@@ -4866,10 +4917,26 @@ function showTab(name) {
     p.hidden = p.dataset.pane !== name;
   }
   state.tab = name;
+  // 279. A CROSS-LINK NAMES BOTH HALVES OR NEITHER. Seven places in
+  // this file send the reader somewhere specific - "who is here ->
+  // Characters", an encounter row on the scene - and after 279 none of
+  // those destinations is a top tab any more. Passing the subtab here
+  // rather than calling `showZone` after `showTab` keeps it one hop, so
+  // a link cannot land on the right zone and the wrong page.
+  if (sub) return showZone(name, sub);
   // Deliberately not awaited: the pane is already on screen with what
   // it had, and the fresh read paints over it when it lands. Making
   // the switch wait would trade a stale number for a stalled tab.
   refreshTab(name);
+}
+
+// A zone's own strip. `showSub` does the showing; this remembers which
+// page the zone is on and re-reads it, because 279's zones are where
+// the dispatch below now hangs.
+function showZone(zone, name) {
+  showSub(zone + "-tabs", zone, name);
+  state.sub[zone] = name;
+  refreshTab(zone);
 }
 
 // WHAT A TAB SHOWS, READ AGAIN WHEN YOU ARRIVE AT IT.
@@ -4887,44 +4954,58 @@ function showTab(name) {
 // ONE DISPATCH, so a new tab cannot forget to be in it. The cost is a
 // handful of reads on navigation, which is the moment a person already
 // expects the screen to be fetching something.
-async function refreshTab(name) {
+// 279. STILL ONE DISPATCH, KEYED ON BOTH HALVES. The rule above - "so
+// a new tab cannot forget to be in it" - is why this is a flat table of
+// "zone/subtab" rather than a switch inside a switch: there are eleven
+// pages now and the only way to see that every one of them re-reads on
+// arrival is to be able to count them in one place.
+async function refreshTab(zone) {
   if (!state.gameId) return;
+  const where = zone + "/" + (state.sub[zone] || ZONES[zone]);
   try {
-    if (name === "play") {
-      // 203. IN THE DISPATCH, which this function's own comment asks
-      // for - "so a new tab cannot forget to be in it". Arriving at
-      // Play is how a player sees the fight has moved, and clicking
-      // Play while already on it is the refresh.
+    if (where === "active/encounter") {
+      // 203. Arriving here is how a player sees the fight has moved,
+      // and clicking the tab you are already on is the refresh.
+      // `loadDM` is in the same breath now because the DM's console
+      // and the player's view of it are one pane after 279; it gates
+      // itself, so a player calling it costs one `amDM()`.
       await loadFightStrip();
       await loadRolls();
-      if (state.characterId) await loadSheet();
-    } else if (name === "chars") {
-      await loadChars();
-      if (state.characterId) await loadSheet();
-    } else if (name === "run") {
       await loadDM();
       await loadTargets();
-    } else if (name === "world") {
-      await loadWorld();
-    } else if (name === "creatures") {
-      await loadCreatures();
-    } else if (name === "objects") {
+      if (state.characterId) await loadSheet();
+    } else if (where === "active/chars") {
+      await loadChars();
+      if (state.characterId) await loadSheet();
+    } else if (where === "active/things") {
       await loadObjects();
-    } else if (name === "trade") {
+    } else if (where === "active/trade") {
       await loadTrade();
-    } else if (name === "spells") {
+    } else if (where === "campaign/world" || where === "campaign/map") {
+      // ONE READ FOR BOTH. The map's own place picker is filled from
+      // `state.locations`, so the map page needs exactly what the world
+      // page needs and asking twice would be two answers that can
+      // disagree about what rooms exist.
+      await loadWorld();
+    } else if (where === "rules/species") {
+      await loadSpecies();
+    } else if (where === "rules/spells") {
       // 169. IN THE DISPATCH, which this comment's own rule asks for -
       // "so a new tab cannot forget to be in it". The prayers tab is
       // the one that did forget: it is read once when the game opens
       // and never again, so a spell added from the other machine is
       // invisible there until sign-out. Not changed here, but noted.
       await loadSpells();
+    } else if (where === "rules/items") {
+      await loadItems();
+    } else if (where === "rules/creatures") {
+      await loadCreatures();
     }
   } catch (e) {
     // A refresh that fails must not take the tab switch with it. The
     // pane is already showing the last good read, and every loader in
     // here reports its own failure through the log.
-    log("refresh " + name, e, true);
+    log("refresh " + where, e, true);
   }
 }
 
@@ -5208,7 +5289,7 @@ function paintPeople(roster, id) {
 }
 
 // What is happening here. 034 put location_id on encounters and until
-// now only the Run tab read it.
+// now only the encounter page read it.
 function paintSceneEncounters(fights) {
   const ul = document.querySelector("#scene-encounters");
   ul.innerHTML = "";
@@ -5218,11 +5299,11 @@ function paintSceneEncounters(fights) {
     return;
   }
   for (const e of fights) {
-    // Clicking it opens it on the Run tab, because that is where it is
-    // run from - the scene says what is here, not how to fight it.
+    // Clicking it opens Active > Encounter, because that is where it
+    // is run from - the scene says what is here, not how to fight it.
     ul.append(
       row(e.name, e.status, async () => {
-        showTab("run");
+        showTab("active", "encounter");
         await selectEncounter(e.id);
       })
     );
@@ -6024,7 +6105,7 @@ function paintFolk(listSel, countSel, folk) {
       // 068. STAYS ON THIS TAB. The sheet moved to Characters in 067
       // and this still sent the reader to Play, which is now a page
       // with nothing but Rolls on it.
-      showTab("chars");
+      showTab("active", "chars");
       showSub("sheet-tabs", "sheet", "stats");
       document.querySelector("#sheet-panel")
         .scrollIntoView({ block: "start", behavior: "smooth" });
@@ -6090,6 +6171,33 @@ function paintFolk(listSel, countSel, folk) {
 async function loadSkillKeys() {
   if (!state.gameId || state.skillKeys) return;
   state.skillKeys = (await call("list_skill_keys", { gameId: state.gameId })) || [];
+}
+
+// 279. THE CATALOGUE ON ITS OWN, because it is the only half of this
+// screen anybody may read. Dave's call: "Players can browse objects as
+// well." What CAN exist is reference - the same kind of thing as the
+// spell book - and `list_catalogue` is ~50 global rows plus whatever
+// the game has overridden.
+//
+// WHAT DID NOT OPEN IS THE OTHER HALF, and the split is the reason this
+// function exists. "EVERY object in the game, whoever is holding it" is
+// the DM's ledger: it answers where the handaxe went, which is a
+// question about a session rather than about the rules. That stays
+// behind `amDM()` in `loadObjects` below, and lives in Active where the
+// rest of what-is-happening lives.
+async function loadItems() {
+  if (!state.gameId) return;
+  const cat = await tryCall("list_catalogue", { gameId: state.gameId });
+  if (!cat.ok) {
+    document.querySelector("#cat-list").innerHTML = "";
+    setCount("#n-cat", 0);
+    // Through the log rather than through `dmSay`: a player has no DM
+    // message line, and this is now a page a player can be standing on.
+    log("list_catalogue", cat.error, true);
+    return;
+  }
+  state.catalogue = cat.value || [];
+  paintCatalogue();
 }
 
 async function loadObjects() {
@@ -7666,26 +7774,26 @@ function paintBranches(enc) {
 
   const place = (state.locations || []).find((l) => l.id === enc.location_id);
   row.append(
-    action(place ? "the " + place.name + " \u2192 World" : "no place set", async () => {
+    action(place ? "the " + place.name + " \u2192 Campaign" : "no place set", async () => {
       if (!place) return dmSay("this encounter happens nowhere in particular", true);
-      showTab("world");
+      showTab("campaign", "world");
       await selectPlace(place.id);
     })
   );
 
   row.append(
     action("who is here \u2192 Characters", () => {
-      showTab("chars");
+      showTab("active", "chars");
     }),
     // The filter is set so the tab opens on the things in this room
     // rather than on all thirty objects in the campaign.
-    action("things here \u2192 Objects", () => {
+    action("things here \u2192 Things", () => {
       const find = document.querySelector("#obj-find");
       if (find && place) {
         find.value = place.name;
         paintObjects();
       }
-      showTab("objects");
+      showTab("active", "things");
     })
   );
 }
@@ -10870,7 +10978,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // tabs - but it does mean the sheet can be left on whichever
         // subtab the LAST character was being read on, which for a
         // brand new one is never the right answer.
-        showTab("chars");
+        showTab("active", "chars");
         showSub("sheet-tabs", "sheet", "stats");
         document.querySelector("#sheet-panel")
           .scrollIntoView({ block: "start", behavior: "smooth" });
@@ -11605,19 +11713,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // 068. World gained a strip when Species moved onto it.
-  for (const b of document.querySelectorAll("#world-tabs .tab")) {
-    b.addEventListener("click", () => showSub("world-tabs", "world", b.dataset.world));
+  // 279. THE THREE ZONE STRIPS, wired by the zone's own name rather
+  // than one loop per strip: the id, the data attribute and the pane
+  // class are all that name, which is what makes `showZone` possible at
+  // all. Clicking the subtab you are on re-reads it, the same way
+  // clicking the tab you are on always has.
+  for (const zone of Object.keys(ZONES)) {
+    for (const b of document.querySelectorAll("#" + zone + "-tabs .tab")) {
+      b.addEventListener("click", () => showZone(zone, b.dataset[zone]));
+    }
   }
 
   for (const b of document.querySelectorAll("#chars-tabs .tab")) {
     b.addEventListener("click", () => showSub("chars-tabs", "chars", b.dataset.chars));
-  }
-
-  for (const b of document.querySelectorAll("#objects-tabs .tab")) {
-    b.addEventListener("click", () =>
-      showSub("objects-tabs", "objects", b.dataset.objects)
-    );
   }
 
   // Filtering is local - the whole list is already here - so it repaints

@@ -13191,12 +13191,169 @@ exactly as they did before the deletion.
 
 ---
 
+## 279. Three zones, one distinction applied twice
+
+**2026-11-04.** Dave, on who may read what: *"I think we can unlock
+objects for players as well gating creatures for DMs - Players can
+browse objects as well. Lets not spend too much on gating spells for
+players either - a player that is playing a fighter doesn't need to see
+spells but they can't use them so it doesn't matter if they want to read
+about them. Species should be under Creatures as well."* And then the
+shape, with Campaign and Active written as two branches under Play, and
+the honest caveat attached: *"I know we will need to flesh out some of
+these as they don't exist yet as categories."*
+
+**The counter was that the two branches are the top level**, because
+nothing would ever be left on a Play tab that housed them, and a third
+click to reach the fight is a click to reach the thing you are doing
+most. Approved in five words: *"Yes - Play becomes ~ Active"*.
+
+### Eight tabs sorted by what a thing was ABOUT, not by which of two it was
+
+The old strip was Play, Chars, Objects, Creatures, Spells, Trade, Run,
+World. Each one named a noun, which looks tidy until a noun exists in
+more than one state - and **the Objects tab was carrying the proof of it
+in its own two subtabs**, whose comments read "what CAN exist" and
+"EVERY object in the game, whoever is holding it". Those are not two
+views of one thing. They are two different kinds of fact that happen to
+share a word.
+
+Creatures was the same pair with its halves on **two different tabs**:
+the templates on Creatures, the individuals standing in rooms on World.
+Spells was a reference list sitting beside four live panes. Species, the
+most player-facing reference in the application, was inside `#world-panel`.
+
+There are three answers underneath all of that, and the same question
+sorts every one of them - **not what is this about, but which of these
+three is it**:
+
+```
+Active    what is HAPPENING     Encounter | Characters | Things | Trade
+Campaign  what is PREPARED      World | Maps
+Rules     what CAN exist        Species | Spells | Items | Creatures
+```
+
+Objects split along the line it was already drawn on: the live ledger is
+**Active > Things**, the catalogue is **Rules > Items**, and each got the
+h2 it needed because neither was a top-level heading before.
+
+### 068's species viewer was never reachable by a player, and nobody had noticed
+
+It was added inside `#world-panel`, **which hides itself for anybody who
+is not the DM** - so for two hundred cycles the screen you read to decide
+what you ARE was the one screen a player could not open. The instruction
+was to put Species under Creatures. It is **beside** Creatures instead,
+and the reason is the gating: Creatures is the DM's, and "Creatures is
+the DM's" has to stay true as a whole sentence rather than becoming a tab
+with mixed rules inside it. Same ids, so `loadSpecies` and
+`paintSpeciesView` did not have to learn where they now live - the second
+time that has been true of this block.
+
+### Play and Run were one pane seen from two sides, and the clock proved it
+
+A player's live screen was Play; the DM's was Run. **The clock bar
+therefore existed twice, with two sets of ids**, and 092 wrote the reason
+down: they are different panes. They are one pane now, so `clock-play`,
+`steps-play`, `restsay-play` and `fx-play` became `-active` and Run's
+copy was deleted. `CLOCK_PANES` went from `["play", "run"]` to
+`["active"]`.
+
+**The role split did not go anywhere - it moved to where it belongs.**
+`#run-panel` still hides itself for anybody who is not the DM and
+`#strip-panel` is still what a player sees of the same fight. A DM on
+Active > Encounter sees both; a player sees one. That is a panel
+decision, which is what 203 argued for, rather than a tab decision.
+
+### The gating change is a change of policy, not of plumbing
+
+`reveal.rs` has said it outright since 203: *"`amDM()` decides what the
+app OFFERS... neither is a security boundary. The boundary is RLS."*
+So the cost of opening Species, Spells and Items to players was asked of
+the loaders, and it was **nothing**: `loadSpecies` and `loadSpells` never
+had a DM gate, and only `loadObjects` did - which is why the catalogue
+half needed its own loader, `loadItems`, and nothing else moved.
+
+**211's `sheet.caster` test is retired.** It existed to keep the spell
+list off a non-caster's strip, and it cost a tab that VANISHED under a
+player the moment they picked up a fighter. Dave's call is that a
+fighter's player who wants to read about Fireball may.
+
+What is still gated: **Campaign entirely**, because both halves are the
+DM's preparation, and **Rules > Creatures**, because a bestiary read in
+advance is a fight spoiled. Two lists say so in one place:
+
+```js
+const DM_ONLY_TABS = ["campaign"];
+const DM_ONLY_SUBS = [["rules", "creatures"]];
+```
+
+`paintTabOffer` also switches **Characters** to **Character** for a
+player, which is the whole of what that tab means to them.
+
+### Never hide the tab somebody is standing on
+
+Hiding a button does not move anybody off the pane behind it, and roles
+change when you switch games - a DM of one is a member of the next. So
+`paintTabOffer` checks, at both levels, whether the thing you are looking
+at just became something you may not look at, and walks you back to
+Active, or back to Species. Driven in the rig by actually switching games
+rather than by calling the function: standing on Campaign with Rules
+sitting on Creatures ended on Active with Rules on Species, both panes
+the only visible one in their strip.
+
+### One dispatch, so a new tab cannot forget to be in it
+
+Three strips, one wiring loop over `ZONES`, one `showZone`, and
+`refreshTab(zone)` re-reads on arrival for all nine leaves. The old code
+had a loop per strip and a `switch` that a new tab had to be added to by
+hand; the clicks arrive the same way now whether the strip is Active,
+Campaign or Rules.
+
+### What was deliberately not built
+
+- **Journal** and **Active > Map** were in the list and are not here,
+  on 275's rule: *"nothing was built towards chat, not even a disabled
+  tab - which is the honest state rather than a stub that looks like a
+  promise."*
+- **Campaign > Encounters.** Run moved whole. Splitting the prepared
+  list from the running one is a real cycle with a real seam - the
+  existing `enc-modes` View/Edit toggle - and doing it inside a layout
+  change would have put the fight loop at risk for a tidier strip.
+
+Verified in the rig as DM and as player before anything was committed:
+ten pages render, one clock bar, the player's three strips read
+`Active | Rules` at the top with Campaign hidden, and Items paints from
+`list_catalogue` with no character selected. `npm test` passes.
+
+1436 tests.
+
+### Carried forward
+
+- **Campaign > Encounters is the next obvious cycle**, and the seam is
+  already in the markup. The prepared list and the running fight are the
+  same two-zone split this cycle made everywhere else; Encounters is the
+  one noun that still has both halves in one place.
+- **`state.catalogue` is two things.** `loadObjects` and
+  `paintCatalogue` treat it as an array; `catalogueFor` treats it as an
+  object keyed by game id. That predates this cycle and survived it
+  untouched, because `loadItems` writes the array form the painter wants.
+  It is a landmine either way and wants one owner.
+- **Active > Things shows every object in the game to everybody**, which
+  is what the old "In play" subtab did for the DM and is now what a
+  player sees too. RLS allows it. Whether a player should be able to read
+  what another party member is carrying is a game-design question that
+  has not been asked yet.
+- **The roll controls are still above the feed rather than in it**,
+  carried from 275 and not addressed here.
+
+---
+
 ## Pick up here
 
-### THE SHELL CHANGED ON 2026-11-03 - read this before the handoff below
+### THE SHELL CHANGED ON 2026-11-03/04 - read this before the handoff below
 
-275-278 rebuilt how you get into this application and how it is laid
-out, so two things in the handoff below now describe a window that no
+275-279 rebuilt how you get into this application and how it is laid
+out, so three things in the handoff below now describe a window that no
 longer exists.
 
 - **The app opens on a door, not on the tabs.** A full-window gate
@@ -13210,6 +13367,12 @@ longer exists.
   **narrative and roll feed**, open by default, with the developer log
   as its second tab. The main pane takes the rest. 800x600 was the
   Tauri template's default and had never been changed.
+- **There are three tabs, not eight.** `Active` (Encounter,
+  Characters, Things, Trade), `Campaign` (World, Maps) and `Rules`
+  (Species, Spells, Items, Creatures). Play and Run are one pane called
+  Active > Encounter; Objects is split between Active > Things and
+  Rules > Items; Species came out of World. 279 says why, and says
+  which old tab each pane came from.
 
 **THE TABLE BELOW IS FROM 2026-10-24 AND ITS NUMBERS HAVE MOVED.**
 Checked against this machine and the live project on 2026-11-03, not

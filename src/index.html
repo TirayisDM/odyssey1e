@@ -185,1353 +185,1366 @@
         <ul id="characters" class="list"></ul>
       </section>
 
-      <!-- THE TABS. The rig showed every panel for every role at once,
-           which stopped being navigable somewhere around the DM screen.
+      <!-- THE TABS. The rig showed every panel for every role at
+           once, which stopped being navigable somewhere around the DM
+           screen.
 
-           Play is the one a player lives in. The other four are DM
-           tools, split by what they are ABOUT rather than by when they
-           get used: the fight in front of the table, the map, the
-           people, the things. Statblock authoring sat in World for one
-           restructure and was wrong there - a creature type is not a
-           place. -->
+           279. THREE ZONES, ONE DISTINCTION APPLIED TWICE. Dave's
+           call: "We are working towards a few primary tabs in the main
+           view after user chooses a game."
+
+             Active    what is HAPPENING - this fight, these people,
+                       these things, this trade
+             Campaign  what this game has PREPARED - the world and its
+                       maps
+             Rules     what CAN exist - species, spells, items,
+                       creature templates
+
+           The old strip had eight, split by what they were ABOUT, and
+           that split could not say where a thing belonged when the
+           thing existed twice. Objects was the proof: its two subtabs
+           were "what CAN exist" and "EVERY object in the game, whoever
+           is holding it", which are not two views of one noun - they
+           are two different zones sharing a word. Creatures was the
+           same pair with its halves on two different tabs. -->
       <nav class="tabs" id="tabs">
-        <button class="tab on" data-tab="play">Play</button>
-        <button class="tab" data-tab="run">Run</button>
-        <button class="tab" data-tab="world">World</button>
-        <button class="tab" data-tab="chars">Characters</button>
-        <button class="tab" data-tab="objects">Objects</button>
-        <button class="tab" data-tab="creatures">Creatures</button>
-        <button class="tab" data-tab="spells">Spells</button>
-        <button class="tab" data-tab="trade">Trade</button>
+        <button class="tab on" data-tab="active">Active</button>
+        <button class="tab" data-tab="campaign">Campaign</button>
+        <button class="tab" data-tab="rules">Rules</button>
       </nav>
 
       <!-- One message line for the whole DM side, in the strip rather
-           than inside a pane: an action taken in World should still be
-           readable after switching to Run. -->
+           than inside a pane: an action taken in Campaign should still
+           be readable after switching to Active. -->
       <div id="dm-msg" class="dm-msg" hidden></div>
 
-      <div class="pane" data-pane="play">
-
-      <section>
-        <!-- 092. THE CLOCK, on both the tabs a session is actually
-             run from. The same markup twice with different ids rather
-             than one bar moved about: Play and Run are different panes
-             and a session lives in whichever one suits it.
-
-             EXPLICIT JUMPS, because outside a fight nothing can know
-             how long anything took and an engine that guessed would be
-             confidently wrong. -->
-        <div class="clockbar">
-          <span class="clock-now" id="clock-play"></span>
-          <span class="clock-steps" id="steps-play"></span>
-          <button class="ghost tiny" data-rest="short" data-clock="play">Short rest</button>
-          <button class="ghost tiny" data-rest="long" data-clock="play">Long rest</button>
-        </div>
-        <div class="muted" id="restsay-play"></div>
-        <!-- 094. WHAT IS RUNNING, soonest to end first. Gone entirely
-             when nothing is - an empty heading saying "no effects" is
-             a line of chrome on every session that never uses them. -->
-        <div id="fx-play" class="fxbar"></div>
-
-      </section>
-
-      <!-- 203. THE PLAYER'S VIEW OF THE FIGHT.
-
-           AT THE TOP OF PLAY AND ONLY WHILE ONE IS RUNNING - Dave's
-           call on placement. A player keeps ONE screen, which is what
-           the phone and tablet target wants, and a panel that sat here
-           saying "no fight" would cost the sheet a screenful on every
-           session that never rolls initiative.
-
-           WHAT IT MAY SAY IS NOT THIS FILE'S BUSINESS. `reveal.rs`
-           decides who gets numbers and who gets a word; `fight_strip`
-           hands over lines that already have nothing in them a player
-           may not see. Nothing here computes a game number. -->
-      <section id="strip-panel" hidden>
-        <h2><span id="strip-name"></span> <span id="strip-round" class="muted"></span></h2>
-        <ol id="strip-order" class="strip"></ol>
-      </section>
-
-      <!-- 110. WHAT A CASTER CAN DO ON THEIR TURN. Beside the roll
-           box rather than buried on the sheet: a cleric in initiative
-           needs their prepared list where the rolling happens, and
-           Luci stood in the Tavern with nothing to click.
-
-           HIDDEN FOR ANYBODY WHO CASTS NOTHING, which is most
-           characters. -->
-      <section id="cast-panel" hidden>
-        <h2>Cast <span id="cast-who" class="muted"></span></h2>
-        <div id="cast-list"></div>
-        <!-- 158. THE SAVE THE LAST CAST IS WAITING ON. A save spell is
-             two steps for the same reason an attack spell is: the DC is
-             the caster's and the d20 is the TARGET's, so the engine
-             states the number and waits to be asked. Empty except in
-             the moment between casting one and resolving it. -->
-        <div id="pending-save"></div>
-      </section>
-
-      <section>
-        <h2>Rolls</h2>
-        <div class="row">
-          <input id="named-request" placeholder="insight, wis save, ath…" />
-          <select id="mode">
-            <option value="normal">Normal</option>
-            <option value="adv">Adv</option>
-            <option value="dis">Dis</option>
-          </select>
-        </div>
-        <!-- 118. WHAT THE SAVE IS AGAINST.
-             098 gave a people a bonus that applies only against a
-             spell, and resolve_request has read it since - but only
-             from the words " vs spell" typed on the end of the
-             request. Nothing said so. The placeholder beside this box
-             offers "wis save", which is the one spelling that does
-             NOT get it, and a Ny'ook's +2 was unreachable by anybody
-             who had not read the species prose.
-             A CIRCUMSTANCE OF THE ROLL, like advantage, so it belongs
-             beside advantage as a control rather than as an
-             incantation. It writes the suffix the engine has always
-             understood - the vocabulary does not change, only the way
-             in. Shown only for a save, because it means nothing on an
-             Athletics check. -->
-        <div class="row" id="vs-spell-row" hidden>
-          <label class="check" for="vs-spell">
-            <input type="checkbox" id="vs-spell" />
-            against a spell
-          </label>
-          <span class="muted" id="vs-spell-why"></span>
-        </div>
-        <!-- Optional. "no target" means the roll is not judged at
-             all, which is not the same as failing it. The list is the
-             active encounter's actors and challenges; typing a number
-             by hand still works when there is no encounter. -->
-        <div class="row">
-          <select id="target-pick">
-            <option value="">no target</option>
-            <option value="manual">type a number…</option>
-          </select>
-          <!-- Only for something that is down. A dying creature saves on
-               its own turn; until initiative exists, that is this. -->
-          <button id="death-save" class="ghost" hidden>death save</button>
-        </div>
-        <div class="row" id="manual-target" hidden>
-          <select id="target-kind">
-            <option value="dc">vs DC</option>
-            <option value="ac">vs AC</option>
-          </select>
-          <input id="target-value" type="number" placeholder="15" />
-          <input id="target-label" placeholder="Goblin 1 (optional)" />
-        </div>
-        <div id="preview" class="preview muted">—</div>
-        <button id="roll-named">Roll</button>
-        <input id="roll-request" placeholder="request, e.g. insight" />
-        <input id="roll-formula" placeholder="formula, e.g. 2d20kh1+5 (blank = pending)" />
-        <button id="create-roll">Insert roll</button>
-        <input id="patch-narr" placeholder="narrative to patch into newest roll" />
-        <button id="patch-roll" class="ghost">Patch narrative</button>
-      </section>
-      </div>
-
-      <div class="pane" data-pane="run" hidden>
-        <section id="run-panel" hidden>
-        <h2>DM <span id="dm-who" class="muted"></span></h2>
-
-        <!-- 092. THE CLOCK, on both the tabs a session is actually
-             run from. The same markup twice with different ids rather
-             than one bar moved about: Play and Run are different panes
-             and a session lives in whichever one suits it.
-
-             EXPLICIT JUMPS, because outside a fight nothing can know
-             how long anything took and an engine that guessed would be
-             confidently wrong. -->
-        <div class="clockbar">
-          <span class="clock-now" id="clock-run"></span>
-          <span class="clock-steps" id="steps-run"></span>
-          <button class="ghost tiny" data-rest="short" data-clock="run">Short rest</button>
-          <button class="ghost tiny" data-rest="long" data-clock="run">Long rest</button>
-        </div>
-        <div class="muted" id="restsay-run"></div>
-        <!-- 094. WHAT IS RUNNING, soonest to end first. Gone entirely
-             when nothing is - an empty heading saying "no effects" is
-             a line of chrome on every session that never uses them. -->
-        <div id="fx-run" class="fxbar"></div>
-
-
-        <div class="row">
-          <input id="enc-name" placeholder="new encounter name" />
-          <!-- Where the fight happens. Blank is nowhere in particular,
-               which 034 allows. -->
-          <select id="enc-where"></select>
-          <button id="create-encounter" class="ghost">Create</button>
-        </div>
-        <ul id="encounters" class="list"></ul>
-
-        <!-- 229. A HOOK, NOT A MAP. The three tile commands have no
-             screen yet - Phase 1's render is its own piece of work -
-             and a command nobody can call is a command nobody has
-             watched fail. This paints a four-square patch, reads it
-             back and erases it, against the place chosen beside it.
-
-             DELETE THIS BLOCK the day there is a real map surface. It
-             exists to prove the round trip, not to author anything. -->
-        <!-- 241. The "Tiles (dev hook)" block lived here from 229 to
-             240 and is gone: every job it did now lives in the Map
-             pane, where the map is visible while you do it. Its
-             `Paint 4` and `Erase 4` wrote to FIXED coordinates, which
-             was harmless on a test map and would have been
-             destructive on a real one. -->
-
-        <div id="enc-detail" hidden>
-          <div id="enc-editing" class="editing" hidden></div>
-
-          <!-- THE ORDER, AT THE TOP. It is the thing a DM looks at
-               between every roll, so it sits above everything that can
-               be edited rather than below the forms. -->
-          <div id="order-strip" class="orderstrip"></div>
-          <div class="row turnbar">
-            <span id="turn-now" class="muted"></span>
-            <button id="next-turn" class="ghost">Begin</button>
-            <button id="reset-order" class="tiny ghost">reset</button>
-          </div>
-
-          <!-- TWO MODES. Looking at a fight and changing one are
-               different jobs, and one screen doing both is how the
-               forms came to outnumber the facts. -->
-          <nav class="tabs mini" id="enc-modes">
-            <button class="tab on" data-encmode="view">View</button>
-            <button class="tab" data-encmode="edit">Edit</button>
-          </nav>
-
-          <div class="encmode-pane" data-encmode="view">
-            <div id="enc-narrative" class="prose-block"></div>
-
-            <!-- RUNNING IT IS NOT READING IT. A fight in front of the
-                 table wants one creature, its options, and what just
-                 happened - not a column of every creature's buttons.
-                 The card appears only while the encounter is ACTIVE;
-                 a draft or an ended fight still reads as the list
-                 below, which is the right shape for planning one. -->
-            <div id="fight-card" class="fight" hidden>
-              <div class="fight-actor">
-                <div id="fight-who" class="fight-who"></div>
-                <div id="fight-options" class="fight-options"></div>
-                <div id="fight-sheet" class="actorview" hidden></div>
-                <div id="fight-result" class="fight-result"></div>
-              </div>
-              <div class="fight-side">
-                <div id="fight-round" class="fight-round"></div>
-                <div class="sub">In order</div>
-                <ol id="fight-order" class="fight-order"></ol>
-                <button id="fight-next" class="ghost wide">End turn</button>
-              </div>
-            </div>
-
-            <div id="roster-head" class="sub">Who is in this</div>
-            <ul id="roster" class="list"></ul>
-
-            <!-- WHAT HAS BEEN DONE. The attack buttons are on this tab
-                 and their results were not - a DM swung and then went
-                 to the Play tab to find out what happened. 054 stamps
-                 the round onto each action, so this is also the only
-                 place that can say a creature has gone twice. -->
-            <div class="sub">What has happened</div>
-            <ul id="enc-log" class="list"></ul>
-          </div>
-
-          <div class="encmode-pane" data-encmode="edit" hidden>
-            <div class="row cells">
-              <!-- enc-rename, NOT enc-name. The create box at the top of
-                   this pane is the other one, and querySelector returns
-                   the first of a duplicate id - so the editor was both
-                   painting into and saving from the create box. -->
-              <label class="cell wide"><span>called</span>
-                <input id="enc-rename" /></label>
-              <label class="cell wide"><span>where it happens</span>
-                <select id="enc-place"></select></label>
-              <button id="set-enc-place" class="ghost">Move here</button>
-            </div>
-            <div class="row cells">
-              <label class="cell wide"><span>what this encounter is</span>
-                <textarea id="enc-story" rows="3"
-                  placeholder="read aloud, or referred to — the engine never touches this"></textarea></label>
-            </div>
-            <div class="sub">What state it is in</div>
-            <div class="row" id="enc-status"></div>
-            <div class="row">
-              <button id="save-encounter" class="ghost">Save</button>
-              <button id="archive-encounter" class="ghost danger">Retire from the list</button>
-            </div>
-
-            <div class="sub">Bring somebody in</div>
-            <div class="row cells">
-              <label class="cell wide"><span>bring in</span>
-                <select id="enrol-what"></select></label>
-              <label class="cell wide"><span>called</span>
-                <input id="enrol-name" placeholder="blank = auto, e.g. Goblin 0003" /></label>
-              <button id="enrol" class="ghost">Enrol</button>
-            </div>
-            <ul id="edit-roster" class="list"></ul>
-          </div>
-
-          <!-- WHAT CAN BE AIMED AT, all three kinds together. A creature
-               answers with an AC, a difficulty with a DC, and since 052
-               so does a THING in the room - a challenge that points at
-               an object, rather than a third kind resolution.rs would
-               have to learn. -->
-          <div class="encmode-pane" data-encmode="view">
-            <div class="sub">What can be aimed at</div>
-            <ul id="targets" class="list"></ul>
-            <div class="sub">Go and look</div>
-            <div class="row" id="enc-branches"></div>
-          </div>
-
-          <div class="encmode-pane" data-encmode="edit" hidden>
-          <div class="sub">Add a difficulty</div>
-          <div class="row cells">
-            <label class="cell wide"><span>what you are doing</span>
-              <input id="chal-label" placeholder="force the door" /></label>
-            <label class="cell"><span>DC</span>
-              <input id="chal-dc" type="number" min="1" /></label>
-          </div>
-          <div class="row cells">
-            <label class="cell wide"><span>suggests the skill</span>
-              <select id="chal-skill"></select></label>
-            <!-- 052: the thing it is about, if it is about one. The
-                 list is what is lying where the fight is happening. -->
-            <label class="cell wide"><span>about this thing</span>
-              <select id="chal-object"></select></label>
-            <button id="add-challenge" class="ghost">Add</button>
-          </div>
-          <ul id="challenges" class="list"></ul>
-          </div>
-
-        </div>
-        </section>
-      </div>
-
-      <div class="pane" data-pane="chars" hidden>
-        <section id="chars-panel" hidden>
-          <h2>Characters <span id="chars-who" class="muted"></span></h2>
-          <nav class="tabs mini" id="chars-tabs">
-            <button class="tab on" data-chars="pcs">
-              PCs <span class="count" id="n-pcs"></span>
-            </button>
-            <button class="tab" data-chars="npcs">
-              NPCs <span class="count" id="n-npcs"></span>
-            </button>
-            <!-- 140. A CREATURE IS A CHARACTER AND IS NOT A PERSON.
-                 `is_npc` was the only split and it answers a different
-                 question: a merchant somebody wrote and a goblin
-                 stamped from a statblock are both NPCs, and the second
-                 kind arrives in tens. The line is 5e's type - humanoid
-                 is the one that is people - and `creature::is_creature`
-                 draws it. -->
-            <button class="tab" data-chars="creatures">
-              Creatures <span class="count" id="n-creature-folk"></span>
-            </button>
-          </nav>
-
-          <div class="chars-pane" data-chars="pcs">
-            <!-- 068. THE LIST FOLDS once somebody is picked. Reading a
-                 sheet and choosing whose sheet to read are different
-                 jobs, and the list only matters for the second. -->
-            <div id="pc-chosen" class="chosen" hidden></div>
-            <ul id="pc-list" class="list"></ul>
-
-            
-          </div>
-
-          <div class="chars-pane" data-chars="npcs" hidden>
-            <!-- TWO DIFFERENT THINGS, and the order says which comes
-                 first. A statblock is a TYPE - a pattern with scores and
-                 a kit. Enrolling one into an encounter copies it onto a
-                 brand new character, and THAT is what the second list
-                 holds. Editing a type never reaches the individuals
-                 already made from it; see 022. -->
-            <div class="sub">Statblocks &mdash; types</div>
-          <div class="sub">Statblock</div>
-          <div class="row">
-            <input id="npc-name" placeholder="name, e.g. Goblin Archer" />
-            <input id="npc-key" placeholder="key" />
-          </div>
-          <div class="row">
-            <input id="npc-species" placeholder="species (optional)" />
-            <input id="npc-class" placeholder="class (optional)" />
-            <!-- 064. THE RULE beside the descriptor. The text above may
-                 say "Chieftain"; this says what the engine treats them
-                 as - which decides their attack count and fills empty
-                 proficiency lists on instantiation. -->
-            <select id="npc-class-key">
-              <option value="">no class</option>
-            </select>
-          </div>
-          <div class="row">
-            <input id="npc-ac" type="number" min="0" placeholder="AC" />
-            <!-- Blank derives it from size and level. Level IS hit
-                 dice, so 2d6 is level 2 and the 7 comes out. -->
-            <input id="npc-hp" type="number" min="1" placeholder="HP (blank = from hit dice)" />
-          </div>
-          <div class="row">
-            <select id="npc-size">
-              <option value="">size (needed to derive HP)</option>
-              <option value="tiny">Tiny &mdash; d4</option>
-              <option value="sm">Small &mdash; d6</option>
-              <option value="med">Medium &mdash; d8</option>
-              <option value="lg">Large &mdash; d10</option>
-              <option value="huge">Huge &mdash; d12</option>
-              <option value="grg">Gargantuan &mdash; d20</option>
-            </select>
-            <input id="npc-level" type="number" min="1" placeholder="level = hit dice" class="narrow" />
-          </div>
-          <!-- What it is TRAINED with, not what it carries. Without
-               these a statblock is proficient with nothing and its
-               kit has to fake it one row at a time - see 028. -->
-          <div class="row">
-            <input id="npc-wprof" placeholder="weapons trained: sim, mar" />
-            <input id="npc-aprof" placeholder="armour: lgt med hvy shl" />
-          </div>
-          <button id="create-npc" class="ghost">Write statblock</button>
-            <ul id="npc-types" class="list"></ul>
-
-            <div class="sub">In play &mdash; individuals</div>
-            <ul id="npc-list" class="list"></ul>
-          </div>
-
-          <!-- 140. THE CREATURES STANDING IN THIS GAME. Individuals,
-               not types: the bestiary of templates is the Creatures tab
-               along the top, and a statblock is written on the NPCs tab
-               beside this one. Everything here opens on the same
-               character sheet a player uses, because since 022 a
-               creature IS a character - which is also why a named one
-               belongs on this tab rather than somewhere of its own. -->
-          <div class="chars-pane" data-chars="creatures" hidden>
-            <div class="sub">In play &mdash; creatures</div>
-            <ul id="creature-folk-list" class="list"></ul>
-            <p class="muted small">
-              Anything that is not a humanoid &mdash; beasts, undead,
-              oozes, dragons. Edit one on its sheet; to change the TYPE
-              it was made from, use the Creatures tab. A creature whose
-              type nobody has stated yet is on the NPCs tab, because
-              unstated is not the same as unknown.
-            </p>
-          </div>
-        </section>
-
-              <!-- 212. THE BUILDER IS A SIBLING OF #chars-panel, for the same
-           reason written over the sheet below it. #chars-panel is the
-           DM's roster and hides itself for anybody who is not the DM,
-           so a builder nested inside it was a builder no player could
-           reach - they could read a character and never make one.
-
-           A PLAYER BUILDING THEIR OWN IS THE SAME ACT THE DM PERFORMS,
-           so it is the same form rather than a second one. Nothing
-           DM-only travels with it: the statblock author and the
-           creatures note are siblings of this block and stay inside
-           the roster where they belong. -->
-<!-- 068. A LINK, NOT A PERMANENT FORM. Making a character is
-                 rare and reading one is constant, so the form that does
-                 the rare thing should not be the tallest thing on the
-                 tab. -->
-            <button id="new-char-toggle" class="linky">+ New character</button>
-            <div id="new-char-panel" hidden>
-            <input id="char-name" placeholder="character name" />
-            <!-- 055. A class is where a character's hit die comes from,
-                 so picking one here is what makes the character arrive
-                 with hit points instead of a null where their life
-                 goes. "No class" stays available because a blank sheet
-                 is a real thing to want. -->
-            <select id="char-class">
-              <option value="">no class yet</option>
-            </select>
-            <div class="muted" id="char-class-note"></div>
-            <!-- 056. The species decides size and the ability bonuses,
-                 so it belongs at creation beside the class rather than
-                 as an edit afterwards. -->
-            <select id="char-species">
-              <option value="">no species yet</option>
-            </select>
-            <div class="muted" id="char-species-note"></div>
-
-            <!-- 066. ROLLED HERE, BEFORE THE CHARACTER EXISTS. Seven
-                 scores of 3d6 with every 1 rerolled, and six of them
-                 assigned - the spare is the point, so the worst of the
-                 seven need not be lived with.
-
-                 Each picker offers only what is still unspent, so a
-                 duplicate is impossible by construction. The rule is in
-                 generation::complete anyway, because the next screen
-                 will not have a dropdown. -->
-            <div class="sub">Ability scores</div>
-            <div class="row">
-              <button id="roll-stats" class="ghost">Roll 3d6 (reroll 1s) &times;7</button>
-              <button id="lock-abilities" class="ghost" disabled>Lock abilities</button>
-            </div>
-            <div id="stat-pool" class="pool"></div>
-            <div id="stat-picks" class="picks"></div>
-            <div id="stat-msg" class="dm-msg" hidden></div>
-
-            <button id="create-char">Create character</button>
-            </div>
-
-<!-- 067. THE SHEET LIVES HERE NOW, not in Play. It is a
-             SIBLING of #chars-panel rather than a child, and that is
-             load-bearing: #chars-panel is hidden for anybody who is
-             not the DM, so nesting the sheet inside it would have
-             taken every player's own character sheet away. -->
-      <section id="sheet-panel" hidden>
-        <!-- 068. THE NAME IS THE HEADING. It used to read "Sheet" with
-             the character muted beside it, which was fine while the
-             list above always said who you had picked - and the list
-             folds away now. -->
-        <h2><span id="sheet-name"></span> <span id="sheet-who" class="muted"></span></h2>
-
-        <!-- 058. THE SHEET GETS SUBTABS. There will be half a dozen of
-             them - combat, spells, background and the rest - and the
-             strip is built on `showSub`, the same helper the Characters
-             tabs use, so the next one is a button and a pane and
-             nothing else. Adding a tab must never mean touching this
-             comment. -->
-        <nav class="tabs mini" id="sheet-tabs">
-          <button class="tab on" data-sheet="stats">Stats</button>
-          <button class="tab" data-sheet="description">Description</button>
-          <button class="tab" data-sheet="equipment">Equipment</button>
-          <button class="tab" data-sheet="skills">Skills &amp; Talents</button>
-          <!-- 106. CLERICS ONLY. Hidden for everybody else rather than
-               shown empty - a fighter has no prepared list, and "0 of
-               0" would invite the question of how to raise it. -->
-          <!-- 176. THE LABEL IS WRITTEN BY `loadPrayers` off the
-               caster's source - Spells for a wizard, Prayers for a
-               cleric. The text here is only what it reads before any
-               caster has been loaded, and the tab is hidden then
-               anyway. It used to be gated on HAVING A CLERIC CLASS BY
-               NAME, so a wizard never saw it. -->
-          <button class="tab" data-sheet="prayers" id="tab-prayers" hidden>Spells</button>
+      <div class="pane" data-pane="active">
+        <nav class="tabs mini" id="active-tabs">
+          <button class="tab on" data-active="encounter">Encounter</button>
+          <button class="tab" data-active="chars">Characters</button>
+          <button class="tab" data-active="things">Things</button>
+          <button class="tab" data-active="trade">Trade</button>
         </nav>
 
-        <div class="sheet-pane" data-sheet="stats">
-          <!-- 072. THE NAME WAS THE ONE THING THE SHEET COULD NOT EDIT.
-               An object has a rename box and so does an encounter
-               actor; the name a player types first was fixed at
-               creation, so a typo at the form was permanent.
+        <!-- 279. PLAY AND RUN WERE ONE PANE SEEN FROM TWO SIDES.
+             A player's live screen was Play and the DM's was Run, and
+             the clock bar existed TWICE with different ids because of
+             it - 092 wrote the reason down and the reason was the two
+             panes. There is one pane now, so there is one clock.
 
-               IT LEADS THE ROW because the name is the larger fact and
-               the level is a number beside it - the same order the
-               heading above reads in. -->
-          <!-- 081. FOLDS ONCE THERE IS A PATH TO FOLD. A character
-               with a class has had their name, their calling and their
-               level decided, and five controls standing open under a
-               decision already made is the sheet asking a question it
-               has the answer to.
+             `#run-panel` still hides itself for anybody who is not the
+             DM and `#strip-panel` is still what a player sees of the
+             same fight, so the role split survives where it belongs:
+             in the panels, not in the tab strip. -->
+        <div class="active-pane" data-active="encounter">
 
-               LARGE AND PLAIN, not muted. This is the headline of the
-               sheet - who they are and what they are - and shrinking it
-               to a caption on the way to read-only would make the
-               folded state feel like less than the open one. -->
-          <div id="stats-read" hidden></div>
-
-          <div id="stats-editor">
-          <div class="row">
-            <input id="char-rename" placeholder="character name" />
-            <button id="save-name" class="ghost">Set name</button>
-            <!-- 073. THE CLASS SITS BETWEEN THE NAME AND THE LEVEL
-                 because the level belongs to it: this control reads
-                 "Falon, Fighter, 4" and the number is the FIGHTER's 4,
-                 not the character's. For a multiclassed character the
-                 two differ and the heading above carries the total. -->
-            <select id="class-lead"></select>
-            <input id="level" type="number" min="1" max="20" placeholder="level" />
-            <button id="save-level" class="ghost">Set level</button>
-          </div>
-
-          <!-- Everything they are besides the one that leads, a row
-               each, built by paintClasses. -->
-          <div id="class-extra"></div>
-          <div class="row">
-            <button id="add-class" class="linky">+ add class</button>
-            <span id="class-note" class="muted"></span>
-          </div>
-          </div>
-          <div id="abilities" class="abils"></div>
-
-          <!-- 119. HOW HARD WAS IT?
-               A save is the one roll nobody chooses to make - somebody
-               else's trap, somebody else's spell - so the difficulty
-               comes from that thing rather than from the character, and
-               has to be asked for. One prompt under the six rows rather
-               than a box on each: only one save is ever being rolled.
-               NOT window.prompt, which blocks the webview, cannot carry
-               the "against a spell" tick, and cannot be filled in by
-               anything but a person. A trap knows its own DC; when
-               scripted actions arrive they set state.scriptedSave and
-               this never opens. -->
-          <div class="row" id="save-prompt" hidden></div>
-
-          <!-- 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL.
-               `species.damage_resistances` has existed since 056 and
-               the only place it appeared was the Description pane,
-               printed as a list of words followed by "(DM applies)" -
-               an honest label for a thing that did nothing.
-
-               BESIDE THE ABILITY SCORES rather than on the Description
-               pane, because this is a combat number like AC and not a
-               fact about somebody's people. The Unt'garoth entry still
-               belongs on the species viewer; what a PARTICULAR
-               character resists belongs here, where the four sources
-               meet.
-
-               HIDDEN WHEN EMPTY, which is most characters. A heading
-               over nothing reads as a section that failed to load. -->
-          <div id="resist-block" hidden>
-            <div class="sub">Resistances</div>
-            <div id="resist-list" class="list"></div>
-          </div>
-        </div>
-
-        <div class="sheet-pane" data-sheet="description" hidden>
-          <div id="desc-species"></div>
-
-          <!-- THIS ONE IN PARTICULAR. What sat here was a one-line box
-               labelled "anything else worth seeing at a glance", in the
-               same row as the Save button - so the only prose on the
-               pane was the PEOPLE's, and a character's own description
-               read as an afterthought to their hair colour.
-
-               A people is a paragraph about thousands; this is the one
-               about one of them. Separately headed, separately
-               authored, and big enough to write in. -->
-          <div class="sub" id="desc-own-head">In particular</div>
-          <div id="desc-own"></div>
-          <!-- FOLDED ONCE THERE IS SOMETHING TO FOLD. An empty sheet
-               opens on the box, because the box is the whole point of
-               an empty one; a written description shows as prose with
-               an edit button after it, because that is what a sheet
-               is for reading. -->
-          <div id="desc-editor">
-            <div class="row desc-edit">
-              <textarea id="desc-notes" rows="5"
-                placeholder="who this one is - what their people's description does not say, or says differently"></textarea>
-            </div>
-            <div class="row desc-edit">
-              <button id="desc-from-species" class="linky">start from the people's words</button>
-            </div>
-          </div>
-
-          <div class="sub">Physical description</div>
-          <div id="desc-body"></div>
-          <!-- 079. FOLDS THE SAME WAY THE PROSE ABOVE DOES. Five boxes
-               standing open under the five facts they already say is
-               the sheet asking a question it has the answer to. An
-               undescribed character opens on the boxes; a described one
-               reads as text with `edit` after it.
-
-               THE SAVE BUTTON IS INSIDE THE FOLD, deliberately - it
-               belongs to the editing and has nothing to do when there
-               is none. It closes this section and the prose editor
-               together, because one button saved both. -->
-          <div id="body-editor">
-            <div class="row desc-edit">
-              <input id="desc-height" class="narrow" placeholder="height ft" />
-              <input id="desc-weight" class="narrow" placeholder="weight lb" />
-            </div>
-            <div class="row desc-edit">
-              <input id="desc-hair" placeholder="hair" />
-              <input id="desc-skin" placeholder="skin" />
-              <input id="desc-eyes" placeholder="eyes" />
-            </div>
-          </div>
-          <!-- OUTSIDE BOTH FOLDS, because it saves both. Inside the
-               body editor it would vanish for a character whose height
-               was filled in and whose prose was not - the box open, the
-               words typed, and no way to keep them. -->
-          <div class="row desc-edit" id="desc-save-row">
-            <button id="save-desc" class="ghost">Save description</button>
-          </div>
-          <div id="desc-msg" class="dm-msg" hidden></div>
-
-          <div class="sub">Features</div>
-          <div id="desc-features"></div>
-
-          <div class="sub">Drawbacks</div>
-          <div id="desc-drawbacks"></div>
-
-          <div class="sub">Languages</div>
-          <div id="desc-languages"></div>
-
-          <!-- THE REST OF WHAT 056 AND 058 SEEDED. Six prose fields
-               were on the species row and the sheet showed one of
-               them, so the culture, the history and the rest were
-               written down and unreachable.
-
-               LAST ON THE PANE AND FOLDED SHUT. Six paragraphs about
-               thousands of people, placed above the one paragraph
-               about this one, would answer the wrong question first. -->
-          <div class="sub" id="desc-lore-head">More about their people</div>
-          <div id="desc-lore"></div>
-        </div>
-      <!-- ===================== EQUIPMENT ===================== -->
-      <div class="sheet-pane" data-sheet="equipment" hidden>
-        <div id="burden" class="muted trained burden"></div>
-        <div id="purse" class="muted trained"></div>
-        <!-- 084. WHAT IS WHERE, in the order a person checks
-             themselves: hands first because that is what you reach for
-             under pressure, then the belt, then what you are carrying,
-             then what you are wearing. Built by paintSlots from
-             slots::LADDER, so the order lives in Rust and this is the
-             hook it draws into. -->
-        <div id="inv-slots"></div>
-
-        <!-- EVERYTHING NOT PLACED. Carried, stowed, in a pack - real
-             and not worn. It sits under the ladder rather than above
-             it because the question "what have I got on me" is asked
-             far more often than "what is in the bottom of my bag". -->
-        <div class="sub">Carried</div>
-        <ul id="inv-carried" class="list"></ul>
-
-        <!-- 084. ADDING SOMETHING MOVED TO THE BOTTOM. It was the
-             first thing on the pane and is the rarest thing done here;
-             reading what you have is the common case and now leads.
-
-             The designed way to acquire something. Until 026 there was
-             none: equipping an item you did not own created it,
-             because the write underneath was an upsert. -->
-        <div class="sub">Add equipment</div>
-        <div class="row">
-          <select id="add-what"></select>
-          <input id="add-qty" type="number" min="1" value="1" class="narrow" />
-          <button id="add-item" class="ghost">Add</button>
-          <button id="check-keys" class="tiny ghost">check keys</button>
-        </div>
-      </div>
-
-      <!-- ================= SKILLS &amp; TALENTS ================= -->
-      <div class="sheet-pane" data-sheet="skills" hidden>
-        <!-- 076. KARMA AND THE CHART, hidden for everybody who has no
-             Karma - which is every class but the bard, every monster
-             and every classless character. An empty "Perform" heading
-             over a fighter's sheet would be worse than no heading. -->
-        <div id="perform-block" hidden>
-          <div class="sub">Karma</div>
-          <div id="karma-line" class="muted"></div>
-          <div class="row">
-            <select id="perform-instrument"></select>
-            <select id="perform-audience"></select>
-            <button id="do-perform" class="ghost">Perform</button>
-          </div>
-          <div id="perform-odds" class="muted"></div>
-          <div id="perform-result"></div>
-        </div>
-
-        <!-- 087. WHAT LEVELLING ACTUALLY ASKS OF YOU, first, because
-             everything else about it is automatic and this is the only
-             part that needs a person. Empty - and gone - for a
-             character with nothing outstanding, which is most of the
-             time. -->
-        <div id="feat-owed-block" hidden>
-          <div class="sub" id="feat-owed-head">Decisions waiting</div>
-          <div id="feat-owed"></div>
-        </div>
-
-        <div class="sub">Class features</div>
-        <div id="feat-list"></div>
-
-        <div class="sub">Skills</div>
-        <div id="skills" class="list"></div>
-
-        <!-- TRAINED WITH WHAT. Read since 008 and written by nothing
-             until 022: a statblock got its proficiencies at authoring
-             and a player character got whatever 006 seeded, so one with
-             an empty list read as not proficient with everything and
-             had no way to say otherwise.
-
-             IT LIVES HERE NOW rather than over the inventory. What a
-             person is trained with is a fact about them, not about
-             what is in their pack - and each weapon row already says
-             `proficient` on its own, which is the half that belonged
-             beside the gear. -->
-        <div class="sub">Proficiencies</div>
-        <div id="equip-profs" class="muted trained">
-          <span id="profs-text"></span>
-          <button id="edit-profs" class="tiny ghost">edit</button>
-        </div>
-        <div class="row" id="profs-edit" hidden>
-          <input id="prof-weapons" placeholder="weapons: sim, mar, or a base item like rapier" />
-          <input id="prof-armour" placeholder="armour: lgt med hvy shl" />
-          <button id="save-profs" class="ghost">Save</button>
-        </div>
-        <div id="profs-msg" class="dm-msg" hidden></div>
-
-        <div class="sub">Talents</div>
-        <div id="talents"></div>
-      </div>
-
-      <!-- ===================== PRAYERS (106) ===================== -->
-      <div class="sheet-pane" data-sheet="prayers" hidden>
-        <div id="prayer-head" class="muted"></div>
-
-        <!-- 108. WHAT IS PREPARED, FIRST. It is what a cleric reads
-             most and it was under the slots and the cantrips. Folded
-             by level, because ten prepared spells open at once is a
-             wall. -->
-        <div class="sub">Prepared <span id="prepared-count" class="muted"></span></div>
-        <div id="my-prayers"></div>
-
-        <div class="sub">Cantrips <span id="cantrip-count" class="muted"></span></div>
-        <div id="my-cantrips" class="list"></div>
-
-        <!-- 107/108. THE SLOTS STICK. They are the number a cleric
-             checks before every decision on this tab, and scrolling to
-             the add-list used to take them off screen. -->
-        <div class="sub slots-head">Spell slots</div>
-        <div id="prayer-slots" class="slotbar"></div>
-
-        <!-- 109. THE WHOLE ADD SECTION FOLDS, with the per-level folds
-             inside it. Adding a prayer happens at a long rest and
-             reading the list happens constantly, so the rare thing
-             should not be the tallest thing on the tab - the same
-             reasoning 068 applied to the character creation form. -->
-        <button id="add-prayer-head" class="lvlhead section">
-          <span class="caret">&#9656;</span>
-          <span class="lvlname" id="add-prayer-word">Add a spell</span>
-          <span class="lvlcount" id="add-prayer-count"></span>
-        </button>
-        <div id="add-prayer-body" hidden>
-          <div class="row">
-            <input id="prep-find" placeholder="search" />
-          </div>
-          <div id="prep-list"></div>
-        </div>
-      </div>
-      </section>
-      </div>
-
-      <!-- 123. THE BESTIARY. A template is a character now, so a
-           creature is edited with the same sheet a player uses and
-           placing one on the board is a copy. The pane says so, because
-           "copy" is the whole mental model and getting it wrong means
-           expecting an edit here to reach a goblin already in a fight. -->
-      <div class="pane" data-pane="creatures" hidden>
         <section>
-          <h2>Creatures</h2>
-          <p class="muted hint">
-            A creature here is a <strong>template</strong> &mdash; a thing you
-            copy from. It has no place in the world, never takes a turn and
-            never appears in a target list. Placing one makes an individual:
-            editing the template afterwards never reaches it, which is why two
-            goblins off one template can die separately.
-          </p>
+          <!-- 092/279. THE CLOCK, once. 092 built this bar TWICE,
+               with `-play` and `-run` ids, because "Play and Run are
+               different panes and a session lives in whichever one
+               suits it". 279 made them one pane, so the reason went and
+               the duplicate went with it - `CLOCK_PANES` is a list of
+               one and `paintClock` still takes the suffix.
 
-          <div class="row">
-            <select id="creature-import-pick"></select>
-            <input id="creature-import-name" placeholder="name it, or leave blank" />
-            <button id="creature-import">Import from reference</button>
+               EXPLICIT JUMPS, because outside a fight nothing can know
+               how long anything took and an engine that guessed would be
+               confidently wrong. -->
+          <div class="clockbar">
+            <span class="clock-now" id="clock-active"></span>
+            <span class="clock-steps" id="steps-active"></span>
+            <button class="ghost tiny" data-rest="short" data-clock="active">Short rest</button>
+            <button class="ghost tiny" data-rest="long" data-clock="active">Long rest</button>
           </div>
-          <p class="muted hint">
-            The reference statblocks are shared and read-only &mdash; importing
-            takes a copy you own and can edit. The shared goblin stays as it is.
-          </p>
+          <div class="muted" id="restsay-active"></div>
+          <!-- 094. WHAT IS RUNNING, soonest to end first. Gone entirely
+               when nothing is - an empty heading saying "no effects" is
+               a line of chrome on every session that never uses them. -->
+          <div id="fx-active" class="fxbar"></div>
 
-          <!-- 125. A TEMPLATE BELONGS TO A GAME, so a file is how one
-               travels - to a backup, or to somebody else's game. An
-               import that cannot resolve a key SKIPS IT AND SAYS SO,
-               because a file that will not open because of a torch is a
-               worse answer than a goblin with no torch. -->
-          <div class="row">
-            <input type="file" id="creature-file" accept=".json,application/json" />
-            <button id="creature-import-file">Import from file</button>
-          </div>
-          <p class="muted hint">
-            A creature file carries names, numbers, scores, skills, prepared
-            spells and the whole kit &mdash; but no ids, so it reads into any
-            game. Anything this game has never heard of is <strong>skipped and
-            listed</strong> rather than refusing the file.
-          </p>
-
-          <div id="creature-list" class="list"></div>
-          <p class="muted" id="creature-empty" hidden>
-            No creatures yet. Import one from the reference above, and it will
-            appear here with the full character sheet behind it.
-          </p>
         </section>
-      </div>
 
-      <div class="pane" data-pane="objects" hidden>
-        <section id="objects-panel" hidden>
-          <h2>Objects <span id="objects-who" class="muted"></span></h2>
-          <nav class="tabs mini" id="objects-tabs">
-            <button class="tab on" data-objects="inplay">
-              In play <span class="count" id="n-objs"></span>
-            </button>
-            <button class="tab" data-objects="catalogue">
-              Catalogue <span class="count" id="n-cat"></span>
-            </button>
-          </nav>
+        <!-- 203. THE PLAYER'S VIEW OF THE FIGHT.
 
-          <div class="objects-pane" data-objects="inplay">
-            <!-- EVERY object in the game, whoever is holding it. The
-                 narrower views all knew their holder already; this one
-                 works backwards from the object, which is the only way
-                 to answer "where did that handaxe go". -->
+             AT THE TOP OF PLAY AND ONLY WHILE ONE IS RUNNING - Dave's
+             call on placement. A player keeps ONE screen, which is what
+             the phone and tablet target wants, and a panel that sat here
+             saying "no fight" would cost the sheet a screenful on every
+             session that never rolls initiative.
+
+             WHAT IT MAY SAY IS NOT THIS FILE'S BUSINESS. `reveal.rs`
+             decides who gets numbers and who gets a word; `fight_strip`
+             hands over lines that already have nothing in them a player
+             may not see. Nothing here computes a game number. -->
+        <section id="strip-panel" hidden>
+          <h2><span id="strip-name"></span> <span id="strip-round" class="muted"></span></h2>
+          <ol id="strip-order" class="strip"></ol>
+        </section>
+
+        <!-- 110. WHAT A CASTER CAN DO ON THEIR TURN. Beside the roll
+             box rather than buried on the sheet: a cleric in initiative
+             needs their prepared list where the rolling happens, and
+             Luci stood in the Tavern with nothing to click.
+
+             HIDDEN FOR ANYBODY WHO CASTS NOTHING, which is most
+             characters. -->
+        <section id="cast-panel" hidden>
+          <h2>Cast <span id="cast-who" class="muted"></span></h2>
+          <div id="cast-list"></div>
+          <!-- 158. THE SAVE THE LAST CAST IS WAITING ON. A save spell is
+               two steps for the same reason an attack spell is: the DC is
+               the caster's and the d20 is the TARGET's, so the engine
+               states the number and waits to be asked. Empty except in
+               the moment between casting one and resolving it. -->
+          <div id="pending-save"></div>
+        </section>
+
+          <section id="run-panel" hidden>
+          <h2>DM <span id="dm-who" class="muted"></span></h2>
+
+          <div class="row">
+            <input id="enc-name" placeholder="new encounter name" />
+            <!-- Where the fight happens. Blank is nowhere in particular,
+                 which 034 allows. -->
+            <select id="enc-where"></select>
+            <button id="create-encounter" class="ghost">Create</button>
+          </div>
+          <ul id="encounters" class="list"></ul>
+
+          <!-- 229. A HOOK, NOT A MAP. The three tile commands have no
+               screen yet - Phase 1's render is its own piece of work -
+               and a command nobody can call is a command nobody has
+               watched fail. This paints a four-square patch, reads it
+               back and erases it, against the place chosen beside it.
+
+               DELETE THIS BLOCK the day there is a real map surface. It
+               exists to prove the round trip, not to author anything. -->
+          <!-- 241. The "Tiles (dev hook)" block lived here from 229 to
+               240 and is gone: every job it did now lives in the Map
+               pane, where the map is visible while you do it. Its
+               `Paint 4` and `Erase 4` wrote to FIXED coordinates, which
+               was harmless on a test map and would have been
+               destructive on a real one. -->
+
+          <div id="enc-detail" hidden>
+            <div id="enc-editing" class="editing" hidden></div>
+
+            <!-- THE ORDER, AT THE TOP. It is the thing a DM looks at
+                 between every roll, so it sits above everything that can
+                 be edited rather than below the forms. -->
+            <div id="order-strip" class="orderstrip"></div>
+            <div class="row turnbar">
+              <span id="turn-now" class="muted"></span>
+              <button id="next-turn" class="ghost">Begin</button>
+              <button id="reset-order" class="tiny ghost">reset</button>
+            </div>
+
+            <!-- TWO MODES. Looking at a fight and changing one are
+                 different jobs, and one screen doing both is how the
+                 forms came to outnumber the facts. -->
+            <nav class="tabs mini" id="enc-modes">
+              <button class="tab on" data-encmode="view">View</button>
+              <button class="tab" data-encmode="edit">Edit</button>
+            </nav>
+
+            <div class="encmode-pane" data-encmode="view">
+              <div id="enc-narrative" class="prose-block"></div>
+
+              <!-- RUNNING IT IS NOT READING IT. A fight in front of the
+                   table wants one creature, its options, and what just
+                   happened - not a column of every creature's buttons.
+                   The card appears only while the encounter is ACTIVE;
+                   a draft or an ended fight still reads as the list
+                   below, which is the right shape for planning one. -->
+              <div id="fight-card" class="fight" hidden>
+                <div class="fight-actor">
+                  <div id="fight-who" class="fight-who"></div>
+                  <div id="fight-options" class="fight-options"></div>
+                  <div id="fight-sheet" class="actorview" hidden></div>
+                  <div id="fight-result" class="fight-result"></div>
+                </div>
+                <div class="fight-side">
+                  <div id="fight-round" class="fight-round"></div>
+                  <div class="sub">In order</div>
+                  <ol id="fight-order" class="fight-order"></ol>
+                  <button id="fight-next" class="ghost wide">End turn</button>
+                </div>
+              </div>
+
+              <div id="roster-head" class="sub">Who is in this</div>
+              <ul id="roster" class="list"></ul>
+
+              <!-- WHAT HAS BEEN DONE. The attack buttons are here and
+                   their results were not - a DM swung and then went to
+                   the Play tab to find out what happened, which after
+                   279 is this same pane. 054 stamps the round onto each
+                   action, so this is also the only place that can say a
+                   creature has gone twice. -->
+              <div class="sub">What has happened</div>
+              <ul id="enc-log" class="list"></ul>
+            </div>
+
+            <div class="encmode-pane" data-encmode="edit" hidden>
+              <div class="row cells">
+                <!-- enc-rename, NOT enc-name. The create box at the top of
+                     this pane is the other one, and querySelector returns
+                     the first of a duplicate id - so the editor was both
+                     painting into and saving from the create box. -->
+                <label class="cell wide"><span>called</span>
+                  <input id="enc-rename" /></label>
+                <label class="cell wide"><span>where it happens</span>
+                  <select id="enc-place"></select></label>
+                <button id="set-enc-place" class="ghost">Move here</button>
+              </div>
+              <div class="row cells">
+                <label class="cell wide"><span>what this encounter is</span>
+                  <textarea id="enc-story" rows="3"
+                    placeholder="read aloud, or referred to — the engine never touches this"></textarea></label>
+              </div>
+              <div class="sub">What state it is in</div>
+              <div class="row" id="enc-status"></div>
+              <div class="row">
+                <button id="save-encounter" class="ghost">Save</button>
+                <button id="archive-encounter" class="ghost danger">Retire from the list</button>
+              </div>
+
+              <div class="sub">Bring somebody in</div>
+              <div class="row cells">
+                <label class="cell wide"><span>bring in</span>
+                  <select id="enrol-what"></select></label>
+                <label class="cell wide"><span>called</span>
+                  <input id="enrol-name" placeholder="blank = auto, e.g. Goblin 0003" /></label>
+                <button id="enrol" class="ghost">Enrol</button>
+              </div>
+              <ul id="edit-roster" class="list"></ul>
+            </div>
+
+            <!-- WHAT CAN BE AIMED AT, all three kinds together. A creature
+                 answers with an AC, a difficulty with a DC, and since 052
+                 so does a THING in the room - a challenge that points at
+                 an object, rather than a third kind resolution.rs would
+                 have to learn. -->
+            <div class="encmode-pane" data-encmode="view">
+              <div class="sub">What can be aimed at</div>
+              <ul id="targets" class="list"></ul>
+              <div class="sub">Go and look</div>
+              <div class="row" id="enc-branches"></div>
+            </div>
+
+            <div class="encmode-pane" data-encmode="edit" hidden>
+            <div class="sub">Add a difficulty</div>
+            <div class="row cells">
+              <label class="cell wide"><span>what you are doing</span>
+                <input id="chal-label" placeholder="force the door" /></label>
+              <label class="cell"><span>DC</span>
+                <input id="chal-dc" type="number" min="1" /></label>
+            </div>
+            <div class="row cells">
+              <label class="cell wide"><span>suggests the skill</span>
+                <select id="chal-skill"></select></label>
+              <!-- 052: the thing it is about, if it is about one. The
+                   list is what is lying where the fight is happening. -->
+              <label class="cell wide"><span>about this thing</span>
+                <select id="chal-object"></select></label>
+              <button id="add-challenge" class="ghost">Add</button>
+            </div>
+            <ul id="challenges" class="list"></ul>
+            </div>
+
+          </div>
+          </section>
+        <section>
+          <h2>Rolls</h2>
+          <div class="row">
+            <input id="named-request" placeholder="insight, wis save, ath…" />
+            <select id="mode">
+              <option value="normal">Normal</option>
+              <option value="adv">Adv</option>
+              <option value="dis">Dis</option>
+            </select>
+          </div>
+          <!-- 118. WHAT THE SAVE IS AGAINST.
+               098 gave a people a bonus that applies only against a
+               spell, and resolve_request has read it since - but only
+               from the words " vs spell" typed on the end of the
+               request. Nothing said so. The placeholder beside this box
+               offers "wis save", which is the one spelling that does
+               NOT get it, and a Ny'ook's +2 was unreachable by anybody
+               who had not read the species prose.
+               A CIRCUMSTANCE OF THE ROLL, like advantage, so it belongs
+               beside advantage as a control rather than as an
+               incantation. It writes the suffix the engine has always
+               understood - the vocabulary does not change, only the way
+               in. Shown only for a save, because it means nothing on an
+               Athletics check. -->
+          <div class="row" id="vs-spell-row" hidden>
+            <label class="check" for="vs-spell">
+              <input type="checkbox" id="vs-spell" />
+              against a spell
+            </label>
+            <span class="muted" id="vs-spell-why"></span>
+          </div>
+          <!-- Optional. "no target" means the roll is not judged at
+               all, which is not the same as failing it. The list is the
+               active encounter's actors and challenges; typing a number
+               by hand still works when there is no encounter. -->
+          <div class="row">
+            <select id="target-pick">
+              <option value="">no target</option>
+              <option value="manual">type a number…</option>
+            </select>
+            <!-- Only for something that is down. A dying creature saves on
+                 its own turn; until initiative exists, that is this. -->
+            <button id="death-save" class="ghost" hidden>death save</button>
+          </div>
+          <div class="row" id="manual-target" hidden>
+            <select id="target-kind">
+              <option value="dc">vs DC</option>
+              <option value="ac">vs AC</option>
+            </select>
+            <input id="target-value" type="number" placeholder="15" />
+            <input id="target-label" placeholder="Goblin 1 (optional)" />
+          </div>
+          <div id="preview" class="preview muted">—</div>
+          <button id="roll-named">Roll</button>
+          <input id="roll-request" placeholder="request, e.g. insight" />
+          <input id="roll-formula" placeholder="formula, e.g. 2d20kh1+5 (blank = pending)" />
+          <button id="create-roll">Insert roll</button>
+          <input id="patch-narr" placeholder="narrative to patch into newest roll" />
+          <button id="patch-roll" class="ghost">Patch narrative</button>
+        </section>
+        </div>
+
+        <div class="active-pane" data-active="chars" hidden>
+          <section id="chars-panel" hidden>
+            <h2>Characters <span id="chars-who" class="muted"></span></h2>
+            <nav class="tabs mini" id="chars-tabs">
+              <button class="tab on" data-chars="pcs">
+                PCs <span class="count" id="n-pcs"></span>
+              </button>
+              <button class="tab" data-chars="npcs">
+                NPCs <span class="count" id="n-npcs"></span>
+              </button>
+              <!-- 140. A CREATURE IS A CHARACTER AND IS NOT A PERSON.
+                   `is_npc` was the only split and it answers a different
+                   question: a merchant somebody wrote and a goblin
+                   stamped from a statblock are both NPCs, and the second
+                   kind arrives in tens. The line is 5e's type - humanoid
+                   is the one that is people - and `creature::is_creature`
+                   draws it. -->
+              <button class="tab" data-chars="creatures">
+                Creatures <span class="count" id="n-creature-folk"></span>
+              </button>
+            </nav>
+
+            <div class="chars-pane" data-chars="pcs">
+              <!-- 068. THE LIST FOLDS once somebody is picked. Reading a
+                   sheet and choosing whose sheet to read are different
+                   jobs, and the list only matters for the second. -->
+              <div id="pc-chosen" class="chosen" hidden></div>
+              <ul id="pc-list" class="list"></ul>
+
+            
+            </div>
+
+            <div class="chars-pane" data-chars="npcs" hidden>
+              <!-- TWO DIFFERENT THINGS, and the order says which comes
+                   first. A statblock is a TYPE - a pattern with scores and
+                   a kit. Enrolling one into an encounter copies it onto a
+                   brand new character, and THAT is what the second list
+                   holds. Editing a type never reaches the individuals
+                   already made from it; see 022. -->
+              <div class="sub">Statblocks &mdash; types</div>
+            <div class="sub">Statblock</div>
             <div class="row">
-              <input id="obj-find" placeholder="filter by name or holder" />
-              <select id="obj-where">
-                <option value="">anywhere</option>
-                <option value="character">carried</option>
-                <option value="container">in a container</option>
-                <option value="location">on the floor</option>
-                <option value="nowhere">nowhere</option>
-                <option value="unknown">unaccounted for</option>
+              <input id="npc-name" placeholder="name, e.g. Goblin Archer" />
+              <input id="npc-key" placeholder="key" />
+            </div>
+            <div class="row">
+              <input id="npc-species" placeholder="species (optional)" />
+              <input id="npc-class" placeholder="class (optional)" />
+              <!-- 064. THE RULE beside the descriptor. The text above may
+                   say "Chieftain"; this says what the engine treats them
+                   as - which decides their attack count and fills empty
+                   proficiency lists on instantiation. -->
+              <select id="npc-class-key">
+                <option value="">no class</option>
               </select>
             </div>
-            <ul id="obj-list" class="list"></ul>
-          </div>
+            <div class="row">
+              <input id="npc-ac" type="number" min="0" placeholder="AC" />
+              <!-- Blank derives it from size and level. Level IS hit
+                   dice, so 2d6 is level 2 and the 7 comes out. -->
+              <input id="npc-hp" type="number" min="1" placeholder="HP (blank = from hit dice)" />
+            </div>
+            <div class="row">
+              <select id="npc-size">
+                <option value="">size (needed to derive HP)</option>
+                <option value="tiny">Tiny &mdash; d4</option>
+                <option value="sm">Small &mdash; d6</option>
+                <option value="med">Medium &mdash; d8</option>
+                <option value="lg">Large &mdash; d10</option>
+                <option value="huge">Huge &mdash; d12</option>
+                <option value="grg">Gargantuan &mdash; d20</option>
+              </select>
+              <input id="npc-level" type="number" min="1" placeholder="level = hit dice" class="narrow" />
+            </div>
+            <!-- What it is TRAINED with, not what it carries. Without
+                 these a statblock is proficient with nothing and its
+                 kit has to fake it one row at a time - see 028. -->
+            <div class="row">
+              <input id="npc-wprof" placeholder="weapons trained: sim, mar" />
+              <input id="npc-aprof" placeholder="armour: lgt med hvy shl" />
+            </div>
+            <button id="create-npc" class="ghost">Write statblock</button>
+              <ul id="npc-types" class="list"></ul>
 
-          <div class="objects-pane" data-objects="catalogue" hidden>
-            <!-- What CAN exist, as opposed to what does. Global rows
-                 come from migrations; a campaign's own rows shadow them
-                 by key. Read only here - authoring items is 027's job
-                 and has never had a screen. -->
-            <input id="cat-find" placeholder="filter the catalogue" />
-            <ul id="cat-list" class="list"></ul>
-          </div>
-        </section>
-      </div>
+              <div class="sub">In play &mdash; individuals</div>
+              <ul id="npc-list" class="list"></ul>
+            </div>
 
-      <!-- TRADE. Not a merchant screen - a two-sided exchange, which
-           is what buy, sell, barter and give all are with different
-           columns filled in. The counterparty being a shop or a person
-           is decided by whether they have a markup, not by a mode. -->
-      <!-- 169. THE WHOLE BOOK, NOT ONE CLASS'S.
-           161-167 took the catalogue from 108 spells to 276 and 206 of
-           them are the wizard's, with no surface anywhere in the app
-           that could show one. Cleric Prayers is cleric-only by
-           design - it is that class's reference book and stays as it
-           is - so this is the catalogue itself, with the class as a
-           filter rather than as the premise.
+            <!-- 140. THE CREATURES STANDING IN THIS GAME. Individuals,
+                 not types: the bestiary of templates is Rules >
+                 Creatures, and a statblock is written on the NPCs tab
+                 beside this one. Everything here opens on the same
+                 character sheet a player uses, because since 022 a
+                 creature IS a character - which is also why a named one
+                 belongs on this tab rather than somewhere of its own. -->
+            <div class="chars-pane" data-chars="creatures" hidden>
+              <div class="sub">In play &mdash; creatures</div>
+              <ul id="creature-folk-list" class="list"></ul>
+              <p class="muted small">
+                Anything that is not a humanoid &mdash; beasts, undead,
+                oozes, dragons. Edit one on its sheet; to change the TYPE
+                it was made from, use Rules &gt; Creatures. A creature whose
+                type nobody has stated yet is on the NPCs tab, because
+                unstated is not the same as unknown.
+              </p>
+            </div>
+          </section>
 
-           A REFERENCE BOOK AND NOT A FORM. Nothing here prepares,
-           casts or spends anything; preparing happens on the sheet and
-           casting happens beside the roll box. Same reasoning as the
-           prayers tab's own header, and the same `spellRow` renders
-           both. -->
-      <div class="pane" data-pane="spells" hidden>
-        <section>
-          <h2>Spells <span id="spell-count" class="muted"></span></h2>
-          <div class="row">
-            <input id="spell-find" placeholder="search by name or text" />
-            <select id="spell-class">
-              <option value="">every class</option>
-            </select>
-            <select id="spell-level">
-              <option value="">every level</option>
-            </select>
-            <select id="spell-school">
-              <option value="">every school</option>
-            </select>
-          </div>
-          <div id="spell-list" class="list"></div>
-        </section>
-      </div>
+                <!-- 212. THE BUILDER IS A SIBLING OF #chars-panel, for the same
+             reason written over the sheet below it. #chars-panel is the
+             DM's roster and hides itself for anybody who is not the DM,
+             so a builder nested inside it was a builder no player could
+             reach - they could read a character and never make one.
 
-      <div class="pane" data-pane="trade" hidden>
-        <div class="row">
-          <select id="trade-a"></select>
-          <select id="trade-b"></select>
-        </div>
-        <div id="trade-kind" class="muted trained"></div>
+             A PLAYER BUILDING THEIR OWN IS THE SAME ACT THE DM PERFORMS,
+             so it is the same form rather than a second one. Nothing
+             DM-only travels with it: the statblock author and the
+             creatures note are siblings of this block and stay inside
+             the roster where they belong. -->
+  <!-- 068. A LINK, NOT A PERMANENT FORM. Making a character is
+                   rare and reading one is constant, so the form that does
+                   the rare thing should not be the tallest thing on the
+                   tab. -->
+              <button id="new-char-toggle" class="linky">+ New character</button>
+              <div id="new-char-panel" hidden>
+              <input id="char-name" placeholder="character name" />
+              <!-- 055. A class is where a character's hit die comes from,
+                   so picking one here is what makes the character arrive
+                   with hit points instead of a null where their life
+                   goes. "No class" stays available because a blank sheet
+                   is a real thing to want. -->
+              <select id="char-class">
+                <option value="">no class yet</option>
+              </select>
+              <div class="muted" id="char-class-note"></div>
+              <!-- 056. The species decides size and the ability bonuses,
+                   so it belongs at creation beside the class rather than
+                   as an edit afterwards. -->
+              <select id="char-species">
+                <option value="">no species yet</option>
+              </select>
+              <div class="muted" id="char-species-note"></div>
 
-        <div class="cols2">
-          <div>
-            <div class="sub" id="trade-a-name">this side gives</div>
-            <ul id="trade-a-items" class="list"></ul>
-          </div>
-          <div>
-            <div class="sub" id="trade-b-name">that side gives</div>
-            <ul id="trade-b-items" class="list"></ul>
-          </div>
-        </div>
+              <!-- 066. ROLLED HERE, BEFORE THE CHARACTER EXISTS. Seven
+                   scores of 3d6 with every 1 rerolled, and six of them
+                   assigned - the spare is the point, so the worst of the
+                   seven need not be lived with.
 
-        <!-- Haggling is a contest like any other, so the totals come
-             from the roll box rather than being rolled here. -->
-        <div class="row" id="haggle-row">
-          <input id="haggle-persuasion" type="number" placeholder="Persuasion" class="narrow" />
-          <input id="haggle-insight" type="number" placeholder="their Insight" class="narrow" />
-          <button id="do-haggle" class="tiny ghost">haggle</button>
-          <span id="haggle-said" class="muted"></span>
-        </div>
+                   Each picker offers only what is still unspent, so a
+                   duplicate is impossible by construction. The rule is in
+                   generation::complete anyway, because the next screen
+                   will not have a dropdown. -->
+              <div class="sub">Ability scores</div>
+              <div class="row">
+                <button id="roll-stats" class="ghost">Roll 3d6 (reroll 1s) &times;7</button>
+                <button id="lock-abilities" class="ghost" disabled>Lock abilities</button>
+              </div>
+              <div id="stat-pool" class="pool"></div>
+              <div id="stat-picks" class="picks"></div>
+              <div id="stat-msg" class="dm-msg" hidden></div>
 
-        <div id="trade-balance" class="balance">nothing offered</div>
-        <div class="row">
-          <button id="do-trade">Trade</button>
-          <button id="do-give" class="ghost">Give &mdash; no coin</button>
-        </div>
-        <div id="trade-msg" class="dm-msg" hidden></div>
-      </div>
+              <button id="create-char">Create character</button>
+              </div>
 
-      <div class="pane" data-pane="world" hidden>
-        <section id="world-panel" hidden>
-          <h2>World <span id="world-who" class="muted"></span></h2>
-          <nav class="tabs mini" id="world-tabs">
-            <button class="tab on" data-world="world">World</button>
-            <!-- 068. SPECIES MOVED HERE from the Characters tab. A
-                 people is a fact about the WORLD rather than about any
-                 one character - the character's own copy is the
-                 Description subtab on their sheet. -->
-            <button class="tab" data-world="species">
-              Species <span class="count" id="n-species"></span>
-            </button>
-            <!-- 235. A map is a fact about a PLACE, which is what this
-                 tab is for - the same reasoning 068 used to move
-                 Species here off the Characters tab. -->
-            <button class="tab" data-world="map">Map</button>
+  <!-- 067. THE SHEET LIVES HERE NOW, not in Play. It is a
+               SIBLING of #chars-panel rather than a child, and that is
+               load-bearing: #chars-panel is hidden for anybody who is
+               not the DM, so nesting the sheet inside it would have
+               taken every player's own character sheet away. -->
+        <section id="sheet-panel" hidden>
+          <!-- 068. THE NAME IS THE HEADING. It used to read "Sheet" with
+               the character muted beside it, which was fine while the
+               list above always said who you had picked - and the list
+               folds away now. -->
+          <h2><span id="sheet-name"></span> <span id="sheet-who" class="muted"></span></h2>
+
+          <!-- 058. THE SHEET GETS SUBTABS. There will be half a dozen of
+               them - combat, spells, background and the rest - and the
+               strip is built on `showSub`, the same helper the Characters
+               tabs use, so the next one is a button and a pane and
+               nothing else. Adding a tab must never mean touching this
+               comment. -->
+          <nav class="tabs mini" id="sheet-tabs">
+            <button class="tab on" data-sheet="stats">Stats</button>
+            <button class="tab" data-sheet="description">Description</button>
+            <button class="tab" data-sheet="equipment">Equipment</button>
+            <button class="tab" data-sheet="skills">Skills &amp; Talents</button>
+            <!-- 106. CLERICS ONLY. Hidden for everybody else rather than
+                 shown empty - a fighter has no prepared list, and "0 of
+                 0" would invite the question of how to raise it. -->
+            <!-- 176. THE LABEL IS WRITTEN BY `loadPrayers` off the
+                 caster's source - Spells for a wizard, Prayers for a
+                 cleric. The text here is only what it reads before any
+                 caster has been loaded, and the tab is hidden then
+                 anyway. It used to be gated on HAVING A CLERIC CLASS BY
+                 NAME, so a wizard never saw it. -->
+            <button class="tab" data-sheet="prayers" id="tab-prayers" hidden>Spells</button>
           </nav>
 
-          <div class="world-pane" data-world="map" hidden>
-            <!-- 241. THE DM'S MAP WORKSPACE. Everything map-shaped in
-                 one place: the room, the brush, the creatures, and the
-                 map itself. There are no coordinate boxes anywhere
-                 here, because THE MAP IS THE COORDINATE INPUT - that
-                 is the whole reason the dev hook needed seventeen
-                 controls and this needs none. -->
+          <div class="sheet-pane" data-sheet="stats">
+            <!-- 072. THE NAME WAS THE ONE THING THE SHEET COULD NOT EDIT.
+                 An object has a rename box and so does an encounter
+                 actor; the name a player types first was fixed at
+                 creation, so a typo at the form was permanent.
+
+                 IT LEADS THE ROW because the name is the larger fact and
+                 the level is a number beside it - the same order the
+                 heading above reads in. -->
+            <!-- 081. FOLDS ONCE THERE IS A PATH TO FOLD. A character
+                 with a class has had their name, their calling and their
+                 level decided, and five controls standing open under a
+                 decision already made is the sheet asking a question it
+                 has the answer to.
+
+                 LARGE AND PLAIN, not muted. This is the headline of the
+                 sheet - who they are and what they are - and shrinking it
+                 to a caption on the way to read-only would make the
+                 folded state feel like less than the open one. -->
+            <div id="stats-read" hidden></div>
+
+            <div id="stats-editor">
             <div class="row">
-              <select id="mv-where"></select>
-              <span class="muted">z</span>
-              <button id="mv-down" class="ghost tiny" title="a level down">&#9666;</button>
-              <input id="mv-z" type="number" value="0" class="narrow" />
-              <button id="mv-up" class="ghost tiny" title="a level up">&#9656;</button>
-              <button id="mv-draw" class="ghost tiny">Draw</button>
-              <!-- 242. The webview caches a tile for the life of the
-                   session, so a tile redrawn while the app is open
-                   stays the old one. This empties the cache and asks
-                   again. -->
-              <button id="mv-art" class="ghost tiny" title="re-read the tile images from disk">Reload art</button>
+              <input id="char-rename" placeholder="character name" />
+              <button id="save-name" class="ghost">Set name</button>
+              <!-- 073. THE CLASS SITS BETWEEN THE NAME AND THE LEVEL
+                   because the level belongs to it: this control reads
+                   "Falon, Fighter, 4" and the number is the FIGHTER's 4,
+                   not the character's. For a multiclassed character the
+                   two differ and the heading above carries the total. -->
+              <select id="class-lead"></select>
+              <input id="level" type="number" min="1" max="20" placeholder="level" />
+              <button id="save-level" class="ghost">Set level</button>
             </div>
 
-            <div class="row maprow">
-              <span class="maplabel">who</span>
-              <select id="mv-who"></select>
-              <button id="mv-lift" class="ghost tiny">Lift off the map</button>
+            <!-- Everything they are besides the one that leads, a row
+                 each, built by paintClasses. -->
+            <div id="class-extra"></div>
+            <div class="row">
+              <button id="add-class" class="linky">+ add class</button>
+              <span id="class-note" class="muted"></span>
+            </div>
+            </div>
+            <div id="abilities" class="abils"></div>
+
+            <!-- 119. HOW HARD WAS IT?
+                 A save is the one roll nobody chooses to make - somebody
+                 else's trap, somebody else's spell - so the difficulty
+                 comes from that thing rather than from the character, and
+                 has to be asked for. One prompt under the six rows rather
+                 than a box on each: only one save is ever being rolled.
+                 NOT window.prompt, which blocks the webview, cannot carry
+                 the "against a spell" tick, and cannot be filled in by
+                 anything but a person. A trap knows its own DC; when
+                 scripted actions arrive they set state.scriptedSave and
+                 this never opens. -->
+            <div class="row" id="save-prompt" hidden></div>
+
+            <!-- 116. WHAT HURTS THEM LESS, MORE, OR NOT AT ALL.
+                 `species.damage_resistances` has existed since 056 and
+                 the only place it appeared was the Description pane,
+                 printed as a list of words followed by "(DM applies)" -
+                 an honest label for a thing that did nothing.
+
+                 BESIDE THE ABILITY SCORES rather than on the Description
+                 pane, because this is a combat number like AC and not a
+                 fact about somebody's people. The Unt'garoth entry still
+                 belongs on the species viewer; what a PARTICULAR
+                 character resists belongs here, where the four sources
+                 meet.
+
+                 HIDDEN WHEN EMPTY, which is most characters. A heading
+                 over nothing reads as a section that failed to load. -->
+            <div id="resist-block" hidden>
+              <div class="sub">Resistances</div>
+              <div id="resist-list" class="list"></div>
+            </div>
+          </div>
+
+          <div class="sheet-pane" data-sheet="description" hidden>
+            <div id="desc-species"></div>
+
+            <!-- THIS ONE IN PARTICULAR. What sat here was a one-line box
+                 labelled "anything else worth seeing at a glance", in the
+                 same row as the Save button - so the only prose on the
+                 pane was the PEOPLE's, and a character's own description
+                 read as an afterthought to their hair colour.
+
+                 A people is a paragraph about thousands; this is the one
+                 about one of them. Separately headed, separately
+                 authored, and big enough to write in. -->
+            <div class="sub" id="desc-own-head">In particular</div>
+            <div id="desc-own"></div>
+            <!-- FOLDED ONCE THERE IS SOMETHING TO FOLD. An empty sheet
+                 opens on the box, because the box is the whole point of
+                 an empty one; a written description shows as prose with
+                 an edit button after it, because that is what a sheet
+                 is for reading. -->
+            <div id="desc-editor">
+              <div class="row desc-edit">
+                <textarea id="desc-notes" rows="5"
+                  placeholder="who this one is - what their people's description does not say, or says differently"></textarea>
+              </div>
+              <div class="row desc-edit">
+                <button id="desc-from-species" class="linky">start from the people's words</button>
+              </div>
             </div>
 
-            <!-- 246. THE SHELF. There is no Save button, and that is
-                 not an omission: every click is an INSERT, so the map
-                 is already saved. This is "save as" - a named copy of
-                 the whole map, every level, that can be put back.
-                 Load REPLACES what is drawn, so it asks first. -->
-            <div class="row maprow">
-              <span class="maplabel">shelf</span>
-              <select id="mv-ver" title="saved versions of this map, newest first"></select>
-              <button id="mv-load" class="ghost tiny">Load</button>
-              <button id="mv-vdel" class="ghost tiny">Delete</button>
-              <input id="mv-vname" class="vname" placeholder="save as, e.g. before the dragons" />
-              <button id="mv-save" class="ghost tiny">Save as</button>
+            <div class="sub">Physical description</div>
+            <div id="desc-body"></div>
+            <!-- 079. FOLDS THE SAME WAY THE PROSE ABOVE DOES. Five boxes
+                 standing open under the five facts they already say is
+                 the sheet asking a question it has the answer to. An
+                 undescribed character opens on the boxes; a described one
+                 reads as text with `edit` after it.
+
+                 THE SAVE BUTTON IS INSIDE THE FOLD, deliberately - it
+                 belongs to the editing and has nothing to do when there
+                 is none. It closes this section and the prose editor
+                 together, because one button saved both. -->
+            <div id="body-editor">
+              <div class="row desc-edit">
+                <input id="desc-height" class="narrow" placeholder="height ft" />
+                <input id="desc-weight" class="narrow" placeholder="weight lb" />
+              </div>
+              <div class="row desc-edit">
+                <input id="desc-hair" placeholder="hair" />
+                <input id="desc-skin" placeholder="skin" />
+                <input id="desc-eyes" placeholder="eyes" />
+              </div>
+            </div>
+            <!-- OUTSIDE BOTH FOLDS, because it saves both. Inside the
+                 body editor it would vanish for a character whose height
+                 was filled in and whose prose was not - the box open, the
+                 words typed, and no way to keep them. -->
+            <div class="row desc-edit" id="desc-save-row">
+              <button id="save-desc" class="ghost">Save description</button>
+            </div>
+            <div id="desc-msg" class="dm-msg" hidden></div>
+
+            <div class="sub">Features</div>
+            <div id="desc-features"></div>
+
+            <div class="sub">Drawbacks</div>
+            <div id="desc-drawbacks"></div>
+
+            <div class="sub">Languages</div>
+            <div id="desc-languages"></div>
+
+            <!-- THE REST OF WHAT 056 AND 058 SEEDED. Six prose fields
+                 were on the species row and the sheet showed one of
+                 them, so the culture, the history and the rest were
+                 written down and unreachable.
+
+                 LAST ON THE PANE AND FOLDED SHUT. Six paragraphs about
+                 thousands of people, placed above the one paragraph
+                 about this one, would answer the wrong question first. -->
+            <div class="sub" id="desc-lore-head">More about their people</div>
+            <div id="desc-lore"></div>
+          </div>
+        <!-- ===================== EQUIPMENT ===================== -->
+        <div class="sheet-pane" data-sheet="equipment" hidden>
+          <div id="burden" class="muted trained burden"></div>
+          <div id="purse" class="muted trained"></div>
+          <!-- 084. WHAT IS WHERE, in the order a person checks
+               themselves: hands first because that is what you reach for
+               under pressure, then the belt, then what you are carrying,
+               then what you are wearing. Built by paintSlots from
+               slots::LADDER, so the order lives in Rust and this is the
+               hook it draws into. -->
+          <div id="inv-slots"></div>
+
+          <!-- EVERYTHING NOT PLACED. Carried, stowed, in a pack - real
+               and not worn. It sits under the ladder rather than above
+               it because the question "what have I got on me" is asked
+               far more often than "what is in the bottom of my bag". -->
+          <div class="sub">Carried</div>
+          <ul id="inv-carried" class="list"></ul>
+
+          <!-- 084. ADDING SOMETHING MOVED TO THE BOTTOM. It was the
+               first thing on the pane and is the rarest thing done here;
+               reading what you have is the common case and now leads.
+
+               The designed way to acquire something. Until 026 there was
+               none: equipping an item you did not own created it,
+               because the write underneath was an upsert. -->
+          <div class="sub">Add equipment</div>
+          <div class="row">
+            <select id="add-what"></select>
+            <input id="add-qty" type="number" min="1" value="1" class="narrow" />
+            <button id="add-item" class="ghost">Add</button>
+            <button id="check-keys" class="tiny ghost">check keys</button>
+          </div>
+        </div>
+
+        <!-- ================= SKILLS &amp; TALENTS ================= -->
+        <div class="sheet-pane" data-sheet="skills" hidden>
+          <!-- 076. KARMA AND THE CHART, hidden for everybody who has no
+               Karma - which is every class but the bard, every monster
+               and every classless character. An empty "Perform" heading
+               over a fighter's sheet would be worse than no heading. -->
+          <div id="perform-block" hidden>
+            <div class="sub">Karma</div>
+            <div id="karma-line" class="muted"></div>
+            <div class="row">
+              <select id="perform-instrument"></select>
+              <select id="perform-audience"></select>
+              <button id="do-perform" class="ghost">Perform</button>
+            </div>
+            <div id="perform-odds" class="muted"></div>
+            <div id="perform-result"></div>
+          </div>
+
+          <!-- 087. WHAT LEVELLING ACTUALLY ASKS OF YOU, first, because
+               everything else about it is automatic and this is the only
+               part that needs a person. Empty - and gone - for a
+               character with nothing outstanding, which is most of the
+               time. -->
+          <div id="feat-owed-block" hidden>
+            <div class="sub" id="feat-owed-head">Decisions waiting</div>
+            <div id="feat-owed"></div>
+          </div>
+
+          <div class="sub">Class features</div>
+          <div id="feat-list"></div>
+
+          <div class="sub">Skills</div>
+          <div id="skills" class="list"></div>
+
+          <!-- TRAINED WITH WHAT. Read since 008 and written by nothing
+               until 022: a statblock got its proficiencies at authoring
+               and a player character got whatever 006 seeded, so one with
+               an empty list read as not proficient with everything and
+               had no way to say otherwise.
+
+               IT LIVES HERE NOW rather than over the inventory. What a
+               person is trained with is a fact about them, not about
+               what is in their pack - and each weapon row already says
+               `proficient` on its own, which is the half that belonged
+               beside the gear. -->
+          <div class="sub">Proficiencies</div>
+          <div id="equip-profs" class="muted trained">
+            <span id="profs-text"></span>
+            <button id="edit-profs" class="tiny ghost">edit</button>
+          </div>
+          <div class="row" id="profs-edit" hidden>
+            <input id="prof-weapons" placeholder="weapons: sim, mar, or a base item like rapier" />
+            <input id="prof-armour" placeholder="armour: lgt med hvy shl" />
+            <button id="save-profs" class="ghost">Save</button>
+          </div>
+          <div id="profs-msg" class="dm-msg" hidden></div>
+
+          <div class="sub">Talents</div>
+          <div id="talents"></div>
+        </div>
+
+        <!-- ===================== PRAYERS (106) ===================== -->
+        <div class="sheet-pane" data-sheet="prayers" hidden>
+          <div id="prayer-head" class="muted"></div>
+
+          <!-- 108. WHAT IS PREPARED, FIRST. It is what a cleric reads
+               most and it was under the slots and the cantrips. Folded
+               by level, because ten prepared spells open at once is a
+               wall. -->
+          <div class="sub">Prepared <span id="prepared-count" class="muted"></span></div>
+          <div id="my-prayers"></div>
+
+          <div class="sub">Cantrips <span id="cantrip-count" class="muted"></span></div>
+          <div id="my-cantrips" class="list"></div>
+
+          <!-- 107/108. THE SLOTS STICK. They are the number a cleric
+               checks before every decision on this tab, and scrolling to
+               the add-list used to take them off screen. -->
+          <div class="sub slots-head">Spell slots</div>
+          <div id="prayer-slots" class="slotbar"></div>
+
+          <!-- 109. THE WHOLE ADD SECTION FOLDS, with the per-level folds
+               inside it. Adding a prayer happens at a long rest and
+               reading the list happens constantly, so the rare thing
+               should not be the tallest thing on the tab - the same
+               reasoning 068 applied to the character creation form. -->
+          <button id="add-prayer-head" class="lvlhead section">
+            <span class="caret">&#9656;</span>
+            <span class="lvlname" id="add-prayer-word">Add a spell</span>
+            <span class="lvlcount" id="add-prayer-count"></span>
+          </button>
+          <div id="add-prayer-body" hidden>
+            <div class="row">
+              <input id="prep-find" placeholder="search" />
+            </div>
+            <div id="prep-list"></div>
+          </div>
+        </div>
+        </section>
+        </div>
+
+        <!-- 279. THE LIVE LEDGER OF THINGS, which is what the Objects
+             tab's "In play" subtab always was: every object in the game
+             and who is holding it. That is a fact about this session
+             rather than about the rules, so it is here and the
+             catalogue is in Rules. -->
+        <div class="active-pane" data-active="things" hidden>
+          <section id="objects-panel" hidden>
+          <h2>Things <span class="count" id="n-objs"></span> <span id="objects-who" class="muted"></span></h2>
+              <!-- EVERY object in the game, whoever is holding it. The
+                   narrower views all knew their holder already; this one
+                   works backwards from the object, which is the only way
+                   to answer "where did that handaxe go". -->
+              <div class="row">
+                <input id="obj-find" placeholder="filter by name or holder" />
+                <select id="obj-where">
+                  <option value="">anywhere</option>
+                  <option value="character">carried</option>
+                  <option value="container">in a container</option>
+                  <option value="location">on the floor</option>
+                  <option value="nowhere">nowhere</option>
+                  <option value="unknown">unaccounted for</option>
+                </select>
+              </div>
+              <ul id="obj-list" class="list"></ul>
+          </section>
+        </div>
+
+        <div class="active-pane" data-active="trade" hidden>
+          <div class="row">
+            <select id="trade-a"></select>
+            <select id="trade-b"></select>
+          </div>
+          <div id="trade-kind" class="muted trained"></div>
+
+          <div class="cols2">
+            <div>
+              <div class="sub" id="trade-a-name">this side gives</div>
+              <ul id="trade-a-items" class="list"></ul>
+            </div>
+            <div>
+              <div class="sub" id="trade-b-name">that side gives</div>
+              <ul id="trade-b-items" class="list"></ul>
+            </div>
+          </div>
+
+          <!-- Haggling is a contest like any other, so the totals come
+               from the roll box rather than being rolled here. -->
+          <div class="row" id="haggle-row">
+            <input id="haggle-persuasion" type="number" placeholder="Persuasion" class="narrow" />
+            <input id="haggle-insight" type="number" placeholder="their Insight" class="narrow" />
+            <button id="do-haggle" class="tiny ghost">haggle</button>
+            <span id="haggle-said" class="muted"></span>
+          </div>
+
+          <div id="trade-balance" class="balance">nothing offered</div>
+          <div class="row">
+            <button id="do-trade">Trade</button>
+            <button id="do-give" class="ghost">Give &mdash; no coin</button>
+          </div>
+          <div id="trade-msg" class="dm-msg" hidden></div>
+        </div>
+      </div>
+
+      <!-- 279. CAMPAIGN. What this game has prepared, as against what
+           is happening in it. Both halves are the DM's, so the whole
+           tab sits behind the one gate `#world-panel` has always
+           been. -->
+      <div class="pane" data-pane="campaign" hidden>
+        <section id="world-panel" hidden>
+          <h2>Campaign <span id="world-who" class="muted"></span></h2>
+          <nav class="tabs mini" id="campaign-tabs">
+            <button class="tab on" data-campaign="world">World</button>
+            <!-- 235/279. A map is a fact about a PLACE. Plural here
+                 because `#mv-where` has always picked the place: this
+                 is the library of them, and the one the party is
+                 standing on belongs in Active. -->
+            <button class="tab" data-campaign="map">Maps</button>
+          </nav>
+
+          <div class="campaign-pane" data-campaign="world">
+          <!-- The world. Depth is the whole hierarchy: a universe and a
+               broom cupboard are the same kind of row, and the indent is
+               computed rather than stored. -->
+          <div class="sub">World</div>
+          <div class="row">
+            <input id="loc-name" placeholder="place name, e.g. Frostvalley Inn" />
+            <select id="loc-kind">
+              <option value="structure">structure</option>
+              <option value="outdoors">outdoors</option>
+              <option value="underground">underground</option>
+              <option value="aquatic">aquatic</option>
+              <option value="aerial">aerial</option>
+              <option value="vehicle">vehicle</option>
+            </select>
+          </div>
+          <div class="row">
+            <select id="loc-parent"></select>
+            <button id="create-location" class="ghost">Add place</button>
+          </div>
+          <ul id="locations" class="list"></ul>
+
+          <!-- THE SCENE. Selecting a place answers three questions about
+               it, and they are three lists rather than one because they
+               are three different kinds of thing: people who can act,
+               fights that are running, and objects on the floor.
+
+               Sub-tabs for the same reason the top-level ones exist - the
+               counts are visible without opening anything, so a glance at
+               a room says "four people, one fight" and only the list you
+               actually want takes up the column. -->
+          <div id="scene" hidden>
+            <div class="sub" id="scene-where"></div>
+            <nav class="tabs mini" id="scene-tabs">
+              <button class="tab on" data-scene="people">
+                People <span class="count" id="n-people"></span>
+              </button>
+              <button class="tab" data-scene="events">
+                Encounters <span class="count" id="n-events"></span>
+              </button>
+              <button class="tab" data-scene="things">
+                Things <span class="count" id="n-things"></span>
+              </button>
+            </nav>
+
+            <div class="scene-pane" data-scene="people">
+              <ul id="scene-people" class="list"></ul>
+              <!-- The picker offers EVERYBODY, not just the unplaced -
+                   walking from one room to the next is the common case,
+                   and it would be impossible from a list of nobodies. -->
+              <div class="row">
+                <select id="bring-who"></select>
+                <button id="bring-here" class="ghost">Bring here</button>
+              </div>
             </div>
 
-            <div id="mv-say" class="muted mapsay"></div>
-            <!-- What is under the cursor, including what it COSTS -
-                 the only way to check the rules without reading SQL. -->
-            <div id="mv-at" class="muted mapat">&nbsp;</div>
+            <div class="scene-pane" data-scene="events" hidden>
+              <ul id="scene-encounters" class="list"></ul>
+            </div>
 
-            <!-- 258. THE TILE PANEL. Until now the map pane was
-                 WRITE-ONLY: five controls that change a square and one
-                 hover line that describes it. This reads one square
-                 back, and keeps STORED facts visibly apart from what
-                 the rules DERIVE from them. -->
-            <div class="mapstage">
-              <aside class="tilepanel">
-                <div class="sub">Tile Properties</div>
-                <!-- Inspect is the DEFAULT and suppresses the click
-                     action entirely: you turn the ability to change
-                     things ON, deliberately. Edit and Play are named
-                     here but not yet wired - see the note the panel
-                     prints under them rather than pretending. -->
-                <div class="tpmodes">
-                  <button class="tpmode on" data-tpmode="inspect">Inspect</button>
-                  <button class="tpmode" data-tpmode="edit">Edit</button>
-                  <button class="tpmode" data-tpmode="play">Play</button>
-                </div>
-                <div id="tp-body" class="tpbody"></div>
-
-                <!-- 259. THE EDITING CONTROLS LIVE WITH THE SQUARE
-                     THEY CHANGE. They used to sit in two rows above
-                     the map, which meant the thing you were painting
-                     and the thing you were painting WITH were in
-                     different places - and the panel could only ever
-                     describe the result after the fact.
-
-                     STACKED, NOT IN A ROW. The panel is a narrow
-                     column; five selects side by side would need the
-                     width the map wants. -->
-
-                <!-- WHAT A CLICK DOES. Shown for Edit and Play both,
-                     because both of them act on a click - and its
-                     options are filtered to the ones that mode means,
-                     so "click paints" cannot be chosen while playing. -->
-                <div id="tp-act" class="tptools" hidden>
-                  <div class="tpband">what a click does</div>
-                  <select id="mv-mode" class="tpfield">
-                    <option value="paint">click paints</option>
-                    <option value="erase">click erases</option>
-                    <!-- 247. TWO CREATURE MODES, AND THE DIFFERENCE IS
-                         THE RULES. "places" is 230's deliberately dumb
-                         teleport - it will put a monster inside a
-                         wall, because a DM placing one mid-sentence
-                         should not be argued with. "walks" goes
-                         through `stride::walk`, which prices every
-                         square and stops at the first thing in the
-                         way. -->
-                    <option value="stand">click places the creature</option>
-                    <option value="walk">click walks the creature</option>
-                    <!-- 268. THE THIRD PLAY MODE, and the only one that
-                         MAKES something. The creature stands in a heap
-                         of debris and the click says where it goes -
-                         which is why there is no source control: you
-                         shovel from the pile you are standing in.
-                         273 GAVE IT THE OTHER HALF: a heap can be
-                         lifted and carried now, so the pile you are
-                         standing in is one you may have put there. -->
-                    <option value="build">click builds here</option>
-                    <!-- 269. WORK, AS OPPOSED TO A BLOW. "Hit it" is
-                         the DM typing what they rolled, for anything
-                         that can deal damage. This is a creature
-                         spending hours, and it ignores the threshold
-                         because sustained work is not one swing. -->
-                    <option value="dig">click digs here</option>
-                    <!-- 273. TIPPING, which is the pour with a person
-                         behind it. The click is the DESTINATION; what
-                         is tipped comes out of the pack, which is why
-                         the heap and the amount are controls below
-                         rather than a square to click on. Lifting has
-                         no click at all - the heap is underfoot. -->
-                    <option value="tip">click tips a carried heap</option>
-                  </select>
-                </div>
-
-                <!-- 263. THE PLAY HALF OF 245. A blow SUBTRACTS, through
-                     the threshold, and fires the destruction at zero.
-                     The DM types the number they already rolled at the
-                     table - nothing here rolls anything, because an
-                     attack roll is a creature's problem and not a
-                     square's. -->
-                <div id="tp-play" class="tptools" hidden>
-                  <div class="tpband">deal damage</div>
-                  <select id="mv-hitlayer" class="tpfield"></select>
-                  <div class="tppair">
-                    <input id="mv-hit" type="number" value="0" min="0" title="damage dealt" />
-                    <button id="mv-strike" class="ghost tiny">Hit it</button>
-                  </div>
-
-                  <!-- 268. SPENDING THE DEBRIS. The word is only read
-                       when there is something to raise: a hole is
-                       filled with whatever the heap is, so clicking a
-                       pit ignores this entirely. -->
-                  <div class="tpband">build with debris</div>
-                  <select id="mv-buildword" class="tpfield"></select>
-
-                  <!-- 269. THE SHIFT, shared by digging and building,
-                       because they are the same labour at the same
-                       rate: five minutes a hit point, divided by the
-                       crew. Three is as many as can swing at one face,
-                       so helpers go no higher than two. -->
-                  <div class="tpband">the shift</div>
-                  <div class="tppair">
-                    <input id="mv-minutes" type="number" value="60" min="0" step="5"
-                           title="minutes worked" />
-                    <input id="mv-helpers" type="number" value="0" min="0" max="2"
-                           title="helpers (two at most)" />
-                  </div>
-
-                  <!-- 273. HAULING. NO HELPERS HERE, and that is the
-                       rule rather than an omission: 269's three
-                       workers share one face of one wall, and nobody
-                       shares a pair of hands. Each hauler lifts their
-                       own load at five minutes a hit point.
-
-                       THE AMOUNT IS BLANK FOR "ALL OF IT", because
-                       that is what somebody shovelling a heap into a
-                       barrow actually means, and the heap is blank for
-                       "the only one I am carrying" - named only when
-                       there are two and Rust refuses to guess. -->
-                  <div class="tpband">haul debris</div>
-                  <div class="tppair">
-                    <select id="mv-haulword" class="tpfield"
-                            title="which heap to tip; blank if you carry only one">
-                      <option value="">— whichever —</option>
-                      <option value="rubble">broken stone</option>
-                      <option value="rubble_timber">splintered timber</option>
-                      <option value="rubble_wood">broken boards</option>
-                      <option value="rubble_earth">spoil</option>
-                      <option value="rubble_ice">shattered ice</option>
-                    </select>
-                    <input id="mv-haul" type="number" min="1" step="1"
-                           placeholder="all" title="hit points to lift or tip" />
-                  </div>
-                  <button id="mv-haullift" class="ghost tiny">Lift what is underfoot</button>
-                </div>
-
-                <div id="tp-edit" class="tptools" hidden>
-                  <div class="tpband">brush</div>
-                  <select id="mv-surface" class="tpfield"></select>
-                  <select id="mv-cover" class="tpfield"></select>
-                  <!-- 261. THE THIRD LAYER, WHICH HAD NO CONTROL AT ALL.
-                       226 gave a square a `sub` and Rust has carried it
-                       on every path since - paint, recipe, read - but
-                       nothing on screen could set one, so it has been
-                       empty in the live database for its whole life.
-
-                       It is NEVER CROSSED and never drawn. It is what
-                       `Reveals` uncovers: break the ice and the water
-                       under it is this word. Listed last because it is
-                       the layer you think about least often. -->
-                  <select id="mv-sub" class="tpfield" title="what is revealed if the ground is destroyed"></select>
-                  <div class="tppair">
-                    <!-- 254. WHICH PIECE OF A WALL, not which wall. A
-                         corner blocks, breaks and costs exactly what a
-                         straight run does, so it is one column on the
-                         square rather than five more terrain words. -->
-                    <select id="mv-shape" title="which piece of a wall">
-                      <option value="">plain</option>
-                      <option value="corner">corner</option>
-                      <option value="end">end</option>
-                      <option value="t">T-junction</option>
-                      <option value="center">centre run</option>
-                      <option value="diag">diagonal</option>
-                      <option value="diag_corner_l">diagonal corner, left</option>
-                      <option value="diag_corner_r">diagonal corner, right</option>
-                    </select>
-                    <select id="mv-facing" title="quarter turns clockwise from north">
-                      <option value="0">N</option>
-                      <option value="1">E</option>
-                      <option value="2">S</option>
-                      <option value="3">W</option>
-                    </select>
-                  </div>
-
-                  <!-- The room: how big, and what it is made of where
-                       nobody has said otherwise. 20x20 is a 100ft
-                       battle map, the usual size of a fight. -->
-                  <div class="tpband">room</div>
-                  <div class="tppair">
-                    <input id="mv-w" type="number" value="20" title="squares across" />
-                    <input id="mv-h" type="number" value="20" title="squares down" />
-                  </div>
-                  <select id="mv-dsurface" class="tpfield" title="default ground"></select>
-                  <select id="mv-dcover" class="tpfield" title="default cover"></select>
-                  <select id="mv-dsub" class="tpfield" title="default sub - what is under the floor"></select>
-                  <button id="mv-describe" class="ghost tiny tpfield">Describe</button>
-
-                  <!-- 263. THE AUTHORING HALF OF 245. This ASSIGNS: no
-                       threshold, nothing destroyed, no rule fired. It is
-                       a DM stating that this door is already half
-                       shattered when the players walk in, which is what
-                       a placeable broken door actually needs. Clear puts
-                       it back to untouched. -->
-                  <div class="tpband">condition</div>
-                  <select id="mv-hplayer" class="tpfield"></select>
-                  <div class="tppair">
-                    <input id="mv-hp" type="number" value="0" min="1" title="hit points left" />
-                    <button id="mv-sethp" class="ghost tiny">Set</button>
-                    <button id="mv-clearhp" class="ghost tiny">Clear</button>
-                  </div>
-                </div>
-              </aside>
-              <div class="mapscroll">
-                <canvas id="mv-canvas" class="mapcanvas"></canvas>
+            <div class="scene-pane" data-scene="things" hidden>
+              <ul id="scene-things" class="list"></ul>
+              <!-- 218. STOCKING THE ROOM. Until now the only door into
+                   the world was give_item, which puts a thing in a
+                   character's hands - and a crate refuses to be held,
+                   so a scene could not be furnished at all. The second
+                   picker is the inside of something already standing
+                   here, so a crate and the coin in it are two uses of
+                   one control. -->
+              <div class="row">
+                <select id="stock-what"></select>
+                <select id="stock-into"></select>
+                <input id="stock-count" type="number" min="1" value="1"
+                       class="narrow" />
+                <button id="stock-here" class="tiny ghost">Place</button>
               </div>
             </div>
           </div>
-
-          <div class="world-pane" data-world="world">
-        <!-- The world. Depth is the whole hierarchy: a universe and a
-             broom cupboard are the same kind of row, and the indent is
-             computed rather than stored. -->
-        <div class="sub">World</div>
-        <div class="row">
-          <input id="loc-name" placeholder="place name, e.g. Frostvalley Inn" />
-          <select id="loc-kind">
-            <option value="structure">structure</option>
-            <option value="outdoors">outdoors</option>
-            <option value="underground">underground</option>
-            <option value="aquatic">aquatic</option>
-            <option value="aerial">aerial</option>
-            <option value="vehicle">vehicle</option>
-          </select>
-        </div>
-        <div class="row">
-          <select id="loc-parent"></select>
-          <button id="create-location" class="ghost">Add place</button>
-        </div>
-        <ul id="locations" class="list"></ul>
-
-        <!-- THE SCENE. Selecting a place answers three questions about
-             it, and they are three lists rather than one because they
-             are three different kinds of thing: people who can act,
-             fights that are running, and objects on the floor.
-
-             Sub-tabs for the same reason the top-level ones exist - the
-             counts are visible without opening anything, so a glance at
-             a room says "four people, one fight" and only the list you
-             actually want takes up the column. -->
-        <div id="scene" hidden>
-          <div class="sub" id="scene-where"></div>
-          <nav class="tabs mini" id="scene-tabs">
-            <button class="tab on" data-scene="people">
-              People <span class="count" id="n-people"></span>
-            </button>
-            <button class="tab" data-scene="events">
-              Encounters <span class="count" id="n-events"></span>
-            </button>
-            <button class="tab" data-scene="things">
-              Things <span class="count" id="n-things"></span>
-            </button>
-          </nav>
-
-          <div class="scene-pane" data-scene="people">
-            <ul id="scene-people" class="list"></ul>
-            <!-- The picker offers EVERYBODY, not just the unplaced -
-                 walking from one room to the next is the common case,
-                 and it would be impossible from a list of nobodies. -->
-            <div class="row">
-              <select id="bring-who"></select>
-              <button id="bring-here" class="ghost">Bring here</button>
-            </div>
           </div>
 
-          <div class="scene-pane" data-scene="events" hidden>
-            <ul id="scene-encounters" class="list"></ul>
-          </div>
+          <div class="campaign-pane" data-campaign="map" hidden>
+              <!-- 241. THE DM'S MAP WORKSPACE. Everything map-shaped in
+                   one place: the room, the brush, the creatures, and the
+                   map itself. There are no coordinate boxes anywhere
+                   here, because THE MAP IS THE COORDINATE INPUT - that
+                   is the whole reason the dev hook needed seventeen
+                   controls and this needs none. -->
+              <div class="row">
+                <select id="mv-where"></select>
+                <span class="muted">z</span>
+                <button id="mv-down" class="ghost tiny" title="a level down">&#9666;</button>
+                <input id="mv-z" type="number" value="0" class="narrow" />
+                <button id="mv-up" class="ghost tiny" title="a level up">&#9656;</button>
+                <button id="mv-draw" class="ghost tiny">Draw</button>
+                <!-- 242. The webview caches a tile for the life of the
+                     session, so a tile redrawn while the app is open
+                     stays the old one. This empties the cache and asks
+                     again. -->
+                <button id="mv-art" class="ghost tiny" title="re-read the tile images from disk">Reload art</button>
+              </div>
 
-          <div class="scene-pane" data-scene="things" hidden>
-            <ul id="scene-things" class="list"></ul>
-            <!-- 218. STOCKING THE ROOM. Until now the only door into
-                 the world was give_item, which puts a thing in a
-                 character's hands - and a crate refuses to be held,
-                 so a scene could not be furnished at all. The second
-                 picker is the inside of something already standing
-                 here, so a crate and the coin in it are two uses of
-                 one control. -->
-            <div class="row">
-              <select id="stock-what"></select>
-              <select id="stock-into"></select>
-              <input id="stock-count" type="number" min="1" value="1"
-                     class="narrow" />
-              <button id="stock-here" class="tiny ghost">Place</button>
-            </div>
-          </div>
-        </div>
-        </div>
+              <div class="row maprow">
+                <span class="maplabel">who</span>
+                <select id="mv-who"></select>
+                <button id="mv-lift" class="ghost tiny">Lift off the map</button>
+              </div>
 
-        <!-- 068. The species viewer, moved whole from Characters.
-             Same ids, so loadSpecies and paintSpeciesView did not
-             have to learn where they now live. -->
-        <div class="world-pane" data-world="species" hidden>
-          <div class="row">
-            <select id="species-pick"></select>
+              <!-- 246. THE SHELF. There is no Save button, and that is
+                   not an omission: every click is an INSERT, so the map
+                   is already saved. This is "save as" - a named copy of
+                   the whole map, every level, that can be put back.
+                   Load REPLACES what is drawn, so it asks first. -->
+              <div class="row maprow">
+                <span class="maplabel">shelf</span>
+                <select id="mv-ver" title="saved versions of this map, newest first"></select>
+                <button id="mv-load" class="ghost tiny">Load</button>
+                <button id="mv-vdel" class="ghost tiny">Delete</button>
+                <input id="mv-vname" class="vname" placeholder="save as, e.g. before the dragons" />
+                <button id="mv-save" class="ghost tiny">Save as</button>
+              </div>
+
+              <div id="mv-say" class="muted mapsay"></div>
+              <!-- What is under the cursor, including what it COSTS -
+                   the only way to check the rules without reading SQL. -->
+              <div id="mv-at" class="muted mapat">&nbsp;</div>
+
+              <!-- 258. THE TILE PANEL. Until now the map pane was
+                   WRITE-ONLY: five controls that change a square and one
+                   hover line that describes it. This reads one square
+                   back, and keeps STORED facts visibly apart from what
+                   the rules DERIVE from them. -->
+              <div class="mapstage">
+                <aside class="tilepanel">
+                  <div class="sub">Tile Properties</div>
+                  <!-- Inspect is the DEFAULT and suppresses the click
+                       action entirely: you turn the ability to change
+                       things ON, deliberately. Edit and Play are named
+                       here but not yet wired - see the note the panel
+                       prints under them rather than pretending. -->
+                  <div class="tpmodes">
+                    <button class="tpmode on" data-tpmode="inspect">Inspect</button>
+                    <button class="tpmode" data-tpmode="edit">Edit</button>
+                    <button class="tpmode" data-tpmode="play">Play</button>
+                  </div>
+                  <div id="tp-body" class="tpbody"></div>
+
+                  <!-- 259. THE EDITING CONTROLS LIVE WITH THE SQUARE
+                       THEY CHANGE. They used to sit in two rows above
+                       the map, which meant the thing you were painting
+                       and the thing you were painting WITH were in
+                       different places - and the panel could only ever
+                       describe the result after the fact.
+
+                       STACKED, NOT IN A ROW. The panel is a narrow
+                       column; five selects side by side would need the
+                       width the map wants. -->
+
+                  <!-- WHAT A CLICK DOES. Shown for Edit and Play both,
+                       because both of them act on a click - and its
+                       options are filtered to the ones that mode means,
+                       so "click paints" cannot be chosen while playing. -->
+                  <div id="tp-act" class="tptools" hidden>
+                    <div class="tpband">what a click does</div>
+                    <select id="mv-mode" class="tpfield">
+                      <option value="paint">click paints</option>
+                      <option value="erase">click erases</option>
+                      <!-- 247. TWO CREATURE MODES, AND THE DIFFERENCE IS
+                           THE RULES. "places" is 230's deliberately dumb
+                           teleport - it will put a monster inside a
+                           wall, because a DM placing one mid-sentence
+                           should not be argued with. "walks" goes
+                           through `stride::walk`, which prices every
+                           square and stops at the first thing in the
+                           way. -->
+                      <option value="stand">click places the creature</option>
+                      <option value="walk">click walks the creature</option>
+                      <!-- 268. THE THIRD PLAY MODE, and the only one that
+                           MAKES something. The creature stands in a heap
+                           of debris and the click says where it goes -
+                           which is why there is no source control: you
+                           shovel from the pile you are standing in.
+                           273 GAVE IT THE OTHER HALF: a heap can be
+                           lifted and carried now, so the pile you are
+                           standing in is one you may have put there. -->
+                      <option value="build">click builds here</option>
+                      <!-- 269. WORK, AS OPPOSED TO A BLOW. "Hit it" is
+                           the DM typing what they rolled, for anything
+                           that can deal damage. This is a creature
+                           spending hours, and it ignores the threshold
+                           because sustained work is not one swing. -->
+                      <option value="dig">click digs here</option>
+                      <!-- 273. TIPPING, which is the pour with a person
+                           behind it. The click is the DESTINATION; what
+                           is tipped comes out of the pack, which is why
+                           the heap and the amount are controls below
+                           rather than a square to click on. Lifting has
+                           no click at all - the heap is underfoot. -->
+                      <option value="tip">click tips a carried heap</option>
+                    </select>
+                  </div>
+
+                  <!-- 263. THE PLAY HALF OF 245. A blow SUBTRACTS, through
+                       the threshold, and fires the destruction at zero.
+                       The DM types the number they already rolled at the
+                       table - nothing here rolls anything, because an
+                       attack roll is a creature's problem and not a
+                       square's. -->
+                  <div id="tp-play" class="tptools" hidden>
+                    <div class="tpband">deal damage</div>
+                    <select id="mv-hitlayer" class="tpfield"></select>
+                    <div class="tppair">
+                      <input id="mv-hit" type="number" value="0" min="0" title="damage dealt" />
+                      <button id="mv-strike" class="ghost tiny">Hit it</button>
+                    </div>
+
+                    <!-- 268. SPENDING THE DEBRIS. The word is only read
+                         when there is something to raise: a hole is
+                         filled with whatever the heap is, so clicking a
+                         pit ignores this entirely. -->
+                    <div class="tpband">build with debris</div>
+                    <select id="mv-buildword" class="tpfield"></select>
+
+                    <!-- 269. THE SHIFT, shared by digging and building,
+                         because they are the same labour at the same
+                         rate: five minutes a hit point, divided by the
+                         crew. Three is as many as can swing at one face,
+                         so helpers go no higher than two. -->
+                    <div class="tpband">the shift</div>
+                    <div class="tppair">
+                      <input id="mv-minutes" type="number" value="60" min="0" step="5"
+                             title="minutes worked" />
+                      <input id="mv-helpers" type="number" value="0" min="0" max="2"
+                             title="helpers (two at most)" />
+                    </div>
+
+                    <!-- 273. HAULING. NO HELPERS HERE, and that is the
+                         rule rather than an omission: 269's three
+                         workers share one face of one wall, and nobody
+                         shares a pair of hands. Each hauler lifts their
+                         own load at five minutes a hit point.
+
+                         THE AMOUNT IS BLANK FOR "ALL OF IT", because
+                         that is what somebody shovelling a heap into a
+                         barrow actually means, and the heap is blank for
+                         "the only one I am carrying" - named only when
+                         there are two and Rust refuses to guess. -->
+                    <div class="tpband">haul debris</div>
+                    <div class="tppair">
+                      <select id="mv-haulword" class="tpfield"
+                              title="which heap to tip; blank if you carry only one">
+                        <option value="">— whichever —</option>
+                        <option value="rubble">broken stone</option>
+                        <option value="rubble_timber">splintered timber</option>
+                        <option value="rubble_wood">broken boards</option>
+                        <option value="rubble_earth">spoil</option>
+                        <option value="rubble_ice">shattered ice</option>
+                      </select>
+                      <input id="mv-haul" type="number" min="1" step="1"
+                             placeholder="all" title="hit points to lift or tip" />
+                    </div>
+                    <button id="mv-haullift" class="ghost tiny">Lift what is underfoot</button>
+                  </div>
+
+                  <div id="tp-edit" class="tptools" hidden>
+                    <div class="tpband">brush</div>
+                    <select id="mv-surface" class="tpfield"></select>
+                    <select id="mv-cover" class="tpfield"></select>
+                    <!-- 261. THE THIRD LAYER, WHICH HAD NO CONTROL AT ALL.
+                         226 gave a square a `sub` and Rust has carried it
+                         on every path since - paint, recipe, read - but
+                         nothing on screen could set one, so it has been
+                         empty in the live database for its whole life.
+
+                         It is NEVER CROSSED and never drawn. It is what
+                         `Reveals` uncovers: break the ice and the water
+                         under it is this word. Listed last because it is
+                         the layer you think about least often. -->
+                    <select id="mv-sub" class="tpfield" title="what is revealed if the ground is destroyed"></select>
+                    <div class="tppair">
+                      <!-- 254. WHICH PIECE OF A WALL, not which wall. A
+                           corner blocks, breaks and costs exactly what a
+                           straight run does, so it is one column on the
+                           square rather than five more terrain words. -->
+                      <select id="mv-shape" title="which piece of a wall">
+                        <option value="">plain</option>
+                        <option value="corner">corner</option>
+                        <option value="end">end</option>
+                        <option value="t">T-junction</option>
+                        <option value="center">centre run</option>
+                        <option value="diag">diagonal</option>
+                        <option value="diag_corner_l">diagonal corner, left</option>
+                        <option value="diag_corner_r">diagonal corner, right</option>
+                      </select>
+                      <select id="mv-facing" title="quarter turns clockwise from north">
+                        <option value="0">N</option>
+                        <option value="1">E</option>
+                        <option value="2">S</option>
+                        <option value="3">W</option>
+                      </select>
+                    </div>
+
+                    <!-- The room: how big, and what it is made of where
+                         nobody has said otherwise. 20x20 is a 100ft
+                         battle map, the usual size of a fight. -->
+                    <div class="tpband">room</div>
+                    <div class="tppair">
+                      <input id="mv-w" type="number" value="20" title="squares across" />
+                      <input id="mv-h" type="number" value="20" title="squares down" />
+                    </div>
+                    <select id="mv-dsurface" class="tpfield" title="default ground"></select>
+                    <select id="mv-dcover" class="tpfield" title="default cover"></select>
+                    <select id="mv-dsub" class="tpfield" title="default sub - what is under the floor"></select>
+                    <button id="mv-describe" class="ghost tiny tpfield">Describe</button>
+
+                    <!-- 263. THE AUTHORING HALF OF 245. This ASSIGNS: no
+                         threshold, nothing destroyed, no rule fired. It is
+                         a DM stating that this door is already half
+                         shattered when the players walk in, which is what
+                         a placeable broken door actually needs. Clear puts
+                         it back to untouched. -->
+                    <div class="tpband">condition</div>
+                    <select id="mv-hplayer" class="tpfield"></select>
+                    <div class="tppair">
+                      <input id="mv-hp" type="number" value="0" min="1" title="hit points left" />
+                      <button id="mv-sethp" class="ghost tiny">Set</button>
+                      <button id="mv-clearhp" class="ghost tiny">Clear</button>
+                    </div>
+                  </div>
+                </aside>
+                <div class="mapscroll">
+                  <canvas id="mv-canvas" class="mapcanvas"></canvas>
+                </div>
+              </div>
           </div>
-          <div id="species-view"></div>
-        </div>
         </section>
       </div>
 
+      <!-- 279. RULES. What CAN exist - the reference half of every noun
+           the game has. Open to everybody except the bestiary, and that
+           is a change of policy rather than of plumbing: `reveal.rs`
+           says it outright - "`amDM()` decides what the app OFFERS...
+           neither is a security boundary. The boundary is RLS." Dave's
+           call: a fighter's player who wants to read about Fireball
+           may.
+
+           WHICH RETIRES 211's `sheet.caster` TEST for the spell tab.
+           That test existed to keep the catalogue off a non-caster's
+           strip; nobody is harmed by reading it, and the test cost a
+           pane that vanished under a player the moment they picked up a
+           fighter. -->
+      <div class="pane" data-pane="rules" hidden>
+        <nav class="tabs mini" id="rules-tabs">
+          <!-- 068/279. SPECIES IS THE MOST PLAYER-FACING REFERENCE IN
+               the app - it is what you read to decide what you ARE -
+               and it spent this whole time inside `#world-panel`, which
+               hides itself for anybody who is not the DM. It is BESIDE
+               Creatures rather than inside it, so that "Creatures is
+               the DM's" stays true as a whole sentence instead of
+               becoming a tab with mixed gating. -->
+          <button class="tab on" data-rules="species">
+            Species <span class="count" id="n-species"></span>
+          </button>
+          <button class="tab" data-rules="spells">Spells</button>
+          <button class="tab" data-rules="items">Items</button>
+          <button class="tab" data-rules="creatures">Creatures</button>
+        </nav>
+
+        <!-- 068. The species viewer. Same ids, so loadSpecies and
+             paintSpeciesView did not have to learn where they now live
+             - the second time that has been true of this block. -->
+        <div class="rules-pane" data-rules="species">
+            <div class="row">
+              <select id="species-pick"></select>
+            </div>
+            <div id="species-view"></div>
+        </div>
+
+        <div class="rules-pane" data-rules="spells" hidden>
+          <section>
+            <h2>Spells <span id="spell-count" class="muted"></span></h2>
+            <div class="row">
+              <input id="spell-find" placeholder="search by name or text" />
+              <select id="spell-class">
+                <option value="">every class</option>
+              </select>
+              <select id="spell-level">
+                <option value="">every level</option>
+              </select>
+              <select id="spell-school">
+                <option value="">every school</option>
+              </select>
+            </div>
+            <div id="spell-list" class="list"></div>
+          </section>
+        </div>
+
+        <!-- What CAN exist, as opposed to what does - the other half is
+             Active > Things. Global rows come from migrations; a
+             campaign's own rows shadow them by key. Read only here:
+             authoring items is 027's job and has never had a screen. -->
+        <div class="rules-pane" data-rules="items" hidden>
+          <section>
+            <h2>Items <span class="count" id="n-cat"></span></h2>
+              <!-- What CAN exist, as opposed to what does. Global rows
+                   come from migrations; a campaign's own rows shadow them
+                   by key. Read only here - authoring items is 027's job
+                   and has never had a screen. -->
+              <input id="cat-find" placeholder="filter the catalogue" />
+              <ul id="cat-list" class="list"></ul>
+          </section>
+        </div>
+
+        <div class="rules-pane" data-rules="creatures" hidden>
+          <section>
+            <h2>Creatures</h2>
+            <p class="muted hint">
+              A creature here is a <strong>template</strong> &mdash; a thing you
+              copy from. It has no place in the world, never takes a turn and
+              never appears in a target list. Placing one makes an individual:
+              editing the template afterwards never reaches it, which is why two
+              goblins off one template can die separately.
+            </p>
+
+            <div class="row">
+              <select id="creature-import-pick"></select>
+              <input id="creature-import-name" placeholder="name it, or leave blank" />
+              <button id="creature-import">Import from reference</button>
+            </div>
+            <p class="muted hint">
+              The reference statblocks are shared and read-only &mdash; importing
+              takes a copy you own and can edit. The shared goblin stays as it is.
+            </p>
+
+            <!-- 125. A TEMPLATE BELONGS TO A GAME, so a file is how one
+                 travels - to a backup, or to somebody else's game. An
+                 import that cannot resolve a key SKIPS IT AND SAYS SO,
+                 because a file that will not open because of a torch is a
+                 worse answer than a goblin with no torch. -->
+            <div class="row">
+              <input type="file" id="creature-file" accept=".json,application/json" />
+              <button id="creature-import-file">Import from file</button>
+            </div>
+            <p class="muted hint">
+              A creature file carries names, numbers, scores, skills, prepared
+              spells and the whole kit &mdash; but no ids, so it reads into any
+              game. Anything this game has never heard of is <strong>skipped and
+              listed</strong> rather than refusing the file.
+            </p>
+
+            <div id="creature-list" class="list"></div>
+            <p class="muted" id="creature-empty" hidden>
+              No creatures yet. Import one from the reference above, and it will
+              appear here with the full character sheet behind it.
+            </p>
+          </section>
+        </div>
+      </div>
     </div>
 
     <div class="right">

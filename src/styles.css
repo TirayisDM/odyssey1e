@@ -131,7 +131,10 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .tabs .tab.on{color:var(--accent);border-color:var(--line);background:var(--panel)}
 /* A pane is a plain container; the sections inside keep their own
    spacing, so switching tabs changes nothing but what is on screen. */
-.pane > section:first-child{margin-top:0}
+.pane > section:first-child,
+.active-pane > section:first-child,
+.campaign-pane > section:first-child,
+.rules-pane > section:first-child{margin-top:0}
 /* The scene's sub-tabs. Same mechanism a size down, so a place inside
    the World tab does not look like a fourth peer of Play and Run. */
 .tabs.mini{margin:.15rem 0 .6rem}
@@ -1291,7 +1294,7 @@ button.wide{width:100%}
 .tppair { display: flex; gap: .25rem; margin-bottom: .25rem; }
 .tppair > * { flex: 1 1 0; min-width: 0; }
 
-.world-pane[data-world="map"] { overflow-x: hidden; }
+.campaign-pane[data-campaign="map"] { overflow-x: hidden; }
 
 /* 246. The shelf's name box. Wide enough for a real name - "before
    the dragons" is the kind of thing a DM types - and it shares the

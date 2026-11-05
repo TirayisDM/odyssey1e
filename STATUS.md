@@ -13534,6 +13534,75 @@ next one.
   advantage from the sheet means setting a control you cannot see. A
   shared control that 279 left on one of three panes.
 
+## 282. The fold belonged to the click, not to the loader
+
+**2026-11-05.** Dave, with a screenshot of Characters standing on
+**PCs** and showing one folded line reading **Lich 0001**:
+*"Character always opens to this instead of a list of the
+characters."*
+
+**Nothing he clicked chose that character.** `fight_strip` picks one
+for you when none is set - 058's kindness to a player who goes
+straight to the fight and would otherwise find their own panel empty -
+and `reveal.rs` decides whose by ownership, with its own comment
+admitting the hole: *"A DM looking at this would own most of the
+board."* So the first line of initiative is "yours" to a DM, and the
+Lich was it.
+
+### The line was right in 068 and wrong by 280
+
+`selectCharacter` folded the list, and 068 said why: *"A fresh pick
+folds the list. Reopening it is one click and the choice survives."*
+That was true when there were TWO lists. The picker above the strip
+folded; the roster below went on showing everybody; nothing was lost.
+
+280 merged them into one list and left the fold where it was, so the
+same line now hid **the only list there is**, before the reader had
+touched anything, on somebody they had not chosen. The screenshot
+contains the proof that it was automatic: the fold said Lich 0001
+while the subtab underneath said PCs, and a Lich is not in the PCs
+list.
+
+### Loading somebody and folding a list are two acts
+
+The fold moved out of the loader and onto the two places where a
+person actually chooses: **`openSheetFor`**, which is a click on a
+row, and the **new-character** path, where you made them a second ago
+and the list you made them from is not what you want to read. Both
+set it before the await, because `selectCharacter` ends in
+`paintChosen` and that is the paint that performs the fold.
+
+`selectGame` resets it too, which was one line past the diagnosis and
+is the same fault one door along: fold in one game, open the next, let
+its strip auto-pick, and a list nobody had touched folded again.
+
+**The auto-pick itself was deliberately left alone.** Choosing a Lich
+for a DM looks wrong, but the same call is what fills the casting
+panel for a player who opens straight into a fight, and changing who
+counts as "yours" is an engine question rather than a fix to a list.
+
+Verified in the rig against a stubbed fight whose first line is
+`yours` with a character id, so the auto-pick fires exactly as it
+does in the window: arriving at Characters leaves the list open with
+the sheet filled, a click folds to one name with `change`, `change`
+brings the list back with that row marked, and a game switch reopens
+it. Checked as a player as well. `npm test` passes.
+
+1436 tests.
+
+### Carried forward
+
+- **A throw in `loadSheet` skips everything after it**, `paintChosen`
+  included, so a bad casting row would leave the list mid-update. 211
+  fixed half of this by moving `paintTabOffer` to the top of the
+  function and wrote the argument down; the other half is
+  `loadPrayers`, `loadInventory`, `loadFeatures` and `loadCastable`
+  still being able to take the paint below them down. Two rig rounds
+  of this cycle were spent on exactly that shape.
+- **`reveal.rs` calls most of the board a DM's own.** It is honest
+  about it in a comment and it feeds an auto-pick that now has one
+  fewer place to go wrong. It still decides what the strip offers.
+
 ---
 
 ## Pick up here

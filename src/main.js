@@ -880,6 +880,11 @@ function paintTabOffer() {
 async function selectGame(id) {
   state.gameId = id;
   state.dmEncounterId = null;
+  // 282. AND THE LIST COMES BACK OPEN. A fold is a choice somebody
+  // made about one game's roster; carrying it into the next one
+  // would let the strip's auto-pick fold a list nobody has touched,
+  // which is the whole fault this cycle is fixing.
+  state.listOpen = true;
   // 277. Choosing is over, whether this came from the chooser or from
   // the chip asking to see it again.
   choosingGame = false;
@@ -3088,9 +3093,21 @@ const ABILS = ["str", "dex", "con", "int", "wis", "cha"];
 
 async function selectCharacter(id) {
   state.characterId = id;
-  // 068. A fresh pick folds the list. Reopening it is one click and
-  // the choice survives, so this is a default rather than a trap.
-  state.listOpen = false;
+  // 282. THE FOLD IS NOT THIS FUNCTION'S BUSINESS. 068 folded here
+  // because there were TWO lists: the picker above the strip folded
+  // and the roster below went on showing everybody, so the fold cost
+  // a reader nothing. 280 merged them, and this line then hid the
+  // only list there is.
+  //
+  // AND IT HID IT FOR SOMEBODY NOBODY CHOSE. `fight_strip` selects a
+  // character for you when none is set, and `reveal.rs` decides
+  // whose by ownership - which for a DM is most of the board, as its
+  // own comment admits. So a DM opened Characters standing on PCs
+  // with the list folded to a Lich.
+  //
+  // Loading a character and folding a list are two acts. This one
+  // loads; the two places where a person actually chooses somebody
+  // fold, and nothing else does.
   // 073. And it puts away a half-filled "which class" row, which
   // belonged to whoever was being read a moment ago.
   state.addingClass = false;
@@ -6181,6 +6198,10 @@ function paintChosen() {
 // 068/280. Choose somebody and read them, which is one act from the
 // list's side. It was the Sheet button's handler and is now the row's.
 async function openSheetFor(id) {
+  // 282. ONE OF THE TWO REAL CHOICES, and set before the await
+  // because `selectCharacter` ends in `paintChosen` - which is the
+  // paint that performs the fold.
+  state.listOpen = false;
   await selectCharacter(id);
   // 068. STAYS ON THIS TAB. The sheet moved to Characters in 067 and
   // this still sent the reader to Play, which is now a page with
@@ -11133,6 +11154,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       await fillCreaturePicker();
       await loadChars();
       if (id) {
+        // 282. THE OTHER ONE. You made this character a second ago;
+        // the list you made them from is not what you want to look at.
+        state.listOpen = false;
         await selectCharacter(id);
         // 067. ON THE STATS TAB OF THE NEW CHARACTER. The sheet moved
         // into Characters, so creating one no longer means changing

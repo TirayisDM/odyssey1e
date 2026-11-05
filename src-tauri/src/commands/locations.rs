@@ -386,7 +386,13 @@ pub fn who_is_where(state: State<AppState>, game_id: String) -> Result<Value, St
             // from a statblock are both NPCs, and only one of them is a
             // creature. Both are facts already on the row; neither is a
             // rule, and nothing here decides anything with them.
-            ("select", "id,name,token_name,is_npc,npc_key,creature_type,dead,is_active,location_id,entity_id,markup,disposition"),
+            // 280. `owner_uid` TRAVELS TOO, and for the same reason the
+            // two above do: the roster is now the only character list
+            // there is, so it has to be able to say "mine". It used to
+            // be a second list - `list_characters`, above the tabs -
+            // that carried the column, and the two disagreed about
+            // whether a DM may open somebody else's sheet.
+            ("select", "id,name,token_name,owner_uid,is_npc,npc_key,creature_type,dead,is_active,location_id,entity_id,markup,disposition"),
             // 123. A TEMPLATE IS NOT A CREATURE IN THE WORLD.
             ("is_template", "is.false"),
             ("game_id", &format!("eq.{}", game_id)),

@@ -345,8 +345,12 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 /* A GRID RATHER THAN space-between, because the row grew from three
    things to five and the eye needs the numbers under each other: the
    name stretches, the natural bonus sits in one column, what carried
-   it in the next, and the total last. */
-.skillrow{display:grid;grid-template-columns:1fr auto 2.4rem minmax(0,9rem) 2.4rem;
+   it in the next, and the total last.
+   281. SIX NOW. The roll button goes on the end rather than beside
+   the name, so the three number columns stay together and the thing
+   you click is in one place down the whole list. */
+.skillrow{display:grid;
+          grid-template-columns:1fr auto 2.4rem minmax(0,9rem) 2.4rem auto;
           align-items:center;gap:.4rem;
           padding:.22rem .45rem;border:1px solid var(--line);border-radius:4px;margin-bottom:.2rem}
 .skillrow span{font:12px ui-monospace,Menlo,monospace}
@@ -356,6 +360,10 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 .skillrow .skill-from{font-size:11px;color:#9ecbff;text-align:right;
                       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .skillrow .bonus.total{color:#9ecbff}
+/* Tabular, so eighteen buttons reading "roll +3" do not jitter as the
+   sign and the width change down the column. */
+.skillrow .skill-roll{white-space:nowrap;font-variant-numeric:tabular-nums;
+                      min-width:4.6rem;text-align:center}
 /* 116. WHAT HURTS SOMEBODY LESS, MORE, OR NOT AT ALL.
    Laid out like a skill row on purpose: degree, the damage type, then
    where it came from in the same right-hand column the skill

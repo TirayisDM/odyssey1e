@@ -36,7 +36,10 @@ let state = {
   // the second has to be remembered PER ZONE: coming back to Rules
   // should land on the page you left it on, not on its first subtab.
   tab: "active",
-  sub: { active: "encounter", campaign: "world", rules: "species" },
+  // 280. `chars` joins the three zones here because the stranding
+  // guard reads this object, and a strip whose page is never recorded
+  // cannot be walked off a page it may no longer be on.
+  sub: { active: "encounter", campaign: "world", rules: "species", chars: "pcs" },
   // 055. The class catalogue for this game, globals plus any the
   // table has written for itself.
   classes: [],
@@ -588,7 +591,8 @@ function clearData() {
   paintTabOffer();
   state.rolls = [];
   document.querySelector("#games").innerHTML = "";
-  document.querySelector("#characters").innerHTML = "";
+  // 280. The roster, where the strip's character list used to be named.
+  document.querySelector("#pc-list").innerHTML = "";
   document.querySelector("#rolls").innerHTML = "";
 }
 
@@ -808,7 +812,25 @@ const DM_ONLY_TABS = ["campaign"];
 // place - rather than something a player reads. Species is BESIDE it
 // and open, so "Creatures is the DM's" stays true as a whole sentence
 // instead of becoming a tab with mixed gating.
-const DM_ONLY_SUBS = [["rules", "creatures"]];
+//
+// 280. AND TWO MORE, which is what let the Characters panel stop
+// gating itself whole. NPCs are the DM's cast and Creatures the DM's
+// monsters; PCs is the list everybody needs, because it is now the
+// only place to choose who you are playing. Same shape as the
+// bestiary: the tab keeps one meaning and the parts that are the DM's
+// say so individually.
+const DM_ONLY_SUBS = [
+  ["rules", "creatures"],
+  ["chars", "npcs"],
+  ["chars", "creatures"],
+];
+
+// Where a strip goes when the page it was on stops being offered.
+// `ZONES` is the three that are top-level panes with a refreshTab
+// branch; `chars` is a strip inside one, so it falls back without a
+// re-read - loadChars has just run to hide the button in the first
+// place.
+const SUB_HOME = { active: "encounter", campaign: "world", rules: "species", chars: "pcs" };
 
 function subButton(zone, name) {
   return document.querySelector(
@@ -826,13 +848,11 @@ function paintTabOffer() {
     if (b) b.hidden = !dm;
   }
 
-  // 211/279. "CHARACTERS" IS A ROSTER; A PLAYER HAS ONE. The pane is
-  // the DM's list of everybody in the campaign and, for a player, their
-  // own sheet - the same pane answering two different questions, so it
-  // gets the two names. A subtab of Active now rather than a tab of its
-  // own, which is the only thing that changed about it.
-  const chars = subButton("active", "chars");
-  if (chars) chars.textContent = dm ? "Characters" : "Character";
+  // 280. THE SUBTAB IS "CHARACTERS" FOR EVERYBODY. 279 made it
+  // singular for a player on the reasoning that the pane was their own
+  // sheet and nothing else. It is a list now, and a player can own more
+  // than one - the DM reading this owns four in their own game - so the
+  // singular was about to be wrong on the screen it was meant to fit.
 
   // AND DO NOT LEAVE THEM STANDING ON ONE. Hiding the button while its
   // pane is the open one would take the tab off the strip and leave the
@@ -850,7 +870,10 @@ function paintTabOffer() {
   // the gate it needed for that is gone, but the bestiary's remains.
   for (const [zone, name] of DM_ONLY_SUBS) {
     const b = subButton(zone, name);
-    if (b && b.hidden && state.sub[zone] === name) showZone(zone, ZONES[zone]);
+    if (b && b.hidden && state.sub[zone] === name) {
+      if (ZONES[zone]) showZone(zone, SUB_HOME[zone]);
+      else showStrip(zone, SUB_HOME[zone]);
+    }
   }
 }
 
@@ -872,7 +895,7 @@ async function selectGame(id) {
   // this is the only place the answer can change - the same person is
   // DM of one game and a player in the next.
   paintTabOffer();
-  await loadCharacters();
+  await fillCreaturePicker();
   // 055: twelve rows, so the creation picker is ready before
   // anybody opens it.
   await loadClasses();
@@ -3030,39 +3053,35 @@ function lockedAbilities() {
   return ABILS.map((c) => [c, chargen.pool[chargen.taken[c]]]);
 }
 
-async function loadCharacters() {
-  const ul = document.querySelector("#characters");
-  ul.innerHTML = "";
+// 241. The map's creature picker.
+//
+// 280. ALL THIS FUNCTION DOES NOW. It used to paint the strip's
+// character list as well, and that list is gone - the roster in
+// Characters is the one list there is. The two jobs were only ever
+// together because both happened to want `list_characters`.
+//
+// WHICH IS THE WRONG SOURCE FOR THIS ONE, and was before this cycle
+// touched it. `list_characters` is PCs only - `is_npc` is `false` in
+// the query - so the control labelled "pick a creature" has never
+// offered a creature. 241's own comment says what it wanted: "EVERY
+// character, not only your own - placing a monster is the commonest
+// reason to use it." Left exactly as it was, because fixing the map's
+// picker inside a layout cycle is how a layout cycle breaks the map.
+async function fillCreaturePicker() {
+  const who = document.querySelector("#mv-who");
+  if (!who) return;
   if (!state.gameId) return;
   const chars = await call("list_characters", { gameId: state.gameId });
   if (!Array.isArray(chars)) return;
-  // 241. The map's creature picker. EVERY character, not only your
-  // own - placing a monster is the commonest reason to use it.
-  const who = document.querySelector("#mv-who");
-  if (who) {
-    const had = who.value;
-    who.innerHTML = '<option value="">— pick a creature —</option>';
-    for (const c of chars) {
-      const o = document.createElement("option");
-      o.value = c.id;
-      o.textContent = c.name;
-      who.append(o);
-    }
-    who.value = had;
-  }
+  const had = who.value;
+  who.innerHTML = '<option value="">— pick a creature —</option>';
   for (const c of chars) {
-    const mine = state.user && c.owner_uid === state.user.profile_id;
-    // Only your own character is selectable — the sheet editor writes,
-    // and the policies would refuse anyway. Better to not offer it.
-    ul.append(
-      row(
-        c.name,
-        mine ? "mine" : "someone else's",
-        mine ? () => selectCharacter(c.id) : null,
-        c.id === state.characterId
-      )
-    );
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent = c.name;
+    who.append(o);
   }
+  who.value = had;
 }
 
 const ABILS = ["str", "dex", "con", "int", "wis", "cha"];
@@ -3080,7 +3099,9 @@ async function selectCharacter(id) {
   state.descEditing = false;
   state.bodyEditing = false;
   state.statsEditing = false;
-  await loadCharacters();
+  // 280. The strip's list was repainted here to move its selected
+  // mark. There is no strip list; paintChosen folds the roster to the
+  // name just picked, which is the whole of what the mark was for.
   await loadSheet();
   paintChosen();
 }
@@ -3403,7 +3424,33 @@ async function loadSheet() {
     tot.className = "bonus total";
     if (line.total !== line.natural) tot.textContent = withSign(line.total);
 
-    el.append(nm, sel, b, from, tot);
+    // 281. AND THE ROLL, WHICH THE ENGINE HAS BEEN READY FOR ALL
+    // ALONG. `preview_request`'s own doc comment says it exists so a
+    // UI can "show 'Insight (WIS) +6' on the button before anyone
+    // commits" - and there has never been a button. A skill check is
+    // 119's saving throw mirrored: the roll a player constantly DOES
+    // initiate, and still the one they had to leave this tab and type
+    // into a box to make.
+    //
+    // NOTHING IS ASKED FIRST. A save stops for a difficulty because
+    // 017 forbids a default one - but a check is the other case: the
+    // DM calls the number, usually after seeing the dice. So this
+    // rolls straight through with no target at all.
+    //
+    // THE TOTAL, NOT THE NATURAL. `skill_mods[key].total` IS
+    // `skill_modifier`, the very method `resolve_request` calls, so
+    // the number on the button cannot drift from the number rolled.
+    // Printing `natural` here would walk into the trap the comment
+    // at the top of this loop already warns about, and print +2 on a
+    // button that rolls +5.
+    const roll = sEl("button", "ghost tiny skill-roll",
+      "roll " + withSign(line.total));
+    roll.title = sk.name + " check at " + withSign(line.total) +
+      " - no difficulty, rolled at the mode set on Active > Encounter." +
+      " A running effect's own dice are added as it rolls.";
+    roll.addEventListener("click", () => rollSkill(sk, line));
+
+    el.append(nm, sel, b, from, tot, roll);
     list.append(el);
   }
 
@@ -3515,6 +3562,35 @@ async function rollSave(code, dc, vsSpell, label) {
     targetValue: dc,
     targetKind: "dc",
     targetLabel: label,
+    encounterId: state.encounterId || null,
+    actorId: performerActorId(),
+  });
+  if (!r.ok) return log("roll_named", r.error, true);
+  await loadRolls();
+}
+
+// 281. A SKILL CHECK, ROLLED FROM THE ROW THAT SHOWS IT.
+//
+// THE REQUEST IS THE SKILL'S KEY, because that is the vocabulary
+// `resolve_request` already speaks: it finds a skill by key or by
+// name and asks `skill_modifier` for the number - the same number
+// this row is printing. No new command, and no second arithmetic to
+// drift away from the first.
+//
+// AND NO TARGET AT ALL. `targetValue: null` is the plain-check path
+// the roll box itself takes when nothing is picked, so a check made
+// here is the same row in the feed as a check made there.
+async function rollSkill(sk, line) {
+  if (!state.characterId)
+    return log("roll_named", "select a character first", true);
+  const r = await tryCall("roll_named", {
+    characterId: state.characterId,
+    request: sk.key,
+    // ONE SOURCE FOR ADVANTAGE, even though it sits on another tab.
+    // A second mode control on the sheet would be a second truth
+    // about the same d20; 119's save button reads this one too.
+    mode: document.querySelector("#mode")?.value || "normal",
+    targetValue: null,
     encounterId: state.encounterId || null,
     actorId: performerActorId(),
   });
@@ -4934,9 +5010,19 @@ function showTab(name, sub) {
 // page the zone is on and re-reads it, because 279's zones are where
 // the dispatch below now hangs.
 function showZone(zone, name) {
+  showStrip(zone, name);
+  refreshTab(zone);
+}
+
+// 280. A STRIP THAT IS NOT A ZONE. `chars` is a sub-strip inside
+// Active > Characters, and it needs the half of showZone that
+// remembers - the stranding guard reads `state.sub` and cannot guard a
+// strip that never writes it. It gets no refreshTab because there is
+// no dispatch branch for it: loadChars paints all three of its panes
+// in one go.
+function showStrip(zone, name) {
   showSub(zone + "-tabs", zone, name);
   state.sub[zone] = name;
-  refreshTab(zone);
 }
 
 // WHAT A TAB SHOWS, READ AGAIN WHEN YOU ARRIVE AT IT.
@@ -5439,20 +5525,37 @@ function syncEncPlace(id) {
 // ONE CALL FOR BOTH LISTS. who_is_where already returns everybody with
 // is_npc and where they are standing, so the two sub-tabs are two
 // filters of one answer rather than two round trips that can disagree.
+// 280. EVERYBODY'S NOW, which is the change. This panel used to hide
+// itself whole for anybody who was not the DM, and a player picked
+// their character from a second list above the tab strip. That list is
+// gone and this is what replaced it, so the gate moved down a level:
+// `DM_ONLY_SUBS` hides the NPCs and Creatures BUTTONS, and PCs - the
+// one everybody has a reason to open - stays.
+//
+// `who_is_where` IS MEMBER-READABLE and always was. It asks the
+// `characters` table through 001's "members read" policy, with no DM
+// test in Rust and none in the policy - so this is the same reveal
+// decision 279 made for Species and Items, not a new door. What a
+// player gains to look at is where the rest of the party is standing.
 async function loadChars() {
   const panel = document.querySelector("#chars-panel");
-  if (!state.gameId || !amDM()) {
+  if (!state.gameId) {
     panel.hidden = true;
     return;
   }
   panel.hidden = false;
-  document.querySelector("#chars-who").textContent = "you run this game";
+  const dm = amDM();
+  document.querySelector("#chars-who").textContent = dm ? "you run this game" : "";
 
   // Same distinction as loadObjects: "nobody" is an answer, and
   // "the question failed" is not.
   const roster = await tryCall("who_is_where", { gameId: state.gameId });
   if (!roster.ok) {
-    dmSay(roster.error, true);
+    // 280. A PLAYER HAS NO DM LINE to read this in - `#dm-msg` is the
+    // DM's. The developer log takes it instead, which is where a
+    // player's failures have always gone.
+    if (dm) dmSay(roster.error, true);
+    else log("who_is_where", roster.error, true);
     return;
   }
   const folk = roster.value || [];
@@ -5460,28 +5563,17 @@ async function loadChars() {
   // asking again.
   state.folk = folk;
   // 140. THREE LISTS OFF ONE ANSWER, still one round trip - the same
-  // argument the two were built on.
-  //
-  // `c.creature` COMES FROM THE ENGINE. The line is "is this a
-  // humanoid", which is one word compared against a constant and
-  // exactly the kind of rule that gets written twice and then
-  // disagrees - `skill_mods` is the scar. `creature::is_creature` owns
-  // it, with tests; this only reads the verdict.
-  //
-  // Dave chose it over "did it come from a statblock", which would have
-  // made a merchant built on the commoner statblock into a creature. An
-  // UNSTATED type stays among the people, per 122: a monster on the
-  // wrong tab for want of one word is visible and fixable, and a person
-  // quietly filed as a monster is not.
-  //
-  // A NAMED CREATURE STAYS A CREATURE. Naming Webbys does not make it a
-  // person - and all three lists are the Characters tab either way,
-  // because since 022 a creature IS a character.
-  paintFolk("#pc-list", "#n-pcs", folk.filter((c) => !c.is_npc));
-  paintFolk("#npc-list", "#n-npcs", folk.filter((c) => c.is_npc && !c.creature));
-  paintFolk("#creature-folk-list", "#n-creature-folk",
-            folk.filter((c) => c.is_npc && c.creature));
+  // argument the two were built on. The lists themselves are
+  // paintRoster, which says which is which.
+  paintRoster();
   paintChosen();
+
+  // 280. THE DM'S HALF STOPS HERE. The two lists above painted into
+  // panes whose buttons a player cannot see, which costs nothing - but
+  // `list_npcs` is a round trip for a screen that is not there, and an
+  // error from it would be a player's log filling up over a table they
+  // were never offered.
+  if (!dm) return;
 
   // The TYPES, which are a different table and a different idea from
   // the individuals above. 022 is the whole distinction.
@@ -5776,7 +5868,7 @@ async function afterClassChange() {
   // not taken.
   state.statsEditing = false;
   await loadSheet();
-  await loadCharacters();
+  await loadChars();
 }
 
 // KARMA, AND PLAYING TO A ROOM. 076.
@@ -6027,6 +6119,35 @@ async function loadAudiences() {
   paintOdds();
 }
 
+// 140/280. THE THREE LISTS, off whatever `state.folk` last held.
+//
+// Split out so that unfolding can repaint from memory. `selectCharacter`
+// used to refetch to move the selected mark, and the mark is the only
+// thing that moved - one round trip for a tick.
+//
+// `c.creature` COMES FROM THE ENGINE. The line is "is this a humanoid",
+// which is one word compared against a constant and exactly the kind of
+// rule that gets written twice and then disagrees - `skill_mods` is the
+// scar. `creature::is_creature` owns it, with tests; this only reads
+// the verdict.
+//
+// Dave chose it over "did it come from a statblock", which would have
+// made a merchant built on the commoner statblock into a creature. An
+// UNSTATED type stays among the people, per 122: a monster on the wrong
+// tab for want of one word is visible and fixable, and a person quietly
+// filed as a monster is not.
+//
+// A NAMED CREATURE STAYS A CREATURE. Naming Webbys does not make it a
+// person - and all three lists are the Characters tab either way,
+// because since 022 a creature IS a character.
+function paintRoster() {
+  const folk = state.folk || [];
+  paintFolk("#pc-list", "#n-pcs", folk.filter((c) => !c.is_npc));
+  paintFolk("#npc-list", "#n-npcs", folk.filter((c) => c.is_npc && !c.creature));
+  paintFolk("#creature-folk-list", "#n-creature-folk",
+            folk.filter((c) => c.is_npc && c.creature));
+}
+
 function paintChosen() {
   const line = document.querySelector("#pc-chosen");
   const list = document.querySelector("#pc-list");
@@ -6048,9 +6169,26 @@ function paintChosen() {
   back.title = "show the list again";
   back.addEventListener("click", () => {
     state.listOpen = true;
+    // 280. REPAINTED ON THE WAY OUT, so the list that comes back
+    // carries the selected mark rather than the one from whenever it
+    // was last fetched.
+    paintRoster();
     paintChosen();
   });
   line.append(back);
+}
+
+// 068/280. Choose somebody and read them, which is one act from the
+// list's side. It was the Sheet button's handler and is now the row's.
+async function openSheetFor(id) {
+  await selectCharacter(id);
+  // 068. STAYS ON THIS TAB. The sheet moved to Characters in 067 and
+  // this still sent the reader to Play, which is now a page with
+  // nothing but Rolls on it.
+  showTab("active", "chars");
+  showSub("sheet-tabs", "sheet", "stats");
+  const panel = document.querySelector("#sheet-panel");
+  if (panel) panel.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function paintFolk(listSel, countSel, folk) {
@@ -6061,9 +6199,35 @@ function paintFolk(listSel, countSel, folk) {
     ul.append(row("nobody", "", null));
     return;
   }
+  const dm = amDM();
   for (const c of folk) {
     const at = (state.locations || []).find((l) => l.id === c.location_id);
-    const li = row(c.token_name || c.name, at ? at.name : "nowhere", null);
+    // 280. WHOSE IT IS, which arrived with `owner_uid` on who_is_where
+    // for this cycle. A DM may open anybody; a player may open their
+    // own, which is the rule the strip's list enforced and the only
+    // part of it worth keeping.
+    //
+    // THE OLD LIST GAVE THE WRONG REASON FOR IT - "the policies would
+    // refuse anyway" - and for a DM they do not: 001's policy is
+    // `owner_uid = auth.uid() or is_game_dm(game_id)`. That is why the
+    // two lists disagreed about Bryn. The gate is kept for a PLAYER,
+    // where it is true, and it is a courtesy rather than a wall: a
+    // sheet opened and then refused on save is a worse answer than one
+    // that does not open.
+    const mine = !!state.user && c.owner_uid === state.user.profile_id;
+    const mayOpen = dm || mine;
+    const li = row(
+      c.token_name || c.name,
+      at ? at.name : "nowhere",
+      mayOpen ? () => openSheetFor(c.id) : null,
+      c.id === state.characterId
+    );
+    if (!mine && !c.is_npc) {
+      const o = document.createElement("span");
+      o.className = "tag";
+      o.textContent = "someone else's";
+      li.append(o);
+    }
     if (c.dead) {
       const d = document.createElement("span");
       d.className = "tag";
@@ -6096,27 +6260,17 @@ function paintFolk(listSel, countSel, folk) {
     // scores, level and skills. A second editor here would be a second
     // place for the same rules to be wrong - and since 022 an NPC IS a
     // character, so the goblin opens in exactly the same screen.
-    const open = document.createElement("button");
-    open.className = "tiny ghost";
-    open.textContent = "Sheet";
-    open.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      await selectCharacter(c.id);
-      // 068. STAYS ON THIS TAB. The sheet moved to Characters in 067
-      // and this still sent the reader to Play, which is now a page
-      // with nothing but Rolls on it.
-      showTab("active", "chars");
-      showSub("sheet-tabs", "sheet", "stats");
-      document.querySelector("#sheet-panel")
-        .scrollIntoView({ block: "start", behavior: "smooth" });
-    });
-    li.append(open);
+    //
+    // 280. AND THE ROW IS THE BUTTON. "Sheet" sat on a row that did
+    // nothing when clicked, in a list whose whole job is choosing whose
+    // sheet to read.
 
     // WHICH LIST IT BELONGS IN, and it is a label rather than a rule -
     // 022 is explicit about that. A merchant can be a shopkeeper the DM
     // runs or somebody's character who keeps a shop, and nothing but
     // this sorts them.
-    const move = document.createElement("button");
+    const move = dm ? document.createElement("button") : null;
+    if (move) {
     move.className = "tiny ghost";
     move.textContent = c.is_npc ? "make a PC" : "make an NPC";
     move.title = c.is_npc
@@ -6128,12 +6282,14 @@ function paintFolk(listSel, countSel, folk) {
       if (!r.ok) return dmSay(r.error, true);
       dmSay((c.token_name || c.name) + (c.is_npc ? " is a player character" : " is an NPC"));
       // A character that just became an NPC leaves list_characters, so
-      // the strip picker has to be repainted or it keeps offering one
-      // that is no longer there.
-      await loadCharacters();
+      // the map's creature picker has to be repainted or it keeps
+      // offering one that is no longer there. The roster reads from
+      // who_is_where, which keeps them - on a different list.
+      await fillCreaturePicker();
       await loadChars();
     });
     li.append(move);
+    }
 
     // EVERY row, not just monsters. This was NPC-only for one commit on
     // the reasoning that a player character running a shop was a case
@@ -6148,7 +6304,11 @@ function paintFolk(listSel, countSel, folk) {
     }
     const wrap = document.createElement("div");
     wrap.className = "folk-row";
-    wrap.append(li, shopControl(c, loadChars));
+    // 280. THE SHOP CONTROL IS A DM ACT and this list is no longer the
+    // DM's alone. Setting a markup on your own character is not a thing
+    // a player does; it is how the DM says this person sells.
+    wrap.append(li);
+    if (dm) wrap.append(shopControl(c, loadChars));
     ul.append(wrap);
   }
 }
@@ -10970,7 +11130,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (panel) panel.hidden = true;
       const t = document.querySelector("#new-char-toggle");
       if (t) t.textContent = "+ New character";
-      await loadCharacters();
+      await fillCreaturePicker();
+      await loadChars();
       if (id) {
         await selectCharacter(id);
         // 067. ON THE STATS TAB OF THE NEW CHARACTER. The sheet moved
@@ -11049,7 +11210,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // visits rather than a session with no end.
       state.statsEditing = false;
       await loadSheet();
-      await loadCharacters();
+      await loadChars();
     }
   });
 
@@ -11725,7 +11886,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   for (const b of document.querySelectorAll("#chars-tabs .tab")) {
-    b.addEventListener("click", () => showSub("chars-tabs", "chars", b.dataset.chars));
+    b.addEventListener("click", () => showStrip("chars", b.dataset.chars));
   }
 
   // Filtering is local - the whole list is already here - so it repaints

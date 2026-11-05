@@ -177,13 +177,17 @@
 
       
 
-      <!-- The PICKER, not the manager. Who you are playing decides
-           what every tab below shows, so it stays in the strip; making
-           a new one is a rare act and lives in Characters. -->
-      <section>
-        <h2>Characters</h2>
-        <ul id="characters" class="list"></ul>
-      </section>
+      <!-- 280. THE PICKER WAS HERE AND IS NOW THE ROSTER.
+
+           It said: "Who you are playing decides what every tab below
+           shows, so it stays in the strip." True, and it was the
+           argument for keeping a SECOND list of the same people one
+           screen above the first - which answered differently. A DM
+           reading this strip was told Bryn was "someone else's" and
+           could not click him, while the roster below offered him a
+           Sheet button that worked. One list now, in Characters. The
+           cost is real and named in 280: changing who you play is a
+           trip to that tab rather than a glance at the strip. -->
 
       <!-- THE TABS. The rig showed every panel for every role at
            once, which stopped being navigable somewhere around the DM
@@ -515,6 +519,18 @@
         </div>
 
         <div class="active-pane" data-active="chars" hidden>
+          <!-- 280. THIS PANEL IS NO LONGER THE DM'S ALONE. It gated
+               itself whole, and that gate is what scattered the
+               Character section: 212 had to park the builder outside it
+               as a sibling, 067 the sheet, and the picker lived above
+               the tab strip entirely - three things exiled by one
+               `hidden`.
+
+               279 built the answer and used it on Rules > Creatures:
+               GATE THE SUBTAB, NOT THE PANEL. NPCs and Creatures are
+               the DM's and say so in `DM_ONLY_SUBS`; PCs is everybody's,
+               and a player opening Characters now finds their own
+               people where the DM finds the roster. -->
           <section id="chars-panel" hidden>
             <h2>Characters <span id="chars-who" class="muted"></span></h2>
             <nav class="tabs mini" id="chars-tabs">
@@ -539,7 +555,14 @@
             <div class="chars-pane" data-chars="pcs">
               <!-- 068. THE LIST FOLDS once somebody is picked. Reading a
                    sheet and choosing whose sheet to read are different
-                   jobs, and the list only matters for the second. -->
+                   jobs, and the list only matters for the second.
+
+                   280. AND IT IS THE PICKER NOW, so the fold is the only
+                   focus behaviour left rather than one of two. A row
+                   SELECTS - the Sheet button beside it said out loud
+                   what clicking the row should always have meant, and a
+                   list where the row and the button on it do different
+                   things has to explain itself every time. -->
               <div id="pc-chosen" class="chosen" hidden></div>
               <ul id="pc-list" class="list"></ul>
 
@@ -622,17 +645,16 @@
             </div>
           </section>
 
-                <!-- 212. THE BUILDER IS A SIBLING OF #chars-panel, for the same
-             reason written over the sheet below it. #chars-panel is the
-             DM's roster and hides itself for anybody who is not the DM,
-             so a builder nested inside it was a builder no player could
-             reach - they could read a character and never make one.
+                <!-- 212. THE BUILDER IS A SIBLING OF #chars-panel. The
+             reason it had to be is gone - 280 opened that panel to
+             everybody, so a builder nested inside it would now be
+             reachable - but the order on the page is already right and
+             moving it would be churn for nothing to see.
 
              A PLAYER BUILDING THEIR OWN IS THE SAME ACT THE DM PERFORMS,
              so it is the same form rather than a second one. Nothing
              DM-only travels with it: the statblock author and the
-             creatures note are siblings of this block and stay inside
-             the roster where they belong. -->
+             creatures note live under the NPCs subtab, which IS gated. -->
   <!-- 068. A LINK, NOT A PERMANENT FORM. Making a character is
                    rare and reading one is constant, so the form that does
                    the rare thing should not be the tallest thing on the
@@ -678,11 +700,13 @@
               <button id="create-char">Create character</button>
               </div>
 
-  <!-- 067. THE SHEET LIVES HERE NOW, not in Play. It is a
-               SIBLING of #chars-panel rather than a child, and that is
-               load-bearing: #chars-panel is hidden for anybody who is
-               not the DM, so nesting the sheet inside it would have
-               taken every player's own character sheet away. -->
+  <!-- 067. THE SHEET LIVES HERE NOW, not in Play. It was a
+               SIBLING of #chars-panel because that panel hid itself for
+               anybody who was not the DM, and nesting the sheet inside
+               it would have taken every player's own character sheet
+               away. 280 removed that gate, so the sibling is now a
+               layout fact rather than a load-bearing one - the sheet
+               reads below the list that chooses it. -->
         <section id="sheet-panel" hidden>
           <!-- 068. THE NAME IS THE HEADING. It used to read "Sheet" with
                the character muted beside it, which was fine while the

@@ -13346,14 +13346,202 @@ ten pages render, one clock bar, the player's three strips read
 - **The roll controls are still above the feed rather than in it**,
   carried from 275 and not addressed here.
 
+## 280. The two character lists that disagreed about Bryn
+
+**2026-11-05.** Dave, on what a DM may do: *"A DM has access to NPCs
+Creatures and PCs that are involved in a campaign that the DM runs. A
+DM can modify NPCs, Creatures but PCs other player's Characters get mod
+files that they can use to update their own characters."*
+
+**The reply was that the first half already exists and the second half
+is the wrong medium**, and the answer came back narrowed: *"ok that
+sounds right - the DM privilege part. I would just like a more defined
+Character section lets start with this."* Three instructions followed -
+bump the top section down below the tabs, put it where the active
+character line sits, and selecting a character brings that character
+into focus and hides the others - with a fourth attached: *"Focused dev
+for this change"*.
+
+### The screenshot was carrying the contradiction
+
+Above the tab strip, a `CHARACTERS` picker said Bryn was **SOMEONE
+ELSE'S** and refused the click. Below the tabs, the roster of the same
+game gave the DM a working **Sheet** button for the same character. Two
+lists, one screen, opposite answers about one row.
+
+The picker's comment gave the reason it refused: the policies would
+refuse anyway. **That is true for a player and false for a DM.** 001's
+policy on `characters` is `owner_uid = auth.uid() or
+public.is_game_dm(game_id)`, and every child table - abilities, skills,
+items, dice - carries the same pair. A DM can rewrite any PC in their
+own game, and the picker was the only thing in the application that
+thought otherwise.
+
+### Which is why the mod-file idea is not the fix it looks like
+
+A file crosses a boundary. Between a DM and a player in one campaign
+there is no boundary to cross - there is one row and two people who can
+write it. A file can be lost, hand-edited, or applied twice, and
+`import_creature` creates; it has never applied a diff to a live row.
+
+**The access is not the defect. The silence is.** Nothing anywhere
+records that the DM did it. "The DM changed your WIS from 16 to 12" in
+the feed fixes most of the harm without a queue, a file or a schema
+change, and the state/build line is already drawn in the command list:
+`apply_effect`, `death_save`, `move_character`, `give_item`,
+`take_object`, `take_rest` and `advance_time` are the DM running the
+world and stay immediate; `set_ability`, `set_level`, `set_class_level`,
+`remove_class`, `set_skill_prof`, `set_proficiencies`,
+`rename_character` and `set_description` are somebody's build. That is
+the cycle this one did not do. `export_character` keeps what the file
+idea is genuinely for: taking a character somewhere else.
+
+### One list, and the panel stopped hiding itself
+
+**`#chars-panel` hid whole for anybody who was not the DM**, and that
+single line is what scattered the Character section across the window:
+212 put the builder outside it, 067 put the sheet outside it, and the
+picker went into the strip above the tabs. Three places, because the
+one place was shut.
+
+279 had already built the answer and not used it here - gate the
+SUBTAB. `DM_ONLY_SUBS` now names `rules > creatures`, `chars > npcs` and
+`chars > creatures`; the panel itself opens for everybody, and
+`Characters > PCs` is one list with the roster, the chosen line, the
+sheet and the builder underneath it.
+
+**A row selects now.** The Sheet button is gone, because a row that
+selects and a button that opens were two controls for one act. A DM may
+open anybody; a player may open their own and sees "someone else's" on
+the rest - the one part of the old picker's rule that was true. Choosing
+somebody folds the list to a single line with `change` beside it, which
+is the focus that was asked for.
+
+### The stranding guard, now at the third level
+
+140's rule is that you are never standing on a pane whose button just
+disappeared. 279 applied it to zones and to subtabs; the sheet's own
+strip is the third, so the guard walks `DM_ONLY_SUBS` and sends a
+stranded reader to `SUB_HOME` for whichever strip they were in -
+`chars` included, which is new.
+
+`owner_uid` travels on `who_is_where` for this, alongside `is_npc` and
+`npc_key`, because the roster is now the only character list there is
+and it has to be able to say "mine".
+
+### Found, and deliberately not fixed
+
+The map's **"pick a creature"** dropdown is filled from
+`list_characters`, which is PCs-only - so since 241 that control has
+never once offered a creature, and its own comment says it should. It is
+a one-line change into a command this cycle was not touching, and it
+goes in the next one rather than riding along in a layout cycle.
+
+Verified in the rig as DM and as player: one list, Bryn refused for a
+player and open for the DM, the fold and `change` round-trip, and the
+guard moving a stranded player off `chars > npcs`. `npm test` passes.
+
+1436 tests.
+
+### Carried forward
+
+- **The DM-edit attribution cycle.** The eight build writers record who
+  wrote them, the feed says so, and the DM's view of somebody else's
+  sheet stops pretending it is yours. This is the cycle the mod-file
+  conversation actually asked for.
+- **`#mv-who` offers no creatures**, above.
+- **A proposal queue** - the player accepting a change rather than being
+  told about it - stays unbuilt and unargued-for until the feed line
+  exists and proves insufficient.
+
+## 281. The button the engine was already documented for
+
+**2026-11-05.** Dave: *"could we add a roll button/control. I am
+thinking a straight roller for the skill on each line - this would
+essentially be a straight roll check with whatever general character
+modifiers added or subtracted from the roll."*
+
+**`preview_request` has said this out loud since it was written.** Its
+doc comment: *"What would this request roll, and why - without rolling
+it. Lets a UI show 'Insight (WIS) +6' on the button before anyone
+commits."* There was no button. The command has only ever fed the live
+preview over the roll box.
+
+### No Rust, because every piece was already there
+
+`resolve_request` finds a skill by key or by name and asks
+`skill_modifier` for the number. `roll_named` with `targetValue: null`
+is the plain-check path the roll box itself takes when nothing is
+picked. So the whole cycle is a sixth column on `.skillrow`, a button,
+and `rollSkill` - which sits directly under `rollSave` because it is
+that function minus the difficulty.
+
+### 119 mirrored
+
+119 put a button on the saving throw and wrote why: *"A save is the one
+roll a player makes constantly and never initiates... so it was the one
+roll you had to go and type out by hand."* A skill check is the same
+sentence with one word changed. It is the roll a player constantly DOES
+initiate, and it was still typed into a box on another tab. 119 fixed
+the harder half and left the obvious one.
+
+**And it does not ask a difficulty.** A save stops to ask because 017
+forbids a default DC. A check is the other case - the DM calls the
+number, usually after seeing the dice - so this rolls straight through
+with no target at all.
+
+### The button carries the total, which is the only number it could
+
+The row prints `natural` always and `total` only when they differ. The
+dice use `skill_modifier`. Those are the same function:
+`skill_mods[key].total` IS `sheet.skill_modifier(&k)`, which is why
+`skill_mods` was added in the first place. A button printing `natural`
+would promise +3 on a Perception an amulet has lifted to +6 - the exact
+fault the comment at the top of that loop already warns about. So the
+button says `roll +6`, and the number on it cannot drift from the
+number rolled.
+
+No per-row `preview_request` either, doc comment notwithstanding:
+eighteen round trips to be told what the sheet is already holding.
+
+### What it inherits
+
+- **Advantage comes from `#mode`**, which is on Active > Encounter. A
+  second mode control on the sheet would be a second truth about one
+  d20, so the button reads that one - exactly as 119's does.
+- **A running Bless is not in the number.** `effect_grants` appends live
+  dice at roll time, so the button says +3 and the result can beat it.
+  Same property the save button has had since 119.
+- **A DM can open anybody's sheet since 280**, so these buttons appear
+  on other people's characters. For a goblin's Stealth that is the
+  point, and a roll is not a build change.
+
+`character.rs` already asserts the guarantee the button leans on -
+`skill_resolves_by_key_as_well_as_name` - so no test was added. Verified
+in the rig against three rows chosen to cover it: unaided, proficient,
+and one an item had lifted. The payloads carried `per`/`ins`/`ath` with
+`targetValue: null`, and switching the encounter box to Adv changed the
+next one.
+
+1436 tests.
+
+### Carried forward
+
+- **An ability check still has no button.** The abilities block got a
+  saving throw in 119 and a plain STR check is still typed into the
+  box. It is the same four lines.
+- **The mode control is on the wrong tab for this.** Rolling at
+  advantage from the sheet means setting a control you cannot see. A
+  shared control that 279 left on one of three panes.
+
 ---
 
 ## Pick up here
 
-### THE SHELL CHANGED ON 2026-11-03/04 - read this before the handoff below
+### THE SHELL CHANGED ON 2026-11-03/05 - read this before the handoff below
 
-275-279 rebuilt how you get into this application and how it is laid
-out, so three things in the handoff below now describe a window that no
+275-281 rebuilt how you get into this application and how it is laid
+out, so four things in the handoff below now describe a window that no
 longer exists.
 
 - **The app opens on a door, not on the tabs.** A full-window gate
@@ -13373,6 +13561,12 @@ longer exists.
   Active > Encounter; Objects is split between Active > Things and
   Rules > Items; Species came out of World. 279 says why, and says
   which old tab each pane came from.
+- **The Character section is one list, below the tabs.** The picker
+  that sat above the strip is gone; `Active > Characters > PCs` holds
+  the roster, the sheet and the builder, and `#chars-panel` no longer
+  hides itself from a player - the NPC and Creature subtabs do that
+  instead. A row selects, choosing somebody folds the list, and 280
+  says why the two old lists disagreed about who a DM may open.
 
 **THE TABLE BELOW IS FROM 2026-10-24 AND ITS NUMBERS HAVE MOVED.**
 Checked against this machine and the live project on 2026-11-03, not

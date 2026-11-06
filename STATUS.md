@@ -13838,11 +13838,11 @@ title keeps its picture. `npm test` passes.
 
 ### Carried forward
 
-- **THE LIVE UPLOAD HAS NOT BEEN RUN.** Everything up to Rust's three
-  HTTP calls is verified; those calls themselves have only been
-  checked for route shape and policy reachability. The first real drop
-  in the application is the test, and `upload`, `signed_url` and
-  `remove` are where to look if it is not right.
+- ~~**THE LIVE UPLOAD HAS NOT BEEN RUN.**~~ It was, the next
+  morning, and it found 285. The upload itself reached Storage with
+  its bytes, its content type and a token Storage accepted; what
+  refused it was 284's own policy. `signed_url` and `remove` are
+  still unexercised.
 - **AND THE DROP ITSELF IS WEBVIEW2'S TO HONOUR.** `dragDropEnabled`
   false is the documented way to hand HTML drag and drop to the
   webview, and it is the one thing the rig cannot stand in for - a
@@ -13858,6 +13858,71 @@ title keeps its picture. `npm test` passes.
   later cycle, and is what rank was added for.
 - **`NEW-MACHINE.md` says migrations cannot be applied from here**,
   which stopped being true in 283.
+
+## 285. The name I meant was the object's
+
+**2026-11-06.** Dave, with a screenshot of the first real drop:
+*"Storage said 400: new row violates row-level security policy"* -
+printed under the circle, where 284 put it.
+
+**284's four policies asked the wrong table for the name.** Each one
+reads `storage.foldername(name)` to pull the character id off the
+front of the object key, and `name` is not what Postgres bound it to.
+The EXISTS selects `from public.characters c`, the inner relation wins
+an unqualified reference, and `characters` has a `name` column too. So
+what was stored - and what `pg_policies` prints straight back - is:
+
+    (c.id)::text = (storage.foldername(c.name))[1]
+
+`storage.foldername('Bryn')` is `{}`, `[1]` of that is NULL, the
+comparison is NULL, the EXISTS is false. Not sometimes: for every
+object, every character and every command. The bucket was sealed shut.
+
+### Nothing was ever going to catch this but an insert
+
+It compiled. It applied. `security_doors()` passed, because a policy
+that is always false is not malformed - and `characters.name` is a
+real column, so there was nothing for Postgres to complain about. The
+rig cannot see it either: the rig stubs Rust, and RLS lives two layers
+below the place the rig stops.
+
+284's own carried note said the live upload had not been run and named
+`upload`, `signed_url` and `remove` as where to look. It was the right
+warning pointed at the wrong three functions. **The upload worked.**
+The 400 came back from the INSERT on `storage.objects`, which means
+the bytes, the content type and the token all reached Storage and got
+as far as the row - everything 284 could not verify, verified by the
+one thing it could not do.
+
+### Qualify the outer column
+
+`objects.name` can only be the protected table's. The four policies
+are dropped and rewritten with it, confirmed by reading them back:
+all four now contain `objects.name` and none contains `c.name`.
+
+**THE TRAP IS GENERAL AND WILL BE BACK.** Any policy whose EXISTS
+selects from a table that happens to share a column name with the one
+being protected will silently test the wrong one. `characters` has
+`name`, `id` and `created_at`; so do half the tables in this schema.
+Inside an EXISTS, qualify the outer column.
+
+115 is why this is a new file rather than a correction to 284: an
+applied migration records what the database was told.
+
+1443 tests - unchanged, because nothing in Rust or the frontend moved.
+
+### Carried forward
+
+- **`signed_url` and `remove` are still unexercised.** The next drop
+  reaches further than any before it; a picture that uploads and then
+  shows as "could not reach the picture" is `signed_url`, and one that
+  will not go away is `remove`.
+- **No test covers an RLS policy.** 1443 of them cover Rust, and the
+  one class of fault that has now cost two cycles - 283's missing
+  table, 285's wrong column - lives entirely in SQL that nothing
+  exercises until somebody clicks. A policy harness that asserts
+  "this role can / cannot" against the live project would have caught
+  both in seconds.
 
 ---
 
@@ -13909,8 +13974,8 @@ reports it live rather than from a document.
 | | 2026-10-24 said | actually |
 |---|---|---|
 | `cargo test` | 1,331 | **1443, 0 failed** |
-| migration files | 167 | **176**, newest `284_a_picture_you_can_drop_in.sql`, applied 2026-11-05 |
-| ledger rows | 177, "ten applied in parts" | **188**, and it is **eight** files the database split, not ten - 176 + 12 = 188, reconciled by name |
+| migration files | 167 | **177**, newest `285_the_name_i_meant_was_the_objects.sql`, applied 2026-11-06 |
+| ledger rows | 177, "ten applied in parts" | **189**, and it is **eight** files the database split, not ten - 177 + 12 = 189, reconciled by name |
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 
 `security_doors()` still returns **0 faults**, re-run on 2026-11-03.

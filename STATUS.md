@@ -13694,17 +13694,39 @@ rank 5 taking the default off the first, a character switch clearing
 it, a 404 falling back, and the single-column layout at 820px with no
 horizontal overflow. `npm test` passes.
 
+### And the migration took a permission rule to apply
+
+Every cycle before this one applied its migration as it was written -
+the handoff says so in as many words - and this one was **refused
+twice** by the session's guard on schema writes, which judged a write
+to the live project a production deploy. So the first launch on this
+code answered *"Could not find the table 'public.character_images' in
+the schema cache (404)"* at the save button, with everything in front
+of it working: the ring, the fields, the refusals, and a write with
+nowhere to land.
+
+**The route round it was not taken.** `execute_sql` would have run the
+same DDL against the same project with the guard stepped over and
+NOTHING WRITTEN TO THE LEDGER, which is the record the handoff's
+counts reconcile against. Applied properly instead, once Dave allowed
+`apply_migration` in `.claude/settings.local.json` - a file that is
+gitignored, because a permission rule is this machine's and not this
+project's.
+
+Verified against the live project rather than the rig: 8 columns, 4
+policies, 3 indexes, RLS on, `portrait_url` gone from `characters`,
+**187 ledger rows** and `security_doors()` **0 faults**.
+
 1439 tests.
 
 ### Carried forward
 
-- **THE MIGRATION IS WRITTEN AND NOT APPLIED.** Every other cycle
-  applied as it was written - the handoff says so in as many words -
-  and this one could not: the tool was refused. Until
-  `283_a_face_for_a_character.sql` is run, both new commands answer
-  *"Could not find the table 'public.character_images' in the schema
-  cache (404)"*, which is what the first launch on this code showed.
-  Nothing else is affected; no other code path touches that table.
+- **A schema write now needs a permission rule on this machine.**
+  `.claude/settings.local.json` allows `apply_migration` and is
+  gitignored, so a fresh clone starts without it and the next
+  migration will be refused until somebody grants it again.
+  `NEW-MACHINE.md` says "you can write migration files but not apply
+  them", which was true and no longer is.
 - **No way to DELETE a picture.** A wrong address can be corrected and
   cannot be removed, so a character accumulates every one they were
   ever given. One command and one button in the panel that already
@@ -13750,8 +13772,8 @@ longer exists.
   says why the two old lists disagreed about who a DM may open. 283 put
   a round portrait at the top of the Stats pane, in a column of its own
   beside the name and class controls, with an image control panel
-  behind it - and **its migration is the one file in
-  `supabase/migrations` that has not been applied.**
+  behind it. Its table, `character_images`, is the first child of
+  `characters` added since 005.
 
 **THE TABLE BELOW IS FROM 2026-10-24 AND ITS NUMBERS HAVE MOVED.**
 Checked against this machine and the live project on 2026-11-03, not
@@ -13763,8 +13785,8 @@ reports it live rather than from a document.
 | | 2026-10-24 said | actually |
 |---|---|---|
 | `cargo test` | 1,331 | **1439, 0 failed** |
-| migration files | 167 | **175**, newest `283_a_face_for_a_character.sql` - **written 2026-11-05 and NOT applied**, so the ledger is still 186 rows |
-| ledger rows | 177, "ten applied in parts" | **186**, and it is **eight** files the database split, not ten - 174 + 12 = 186, reconciled by name |
+| migration files | 167 | **175**, newest `283_a_face_for_a_character.sql`, applied 2026-11-05 |
+| ledger rows | 177, "ten applied in parts" | **187**, and it is **eight** files the database split, not ten - 175 + 12 = 187, reconciled by name |
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 
 `security_doors()` still returns **0 faults**, re-run on 2026-11-03.

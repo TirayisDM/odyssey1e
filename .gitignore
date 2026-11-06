@@ -25,3 +25,6 @@ dist-ssr
 
 # Supabase CLI scratch (version check, link state) - not project state
 supabase/.temp/
+
+# Claude Code per-machine settings (permission rules, not project state)
+.claude/settings.local.json

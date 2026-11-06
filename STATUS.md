@@ -13603,13 +13603,125 @@ it. Checked as a player as well. `npm test` passes.
   about it in a comment and it feeds an auto-pick that now has one
   fewer place to go wrong. It still decides what the strip offers.
 
+## 283. Three fields that said there was more than one picture
+
+**2026-11-05.** Dave, with a red arrow at an empty box beside the
+abilities: *"I want to establish a top section that shows the character
+icon - round with a border of 10 px so we can add customized borders.
+The image should be like the example Box is for section positioning and
+size purposes."* Then, correcting the first proposal: *"again the outer
+border is not to be displayed - The edit will allow image control panel
+- asking for image source, title, rank (in display weight), default
+status, ring style (sub menu to choose later for now do 1-10 colors).
+After choosing a save should write to memory and the menu closes to
+just display image with border."*
+
+**THE SECOND MESSAGE CHANGED THE SCHEMA, not the layout.** The first
+proposal was going to write a URL into `characters.portrait_url` -
+which 001 has carried since the beginning and which nothing has ever
+read or written. Title, rank and default status cannot live there. A
+single picture has nothing to be titled apart from, nothing to be
+ranked among and nothing to be the default instead of; those three
+words say there are SEVERAL, and a text column cannot hold several.
+
+So `character_images` is a child table on 005's pattern - read with the
+character, written by owner or DM - and `portrait_url` is dropped in
+the same migration. A column that looks authoritative beside a table
+that actually is, is the two-places-disagree fault 280 had just
+finished taking out of the character lists.
+
+### The ring is a number, and that is the whole point of it
+
+`ring` stores 1-10: the style somebody chose. The stylesheet decides
+what 7 looks like. Dave deferred the submenu - *"for now do 1-10
+colors"* - and a ring style will eventually be a gradient, a texture or
+a frame; storing `#9a7ad1` would have made every one of those a
+migration. The same reasoning put the ring in an ELEMENT rather than a
+`border`, because a border can only ever be a colour.
+
+**One default per character, enforced by a partial unique index.**
+`save_character_image` clears the old one in the same call, so the
+refusal is a backstop nobody meets rather than a rule somebody has to
+remember.
+
+### Not on the sheet, which is a departure from what was proposed
+
+The proposal said `load_sheet` would carry the images. It cannot:
+that function's own header names its seven queries as *"the count to
+watch"* and it runs on every roll. A picture has nothing to do with a
+d20. `list_character_images` is read once by the pane that shows it,
+and `loadPortrait` runs FIRST of the async loaders - in front of the
+four that can still take each other down, which is 282's carried note
+honoured rather than restated.
+
+### The box is not drawn
+
+*"The image should be like the example Box is for section positioning
+and size purposes."* So there is no box. A circle, a 10px ring, and one
+button bottom-right. Two columns under the tab strip, collapsing to one
+below 900px so a narrow window gives the name box and the class
+dropdown the width rather than squeezing them.
+
+**Nothing empty looks broken.** No picture paints the ring around the
+character's initials; an address that fails to load falls back to the
+same thing saying so. An `<img>` that cannot load renders as nothing,
+and nothing inside a 10px ring reads as an application that failed.
+
+### What the panel knows that the request did not say
+
+The five fields are Dave's. The LIST of the character's other pictures
+is not, and it is there because without it title, rank and default are
+controls for rows nothing can reach - the sheet shows one face, and a
+second picture would be unreachable the moment it stopped being the
+default. The gallery proper, pictures laid out in rank order, is a
+later cycle.
+
+**The URL is refused in two places.** `tauri.conf.json` sets `"csp":
+null`, so whatever is stored becomes an `<img src>` unexamined.
+A CHECK constraint is the half that cannot be forgotten; the Rust
+refusal is the half that can say why in a sentence somebody can read.
+`javascript:`, `data:` and `file:` are all turned away.
+
+**A refusal leaves the panel open with everything still in it**, which
+is the one thing a form that validates on the far side of an IPC call
+has to get right. Choosing a ring repaints nothing at all - it moves
+two classes and one custom property, and the circle above answers at
+once, because the point of choosing a ring is seeing it.
+
+Verified in the rig: the empty ring, `javascript:alert(1)` refused with
+the form intact, a real address saved at ring 7, a second picture at
+rank 5 taking the default off the first, a character switch clearing
+it, a 404 falling back, and the single-column layout at 820px with no
+horizontal overflow. `npm test` passes.
+
+1439 tests.
+
+### Carried forward
+
+- **THE MIGRATION IS WRITTEN AND NOT APPLIED.** Every other cycle
+  applied as it was written - the handoff says so in as many words -
+  and this one could not: the tool was refused. Until
+  `283_a_face_for_a_character.sql` is run, both new commands answer
+  *"Could not find the table 'public.character_images' in the schema
+  cache (404)"*, which is what the first launch on this code showed.
+  Nothing else is affected; no other code path touches that table.
+- **No way to DELETE a picture.** A wrong address can be corrected and
+  cannot be removed, so a character accumulates every one they were
+  ever given. One command and one button in the panel that already
+  lists them.
+- **Nothing uploads.** An address is somewhere else's server, and the
+  picture disappears when that server does. Supabase Storage is the
+  answer and is a cycle of its own.
+- **The ring styles are ten colours.** The submenu Dave deferred is
+  what makes them styles; the schema is already shaped for it.
+
 ---
 
 ## Pick up here
 
 ### THE SHELL CHANGED ON 2026-11-03/05 - read this before the handoff below
 
-275-281 rebuilt how you get into this application and how it is laid
+275-283 rebuilt how you get into this application and how it is laid
 out, so four things in the handoff below now describe a window that no
 longer exists.
 
@@ -13635,7 +13747,11 @@ longer exists.
   the roster, the sheet and the builder, and `#chars-panel` no longer
   hides itself from a player - the NPC and Creature subtabs do that
   instead. A row selects, choosing somebody folds the list, and 280
-  says why the two old lists disagreed about who a DM may open.
+  says why the two old lists disagreed about who a DM may open. 283 put
+  a round portrait at the top of the Stats pane, in a column of its own
+  beside the name and class controls, with an image control panel
+  behind it - and **its migration is the one file in
+  `supabase/migrations` that has not been applied.**
 
 **THE TABLE BELOW IS FROM 2026-10-24 AND ITS NUMBERS HAVE MOVED.**
 Checked against this machine and the live project on 2026-11-03, not
@@ -13646,8 +13762,8 @@ reports it live rather than from a document.
 
 | | 2026-10-24 said | actually |
 |---|---|---|
-| `cargo test` | 1,331 | **1436, 0 failed** |
-| migration files | 167 | **174**, newest `274_ice_falls_into_ice.sql` |
+| `cargo test` | 1,331 | **1439, 0 failed** |
+| migration files | 167 | **175**, newest `283_a_face_for_a_character.sql` - **written 2026-11-05 and NOT applied**, so the ledger is still 186 rows |
 | ledger rows | 177, "ten applied in parts" | **186**, and it is **eight** files the database split, not ten - 174 + 12 = 186, reconciled by name |
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 

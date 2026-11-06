@@ -756,6 +756,23 @@
                  sheet - who they are and what they are - and shrinking it
                  to a caption on the way to read-only would make the
                  folded state feel like less than the open one. -->
+            <!-- 283. WHO THIS IS, BESIDE WHAT THEY ARE WORTH.
+                 Dave: "I want to establish a top section that shows the
+                 character icon - round with a border of 10 px so we can
+                 add customized borders."
+
+                 TWO COLUMNS, and the picture is the narrow one: the
+                 name, the calling and the level are what this pane is
+                 for, and a face is what makes the pane recognisable
+                 from across a table. Under 900px the picture goes above
+                 them rather than squeezing them - see styles.css.
+
+                 THE BOX IN THE MOCK IS NOT DRAWN. "again the outer
+                 border is not to be displayed" - the rectangle was
+                 Dave's own positioning guide and nothing else. What
+                 shows is the circle, its ring, and one edit button. -->
+            <div class="stats-top">
+            <div class="stats-top-main">
             <div id="stats-read" hidden></div>
 
             <div id="stats-editor">
@@ -780,6 +797,15 @@
               <span id="class-note" class="muted"></span>
             </div>
             </div>
+            </div>
+
+            <!-- Filled by paintPortrait. Empty until a sheet loads, and
+                 it paints a ring around the character's initials when
+                 nobody has given them a face - an empty slot that
+                 looks deliberate rather than broken. -->
+            <div id="portrait" class="portrait"></div>
+            </div>
+
             <div id="abilities" class="abils"></div>
 
             <!-- 119. HOW HARD WAS IT?

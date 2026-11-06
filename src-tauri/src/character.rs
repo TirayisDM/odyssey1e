@@ -999,6 +999,110 @@ pub struct Vitals {
     pub size: Option<String>,
 }
 
+/// ONE PICTURE OF SOMEBODY. 283.
+///
+/// SEVERAL PER CHARACTER, which is why this is a row and not a column.
+/// `portrait_url` sat on `characters` from 001 and was never read or
+/// written; the moment a picture has a title to tell it apart, a rank
+/// to sort it among and a default to be chosen as, there is more than
+/// one of them and a text column cannot hold it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CharacterImage {
+    pub id: String,
+    pub url: String,
+    /// What this one is of - "before the curse", "in plate". None is
+    /// normal; an untitled picture is still a picture.
+    pub title: Option<String>,
+    /// Display weight. Higher sorts earlier.
+    pub rank: i64,
+    /// The one the sheet shows. At most one per character, which the
+    /// database enforces with a partial unique index rather than
+    /// trusting this side to clear the old one.
+    pub is_default: bool,
+    /// Which ring surrounds it, 1-10.
+    ///
+    /// A STYLE ID AND NOT A COLOUR. The stylesheet decides what 7 looks
+    /// like, so the submenu that is coming can make a style a gradient
+    /// or a worn-bronze texture without a migration and without this
+    /// struct hearing about it.
+    pub ring: i64,
+}
+
+/// HTTP OR HTTPS, AND NOTHING ELSE. 283.
+///
+/// `tauri.conf.json` sets `"csp": null`, so whatever is stored here is
+/// handed straight to an `<img src>` in the webview. `javascript:` and
+/// `data:` must not reach the column, and the CHECK constraint in 283
+/// says the same thing in the one place that cannot be forgotten - this
+/// is the half that can say WHY in a sentence somebody can read.
+pub fn checked_image_url(raw: &str) -> Result<String, String> {
+    let u = raw.trim();
+    if u.is_empty() {
+        return Err("a picture needs a web address".to_string());
+    }
+    let lower = u.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(format!(
+            "an image address has to start with http:// or https:// - '{}' does not",
+            u
+        ));
+    }
+    Ok(u.to_string())
+}
+
+/// WHICH RING, 1 TO 10. 283.
+///
+/// Refused rather than clamped: a 14 is somebody's mistake and a
+/// silently-applied 10 would hide it. Same reasoning as 017's refusal
+/// to invent a difficulty.
+pub fn checked_ring(n: i64) -> Result<i64, String> {
+    if (1..=10).contains(&n) {
+        Ok(n)
+    } else {
+        Err(format!("ring styles run 1 to 10 - {} is not one of them", n))
+    }
+}
+
+/// Every picture of one character, the sheet's one first. 283.
+///
+/// NOT ON THE SHEET, DELIBERATELY. `load_sheet` runs on every roll and
+/// its own header names seven queries as "the count to watch"; a
+/// picture has nothing to do with a d20 and would make it eight. This
+/// is read by the pane that shows it, once, when that pane paints.
+pub fn load_images(token: &str, character_id: &str) -> Result<Vec<CharacterImage>, String> {
+    let rows = supabase::rest_get(
+        token,
+        "character_images",
+        &[
+            ("select", "id,url,title,rank,is_default,ring"),
+            ("character_id", &format!("eq.{}", character_id)),
+            // The default leads, then weight, then the order they
+            // arrived - so an unranked gallery is simply a history.
+            ("order", "is_default.desc,rank.desc,created_at.asc"),
+        ],
+    )?;
+    let mut out = Vec::new();
+    if let Some(rows) = rows.as_array() {
+        for r in rows {
+            out.push(CharacterImage {
+                id: as_str(r, "id"),
+                url: as_str(r, "url"),
+                title: r
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                rank: as_i64(r, "rank", 0),
+                is_default: r
+                    .get("is_default")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                ring: as_i64(r, "ring", 1),
+            });
+        }
+    }
+    Ok(out)
+}
+
 pub fn load_profile(token: &str, character_id: &str) -> Result<Profile, String> {
     let chars = supabase::rest_get(
         token,
@@ -2354,6 +2458,38 @@ mod tests {
         let by_key = resolve_request(&rodnar(), "ins", "normal");
         let by_name = resolve_request(&rodnar(), "Insight", "normal");
         assert_eq!(by_key, by_name);
+    }
+
+    // 283. The webview runs with no CSP, so whatever reaches the column
+    // reaches an `<img src>`. These are the schemes that must not.
+    #[test]
+    fn an_image_address_has_to_be_the_web() {
+        assert!(checked_image_url("https://example.com/falon.png").is_ok());
+        assert!(checked_image_url("HTTP://example.com/falon.png").is_ok());
+        assert!(checked_image_url("javascript:alert(1)").is_err());
+        assert!(checked_image_url("data:image/png;base64,AAAA").is_err());
+        assert!(checked_image_url("file:///C:/pictures/falon.png").is_err());
+        assert!(checked_image_url("example.com/falon.png").is_err());
+        assert!(checked_image_url("   ").is_err());
+    }
+
+    #[test]
+    fn a_pasted_address_may_carry_whitespace() {
+        assert_eq!(
+            checked_image_url("  https://example.com/falon.png\n").unwrap(),
+            "https://example.com/falon.png"
+        );
+    }
+
+    // REFUSED RATHER THAN CLAMPED, so a wrong number is somebody's
+    // mistake to see rather than a silent 10.
+    #[test]
+    fn ring_styles_run_one_to_ten() {
+        assert_eq!(checked_ring(1).unwrap(), 1);
+        assert_eq!(checked_ring(10).unwrap(), 10);
+        assert!(checked_ring(0).is_err());
+        assert!(checked_ring(11).is_err());
+        assert!(checked_ring(-3).is_err());
     }
 
     #[test]

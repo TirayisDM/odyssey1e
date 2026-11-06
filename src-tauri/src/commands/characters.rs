@@ -527,6 +527,117 @@ pub fn set_description(
     )
 }
 
+/* ===================== WHAT THEY LOOK LIKE, LITERALLY ===================== */
+
+/// Every picture of one character. 283.
+///
+/// A COMMAND OF ITS OWN RATHER THAN A FIELD ON THE SHEET. `load_sheet`
+/// runs on every roll and its header names its seven queries as "the
+/// count to watch"; a picture has nothing to do with a d20, so it is
+/// read by the pane that shows it instead of riding along with the
+/// dice.
+#[tauri::command]
+pub fn list_character_images(
+    state: State<AppState>,
+    character_id: String,
+) -> Result<Value, String> {
+    let token = state.token()?;
+    let images = crate::character::load_images(&token, &character_id)?;
+    serde_json::to_value(images).map_err(|e| e.to_string())
+}
+
+/// Add a picture to a character, or change one. 283.
+///
+/// Dave: *"The edit will allow image control panel - asking for image
+/// source, title, rank (in display weight), default status, ring style
+/// ... After choosing a save should write to memory and the menu closes
+/// to just display image with border."* This is the write that save
+/// performs.
+///
+/// `image_id` ABSENT MEANS A NEW ONE. The panel is one form for both
+/// acts, because adding a second picture and correcting the first ask
+/// for exactly the same six facts.
+///
+/// THE FIRST PICTURE IS THE DEFAULT WHETHER OR NOT THE BOX WAS TICKED.
+/// A character with one picture and no default would paint a ring
+/// around nothing, which reads as a failure rather than as a choice -
+/// and nobody adding their only portrait means "do not show it". The
+/// same rule keeps the tick from being untickable away: unticking the
+/// only picture's default would leave the sheet blank, so it holds.
+///
+/// ONE DEFAULT, CLEARED HERE AND ENFORCED THERE. This clears the old
+/// default in the same call so the common path never meets a refusal;
+/// 283's partial unique index is what makes that a guarantee rather
+/// than a habit.
+#[tauri::command]
+pub fn save_character_image(
+    state: State<AppState>,
+    character_id: String,
+    image_id: Option<String>,
+    url: String,
+    title: Option<String>,
+    rank: Option<i64>,
+    is_default: Option<bool>,
+    ring: Option<i64>,
+) -> Result<Value, String> {
+    let token = state.token()?;
+
+    // REFUSED HERE AS WELL AS IN THE COLUMN. The webview has no CSP,
+    // so this value becomes an `<img src>` unexamined - and this is
+    // the half that can explain itself to whoever typed it.
+    let url = crate::character::checked_image_url(&url)?;
+    let ring = crate::character::checked_ring(ring.unwrap_or(1))?;
+    let rank = rank.unwrap_or(0);
+
+    // 058's convention, one door along: an empty string CLEARS a title
+    // and an absent one leaves it unsaid. Both are things a form has
+    // to be able to say.
+    let title = title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let had = crate::character::load_images(&token, &character_id)?;
+    let only_one_and_it_is_this = had.len() == 1 && Some(&had[0].id) == image_id.as_ref();
+    let default = is_default.unwrap_or(false) || had.is_empty() || only_one_and_it_is_this;
+
+    if default {
+        supabase::rest_update(
+            &token,
+            "character_images",
+            &[
+                ("character_id", &format!("eq.{}", character_id)),
+                ("is_default", "eq.true"),
+            ],
+            &json!({ "is_default": false }),
+        )?;
+    }
+
+    match image_id {
+        Some(id) => supabase::rest_update(
+            &token,
+            "character_images",
+            &[("id", &format!("eq.{}", id))],
+            &json!({
+                "url": url,
+                "title": title,
+                "rank": rank,
+                "is_default": default,
+                "ring": ring,
+            }),
+        ),
+        None => supabase::rest_insert(
+            &token,
+            "character_images",
+            &json!({
+                "character_id": character_id,
+                "url": url,
+                "title": title,
+                "rank": rank,
+                "is_default": default,
+                "ring": ring,
+            }),
+        ),
+    }
+}
+
 /* ======================= WHEN THE NUMBERS MOVE ======================= */
 
 /// Recompute a character's hit point maximum from what it is derived

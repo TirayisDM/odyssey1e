@@ -1359,3 +1359,82 @@ button.wide{width:100%}
 .gamechip:hover{border-color:var(--line)}
 .gamechip[hidden]{display:none}
 .gamechip .caret{color:var(--muted);font-size:10px}
+
+/* ================= A FACE FOR A CHARACTER (283) =================
+
+   Dave: "I want to establish a top section that shows the character
+   icon - round with a border of 10 px so we can add customized
+   borders", and, of the rectangle in his own mock: "again the outer
+   border is not to be displayed". So there is no box here. The circle,
+   its ring, and one button.
+
+   THE RING IS AN ELEMENT RATHER THAN A `border`. Ten pixels of
+   background behind a round child, which a border could also do today
+   - and could not do once a ring style is a gradient, a texture or an
+   image. `--portrait-ring` is set per element from the stored style
+   id, so the submenu that is coming changes these ten declarations
+   and nothing else.
+
+   TWO COLUMNS, COLLAPSING AT 900px. Below that the picture goes above
+   the name and class controls instead of squeezing them: the name box
+   and the class dropdown are what this pane is for. */
+
+:root{
+  --ring-1:#6aa9ff; --ring-2:#9aa4b2; --ring-3:#b5853f; --ring-4:#d9b64a;
+  --ring-5:#6fbf73; --ring-6:#3fb6a8; --ring-7:#9a7ad1; --ring-8:#d1543f;
+  --ring-9:#d9789f; --ring-10:#e8e4d8;
+}
+
+.stats-top{display:grid;grid-template-columns:minmax(0,1fr) auto;
+           gap:1rem;align-items:start}
+.stats-top-main{min-width:0}
+@media (max-width:900px){
+  .stats-top{grid-template-columns:minmax(0,1fr)}
+  .portrait{justify-self:start}
+}
+
+.portrait{display:flex;flex-direction:column;align-items:center;
+          gap:.4rem;width:12rem}
+.portrait-ring{position:relative;flex:0 0 auto;width:11rem;height:11rem;
+               padding:10px;border-radius:50%;
+               background:var(--portrait-ring,var(--ring-1))}
+.portrait-img,.portrait-empty{display:block;width:100%;height:100%;
+                              border-radius:50%;object-fit:cover;
+                              background:#0f1114}
+.portrait-empty{display:flex;flex-direction:column;align-items:center;
+                justify-content:center;gap:.2rem;padding:.6rem;
+                text-align:center}
+.portrait-initials{font-size:2.2rem;font-weight:600;letter-spacing:.04em;
+                   color:var(--muted)}
+.portrait-note{font-size:10px;line-height:1.25;color:var(--muted)}
+/* Over the picture, so it needs a background of its own - a ghost
+   button on a photograph is a button nobody can read. */
+.portrait-edit{position:absolute;right:.1rem;bottom:.1rem;
+               background:var(--panel);border-color:var(--line)}
+.portrait-caption{max-width:11rem;font-size:12px;text-align:center}
+
+.portrait-panel{width:100%;padding:.6rem;background:var(--panel);
+                border:1px solid var(--line);border-radius:6px}
+.portrait-field{margin-bottom:.5rem}
+.portrait-label{display:block;margin-bottom:.15rem;font-size:10px;
+                text-transform:uppercase;letter-spacing:.08em;
+                color:var(--muted)}
+.portrait-hint{display:block;font-size:10px;line-height:1.3}
+.portrait-tick{width:auto;margin:0 0 .2rem}
+.portrait-err{margin:.3rem 0;font-size:11px;color:var(--bad)}
+
+.ring-swatches{display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.2rem}
+.ring-swatch{width:1.2rem;height:1.2rem;margin:0;padding:0;border-radius:50%;
+             background:var(--portrait-ring,var(--ring-1));
+             border:2px solid transparent;cursor:pointer}
+.ring-swatch.on{border-color:var(--fg)}
+.ring-dot{flex:0 0 auto;width:.7rem;height:.7rem;border-radius:50%;
+          background:var(--portrait-ring,var(--ring-1))}
+
+.portrait-others{margin-bottom:.6rem}
+.portrait-other{display:flex;align-items:center;gap:.4rem;margin-bottom:.25rem;
+                padding:.25rem .35rem;font-size:12px;
+                border:1px solid var(--line);border-radius:4px}
+.portrait-other.on{border-color:var(--accent)}
+.portrait-other-name{flex:1;min-width:0;overflow:hidden;white-space:nowrap;
+                     text-overflow:ellipsis}

@@ -97,6 +97,14 @@ let state = {
   // written yet - see paintDescription.
   descEditing: false,
   bodyEditing: false,
+  // 283. Whether the image control panel is open, which picture it is
+  // editing (null for a new one), every picture this character has, and
+  // WHOSE they are. The last exists because switching character would
+  // otherwise leave the panel standing open on somebody else's row.
+  portraitEditing: false,
+  portraitEditId: null,
+  portraitFor: null,
+  images: [],
   // 081. Whether the Stats pane's name-and-class controls are open.
   // False once they have a class; `edit` on the folded line reopens.
   statsEditing: false,
@@ -1241,6 +1249,302 @@ function paintTalents(sheet) {
     box.append(head, sEl("div", "talent-text", text));
     host.append(box);
   }
+}
+
+/* ==================== A FACE FOR A CHARACTER (283) ==================== */
+//
+// Dave: *"I want to establish a top section that shows the character
+// icon - round with a border of 10 px so we can add customized
+// borders"*, and then: *"The edit will allow image control panel -
+// asking for image source, title, rank (in display weight), default
+// status, ring style (sub menu to choose later for now do 1-10 colors).
+// After choosing a save should write to memory and the menu closes to
+// just display image with border."*
+//
+// THE BOX IN THE MOCK IS NOT DRAWN. "again the outer border is not to
+// be displayed" - the rectangle was a positioning guide. What shows is
+// the circle, its ring, and one button.
+//
+// READ BY ITS OWN COMMAND rather than carried on the sheet. `load_sheet`
+// runs on every roll and its own header names its seven queries as "the
+// count to watch"; a picture has nothing to do with a d20.
+//
+// 079's RULE, ONE PANE ALONG: written means read-only until asked. A
+// character who has a face shows the face and an `edit` button, and
+// nothing repaints while the panel is open - so a half-filled form
+// cannot fold under somebody mid-entry.
+async function loadPortrait() {
+  const host = document.querySelector("#portrait");
+  if (!host) return;
+  if (!state.characterId) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+
+  // A NEW PERSON CLOSES THE PANEL. `portraitEditId` names a row in the
+  // list that is about to be replaced, and a panel left open across a
+  // character switch would offer to edit a picture that is no longer
+  // on the screen.
+  if (state.portraitFor !== state.characterId) {
+    state.portraitEditing = false;
+    state.portraitEditId = null;
+    state.portraitFor = state.characterId;
+  }
+
+  const got = await call("list_character_images", {
+    characterId: state.characterId,
+  });
+  state.images = Array.isArray(got) ? got : [];
+  paintPortrait();
+}
+
+function paintPortrait() {
+  const host = document.querySelector("#portrait");
+  if (!host) return;
+  host.innerHTML = "";
+
+  const images = state.images || [];
+  // THE HEAD OF THE LIST IS THE ONE TO SHOW. `load_images` orders
+  // default first, then rank, then arrival - so this is the default
+  // where there is one and the heaviest picture where there is not,
+  // which is what unticking the only tick leaves behind.
+  const shown = images[0] || null;
+
+  // THE RING IS AN ELEMENT AND NOT A BORDER. Ten pixels of background
+  // behind a round child, so the submenu Dave deferred can make style 7
+  // a gradient or a worn-bronze texture by changing one custom
+  // property. A border can only ever be a colour.
+  const ring = sEl("div", "portrait-ring");
+  ring.style.setProperty(
+    "--portrait-ring",
+    "var(--ring-" + (shown ? shown.ring : 1) + ")",
+  );
+
+  if (shown) {
+    const img = sEl("img", "portrait-img");
+    img.src = shown.url;
+    img.alt = shown.title || (state.sheet ? state.sheet.name : "portrait");
+    if (shown.title) img.title = shown.title;
+    // A DEAD ADDRESS SAYS SO. A failed <img> renders as nothing, and
+    // nothing inside a 10px ring reads as a broken application rather
+    // than as a wrong address somebody can go and fix.
+    img.addEventListener("error", () => {
+      img.replaceWith(portraitEmpty("that address did not load"));
+    });
+    ring.append(img);
+  } else {
+    ring.append(portraitEmpty(null));
+  }
+
+  // BOTTOM-RIGHT OF THE CIRCLE, where the mock puts it.
+  const edit = sEl("button", "ghost tiny portrait-edit", shown ? "edit" : "add");
+  edit.title = shown
+    ? "change this picture, its ring, or which one the sheet shows"
+    : "give this character a face";
+  edit.addEventListener("click", () => {
+    state.portraitEditing = true;
+    state.portraitEditId = shown ? shown.id : null;
+    paintPortrait();
+  });
+  ring.append(edit);
+  host.append(ring);
+
+  if (state.portraitEditing) {
+    host.append(portraitPanel());
+  } else if (shown && shown.title) {
+    host.append(sEl("div", "muted portrait-caption", shown.title));
+  }
+}
+
+// A RING AROUND THE INITIALS when nobody has given them a face. An
+// empty circle reads as a picture that failed to load; initials read as
+// a slot waiting for one.
+function portraitEmpty(note) {
+  const box = sEl("div", "portrait-empty");
+  const name = (state.sheet && state.sheet.name) || "";
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+  box.append(sEl("span", "portrait-initials", initials || "?"));
+  if (note) box.append(sEl("span", "portrait-note", note));
+  return box;
+}
+
+// THE IMAGE CONTROL PANEL. The five facts Dave named, and the list of
+// what they apply to.
+//
+// NOT window.prompt, for 119's reasons restated: a browser modal blocks
+// the webview, cannot be styled, and cannot carry five fields and a
+// ring.
+//
+// IT LISTS THE OTHER PICTURES, because otherwise title, rank and
+// default status are controls for rows nobody can reach. The gallery
+// itself - the pictures laid out on the sheet, in rank order - is a
+// later cycle; this is the control panel naming what it controls, which
+// is the panel that was asked for.
+//
+// BUILT ONCE AND MUTATED IN PLACE. Choosing a ring moves two classes
+// and one custom property rather than repainting, because a repaint
+// mid-form would throw away what somebody had typed into the address
+// box above it.
+function portraitPanel() {
+  const images = state.images || [];
+  const row = state.portraitEditId
+    ? images.find((i) => i.id === state.portraitEditId) || null
+    : null;
+
+  const panel = sEl("div", "portrait-panel");
+  panel.append(sEl("div", "sub", row ? "Image control" : "A new picture"));
+
+  if (images.length) {
+    const list = sEl("div", "portrait-others");
+    for (const im of images) {
+      const r = sEl(
+        "div",
+        "portrait-other" + (row && row.id === im.id ? " on" : ""),
+      );
+      const dot = sEl("span", "ring-dot");
+      dot.style.setProperty("--portrait-ring", "var(--ring-" + im.ring + ")");
+      r.append(dot, sEl("span", "portrait-other-name", im.title || im.url));
+      if (im.is_default) r.append(sEl("span", "tag tag-src", "shown"));
+      if (!row || row.id !== im.id) {
+        r.append(
+          action("edit", () => {
+            state.portraitEditId = im.id;
+            paintPortrait();
+          }),
+        );
+      }
+      list.append(r);
+    }
+    panel.append(list);
+  }
+
+  const field = (label, control, hint) => {
+    const f = sEl("div", "portrait-field");
+    f.append(sEl("label", "portrait-label", label));
+    f.append(control);
+    if (hint) f.append(sEl("span", "muted portrait-hint", hint));
+    return f;
+  };
+
+  const src = document.createElement("input");
+  src.placeholder = "https://...";
+  src.value = row ? row.url : "";
+  panel.append(
+    field("image source", src, "http or https - the engine refuses anything else"),
+  );
+
+  const ttl = document.createElement("input");
+  ttl.placeholder = "optional";
+  ttl.value = row && row.title ? row.title : "";
+  panel.append(field("title", ttl, "what this one is of - “in plate”"));
+
+  const rnk = document.createElement("input");
+  rnk.type = "number";
+  rnk.value = row ? row.rank : 0;
+  panel.append(field("rank", rnk, "display weight - higher comes first"));
+
+  // THE ONLY PICTURE IS ALWAYS THE ONE SHOWN, and Rust decides that
+  // whether or not this is ticked. So the tick is disabled rather than
+  // left standing as a control that cannot be honoured.
+  const def = document.createElement("input");
+  def.type = "checkbox";
+  def.className = "portrait-tick";
+  const forced = images.length === 0 || (images.length === 1 && !!row);
+  def.checked = forced || (row ? !!row.is_default : false);
+  def.disabled = forced;
+  panel.append(
+    field(
+      "default",
+      def,
+      forced
+        ? "the only picture is always the one shown"
+        : "the one the sheet shows - there can be one",
+    ),
+  );
+
+  // TEN STYLES, AS NUMBERS. Colours for now, by Dave's own "for now do
+  // 1-10 colors"; what each one becomes is the stylesheet's business
+  // and needs no migration to change.
+  let ring = row ? row.ring : 1;
+  const swatches = sEl("div", "ring-swatches");
+  for (let n = 1; n <= 10; n++) {
+    const sw = sEl("button", "ring-swatch" + (n === ring ? " on" : ""));
+    sw.type = "button";
+    sw.title = "ring style " + n;
+    sw.style.setProperty("--portrait-ring", "var(--ring-" + n + ")");
+    sw.addEventListener("click", () => {
+      ring = n;
+      for (const other of swatches.children) other.classList.remove("on");
+      sw.classList.add("on");
+      // THE CIRCLE ANSWERS AT ONCE, because the whole point of
+      // choosing a ring is seeing it on the face it surrounds.
+      const live = document.querySelector("#portrait .portrait-ring");
+      if (live) live.style.setProperty("--portrait-ring", "var(--ring-" + n + ")");
+    });
+    swatches.append(sw);
+  }
+  panel.append(field("ring style", swatches, "a submenu of styles comes later"));
+
+  const err = sEl("div", "portrait-err");
+  err.hidden = true;
+  panel.append(err);
+
+  const buttons = sEl("div", "row");
+  const save = sEl("button", "", "save");
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    const r = await tryCall("save_character_image", {
+      characterId: state.characterId,
+      imageId: row ? row.id : null,
+      url: src.value,
+      title: ttl.value,
+      rank: Number(rnk.value) || 0,
+      isDefault: def.checked,
+      ring: ring,
+    });
+    save.disabled = false;
+    // A REFUSAL LEAVES THE PANEL OPEN with everything still in it. A
+    // mistyped address is one character to fix and would otherwise
+    // cost the whole form.
+    if (!r.ok) {
+      err.textContent = r.error;
+      err.hidden = false;
+      return;
+    }
+    // "After choosing a save should write to memory and the menu
+    // closes to just display image with border."
+    state.portraitEditing = false;
+    state.portraitEditId = null;
+    await loadPortrait();
+  });
+
+  const cancel = sEl("button", "ghost", "cancel");
+  cancel.addEventListener("click", () => {
+    state.portraitEditing = false;
+    state.portraitEditId = null;
+    paintPortrait();
+  });
+  buttons.append(save, cancel);
+  panel.append(buttons);
+
+  // ONE MORE, from inside the panel that already lists them. The sheet
+  // shows one face; this is how a second one gets added at all.
+  if (row) {
+    const another = sEl("button", "linky", "+ another picture");
+    another.addEventListener("click", () => {
+      state.portraitEditId = null;
+      paintPortrait();
+    });
+    panel.append(another);
+  }
+
+  return panel;
 }
 
 function paintDescription(sheet) {
@@ -3471,6 +3775,12 @@ async function loadSheet() {
     list.append(el);
   }
 
+  // 283. FIRST OF THE ASYNC LOADERS, and after everything synchronous
+  // above has already painted. A throw in `loadInventory` skips what
+  // follows it - the fault 211 half-fixed and 282's carried note still
+  // names - so the face goes in front of the four that can take each
+  // other down rather than behind them.
+  await loadPortrait();
   await updatePreview();
   await loadInventory();
   await loadFeatures();

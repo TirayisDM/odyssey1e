@@ -1793,6 +1793,9 @@ pub fn run() {
             commands::characters::list_species,
             // 058: what this particular person looks like.
             commands::characters::set_description,
+            // 283: and what they look like LITERALLY - the pictures.
+            commands::characters::list_character_images,
+            commands::characters::save_character_image,
             // 066: seven scores for six slots, rolled on this device.
             commands::characters::roll_ability_spread,
             list_rolls,

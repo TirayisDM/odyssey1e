@@ -1385,8 +1385,18 @@ button.wide{width:100%}
   --ring-9:#d9789f; --ring-10:#e8e4d8;
 }
 
-.stats-top{display:grid;grid-template-columns:minmax(0,1fr) auto;
-           gap:1rem;align-items:start}
+/* 287. THE TABLE AT ITS OWN WIDTH, THE FACE AT THE FAR EDGE.
+   `1fr` stretched the ability rows the whole width of the pane and
+   left the circle hard against them. A capped left track and
+   space-between puts the gap Dave's layout has between the two.
+
+   46rem IS NOT ARBITRARY. `#abilities` is a container and its rows
+   fold the save half onto a second line below 680px - so a tidier
+   40rem would have quietly undone 119's one-line row on every wide
+   window. The cap has to clear that query, and this does, with room
+   to spare. */
+.stats-top{display:grid;grid-template-columns:minmax(0,46rem) auto;
+           gap:1rem;align-items:start;justify-content:space-between}
 .stats-top-main{min-width:0}
 @media (max-width:900px){
   .stats-top{grid-template-columns:minmax(0,1fr)}

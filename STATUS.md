@@ -13984,6 +13984,55 @@ ring. `npm test` passes.
   now visible. It paints correctly, because the list falls back to
   rank. It still reads oddly in the panel.
 
+## 287. Beside the table, not above it
+
+**2026-11-06.** Dave, with his own window marked up: *"looking good
+but remember I want the table and image position to be in this overall
+shape, keep the edit buttons the same and the popup menu for image
+editing but format left table like the image."*
+
+**283 PUT THE CIRCLE IN A BAND ACROSS THE TOP**, which reads as a
+header: the name line on the left, the face on the right, and the
+ability scores starting underneath the whole thing. Measured before
+changing anything, because the difference was worth being exact
+about: the portrait row ended at 773 and the table began at 797, with
+the table stretching the full 1235 pixels of the pane. What Dave drew
+has them level - the scores at their own width on the left, the face
+beside them on the right.
+
+So the grid grew rather than moved. Everything the Stats pane holds -
+the name line, the scores, the save prompt, the resistances - is now
+the LEFT COLUMN of the same grid the portrait was already the right
+column of. Nothing was restyled and no button moved; three blocks
+changed which div they close inside.
+
+### 46rem is not a round number and could not be
+
+The obvious cap on the left column was 40rem, which looks tidier and
+would have broken 119 in silence. `#abilities` is a container and its
+rows fold the save half onto a second line **below 680px** - so a
+40rem column would have quietly undone the one-line ability row on
+every wide window, the exact layout 119 argued for. The cap has to
+clear that query. 46rem does, with room, and the rows were checked
+rather than assumed: the save half is still level with the code.
+
+`justify-content: space-between` is what puts the face at the far
+edge instead of hard against the table.
+
+**STILL NO BOX.** The rectangle in the mock is where the picture
+goes, not something to draw - the same answer as 283, asked again and
+confirmed before building.
+
+Verified in the rig at 1600 and at 860. Wide: the table is 736 wide
+at the left, the circle level with the name line at the right, the
+two genuinely overlapping vertically, the save half on one line, and
+the image panel opening under the circle in the right-hand column
+where it belongs. Narrow: one column, the circle below the table, no
+horizontal overflow, and the save half wrapping as 119 intended.
+`npm test` passes.
+
+1443 tests - unchanged, since nothing in Rust moved.
+
 ---
 
 ## Pick up here

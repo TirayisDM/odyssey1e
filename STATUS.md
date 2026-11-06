@@ -13843,6 +13843,12 @@ title keeps its picture. `npm test` passes.
   checked for route shape and policy reachability. The first real drop
   in the application is the test, and `upload`, `signed_url` and
   `remove` are where to look if it is not right.
+- **AND THE DROP ITSELF IS WEBVIEW2'S TO HONOUR.** `dragDropEnabled`
+  false is the documented way to hand HTML drag and drop to the
+  webview, and it is the one thing the rig cannot stand in for - a
+  browser always had it. If a drop onto the circle does nothing at all
+  in the window, that flag is the first suspect and **paste is the
+  fallback**, because the clipboard path does not go through it.
 - **Nothing resizes or crops.** A 2MB photograph is stored at 2MB and
   scaled down by the browser into a 176px circle, downloaded in full
   every time the sheet paints. The cap keeps it survivable; it does

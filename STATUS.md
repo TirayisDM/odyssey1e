@@ -13913,16 +13913,76 @@ applied migration records what the database was told.
 
 ### Carried forward
 
-- **`signed_url` and `remove` are still unexercised.** The next drop
-  reaches further than any before it; a picture that uploads and then
-  shows as "could not reach the picture" is `signed_url`, and one that
-  will not go away is `remove`.
+- ~~**`signed_url` is unexercised.**~~ The next drop reached it: the
+  picture rendered, so a private bucket, a signed URL and an `<img
+  src>` with no credentials all work together. **`remove` still has
+  not run against live Storage** - the next thing deleted tests
+  whether the object leaves the bucket or only the row.
 - **No test covers an RLS policy.** 1443 of them cover Rust, and the
   one class of fault that has now cost two cycles - 283's missing
   table, 285's wrong column - lives entirely in SQL that nothing
   exercises until somebody clicks. A policy harness that asserts
   "this role can / cannot" against the live project would have caught
   both in seconds.
+
+## 286. The panel landed on nothing
+
+**2026-11-06.** The first drop that worked, and the database proved
+it: `Mage_ico`, **21,523 bytes** - the file itself, to the byte -
+`image/png`, under Tarren's id, no address, rendering in the circle.
+Which means the upload, the private bucket, the signed URL and an
+`<img src>` carrying no credentials all work together. 284's three
+unverified calls are down to one.
+
+**And then save refused.** Dave's screenshot: the picture in the
+circle, and under it the panel reading **A NEW PICTURE** over an empty
+form, with *"a picture needs a web address"* in red.
+
+**284 LEFT THE PANEL EXACTLY AS IT FOUND IT.** A drop made while the
+panel was open redrew it unchanged - still the blank new-picture form
+it had been before - now sitting over a picture that had just landed.
+The address box was empty because what arrived was not an address, and
+`save` on an empty address box is correctly refused. So the one
+control that looked like the next step was the one that could not
+work. A trap of my own making, and the kind that only exists because
+the two halves were built in the right order and never tried in the
+wrong one.
+
+Dave: *"Save should just be confirming the other options and closing
+after the image drop or paste."*
+
+### An arrival is an edit
+
+A drop or a paste now leaves the panel open **on the picture that just
+arrived**, whether or not it was open before. The title is already
+filled from the filename, the address box is greyed because this one
+is a file, the ring swatches are live, and the default tick says where
+this picture stands among the others. Save then means what it says:
+confirm those four and close to the picture and its ring - 283's rule,
+reached by the other road.
+
+**THE ROW COMES BACK FROM THE INSERT.** `rest_insert` already asks for
+`return=representation`, so the id the panel reopens on is the one
+Postgres wrote rather than a guess at it. If it ever arrives without
+one the panel shuts instead, because reopening blank is the fault
+being fixed.
+
+Verified in the rig three ways: dropped with the panel shut, dropped
+with the panel open on a different picture, and pasted with the panel
+shut. All three land on the new row with its filename as the title and
+the file's own row marked; save closes to the picture with the chosen
+ring. `npm test` passes.
+
+1443 tests - unchanged, since nothing in Rust moved.
+
+### Carried forward
+
+- **`remove` still has not run against live Storage**, as above.
+- **A character can have pictures and no default.** Tarren does: the
+  upload was not the default because a linked picture held the flag,
+  and removing that one promoted nothing - 284's deliberate choice,
+  now visible. It paints correctly, because the list falls back to
+  rank. It still reads oddly in the panel.
 
 ---
 

@@ -1484,6 +1484,37 @@ async function portraitTakeFile(file) {
     state.portraitError = r.error;
     return paintPortrait();
   }
+
+  // 286. THE PANEL LANDS ON THE PICTURE THAT JUST ARRIVED.
+  //
+  // Dave: *"Save should just be confirming the other options and
+  // closing after the image drop or paste"*. 284 left the panel
+  // exactly as it found it, which meant a drop made with the panel
+  // open redrew it as a blank **A NEW PICTURE** form sitting over a
+  // picture that had just landed - and the obvious button on a blank
+  // form is `save`, which correctly refused it for having no address.
+  // A trap of my own making: the one control that looked like the
+  // next step was the one that could not work.
+  //
+  // So an arrival IS an edit now. The title comes off the filename,
+  // the ring swatches are live, the default tick says where this one
+  // stands among the others, and save means what it says - confirm
+  // those four and close to the picture, which is 283's rule reached
+  // by the other road.
+  //
+  // THE ROW COMES BACK FROM THE INSERT. `rest_insert` asks for
+  // `return=representation`, so this is the row Postgres wrote rather
+  // than a guess at it - and if it ever arrives without an id, the
+  // panel shuts instead of reopening blank, because the blank form is
+  // the fault being fixed.
+  const made = Array.isArray(r.value) ? r.value[0] : r.value;
+  if (made && made.id) {
+    state.portraitEditing = true;
+    state.portraitEditId = made.id;
+  } else {
+    state.portraitEditing = false;
+    state.portraitEditId = null;
+  }
   await loadPortrait();
 }
 

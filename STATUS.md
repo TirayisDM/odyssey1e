@@ -14033,6 +14033,93 @@ horizontal overflow, and the save half wrapping as 119 intended.
 
 1443 tests - unchanged, since nothing in Rust moved.
 
+## 288. A miner is not a giant
+
+**2026-11-06.** Dave, reading Tarren's sheet: *"he is listed as an
+Untgar but it looks like some of his attributes and species traits are
+coming from Untgaroth."*
+
+**ONE FIELD, AND HE FOUND IT FROM THE OUTSIDE.** `species.creature_type`
+for the Unt'gar said `giant` - the Unt'garoth's word, on a four-foot
+Hågenfolk miner, printed into the sheet header beside the name:
+"Tarren - giant". The Fjell'gar, in the same height band, say
+`humanoid`.
+
+### What was already right, and checking it was the work
+
+Tarren's row: `species_key: untgar`, `size: med`, `creature_type:
+null`, and all six stored scores flat 10s - so the 12 Constitution and
+11 Intelligence on his sheet are Unt'gar's +2/+1 being applied exactly
+as 056 designed. Nothing of the Unt'garoth is stored on him.
+
+The species row checked out against **Dave's own document**, read off
+the Drive rather than reasoned about: `E. Unt'gar/Species Rules
+Untgar/Unt'gar Details.txt`. Con +2 / Int +1, Medium, 25 feet,
+History, four to five feet, Darkvision 120, Mineral Sense,
+Stonecunning, Trade Savvy, Environmental Resilience, Common /
+Hågenfolk / one other, mature at 25 and live to 500, lawful neutral.
+Field for field. The lookup could not have borrowed anything either -
+`load_species_map` asks for the key exactly and both screens match on
+`key ===`.
+
+So one word out of forty-odd facts, and it was the one no document
+states. Neither species paper names a 5e creature type at all; the
+Unt'garoth's own summary calls them *towering humanoids*.
+
+### The worse half: nothing ever wrote this column
+
+122 added `creature_type` to `species`, `characters` and `npcs` and
+set a value on exactly one of them - `npcs`, to humanoid. Species got
+the column, the check constraint and the comment, and **not one row**.
+So all four live values were typed straight into the database: a
+rebuild from these migrations produces four NULLs, the repo has never
+recorded what any people IS, and the wrong word sat in the one place
+nobody reviews. That is the fault. The typo is a consequence of it,
+and the same shape as 283's missing table and 285's wrong column -
+SQL that nothing exercises until somebody reads a screen.
+
+**IT IS NOT COSMETIC.** `creature::is_creature` files anything that is
+not humanoid-or-null as a creature rather than a person - 140's line
+between a merchant and a goblin. Tarren escaped it only because
+`who_is_where` reads `characters.creature_type`, which is null, and
+not the species behind it. The moment anything stamps a resolved type
+onto the row, an Unt'gar player character lands on the monster list.
+
+### The Unt'garoth keep `giant`, now on purpose
+
+Dave: *"Unt'gar to humanoid but Untgaroth is a Large creature."* Their
+paper calls them towering humanoids and the mechanics say otherwise -
+Large, Powerful Build, forged by the Mithar'itra as labourers - so the
+word stands as a decision rather than as an inheritance.
+
+**ALL FOUR ARE WRITTEN, not just the broken one**, because the point
+is the record and not the repair. `where game_id is null` so a game's
+own override is untouched, keyed by slug so a rebuilt database lands
+on the same four rows. The migration then **fails if any species has
+no type** - `collapse` replaces a whole row, so a people with no type
+hands every character of it an unstated one. Four peoples and a fifth
+a seed away: the cheapest guard is the one that fails the migration
+that forgets, which is `security_doors()`'s argument one layer down.
+
+Read back: untgar humanoid, fjellgar humanoid, nyook humanoid,
+untgaroth giant. 1443 tests - unchanged, because nothing in Rust or
+the frontend moved. This was data.
+
+### Carried forward
+
+- **44 of the bestiary's statblocks read as people.** Checking the
+  other half of 122 turned this up: `npcs` has 44 humanoid keys, and
+  5e agrees with nearly every one - goblin, kobold, orc, bugbear,
+  hobgoblin, drow, gnoll, duergar, lizardfolk, sahuagin, and the five
+  lycanthropes are all humanoid in the Monster Manual. So a goblin
+  stamped from a statblock lands in the **NPCs** list and not the
+  Creatures one. That is 140's rule working as written - Dave chose
+  "is it a humanoid" over "did it come from a statblock" so a merchant
+  built on `commoner` stays a person - but the cost was never looked
+  at from this end, and it is most of the bestiary.
+- **Still no test covers data like this**, 285's note unanswered. The
+  guard added here is one assertion in one migration, not a harness.
+
 ---
 
 ## Pick up here
@@ -14083,8 +14170,8 @@ reports it live rather than from a document.
 | | 2026-10-24 said | actually |
 |---|---|---|
 | `cargo test` | 1,331 | **1443, 0 failed** |
-| migration files | 167 | **177**, newest `285_the_name_i_meant_was_the_objects.sql`, applied 2026-11-06 |
-| ledger rows | 177, "ten applied in parts" | **189**, and it is **eight** files the database split, not ten - 177 + 12 = 189, reconciled by name |
+| migration files | 167 | **178**, newest `288_a_miner_is_not_a_giant.sql`, applied 2026-11-06 |
+| ledger rows | 177, "ten applied in parts" | **190**, and it is **eight** files the database split, not ten - 178 + 12 = 190, reconciled by name |
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 
 `security_doors()` still returns **0 faults**, re-run on 2026-11-03.

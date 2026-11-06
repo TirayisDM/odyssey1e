@@ -105,6 +105,11 @@ let state = {
   portraitEditId: null,
   portraitFor: null,
   images: [],
+  // 284. A drop or a paste in flight, and what went wrong with the
+  // last one. The error lives here rather than in the panel because a
+  // drop happens with the panel shut.
+  portraitBusy: false,
+  portraitError: null,
   // 081. Whether the Stats pane's name-and-class controls are open.
   // False once they have a class; `edit` on the folded line reopens.
   statsEditing: false,
@@ -1321,7 +1326,9 @@ function paintPortrait() {
     "var(--ring-" + (shown ? shown.ring : 1) + ")",
   );
 
-  if (shown) {
+  if (state.portraitBusy) {
+    ring.append(portraitEmpty("uploading\u2026"));
+  } else if (shown && shown.url) {
     const img = sEl("img", "portrait-img");
     img.src = shown.url;
     img.alt = shown.title || (state.sheet ? state.sheet.name : "portrait");
@@ -1334,7 +1341,11 @@ function paintPortrait() {
     });
     ring.append(img);
   } else {
-    ring.append(portraitEmpty(null));
+    // 284. A picture WITH a row and WITHOUT an address is an upload
+    // whose signing failed - the bucket is private, so there is no
+    // address to fall back on. Said out loud, because it is a
+    // different fault from never having had a picture.
+    ring.append(portraitEmpty(shown ? "could not reach the picture" : null));
   }
 
   // BOTTOM-RIGHT OF THE CIRCLE, where the mock puts it.
@@ -1349,12 +1360,131 @@ function paintPortrait() {
   });
   ring.append(edit);
   host.append(ring);
+  wirePortrait(host);
+
+  // 284. WHAT WENT WRONG WITH THE LAST DROP, under the circle rather
+  // than in the panel: a drop happens with the panel shut, and an
+  // upload refused in silence looks like a drop that missed.
+  if (state.portraitError) {
+    const err = sEl("div", "portrait-err", state.portraitError);
+    host.append(err);
+  }
 
   if (state.portraitEditing) {
     host.append(portraitPanel());
   } else if (shown && shown.title) {
     host.append(sEl("div", "muted portrait-caption", shown.title));
   }
+}
+
+// 284. DROP A FILE ON THE CIRCLE, OR PASTE ONE ANYWHERE ON THE PANE.
+//
+// Dave: *"should we just start with drag an image in from explorer,
+// and add the paste later or is it same basic operation?"* It is the
+// same operation. A drop reads `dataTransfer.files`, a paste reads
+// `clipboardData.items`, and from the File onwards there is one path -
+// which is why withholding the second would have been a decision
+// rather than a saving.
+//
+// WIRED ONCE, NOT PER PAINT. `paintPortrait` empties `#portrait` on
+// every repaint but the host element itself survives, so listeners
+// added each time would stack up and a single drop would upload four
+// copies.
+//
+// THE WINDOW REFUSES FILES EVERYWHERE ELSE. Without that, dropping
+// slightly wide of the circle makes the webview NAVIGATE to the file,
+// which replaces the application with a picture and loses whatever
+// was on screen. Only drags carrying files are touched, so nothing
+// the map or the inventory does with its own drags is affected.
+function wirePortrait(host) {
+  if (host.dataset.wired === "1") return;
+  host.dataset.wired = "1";
+
+  const carriesFiles = (ev) =>
+    !!ev.dataTransfer &&
+    Array.from(ev.dataTransfer.types || []).includes("Files");
+
+  host.addEventListener("dragover", (ev) => {
+    if (!carriesFiles(ev)) return;
+    ev.preventDefault();
+    host.classList.add("dropping");
+  });
+  host.addEventListener("dragleave", () => host.classList.remove("dropping"));
+  host.addEventListener("drop", (ev) => {
+    if (!carriesFiles(ev)) return;
+    ev.preventDefault();
+    host.classList.remove("dropping");
+    portraitTakeFile(ev.dataTransfer.files[0]);
+  });
+
+  for (const kind of ["dragover", "drop"]) {
+    window.addEventListener(kind, (ev) => {
+      if (!carriesFiles(ev)) return;
+      if (ev.target && ev.target.closest && ev.target.closest("#portrait")) return;
+      ev.preventDefault();
+    });
+  }
+
+  // A TEXT PASTE IS LEFT ALONE, which is the whole of "as an option":
+  // pasting an address into the source box still works, because this
+  // only takes the event when the clipboard holds image BYTES.
+  document.addEventListener("paste", (ev) => {
+    if (!state.characterId) return;
+    const h = document.querySelector("#portrait");
+    // offsetParent is null while the Stats pane is hidden, which is
+    // the cheapest way to ask "is this on screen".
+    if (!h || h.hidden || !h.offsetParent) return;
+    const items = Array.from((ev.clipboardData && ev.clipboardData.items) || []);
+    const hit = items.find(
+      (i) => i.kind === "file" && String(i.type).startsWith("image/"),
+    );
+    if (!hit) return;
+    ev.preventDefault();
+    portraitTakeFile(hit.getAsFile());
+  });
+}
+
+// One file, whichever way it arrived.
+//
+// THE BYTES CROSS AS BASE64, which is what `readAsDataURL` already
+// produces - Rust strips the `data:image/png;base64,` prefix. A
+// `Vec<u8>` would travel as a JSON array of numbers, eight times the
+// size for the same picture.
+//
+// EVERY REFUSAL IS THE ENGINE'S. Size, format and policy are decided
+// in Rust and in the bucket; this reads the file and shows what came
+// back. A limit enforced in two places is a limit with two answers.
+async function portraitTakeFile(file) {
+  if (!file || !state.characterId) return;
+
+  state.portraitBusy = true;
+  state.portraitError = null;
+  paintPortrait();
+
+  const data = await new Promise((resolve) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => resolve(null);
+    fr.readAsDataURL(file);
+  });
+
+  if (data === null) {
+    state.portraitBusy = false;
+    state.portraitError = "could not read that file";
+    return paintPortrait();
+  }
+
+  const r = await tryCall("upload_character_image", {
+    characterId: state.characterId,
+    dataBase64: data,
+    title: file.name ? file.name.replace(/\.[^.]+$/, "") : null,
+  });
+  state.portraitBusy = false;
+  if (!r.ok) {
+    state.portraitError = r.error;
+    return paintPortrait();
+  }
+  await loadPortrait();
 }
 
 // A RING AROUND THE INITIALS when nobody has given them a face. An
@@ -1409,7 +1539,11 @@ function portraitPanel() {
       );
       const dot = sEl("span", "ring-dot");
       dot.style.setProperty("--portrait-ring", "var(--ring-" + im.ring + ")");
-      r.append(dot, sEl("span", "portrait-other-name", im.title || im.url));
+      r.append(
+        dot,
+        sEl("span", "portrait-other-name", im.title || im.url || "uploaded"),
+      );
+      if (im.uploaded) r.append(sEl("span", "tag tag-src", "file"));
       if (im.is_default) r.append(sEl("span", "tag tag-src", "shown"));
       if (!row || row.id !== im.id) {
         r.append(
@@ -1419,6 +1553,28 @@ function portraitPanel() {
           }),
         );
       }
+      // 284. TWO CLICKS, because this one destroys a file. The second
+      // click is the confirmation and the button says so; a browser
+      // confirm() blocks the webview, which is 119's objection to
+      // window.prompt one door along.
+      const gone = sEl("button", "tiny ghost danger", "remove");
+      gone.addEventListener("click", async () => {
+        if (gone.textContent !== "sure?") {
+          gone.textContent = "sure?";
+          return;
+        }
+        gone.disabled = true;
+        const d = await tryCall("delete_character_image", { imageId: im.id });
+        if (!d.ok) {
+          gone.disabled = false;
+          gone.textContent = "remove";
+          state.portraitError = d.error;
+          return paintPortrait();
+        }
+        if (state.portraitEditId === im.id) state.portraitEditId = null;
+        await loadPortrait();
+      });
+      r.append(gone);
       list.append(r);
     }
     panel.append(list);
@@ -1432,11 +1588,26 @@ function portraitPanel() {
     return f;
   };
 
+  // 284. AN UPLOADED PICTURE HAS NO ADDRESS TO EDIT. The bytes are in
+  // the bucket under a name this row is the only record of, so
+  // retyping over it would orphan them - Rust refuses it too, and this
+  // is the half that says why before you try.
   const src = document.createElement("input");
   src.placeholder = "https://...";
-  src.value = row ? row.url : "";
+  src.value = (row && row.url) || "";
+  if (row && row.uploaded) {
+    src.value = "";
+    src.placeholder = "an uploaded file";
+    src.disabled = true;
+  }
   panel.append(
-    field("image source", src, "http or https - the engine refuses anything else"),
+    field(
+      "image source",
+      src,
+      row && row.uploaded
+        ? "this one is a file in the bucket - remove it to replace it"
+        : "http or https - or drop a file on the circle, up to 2 MB",
+    ),
   );
 
   const ttl = document.createElement("input");
@@ -1502,7 +1673,7 @@ function portraitPanel() {
     const r = await tryCall("save_character_image", {
       characterId: state.characterId,
       imageId: row ? row.id : null,
-      url: src.value,
+      url: row && row.uploaded ? null : src.value,
       title: ttl.value,
       rank: Number(rnk.value) || 0,
       isDefault: def.checked,

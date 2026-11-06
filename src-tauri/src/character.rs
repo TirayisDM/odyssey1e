@@ -1009,7 +1009,19 @@ pub struct Vitals {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CharacterImage {
     pub id: String,
-    pub url: String,
+    /// WHERE TO POINT AN `<img src>`, whichever kind of picture this
+    /// is: the stored address for a linked one, a freshly signed
+    /// Storage URL for an uploaded one. 284.
+    ///
+    /// NONE IS A REAL ANSWER and not a gap - it means the signing
+    /// failed, and the screen says so rather than rendering an empty
+    /// circle. A linked picture always has one.
+    pub url: Option<String>,
+    /// 284. The bytes are ours, in the `character-images` bucket.
+    /// The panel reads this to know the source cannot be edited: an
+    /// uploaded picture is a file, not an address, and retyping it
+    /// would orphan the object.
+    pub uploaded: bool,
     /// What this one is of - "before the curse", "in plate". None is
     /// normal; an untitled picture is still a picture.
     pub title: Option<String>,
@@ -1074,7 +1086,7 @@ pub fn load_images(token: &str, character_id: &str) -> Result<Vec<CharacterImage
         token,
         "character_images",
         &[
-            ("select", "id,url,title,rank,is_default,ring"),
+            ("select", "id,url,storage_path,title,rank,is_default,ring"),
             ("character_id", &format!("eq.{}", character_id)),
             // The default leads, then weight, then the order they
             // arrived - so an unranked gallery is simply a history.
@@ -1084,9 +1096,28 @@ pub fn load_images(token: &str, character_id: &str) -> Result<Vec<CharacterImage
     let mut out = Vec::new();
     if let Some(rows) = rows.as_array() {
         for r in rows {
+            // 284. ONE SIGNING PER UPLOADED PICTURE, and none at
+            // all for a linked one. The bucket is private, so there is
+            // no address to store - 284's header argues why that is
+            // worth a round trip. A character has one picture or
+            // three; this is not the place to batch.
+            //
+            // A FAILURE HERE DOES NOT TAKE THE SHEET DOWN. One
+            // unsignable object would otherwise mean no portrait, no
+            // abilities and no skills, which is the shape 282's
+            // carried note is about.
+            let path = r.get("storage_path").and_then(|v| v.as_str());
+            let url = match path {
+                Some(p) => crate::storage::signed_url(token, p).ok(),
+                None => r
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            };
             out.push(CharacterImage {
                 id: as_str(r, "id"),
-                url: as_str(r, "url"),
+                url,
+                uploaded: path.is_some(),
                 title: r
                     .get("title")
                     .and_then(|v| v.as_str())

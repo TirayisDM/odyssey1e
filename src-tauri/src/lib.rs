@@ -83,6 +83,9 @@ mod reveal;
 mod scribe;
 mod shape;
 mod shelf;
+// 284. Supabase Storage, for a picture dropped in rather than
+// linked to.
+mod storage;
 mod size;
 mod slots;
 mod species;
@@ -1796,6 +1799,9 @@ pub fn run() {
             // 283: and what they look like LITERALLY - the pictures.
             commands::characters::list_character_images,
             commands::characters::save_character_image,
+            // 284: and a picture dropped in rather than linked to.
+            commands::characters::upload_character_image,
+            commands::characters::delete_character_image,
             // 066: seven scores for six slots, rolled on this device.
             commands::characters::roll_ability_spread,
             list_rolls,

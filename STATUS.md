@@ -13737,13 +13737,129 @@ policies, 3 indexes, RLS on, `portrait_url` gone from `characters`,
 - **The ring styles are ten colours.** The submenu Dave deferred is
   what makes them styles; the schema is already shaped for it.
 
+## 284. A picture you can drop in
+
+**2026-11-05.** Dave: *"need to make it so we can paste an image to
+upload it, as an option"*, and then, on the proposal: *"should we just
+start with drag an image in from explorer, and add the paste later or
+is it same basic operation? If it is start it. I have to sleep."*
+
+**IT IS THE SAME OPERATION**, which is why both are here. A drop reads
+`dataTransfer.files` and a paste reads `clipboardData.items`; from the
+File onwards there is one path - read the bytes, base64 them across the
+IPC, sniff, cap, upload, write a row. Shipping one and holding the
+other back would have been a decision rather than a smaller cycle.
+
+### The bucket is private, and that was decided while he slept
+
+A public bucket hands back a URL that works forever, fits 283's column
+unchanged, and is perhaps two hours of work. It is also the only thing
+this application would hold that is readable with no account, no
+membership and no policy. 203's line is that `amDM()` is an offer and
+RLS is the boundary. A portrait in somebody's private campaign is
+exactly what should not be reachable by link, and making that weaker
+unilaterally while the person who would object is asleep is not a
+trade to take.
+
+So the bucket is private, `storage.objects` carries the same four
+policies the table does, and the price is paid on the read:
+`load_images` mints a signed URL per uploaded picture, good for a day.
+A day rather than an hour because the failure it prevents - a window
+left open overnight showing broken circles in the morning - is the one
+that actually happens.
+
+**THE PATH IS THE POLICY.** An object is stored at
+`<character_id>/<32 hex>.<ext>`, so `storage.foldername(name)[1]` IS
+the character id and 284's policies join to `characters` exactly as the
+table's do. The random half only stops two files called `portrait.png`
+from colliding.
+
+### One source per row, and a CHECK that says so
+
+`url` and `storage_path` are two kinds of the same picture, never both.
+283's `url ~* '^https?://'` moved inside the new constraint, because the
+column is nullable now and the old one would have refused every upload.
+An uploaded row's source is **not editable**: the bytes sit under a name
+that row is the only record of, so retyping an address over it would
+orphan them. Rust refuses it and the panel greys the box, which is the
+half that explains itself before you try.
+
+### Tauri eats file drops unless you tell it not to
+
+`dragDropEnabled` defaults to **true**, and while it is, the webview
+never sees an HTML `drop` at all - the OS drop is swallowed and
+re-emitted as a Tauri event carrying file PATHS. Paths would have meant
+Rust reading from disk: a second code path, working only in the
+application and not in the rig, for the same picture. One line of
+`tauri.conf.json` turns that off and the webview gets the File with its
+bytes - the identical object a paste produces, through the identical
+function.
+
+**AND THE WINDOW REFUSES FILES EVERYWHERE ELSE.** Without that, a drop
+slightly wide of the circle makes the webview NAVIGATE to the file,
+replacing the whole application with a picture. Only drags carrying
+`Files` are touched, so nothing the map does with its own drags is
+affected.
+
+### Delete stops being deferrable the moment there are bytes
+
+283 shipped without it and said why: a wrong address costs nothing to
+leave lying about. A 2MB upload does. So `delete_character_image`
+arrives here, two clicks on a button that says `sure?` in between,
+because this one destroys a file. **The row goes before the object** -
+the other order risks a picture that can never load and cannot be
+removed, where this one risks an orphaned file and nothing else. An
+upload whose row insert is then refused cleans its own object up, which
+is the only way this cycle could have leaked storage.
+
+### What the probe found that was worth more than the probe
+
+The live round trip could not be driven - that needs somebody at the
+keyboard - so the three Storage routes were checked unauthenticated
+instead, and the sign endpoint answered **"permission denied for
+function is_game_member"** rather than a 404. That is the policy being
+REACHED, which says the route shape is right; and the role it refused
+was `anon`, which is 193's wall standing where it should. Checked
+directly afterwards: `authenticated` has execute on both
+`is_game_member` and `is_game_dm`, which is the grant a signed-in
+user's upload depends on and the one that would have failed silently.
+
+Verified in the rig with **the actual file Dave named** -
+`Mage_ico.png`, 21,523 bytes - dropped as a real `drop` event with real
+bytes: the circle highlights while the file is over it and stops when
+it lands, all 21,523 bytes arrive, the sniff reads PNG, the 100x100
+image paints, and the title comes off the filename. A text file
+claiming `image/png` is refused by name; 2.2MB is refused by size; a
+pasted image uploads and a pasted URL is left alone for the address
+box; remove takes two clicks; and editing an uploaded row's ring and
+title keeps its picture. `npm test` passes.
+
+1443 tests.
+
+### Carried forward
+
+- **THE LIVE UPLOAD HAS NOT BEEN RUN.** Everything up to Rust's three
+  HTTP calls is verified; those calls themselves have only been
+  checked for route shape and policy reachability. The first real drop
+  in the application is the test, and `upload`, `signed_url` and
+  `remove` are where to look if it is not right.
+- **Nothing resizes or crops.** A 2MB photograph is stored at 2MB and
+  scaled down by the browser into a 176px circle, downloaded in full
+  every time the sheet paints. The cap keeps it survivable; it does
+  not make it sensible.
+- **The gallery.** `rank` orders a list that is only visible inside
+  the control panel. The pictures laid out on the sheet is still a
+  later cycle, and is what rank was added for.
+- **`NEW-MACHINE.md` says migrations cannot be applied from here**,
+  which stopped being true in 283.
+
 ---
 
 ## Pick up here
 
 ### THE SHELL CHANGED ON 2026-11-03/05 - read this before the handoff below
 
-275-283 rebuilt how you get into this application and how it is laid
+275-284 rebuilt how you get into this application and how it is laid
 out, so four things in the handoff below now describe a window that no
 longer exists.
 
@@ -13772,8 +13888,10 @@ longer exists.
   says why the two old lists disagreed about who a DM may open. 283 put
   a round portrait at the top of the Stats pane, in a column of its own
   beside the name and class controls, with an image control panel
-  behind it. Its table, `character_images`, is the first child of
-  `characters` added since 005.
+  behind it, and 284 lets you drop or paste a file in rather than
+  link to one - the first use of Supabase Storage in this project,
+  with `dragDropEnabled` turned off so the webview sees the drop at
+  all.
 
 **THE TABLE BELOW IS FROM 2026-10-24 AND ITS NUMBERS HAVE MOVED.**
 Checked against this machine and the live project on 2026-11-03, not
@@ -13784,9 +13902,9 @@ reports it live rather than from a document.
 
 | | 2026-10-24 said | actually |
 |---|---|---|
-| `cargo test` | 1,331 | **1439, 0 failed** |
-| migration files | 167 | **175**, newest `283_a_face_for_a_character.sql`, applied 2026-11-05 |
-| ledger rows | 177, "ten applied in parts" | **187**, and it is **eight** files the database split, not ten - 175 + 12 = 187, reconciled by name |
+| `cargo test` | 1,331 | **1443, 0 failed** |
+| migration files | 167 | **176**, newest `284_a_picture_you_can_drop_in.sql`, applied 2026-11-05 |
+| ledger rows | 177, "ten applied in parts" | **188**, and it is **eight** files the database split, not ten - 176 + 12 = 188, reconciled by name |
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 
 `security_doors()` still returns **0 faults**, re-run on 2026-11-03.

@@ -249,7 +249,7 @@ impl AppState {
     }
 }
 
-fn http() -> &'static reqwest::blocking::Client {
+pub(crate) fn http() -> &'static reqwest::blocking::Client {
     static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
     CLIENT.get_or_init(reqwest::blocking::Client::new)
 }

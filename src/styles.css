@@ -1438,3 +1438,12 @@ button.wide{width:100%}
 .portrait-other.on{border-color:var(--accent)}
 .portrait-other-name{flex:1;min-width:0;overflow:hidden;white-space:nowrap;
                      text-overflow:ellipsis}
+
+/* 284. THE DROP TARGET SAYS SO WHILE A FILE IS OVER IT, and only
+   then. A dashed outline standing there permanently would be a box,
+   and a box is the one thing this section deliberately does not draw.
+   The offset puts it clear of the ring so the ring's own colour is
+   still readable underneath. */
+.portrait.dropping .portrait-ring{outline:2px dashed var(--accent);
+                                  outline-offset:6px}
+.portrait > .portrait-err{max-width:11rem;text-align:center}

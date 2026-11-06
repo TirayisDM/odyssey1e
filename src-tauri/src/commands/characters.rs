@@ -574,7 +574,7 @@ pub fn save_character_image(
     state: State<AppState>,
     character_id: String,
     image_id: Option<String>,
-    url: String,
+    url: Option<String>,
     title: Option<String>,
     rank: Option<i64>,
     is_default: Option<bool>,
@@ -582,10 +582,6 @@ pub fn save_character_image(
 ) -> Result<Value, String> {
     let token = state.token()?;
 
-    // REFUSED HERE AS WELL AS IN THE COLUMN. The webview has no CSP,
-    // so this value becomes an `<img src>` unexamined - and this is
-    // the half that can explain itself to whoever typed it.
-    let url = crate::character::checked_image_url(&url)?;
     let ring = crate::character::checked_ring(ring.unwrap_or(1))?;
     let rank = rank.unwrap_or(0);
 
@@ -595,6 +591,30 @@ pub fn save_character_image(
     let title = title.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
     let had = crate::character::load_images(&token, &character_id)?;
+
+    // 284. AN UPLOAD'S SOURCE IS NOT EDITABLE. The bytes are in the
+    // bucket under a name this row is the only record of; retyping an
+    // address over it would leave the object behind with nothing
+    // pointing at it. So editing an uploaded picture changes its
+    // title, rank, default and ring, and the panel greys the address
+    // box to say so.
+    let is_upload = image_id
+        .as_ref()
+        .and_then(|id| had.iter().find(|i| &i.id == id))
+        .map(|i| i.uploaded)
+        .unwrap_or(false);
+
+    // REFUSED HERE AS WELL AS IN THE COLUMN. The webview has no CSP,
+    // so this value becomes an `<img src>` unexamined - and this is
+    // the half that can explain itself to whoever typed it.
+    let address = if is_upload {
+        None
+    } else {
+        Some(crate::character::checked_image_url(
+            url.as_deref().unwrap_or(""),
+        )?)
+    };
+
     let only_one_and_it_is_this = had.len() == 1 && Some(&had[0].id) == image_id.as_ref();
     let default = is_default.unwrap_or(false) || had.is_empty() || only_one_and_it_is_this;
 
@@ -610,31 +630,180 @@ pub fn save_character_image(
         )?;
     }
 
+    let mut patch = json!({
+        "title": title,
+        "rank": rank,
+        "is_default": default,
+        "ring": ring,
+    });
+    // LEFT OUT RATHER THAN SENT AS NULL for an upload: 284's CHECK
+    // allows exactly one source per row, and a null `url` beside a
+    // null `storage_path` is the row it exists to refuse.
+    if let Some(a) = &address {
+        patch["url"] = json!(a);
+    }
+
     match image_id {
         Some(id) => supabase::rest_update(
             &token,
             "character_images",
             &[("id", &format!("eq.{}", id))],
-            &json!({
-                "url": url,
-                "title": title,
-                "rank": rank,
-                "is_default": default,
-                "ring": ring,
-            }),
+            &patch,
         ),
-        None => supabase::rest_insert(
-            &token,
-            "character_images",
-            &json!({
-                "character_id": character_id,
-                "url": url,
-                "title": title,
-                "rank": rank,
-                "is_default": default,
-                "ring": ring,
-            }),
-        ),
+        None => {
+            patch["character_id"] = json!(character_id);
+            supabase::rest_insert(&token, "character_images", &patch)
+        }
+    }
+}
+
+/// Put a dropped or pasted picture in the bucket, and give the
+/// character a row pointing at it. 284.
+///
+/// Dave: *"need to make it so we can paste an image to upload it, as
+/// an option"*, then *"should we just start with drag an image in from
+/// explorer... is it same basic operation?"* - it is. A drop and a
+/// paste both end as a File in the webview, and both arrive here as
+/// the same base64.
+///
+/// BASE64 RATHER THAN A `Vec<u8>`. Tauri serialises command arguments
+/// as JSON, so a byte vector crosses as an array of numbers - roughly
+/// eight characters per byte, which turns the 2MB cap into 16MB of
+/// text to parse. See the note on the dependency in Cargo.toml.
+///
+/// THE TYPE IS READ FROM THE BYTES. `File.type` is whatever the
+/// operating system guessed from the extension and the clipboard will
+/// claim anything, so `storage::sniff` decides, and a PDF named
+/// `portrait.png` is turned away by name.
+///
+/// THE OBJECT IS CLEANED UP IF THE ROW FAILS. An upload that succeeds
+/// followed by an insert the policies refuse would otherwise leave
+/// bytes in the bucket that nothing records and nothing can delete -
+/// the one way this cycle could leak storage, so it is handled here
+/// rather than left to a sweep nobody will write.
+#[tauri::command]
+pub fn upload_character_image(
+    state: State<AppState>,
+    character_id: String,
+    data_base64: String,
+    title: Option<String>,
+) -> Result<Value, String> {
+    use base64::Engine;
+
+    let token = state.token()?;
+
+    // A `data:` URI is what FileReader hands back and what a careless
+    // caller will send; the bytes are after the comma either way.
+    let raw = data_base64
+        .rsplit_once(",")
+        .map(|(_, b)| b)
+        .unwrap_or(&data_base64)
+        .trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .map_err(|_| "that did not arrive as a picture".to_string())?;
+
+    if bytes.is_empty() {
+        return Err("that picture is empty".to_string());
+    }
+    if bytes.len() > crate::storage::MAX_BYTES {
+        return Err(format!(
+            "that picture is {} - the limit is 2 MB",
+            human_bytes(bytes.len())
+        ));
+    }
+
+    let Some((mime, ext)) = crate::storage::sniff(&bytes) else {
+        return Err("that is not a PNG, JPEG, WebP or GIF".to_string());
+    };
+
+    let name = crate::storage::object_name(&character_id, ext);
+    crate::storage::upload(&token, &name, bytes, mime)?;
+
+    // THE FIRST PICTURE IS THE DEFAULT, the same rule
+    // `save_character_image` follows and for the same reason: dropping
+    // your only portrait in and not seeing it would read as the drop
+    // having failed.
+    let had = crate::character::load_images(&token, &character_id)?;
+    let title = title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let wrote = supabase::rest_insert(
+        &token,
+        "character_images",
+        &json!({
+            "character_id": character_id,
+            "storage_path": name,
+            "title": title,
+            "rank": 0,
+            "is_default": had.is_empty(),
+            "ring": 1,
+        }),
+    );
+
+    match wrote {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let _ = crate::storage::remove(&token, &name);
+            Err(e)
+        }
+    }
+}
+
+/// Take a picture off a character. 284.
+///
+/// 283 shipped without this and said why: a wrong address costs
+/// nothing to leave lying about. A 2MB upload does, so the moment
+/// there are bytes there has to be a way to remove them.
+///
+/// THE ROW GOES FIRST. If the object were removed first and the row
+/// delete were then refused, the sheet would hold a picture that can
+/// never load and cannot be deleted. This way round the worst case is
+/// an orphaned file, which costs a little storage and nothing else.
+///
+/// NOTHING IS PROMOTED IN ITS PLACE. Deleting the default leaves a
+/// character with pictures and no default, which `load_images` already
+/// answers - it orders by rank after the default, so the screen shows
+/// the heaviest remaining one. Choosing a new default is a decision,
+/// and this is not the moment to make it for somebody.
+#[tauri::command]
+pub fn delete_character_image(state: State<AppState>, image_id: String) -> Result<Value, String> {
+    let token = state.token()?;
+
+    let rows = supabase::rest_get(
+        &token,
+        "character_images",
+        &[
+            ("select", "id,storage_path"),
+            ("id", &format!("eq.{}", image_id)),
+        ],
+    )?;
+    let Some(row) = rows.as_array().and_then(|a| a.first()) else {
+        return Err("no such picture".to_string());
+    };
+    let path = row
+        .get("storage_path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    supabase::rest_delete(
+        &token,
+        "character_images",
+        &[("id", &format!("eq.{}", image_id))],
+    )?;
+
+    if let Some(p) = path {
+        crate::storage::remove(&token, &p)?;
+    }
+    Ok(json!({ "deleted": image_id }))
+}
+
+/// "1.4 MB". Only ever used to tell somebody their picture is too big,
+/// which is a sentence that has to carry a number they recognise.
+fn human_bytes(n: usize) -> String {
+    if n >= 1024 * 1024 {
+        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{} KB", n / 1024)
     }
 }
 

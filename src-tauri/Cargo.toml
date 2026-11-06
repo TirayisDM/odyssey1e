@@ -55,6 +55,12 @@ sha2 = "0.10"
 #
 # Android is unaffected: rustls-native-certs reads the system store
 # there too, so the portability argument above still holds.
+# 284. A dropped or pasted picture crosses the IPC boundary as base64.
+# A Vec<u8> would travel as a JSON array of numbers - eight times the
+# size for the same bytes, and a 2MB cap would mean 16MB of text. Pure
+# Rust, no system dependency, builds for Android: the same three tests
+# rustls and sha2 were chosen on.
+base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 
 

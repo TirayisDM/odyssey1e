@@ -43,6 +43,15 @@
                 role="menuitem">Sign out</button>
       </div>
     </div>
+    <!-- 289. TEMPORARY, and it says so. Dave had been drawing
+         rectangles on screenshots by hand to ask where the boxes
+         were; this draws them. It outlines rather than borders, so
+         turning it on does not move the thing it is measuring.
+         Delete this button and the `show-boxes` block in the
+         stylesheet together. -->
+    <button id="boxes-btn" class="boxesbtn" type="button"
+            aria-pressed="false"
+            title="Outline the layout boxes - a temporary view">borders</button>
   </header>
 
   <!-- 207. THE LOG IS A DRAWER NOW, and `logshut` on this row is what
@@ -850,6 +859,15 @@
                  nobody has given them a face - an empty slot that
                  looks deliberate rather than broken. -->
             <div id="portrait" class="portrait"></div>
+
+            <!-- 289. THE DICE ROLLING PAD GOES HERE. Dave drew this
+                 box on his own screenshot and said what it is for;
+                 the pad itself is the next cycle. The AREA is
+                 declared now because where it sits is a layout
+                 decision and what it does is a feature - building
+                 the pad should not be the day the sheet changes
+                 shape. Empty and labelled until then. -->
+            <div id="dicepad" class="dicepad">dice pad &mdash; next</div>
             </div>
           </div>
 

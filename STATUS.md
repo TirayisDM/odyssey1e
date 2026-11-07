@@ -14120,6 +14120,102 @@ the frontend moved. This was data.
 - **Still no test covers data like this**, 285's note unanswered. The
   guard added here is one assertion in one migration, not a harness.
 
+## 289. The page is a grid, and one room is still empty
+
+**2026-11-07.** Dave, after a week of drawing rectangles on his own
+screenshots to ask where the boxes were: *"if our display ui is css
+isnt a dynamic grid best for this, that is what I have used for
+similar projects"*. Then, looking at the result: *"I would like to add
+the area with the blue border - It should go in as a dice rolling
+pad."*
+
+**HE WAS RIGHT, AND THE PAGE WAS NOT A GRID AT ALL.** `.app` was a
+flex column holding `.cols`, a flex row, with `.left{flex:1}` and
+`.right{flex:0 0 20rem}` - three boxes agreeing by habit about who
+takes the remainder, and `min-width:0` patches load-bearing in two
+places. Every grid in the stylesheet was a local one: ability rows,
+skill rows, resist rows. Two tracks and two rows say the whole page
+at once, and the feed's width stops being a flex-basis it argues with
+the main column about.
+
+### What a container query costs, measured
+
+The obvious answer to 287's magic 46rem was to let the column size
+itself: `minmax(0, max-content)`. **It collapses the table to 135px.**
+
+`container-type: inline-size` IS `contain: inline-size`, so a size
+container computes its own width without consulting its contents - by
+definition it reports no intrinsic size. The grid asks `#abilities`
+how wide it wants to be, gets nothing, and falls back to the only
+uncontained thing in the column: the name line. Flip the containment
+off in the live DOM and the same track measures 677.
+
+So content-driven sizing and a container query are MUTUALLY EXCLUSIVE
+on the same element, and 287 reached for a number because that was the
+only lever left. Worth writing down, because the instinct to replace a
+magic number with `max-content` will come back.
+
+### So the number was measured instead of chosen
+
+| left track | sources cell | chip clearance | row heights |
+|---|---|---|---|
+| 46rem | 155px | **-8px, overlapping** | 38/54/54/54/54/54 |
+| 48rem | 208px | +46px | 38/54/54/54/54/54 |
+| **52rem** | 236px | +74px | **38 x 6** |
+
+832px is where the Save Mods label and its chip stop stacking, which
+is the width at which all six rows finally stand the same height - and
+where "Ability Score Improvement +1" stops running underneath the save
+half. That overlap was a real fault, visible on any character with an
+ASI, and nobody had one when 287 was built.
+
+**AND THE STACK IS A CONTAINER QUERY NOW.** It was `@media
+(max-width:900px)` - a VIEWPORT query underneath a container query,
+in an app where the pane is not the window: the feed takes 20rem of
+it, so a window at 1100 can hold a pane under 800 and the media query
+could not see it. `.sheet-pane` is the container and the sheet
+answers to its own width.
+
+### Show the boxes
+
+Dave had been marking up screenshots by hand. There is a `borders`
+button in the header now that outlines every layout box in light
+green - solid for the page grid, its columns and the sheet's areas,
+faint for the content filling them.
+
+**OUTLINE AND NOT BORDER, deliberately.** A border takes up space, so
+switching it on would move the thing it was meant to measure and the
+view would be a picture of a different layout. Checked: `.left` is
+1600px wide with it off and 1600px with it on.
+
+It is temporary and says so in three places. The button, the
+stylesheet block and the `show-boxes` wiring come out together.
+
+### The empty room
+
+The third area is declared and holds nothing but its own name. Dave
+drew the box and said what goes in it, and **where it sits is a layout
+decision while what it does is a feature** - so the sheet should not
+change shape on the day the pad is built. Under the face, right of the
+table, 697px at his width; when the pane narrows it stacks under the
+other two like everything else.
+
+Verified in the harness at 1573, 1200, 1040 and 900: side by side
+above 1060, one column below it, the pad full width when it stacks,
+no overlap at any of them. `npm test` passes.
+
+1443 tests - unchanged, since nothing in Rust moved.
+
+### Carried forward
+
+- **The right-hand area stretches to the leftover.** `auto` with no
+  `justify-content` means the portrait's track takes the remaining
+  697px and the circle sits at its left edge. That is deliberate -
+  it is the region the pad fills - but until the pad exists the green
+  box is larger than anything in it.
+- **The dice pad is next**, and it is a feature with a layout already
+  waiting for it.
+
 ---
 
 ## Pick up here

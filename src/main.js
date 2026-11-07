@@ -10643,6 +10643,34 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // 289. SHOW THE BOXES - TEMPORARY. The state lives on <html> so
+  // one class reaches every box in the stylesheet, and in
+  // localStorage so a reload does not drop you back out of the view
+  // you were reading. Nothing else reads it; delete this block, the
+  // button and the stylesheet's `show-boxes` rules together.
+  const boxesBtn = document.querySelector("#boxes-btn");
+  if (boxesBtn) {
+    const paintBoxes = (on) => {
+      document.documentElement.classList.toggle("show-boxes", on);
+      boxesBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    };
+    let on = false;
+    try {
+      on = localStorage.getItem("show-boxes") === "1";
+    } catch (_) {
+      // A webview with storage refused is not a reason to lose a
+      // button - it just forgets between launches.
+    }
+    paintBoxes(on);
+    boxesBtn.addEventListener("click", () => {
+      on = !on;
+      paintBoxes(on);
+      try {
+        localStorage.setItem("show-boxes", on ? "1" : "0");
+      } catch (_) {}
+    });
+  }
+
   const accountBtn = document.querySelector("#account-btn");
   if (accountBtn) {
     accountBtn.addEventListener("click", (ev) => {

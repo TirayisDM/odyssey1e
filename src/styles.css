@@ -5,23 +5,31 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
      font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-.app{display:flex;flex-direction:column;height:100vh}
+/* 289. THE PAGE IS A GRID NOW. It was a flex column holding a flex
+   row, which is three nested boxes agreeing by habit about who takes
+   the remainder. Two tracks and two rows say it once: the header is
+   `auto`, everything under it takes what is left, and `minmax(0,1fr)`
+   rather than `1fr` so the scrolling column may shrink below its
+   content instead of pushing the feed off the edge. */
+.app{display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh}
 header{display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;
        border-bottom:1px solid var(--line);background:var(--panel)}
 header strong{color:var(--accent)}
-.cols{display:flex;flex:1;min-height:0}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 20rem;
+      min-height:0}
 /* 275. THE MAIN PANE TAKES THE REMAINDER and the feed is a FIXED
    column, not a share of the width. At 46/54 the whole application -
    all eight tabs, the map among them - lived in the smaller half the
    moment the right-hand column opened. That was tolerable while the
    column was a developer log nobody kept open and is backwards now
    that it is a feed you watch. */
-.left{flex:1;min-width:0;overflow-y:auto;padding:.9rem;
+.left{min-width:0;overflow-y:auto;padding:.9rem;
       border-right:1px solid var(--line)}
-.right{flex:0 0 20rem;display:flex;flex-direction:column;min-width:0;
-       padding:.9rem}
+/* The feed keeps its own column layout; its WIDTH is the track's
+   job now rather than a flex-basis it argues about with `.left`. */
+.right{display:flex;flex-direction:column;min-width:0;padding:.9rem}
 /* A narrow window gives the map the difference rather than the feed. */
-@media (max-width:1040px){.right{flex-basis:17.5rem}}
+@media (max-width:1040px){.cols{grid-template-columns:minmax(0,1fr) 17.5rem}}
 section{margin-bottom:1.3rem}
 h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;
    color:var(--muted);margin:0 0 .5rem;display:flex;align-items:center;gap:.5rem}
@@ -668,6 +676,12 @@ button.wide{width:100%}
 
 /* The equipment divisions. A heading with nothing under it should read
    as an answer, not as a loading state. */
+/* 289. THE PANE IS THE CONTAINER, not the window. Everything inside
+   a sheet used to answer to a viewport media query while the ability
+   rows answered to a container query one level down - and the pane is
+   not the window: the feed takes 20rem of it. A window at 1100 can
+   hold a pane under 800, and the media query could not see that. */
+.sheet-pane{container-type:inline-size}
 .sheet-pane .list .flat.muted { opacity: .5; font-style: italic; }
 
 /* ============ WHOSE GO IT IS (061) ============ */
@@ -1385,22 +1399,44 @@ button.wide{width:100%}
   --ring-9:#d9789f; --ring-10:#e8e4d8;
 }
 
-/* 287. THE TABLE AT ITS OWN WIDTH, THE FACE AT THE FAR EDGE.
-   `1fr` stretched the ability rows the whole width of the pane and
-   left the circle hard against them. A capped left track and
-   space-between puts the gap Dave's layout has between the two.
+/* 289. TWO NAMED AREAS, AND THE FACE SITS BESIDE THE TABLE.
+   287 capped the left track and pushed the two apart with
+   `space-between`, which left 617 pixels of nothing down the middle
+   of the pane. Dave: *"move it in"*. The gap is the gap now.
 
-   46rem IS NOT ARBITRARY. `#abilities` is a container and its rows
-   fold the save half onto a second line below 680px - so a tidier
-   40rem would have quietly undone 119's one-line row on every wide
-   window. The cap has to clear that query, and this does, with room
-   to spare. */
-.stats-top{display:grid;grid-template-columns:minmax(0,46rem) auto;
-           gap:1rem;align-items:start;justify-content:space-between}
-.stats-top-main{min-width:0}
-@media (max-width:900px){
-  .stats-top{grid-template-columns:minmax(0,1fr)}
-  .portrait{justify-self:start}
+   52rem IS MEASURED, NOT CHOSEN. `#abilities` is a size container, so
+   the column cannot size itself to its contents - `max-content` on
+   this track collapses it to 135px, because a size container reports
+   no intrinsic width by definition. The number has to come from
+   outside, so it was measured: at 832px the longest source chip
+   ("Ability Score Improvement +1", 169px) clears the save half, and
+   the Save Mods label and its chip fit on ONE line - which is the
+   width at which all six rows finally stand the same height. Below
+   it they go 38/54/54/54/54/54.
+
+   AND THE STACK IS A CONTAINER QUERY, matching the rows. 832 + 16 of
+   gap + 192 of circle is 1040, so below about that there is no room
+   for two columns and they become one. */
+.stats-top{display:grid;
+           grid-template-columns:minmax(0,52rem) auto;
+           grid-template-areas:"stats portrait"
+                               "stats dice";
+           grid-template-rows:auto auto;
+           gap:1rem;align-items:start}
+.stats-top-main{grid-area:stats;min-width:0}
+.stats-top > .portrait{grid-area:portrait}
+/* 289. THE THIRD AREA, EMPTY ON PURPOSE. Dave drew this box on his own
+   screenshot and named what goes in it: a dice rolling pad, built
+   next. It is declared now because the area is a LAYOUT decision and
+   the pad is a feature - the sheet should not change shape the day
+   the pad arrives. It sits under the face and right of the table,
+   which is where the rectangle was. */
+.stats-top > .dicepad{grid-area:dice;min-width:0}
+@container (max-width:1060px){
+  .stats-top{grid-template-columns:minmax(0,1fr);
+             grid-template-areas:"stats" "portrait" "dice";
+             grid-template-rows:auto auto auto}
+  .stats-top > .portrait{justify-self:start}
 }
 
 .portrait{display:flex;flex-direction:column;align-items:center;
@@ -1457,3 +1493,52 @@ button.wide{width:100%}
 .portrait.dropping .portrait-ring{outline:2px dashed var(--accent);
                                   outline-offset:6px}
 .portrait > .portrait-err{max-width:11rem;text-align:center}
+
+/* 289. AN EMPTY ROOM WITH ITS NAME ON THE DOOR. A reserved area that
+   looked like nothing would read as a rendering fault; a dashed one
+   with a label reads as unfinished, which is what it is. The whole
+   block goes when the pad is built. */
+.dicepad{min-height:14rem;border:1px dashed var(--line);border-radius:6px;
+         display:flex;align-items:center;justify-content:center;
+         color:var(--muted);font-size:12px;letter-spacing:.06em;
+         text-transform:uppercase}
+
+/* ===================================================================
+   289. SHOW THE BOXES - TEMPORARY.
+
+   Dave had been drawing rectangles on screenshots by hand to ask
+   where the boxes were. This draws them.
+
+   OUTLINE AND NOT BORDER, deliberately: a border takes up space, so
+   switching it on would move everything it was meant to measure and
+   the view would be a picture of a different layout. An outline is
+   painted over the box and changes nothing.
+
+   TWO WEIGHTS. The solid green boxes are the LAYOUT - the page grid,
+   its columns, the panes, the sheet's two areas. The faint ones are
+   content that fills them. Remove this block and the button in the
+   header together.
+   =================================================================== */
+html.show-boxes .app,
+html.show-boxes header,
+html.show-boxes .cols,
+html.show-boxes .left,
+html.show-boxes .right,
+html.show-boxes .pane,
+html.show-boxes .sheet-pane,
+html.show-boxes .stats-top,
+html.show-boxes .stats-top-main,
+html.show-boxes .portrait,
+html.show-boxes .dicepad{outline:1px solid #9fe8a0;outline-offset:-1px}
+
+html.show-boxes #abilities,
+html.show-boxes .abil,
+html.show-boxes #stats-read,
+html.show-boxes #stats-editor,
+html.show-boxes #resist-block{outline:1px solid rgba(159,232,160,.3);
+                              outline-offset:-1px}
+
+.boxesbtn{margin-left:.4rem;font-size:11px;padding:.2rem .5rem;
+          border:1px solid var(--line);border-radius:4px;
+          background:transparent;color:var(--muted);cursor:pointer}
+.boxesbtn[aria-pressed="true"]{color:#9fe8a0;border-color:#9fe8a0}

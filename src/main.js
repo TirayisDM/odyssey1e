@@ -604,6 +604,10 @@ function clearData() {
   paintTabOffer();
   state.rolls = [];
   resetDie();
+  // 292. And the die goes back to the stylesheet's base, so the next
+  // person to sign in on this machine does not inherit a red one.
+  paintDieColours(null, null);
+  diceErr("");
   document.querySelector("#games").innerHTML = "";
   // 280. The roster, where the strip's character list used to be named.
   document.querySelector("#pc-list").innerHTML = "";
@@ -10725,6 +10729,59 @@ function paintDie() {
     (r.label || r.request) + " \u2014 natural " + r.natural_roll;
 }
 
+/* 292. THE COLOUR OF THE DIE.
+
+   WHICH COLOURS EXIST IS NOT WRITTEN HERE. 292's CHECK constraints
+   say that, the `<option>`s offer it, and this turns whatever came
+   back into a class name without ever holding the list - so a fourth
+   colour is a migration and a stylesheet rule, and this function does
+   not change. The stylesheet decides what the name looks like.
+
+   THE DIE IS PAINTED BEFORE THE SAVE IS CONFIRMED, deliberately.
+   Choosing a colour is not a thing that can be half-true: the die
+   turns red the instant you say red, and if the write fails you are
+   told so rather than watching it snap back and guessing why. The
+   choice stands for the session either way. */
+function paintDieColours(die, pip) {
+  const el = document.querySelector("#d20");
+  if (!el) return;
+  for (const c of [...el.classList]) {
+    if (c.startsWith("die-") || c.startsWith("pip-")) el.classList.remove(c);
+  }
+  if (die) el.classList.add("die-" + die);
+  if (pip) el.classList.add("pip-" + pip);
+}
+
+function diceErr(message) {
+  const el = document.querySelector("#dice-err");
+  if (!el) return;
+  el.textContent = message || "";
+  el.hidden = !message;
+}
+
+// WHAT THIS PERSON CHOSE. The command upserts, so the answer is always
+// a row and always has both colours in it - see prefs.rs for why a read
+// writes. A failure leaves the stylesheet's base die, which is the same
+// white one the defaults describe, and says what went wrong.
+async function loadDicePrefs() {
+  const r = await tryCall("dice_prefs");
+  if (!r.ok) return diceErr("could not read your dice colours");
+  diceErr("");
+  const die = document.querySelector("#die-colour");
+  const pip = document.querySelector("#pip-colour");
+  if (die) die.value = r.value.die_colour;
+  if (pip) pip.value = r.value.pip_colour;
+  paintDieColours(r.value.die_colour, r.value.pip_colour);
+}
+
+async function saveDicePrefs() {
+  const die = document.querySelector("#die-colour").value;
+  const pip = document.querySelector("#pip-colour").value;
+  paintDieColours(die, pip);
+  const r = await tryCall("set_dice_prefs", { dieColour: die, pipColour: pip });
+  diceErr(r.ok ? "" : "not saved - " + r.error);
+}
+
 // Signing out is not a roll. Forget which one was showing so the next
 // sign-in places its die rather than throwing one.
 function resetDie() {
@@ -10779,11 +10836,16 @@ const val = (id) => document.querySelector(id).value.trim();
 window.addEventListener("DOMContentLoaded", async () => {
   // The pad has a die in it before anything has been rolled.
   buildDie();
+  for (const id of ["#die-colour", "#pip-colour"]) {
+    const el = document.querySelector(id);
+    if (el) el.addEventListener("change", saveDicePrefs);
+  }
   state.user = await call("me");
   paintUser();
   // Decide which door to show before anything else is drawn.
   await paintUnlock();
   if (state.user) await loadGames();
+  if (state.user) await loadDicePrefs();
 
   // 251. SIGN IN, AND SAY SO WHEN IT DOES NOT WORK.
   //
@@ -10807,6 +10869,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     clearData();
     await paintUnlock();
     await loadGames();
+    await loadDicePrefs();
     authSay("");
   });
 
@@ -10849,6 +10912,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     clearData();
     await paintUnlock();
     await loadGames();
+    await loadDicePrefs();
     extra.hidden = true;
     document.querySelector("#password2").value = "";
     // 251. AND OFFER THE PIN IMMEDIATELY. Without one the session is
@@ -12441,6 +12505,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     paintUser();
     await paintUnlock();
     await loadGames();
+    await loadDicePrefs();
   });
 
   // Always available. A stored token that has expired must not lock

@@ -90,6 +90,7 @@ pub mod inventory;
 pub mod log;
 pub mod locations;
 pub mod perform;
+pub mod prefs;
 pub mod casting;
 pub mod session;
 pub mod store;

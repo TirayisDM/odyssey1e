@@ -1497,9 +1497,20 @@ button.wide{width:100%}
 /* 290. THE DICE PAD. 289 left this room empty with its name on the
    door; this is what went in it. The arithmetic, and the reason the
    die cannot roll, are in main.js beside the geometry. */
+/* 292. THREE ROWS: the controls, the die, the line that says whose
+   roll it is. The controls are IN THE FLOW and pushed to the end of
+   their row rather than positioned over the cell - an absolute corner
+   would sit on top of the die at this height, and a control you
+   cannot be sure of hitting is worse than one an inch lower. */
 .dicepad{min-height:14rem;border:1px solid var(--line);border-radius:6px;
-         display:flex;flex-direction:column;align-items:center;
-         justify-content:center;gap:.7rem;padding:.9rem}
+         display:grid;grid-template-rows:auto auto 1fr auto;
+         justify-items:center;align-items:center;gap:.5rem;padding:.9rem}
+
+.dice-controls{justify-self:end;display:flex;gap:.6rem}
+.dice-ctl{display:flex;flex-direction:column;gap:.1rem;font-size:9px;
+          letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.dice-ctl select{width:auto;margin:0;padding:.1rem .2rem;font-size:11px}
+.dice-err{justify-self:end;font-size:11px;color:var(--bad);text-align:right}
 
 /* 291. NO LIGHT. 290 put a radial gradient over this box to stop the
    solid reading as a flat hexagon, and the gradient is round while
@@ -1524,23 +1535,51 @@ button.wide{width:100%}
    `backface-visibility` culls the ten faces turned away, and the ten
    left over cannot overlap each other because the solid is convex -
    so there is no order for the painter to get wrong. */
+/* 292. WHAT A COLOUR NAME LOOKS LIKE IS DECIDED HERE, and only here.
+   292's table stores `red`, and 283's reasoning about the ring being
+   a style id rather than a colour is why: the palette can be retuned,
+   or a fourth colour given a look, without the database learning
+   anything. Four tones per die - the face, the face you landed on,
+   and the two verdicts - because a green crit has to read on a red
+   die as plainly as on a white one, and a red fumble on a red die
+   does not. The deep near-black red is that fumble.
+
+   THE BASE IS WHITE, which is also 292's column default, so a die
+   drawn before the preference has loaded is the die the preference
+   will almost certainly ask for. */
+.d20, .d20.die-white{--face:#d7dce2;--lit:#9dc0ef;
+                     --crit:#6fba78;--fumble:#e3786a}
+.d20.die-red{--face:#8d2f2a;--lit:#cc554a;--crit:#4f9c58;--fumble:#39100d}
+.d20.die-yellow{--face:#c2a02a;--lit:#e9c84a;--crit:#4f9c58;--fumble:#a63b2b}
+
+/* The numbers are one colour on every face, lit or not, because that
+   is the thing that was chosen.
+
+   AND A HAIRLINE OF THE OPPOSITE TONE, which is what makes all six
+   combinations legible instead of four. Checked on a contact sheet of
+   every die against every verdict: white numbers disappear on a white
+   die's unlit faces, and black ones disappear on the near-black
+   fumble face of a red die. A stroke is not a glow - 291 - because it
+   lives on the edge of the glyph and nothing outside the digit is
+   touched; it is the number saying where it ends. */
+.d20, .d20.pip-black{--pip:#14161a;--pip-edge:rgba(255,255,255,.55)}
+.d20.pip-white{--pip:#f4f7fa;--pip-edge:rgba(0,0,0,.55)}
+
 .d20 .face{position:absolute;backface-visibility:hidden;
            clip-path:polygon(50% 0,0 100%,100% 100%);
-           background:#2a303a;
+           background:var(--face);
            display:flex;align-items:flex-end;justify-content:center}
 .d20 .face span{line-height:1;font-weight:700;padding-bottom:18%;
-                color:#aab3c0;font-variant-numeric:tabular-nums}
+                color:var(--pip);font-variant-numeric:tabular-nums;
+                -webkit-text-stroke:.6px var(--pip-edge)}
 
-/* The face you landed on, and the engine's verdict about it. GREEN
-   AND RED ARE `face_outcome`, not a comparison against 20: a crit
-   range of 19+ is a thing a weapon can have, and the screen is in no
+/* The face you landed on, and the engine's verdict about it. CRIT AND
+   FUMBLE ARE `face_outcome`, not a comparison against 20: a crit range
+   of 19+ is a thing a weapon can have, and the screen is in no
    position to know. */
-.d20 .face.lit{background:#36506f}
-.d20 .face.lit span{color:#cfe3ff}
-.d20 .face.lit.crit{background:#2f5a36}
-.d20 .face.lit.crit span{color:#bfe8c2}
-.d20 .face.lit.fumble{background:#5e2f2b}
-.d20 .face.lit.fumble span{color:#ffc8c0}
+.d20 .face.lit{background:var(--lit)}
+.d20 .face.lit.crit{background:var(--crit)}
+.d20 .face.lit.fumble{background:var(--fumble)}
 
 .die-say{font-size:12px;color:var(--muted);text-align:center;max-width:16rem}
 

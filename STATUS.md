@@ -14364,6 +14364,94 @@ One rule deleted. 1443 tests - nothing in Rust moved, again.
   is a display and not a control, the damage dice want the same code
   with a different net, and nothing tests the geometry.
 
+## 292. The colour of your die follows you
+
+**2026-11-07.** Dave: *"next add a color selector for Dice Color: Red,
+Yellow, White. And number color of: White, Black. This should get
+saved for user in a table. Put controls in top right of the cell with
+the die."*
+
+**IN A TABLE, AND HE SAID SO.** This application already remembers two
+preferences and both are in `localStorage` on purpose: whether the
+feed is open, and which of its tabs you left showing, are facts about
+THIS MACHINE. The colour of your die is a fact about YOU. That line
+had never needed drawing before, because nothing had ever been on the
+other side of it; it is drawn now, in `prefs.rs` and in 292's own
+table comment, so the next preference lands on the right side of it
+without anyone having to work out which side that is.
+
+**NOT TWO COLUMNS ON `profiles`, AND THE REASON WAS CHECKED RATHER
+THAN ASSUMED.** `profiles`'s own policies are still 001's and they
+read `id = auth.uid()`. 197 split a PERSON from a SIGN-IN and gave us
+`current_profile()` to resolve a second identity back to one human
+being - so a preference hung on `profiles` would have saved correctly
+for everybody except the person 197 exists for. `dice_prefs` is keyed
+on `current_profile()` and is right for both, and identity's own
+policies are left to be looked at on their own terms. **That
+`auth.uid()` is now a thing worth looking at**, and it is below.
+
+**THE COLOURS ARE NAMED IN THE DATABASE, ONCE.** Three for the die,
+two for the numbers, as CHECK constraints. The `<option>`s in the
+markup are an OFFER and not the rule - `amDM()`'s distinction between
+a menu and a boundary, applied to a value - so a list that drifts is
+refused by Postgres rather than quietly stored. Rust validates
+nothing for the same reason: a copy of the list there would be the
+second place 288 is about.
+
+**AND WHAT A NAME LOOKS LIKE IS THE STYLESHEET'S.** `red` is stored;
+what red is on a face, on the face you landed on, on a crit and on a
+fumble is four tones in CSS. 283's reasoning about the ring being a
+style id rather than a colour, which means the palette can be retuned
+without the database learning anything.
+
+**A READ THAT WRITES, AND THE DEFAULTS ARE WHY.** `dice_prefs` is an
+upsert of the key alone: asking for the row makes it, and Postgres
+fills both columns from the column defaults. A plain read of a missing
+row would have meant naming `white` and `black` again in Rust, and
+again in the `<select>`s. It is idempotent - the conflict path writes
+the key over itself - and it costs the same round trip a read would.
+
+**THE CONTROLS ARE IN THE FLOW, PUSHED RIGHT, NOT POSITIONED OVER THE
+CELL.** The pad is 14rem tall and the die takes 160px of it; an
+absolute top-right corner sits on the die. Four grid rows - controls,
+any error, the die, the line that says whose roll it is - put them in
+the top right without anything landing on anything.
+
+**SIX COMBINATIONS, AND A CONTACT SHEET RATHER THAN AN OPINION.** All
+three dice against lit, crit and fumble, with both number colours:
+eighteen dice on one page. Two of them failed. White numbers vanish on
+a white die's unlit faces, and black numbers vanish on the near-black
+fumble face of a red die. Both are fixed by a 0.6px stroke of the
+opposite tone on the glyph - which is not 291's glow, because it lives
+on the edge of the digit and nothing outside the digit is touched.
+
+**293 IS THE SAME CYCLE.** 292 gave the table an `updated_at` and
+attached nothing to it, so it would have held the moment the row was
+made and called that the moment it changed. `touch_updated_at()` has
+existed since 001 and `characters` has used it since 001; 293 attaches
+it. A separate file because 292 was already applied - 115.
+
+180 migration files, 192 ledger rows, `security_doors()` 0 faults.
+1443 tests - nothing in the rules moved.
+
+### Carried forward
+
+- **`profiles` still asks `auth.uid()`.** Its read-own and update-own
+  policies are 001's, untouched by 197, so a person signed in through
+  a second identity cannot read or rename their own profile. Nobody
+  has two identities today, which is why nothing has broken. It is a
+  real fault with a one-line fix and it wants its own cycle, not a
+  corner of this one.
+- **The contact sheet was re-checked by computed style, not by eye.**
+  The stroke is applied and resolves to 0.6px; the second photograph
+  of the eighteen dice was not taken, because the app window was
+  minimized and the pane cannot draw while it is. Worth one look.
+- **Nothing tests any of it**, which is now the third entry in a row
+  to say so about the frontend.
+- 290's notes stand: advantage shows one die, the pad is a display
+  and not a control, the damage dice want the same code with a
+  different net.
+
 ---
 
 ## Pick up here
@@ -14414,8 +14502,8 @@ reports it live rather than from a document.
 | | 2026-10-24 said | actually |
 |---|---|---|
 | `cargo test` | 1,331 | **1443, 0 failed** |
-| migration files | 167 | **178**, newest `288_a_miner_is_not_a_giant.sql`, applied 2026-11-06 |
-| ledger rows | 177, "ten applied in parts" | **190**, and it is **eight** files the database split, not ten - 178 + 12 = 190, reconciled by name |
+| migration files | 167 | **180**, newest `293_and_the_column_that_says_when.sql`, applied 2026-11-07 |
+| ledger rows | 177, "ten applied in parts" | **192**, and it is **eight** files the database split, not ten - 180 + 12 = 192, reconciled by name |
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 
 `security_doors()` still returns **0 faults**, re-run on 2026-11-03.

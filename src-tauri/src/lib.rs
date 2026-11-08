@@ -1740,6 +1740,11 @@ pub fn run() {
             commands::session::unlock,
             commands::session::forget_pin,
             commands::session::change_password,
+            // 292. How this person wants their die to look. A
+            // preference about a PERSON, so it is a table and not
+            // localStorage - see prefs.rs.
+            commands::prefs::dice_prefs,
+            commands::prefs::set_dice_prefs,
             list_games,
             create_game,
             join_game,

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "test": "node tests/map.smoke.mjs"
+    "test": "node tests/map.smoke.mjs && node tests/tour.smoke.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

@@ -16,6 +16,11 @@ not schemas, not a repo, and not a database.
 install, what to sign into, what does not travel in the clone, and what
 to clear off the old laptop before you pass it on.
 
+**Got it running and want to see what it does?** `TOUR.md` is one
+ordered path through every feature, with what proves each step and the
+element id and Tauri command behind it. It is the shortest route to
+both using the application and finding your way around the code.
+
 ## Running it
 
 ```powershell
@@ -30,14 +35,14 @@ hung. Later runs take seconds.
 
 ```powershell
 cd src-tauri
-cargo test           # 1312 tests, about a second
+cargo test           # 1443 tests, about a second
 ```
 
 `src-tauri` is a standalone Cargo package. **Cargo commands run from
 inside it**, not from the repo root.
 
 ```powershell
-npm test             # the renderer, from the repo root
+npm test             # the renderer and the tour, from the repo root
 ```
 
 **That is a second suite and it is tiny on purpose.** `cargo test`
@@ -45,6 +50,11 @@ cannot reach `src/map.js`, and `node --check` only parses it - 240
 deleted five functions out of the middle of that file and both of
 those checks passed for two commits while the map drew nothing. See
 `tests/map.smoke.mjs`.
+
+The second half of it checks `TOUR.md` against the app: every control
+and command the tour names must still exist. See
+`tests/tour.smoke.mjs`, which is explicit about what that does and
+does not prove.
 
 **A map tab that shows nothing is the first thing to check after a
 pull.** `npm test` answers it in a second and does not need the app,
@@ -97,6 +107,14 @@ You can write rules, write tests, and drive the whole app this way
 without touching anybody else's data, because `games` is the tenant root
 and everything under it is gated on `is_game_member`.
 
+**Then read `TOUR.md`.** It is one ordered path that touches every
+feature, and the order is the dependency order: Trade does nothing
+until somebody is a merchant, a sheet's Spells tab is hidden until the
+character can cast, the fight strip is not drawn until initiative is
+rolled. Each step also names the element id and the Tauri command
+behind it, which makes it the fastest index into the code as well as
+the fastest way to see what the application does.
+
 Two things that are **not** included and are asked for separately:
 
 | to | you need |
@@ -132,7 +150,10 @@ src-tauri/src/
   lib.rs                 the command registry, and the roll path
 supabase/migrations/     schema, applied in order. Read the comments.
 tests/map.smoke.mjs      `npm test`. The renderer, which cargo cannot see.
+tests/tour.smoke.mjs     and TOUR.md's names, which nothing else checks.
 tools/recover_migrations.py
+TOUR.md                  one ordered path through every feature. START HERE
+                         if you have it running and want to see what it does.
 MAP.md  ART.md           the map's plan, and the tile brief
 STATUS.md                the chronological log. "Pick up here" is the end.
 ```
@@ -364,9 +385,9 @@ That is the only record of them.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why **167 files run from 001 to 249.**
+file here, which is why **180 files run from 001 to 293.**
 
-The 82 gaps are all of that kind, and the comments say so in as many
+The 113 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
 099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
 `species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust;
@@ -376,17 +397,30 @@ words: 070 "taught the sheet to show it" where 071 filled the column;
 lost five functions, none of which is a schema change.
 
 ```
-066-070  072  079-083  090-091  099  108-112  119-120  125
-133-134  138  140-141  153-154  169  173-174  176  178-182
-184  188-192  199-207  209-216  219-225  229  231  233-237
-239-242  245-247
+066-070  072  079-083  090-091  099  108-112  119-120  125  133-134
+138  140-141  153-154  169  173-174  176  178-182  184  188-192
+199-207  209-216  219-225  229  231  233-237  239-242  245-247
+250-252  255-262  264  266-269  271-272  275-282  286-287  289-291
 ```
 
-**The chain is complete**, re-verified 2026-10-25: every one of the
-**177 ledger rows** maps to one of the **167 files**, and no file is
-unapplied. The difference of ten is six migrations that were applied
-in parts and committed as one file each - 026 (2 rows), 027 (3), 028
-(3), 031 (4), 032 (2), 043 (2) - not a gap.
+**That list and the count above are computed from the directory**, not
+maintained by hand - 113 missing numbers in 34 runs. Hand-editing them
+is how they came to disagree with `STATUS.md` in the first place.
+
+**The chain is complete**, re-verified 2026-11-08: every one of the
+**192 ledger rows** maps to one of the **180 files**, and no file is
+unapplied. The difference of twelve is **eight** migrations the
+database recorded in parts and the repo committed as one file each -
+026 (2 rows), 027 (3), 028 (3), 031 (4), 032 (2), 043 (2), 273 (2),
+274 (2) - not a gap.
+
+**THE MAPPING IS BY NAME, AND THE LEDGER CHANGED ITS MIND ABOUT
+NAMES.** 70 rows are recorded as `NNN_description` and 122 as bare
+`description`, so neither a numeric sort nor a count alone reconciles
+them. 031, 032 and 043 went in as `031a_`, `031b_` and so on; 273 and
+274 as a name and the same name with a suffix. That is why the
+re-verification is dated rather than continuous, and why
+`tools/recover_migrations.py` exists.
 
 That re-verification was by NAME AND COUNT. The last one by MD5
 against `schema_migrations.statements` was 2026-10-09; nothing since
@@ -431,25 +465,31 @@ could not do.
 
 ## State
 
-About 46k lines of Rust - 33k of rules across 50 modules, 12.5k of
-plumbing across 19 command files - with 1,312 tests, 42 tables, 161
-policies, 49 functions, and a frontend of 11.2k lines of plain JS.
-**Every table in `public` has row level security on**, counted
-2026-10-24, not assumed. `STATUS.md` is the detailed handoff; this is
-the shape of it.
+About 53.4k lines of Rust - 36.1k of rules across 51 modules, 15.4k of
+plumbing across 20 command files, and 1.9k of crate root - with 1,443
+tests, 44 tables, 168 policies and 49 functions, against a frontend of
+13.4k lines of plain JS, 1.7k of markup and 1.6k of CSS. **Every table
+in `public` has row level security on**, counted 2026-11-08 against
+the live project, not assumed. `STATUS.md` is the detailed handoff;
+this is the shape of it.
 
-**The app has eight top-level tabs** — Play, Run, World, Characters,
-Objects, Creatures, Spells, Trade — and the character sheet has five
-subtabs: Stats, Description, Equipment, Skills & Talents, Prayers.
-Creatures is DM-only and is offered on `amDM()`; the access rule itself
-is Postgres's.
+**The app has three top-level tabs** (279): `Active` (Encounter,
+Characters, Things, Trade), `Campaign` (World, Maps) and `Rules`
+(Species, Spells, Items, Creatures). The character sheet has four
+subtabs - Stats, Description, Equipment, Skills & Talents - plus
+**Spells**, which is hidden for anybody who casts nothing. Creatures
+and NPCs are the DM's and are offered on `amDM()`; the access rule
+itself is Postgres's.
+
+**`TOUR.md` walks all of it**, in an order where each step's
+dependencies already exist.
 
 Working, roughly in the order it was built:
 
 * **Access** — auth, games, join-by-code, RLS verified with four
   accounts. There is no DM *account*: "dm" is a per-game role in
   `game_members.role`, so the same person is DM of one game and a player
-  in another, and `is_game_dm()` backs 108 of the 161 policies
+  in another, and `is_game_dm()` backs 111 of the 168 policies
 * **Creatures** — a template IS a character (`is_template`), so a
   creature is edited with the same sheet a player uses and placing one
   on the board is a copy, contents of its containers and all. `npcs` is
@@ -482,7 +522,8 @@ Working, roughly in the order it was built:
   monster's statblock - each named on the sheet
 * **Time** — one game clock in six-second ticks, short and long rests,
   hit dice, feature uses and recharges, effects that expire
-* **Casting** — the cleric spell list, prepared prayers, slots by level,
+* **Casting** — the cleric and wizard lists out of 276 catalogued
+  spells, prepared prayers, slots by level,
   concentration, and effects that reach the dice (Bless adds its d4)
 * **Trade** — merchants, pricing, haggling, coin
 * **The map** — built 2026-10-21 to 24, and the one part of this with
@@ -491,15 +532,15 @@ Working, roughly in the order it was built:
   a wall is a cover standing on a floor and can fall down and leave
   the floor; a room declares its size and what it is made of by
   default, so a wall needs a row and a floor does not. `stride::step`
-  says what one step costs and refuses a wall by name. The Map tab
-  draws it on a canvas and **you author it by clicking it** - there
+  says what one step costs and refuses a wall by name. `Campaign ▸
+  Maps` draws it on a canvas and **you author it by clicking it** - there
   are no coordinate boxes - and a whole map can be saved under a name
   and loaded back. The rules are `grid.rs`, `terrain.rs`, `stride.rs`,
   `ground.rs` and `shelf.rs`; `src/map.js` is the only thing that
   knows what any of it LOOKS like, and is meant to be replaceable
 
 Not done, and the honest list is in `STATUS.md`: subclasses and their
-features, spells for the other eleven classes, four species still
+features, spells for the other ten classes, four species still
 unseeded, the `skill_choices` a class offers at creation are recorded
 but not enforced, and on the map there is no fog, no falling, no
 movement budget and no undo.

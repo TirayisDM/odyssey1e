@@ -14452,6 +14452,138 @@ it. A separate file because 292 was already applied - 115.
   and not a control, the damage dice want the same code with a
   different net.
 
+## 294. The corrections were in the log, and the log is not what you open
+
+**2026-11-08.** Dave: *"I would like to do a full push to update
+everything that John needs to use all features and examine."*
+
+**THE GAP WAS NOT A MISSING FEATURE.** Four documents build, stand up,
+design and remember this application, and not one of them says what to
+click. John can be compiling by lunchtime and still not know that Trade
+does nothing until somebody is a merchant, that a sheet's Spells tab is
+hidden until the character can cast, that the fight strip is not drawn
+until initiative is rolled, or that the dice pad says *no d20 rolled
+yet* until one is. 148 registered commands behind three tabs, and
+nothing walked anybody through them.
+
+**AND THE DOCS HAD DRIFTED - INTO THIS FILE, WHICH IS THE WRONG
+DIRECTION.** Every stale fact found was already corrected somewhere in
+`STATUS.md`: the corrections table said 180 files and 192 rows while
+`README.md` said 167 and 177, and "Pick up here" opens by saying
+*"There are three tabs, not eight"* while `README.md`'s own State
+section still listed Play, Run, World, Characters, Objects, Creatures,
+Spells and Trade. The knowledge existed. It was filed at line 14,500 of
+a 734KB log, and a new reader opens `README.md`. **That is 288 one
+level up from the schema** - the same count written twice, disagreeing -
+and the fix is not another correction note. It is to put the
+corrections home.
+
+What was wrong, and is now right where it is claimed:
+
+| where | said | is |
+|---|---|---|
+| README, Running it | `1312 tests` | 1443 |
+| README, State | `1,312 tests`, 46k Rust, 42 tables, 161 policies | 1443, 53.4k, 44, 168 |
+| README, State | eight top-level tabs, named from before 279 | three, with their subtabs |
+| README, State | `is_game_dm()` backs 108 of 161 | 111 of 168 |
+| README, State | "the cleric spell list" | cleric and wizard, out of 276 |
+| README, Not done | "spells for the other eleven classes" | ten - the wizard list landed |
+| README, numbering | 167 files to 249, 177 rows, 82 gaps | 180 to 293, 192 rows, 113 gaps |
+| NEW-MACHINE, twice | 1436 tests | 1443 |
+| NEW-MACHINE, section 6 | "the eight tabs load" | pick a game, then three |
+
+**THE FIGURES ARE COMPUTED, NOT TYPED.** The gap list in README's
+numbering section - 113 missing numbers in 34 runs - came out of the
+directory, and the table and policy counts out of the live project
+today. Hand-editing those is precisely how they came to disagree with
+this file, so the new text says in as many words that it is computed.
+
+**AND THE LEDGER TURNED OUT TO HAVE CHANGED ITS MIND ABOUT NAMES,**
+which is the one genuinely new thing this cycle found. 70 of the 192
+rows are recorded as `NNN_description` and 122 as a bare
+`description`, so neither a numeric sort nor a count reconciles them.
+The eight files the database split are now named from the ledger
+rather than from memory: 026 (2 rows), 027 (3), 028 (3), 031 (4), 032
+(2), 043 (2), 273 (2), 274 (2), which is the 12. 031, 032 and 043 went
+in as `031a_`, `031b_` and so on; 273 and 274 as a name and the same
+name with a suffix. That is why the re-verification is dated rather
+than continuous.
+
+**`TOUR.md` IS A SEQUENCE AND NOT A FEATURE LIST.** A list gets read
+once and a sequence gets run, and the order is the DEPENDENCY order
+rather than a tour guide's taste - the merchant before the trade, the
+room before the map, the caster before the spell. 93 steps across
+twelve parts, and every one of them says **what proves it**, so a step
+that has stopped working fails where the reader is standing instead of
+three screens later.
+
+**THE THIRD COLUMN IS WHY IT ALSO ANSWERS "AND EXAMINE".** Each step
+names the element id and the Tauri command behind it, which turns the
+tour into the index into `main.js` and `src-tauri/src/` that a new
+reader otherwise has to build for themselves. 74 ids and 91 commands.
+
+**AND THAT COLUMN IS TESTED**, because it is the half that rots on its
+own: a control gets renamed in the cycle that improves it and nobody
+rereads a 600-line document to notice. `tests/tour.smoke.mjs` asserts
+every `#id` exists in `index.html` and every `command()` is registered
+in `generate_handler!` - the registry rather than the source files,
+since a command can exist in `commands/*.rs` and still be unreachable.
+It also refuses a row with a missing cell, because the document's whole
+claim is that each step says what proves it.
+
+**WHAT THE TEST DOES NOT BUY, SAID IN THE TEST AND IN THE DOCUMENT.**
+It cannot tell whether a step is in the right order or whether "proves
+it" still describes what happens. Nothing mechanical can. **Nobody has
+walked the tour end to end** - it was derived from the markup and the
+handlers - and both files say so rather than implying a confidence
+that was never earned.
+
+**ONLY THE LAST COLUMN IS SCANNED,** which is a small decision worth
+recording. The prose cites `current_profile()`, a Postgres function and
+not a Tauri command, and a naive sweep for `something()` would fail on
+it. Narrowing to the column that makes the promise beat keeping a list
+of exceptions, which would have been a second place to be wrong.
+
+**THE FLOORS ARE BELOW THE REAL FIGURES ON PURPOSE.** Every assertion
+in that test is satisfied by a file with no steps in it, so there are
+floors to stop a gutted document passing - but set under the counts
+rather than at them. A step whose control is built in JavaScript and
+has no id cites only a command, which is correct, and padding the
+document to reach a round number would be writing for the test.
+
+**ONE CARRIED ITEM WAS CHECKED AND IS NOT THERE.** The note that
+`NEW-MACHINE.md` claims migrations cannot be applied from this machine
+is wrong: the only sentence in that file about applying them is in the
+accounts table, about not having the Supabase invite, and it is
+correct. Nothing was changed, and the item is struck rather than
+carried again.
+
+180 migration files, 192 ledger rows, `security_doors()` 0 faults.
+1443 Rust tests and two Node checks - nothing in the rules moved,
+because nothing in this cycle touched a rule.
+
+### Carried forward
+
+- **Nobody has walked `TOUR.md`.** The first walk is worth more than
+  the next hundred and will find something; correcting the file is
+  part of walking it. This is the only item on this list that a single
+  evening closes.
+- **`profiles` still asks `auth.uid()`** in its read-own and
+  update-own policies, untouched by 197, so a person signed in through
+  a second identity cannot read or rename their own profile. 292
+  recorded it; it still wants its own cycle.
+- **292's contact sheet was never re-photographed.** The glyph stroke
+  resolves to 0.6px by computed style and has not been looked at by
+  eye.
+- **The art count still appears three times further down this file**
+  as "18 of 33", "21 of 33" and "the 15 words with no tile yet", and
+  all three are low. The corrections table above has the counted
+  answer. 294 fixed `README.md` and `NEW-MACHINE.md`; it did not go
+  back through this log, and a log is a record rather than a draft.
+- 290's notes stand: advantage shows one die, the pad is a display and
+  not a control, the damage dice want the same code with a different
+  net.
+
 ---
 
 ## Pick up here
@@ -14507,10 +14639,11 @@ reports it live rather than from a document.
 | tile images | 33 files, 21 of 33 words | **60 files, and 31 of the 37 terrain words have one** - the six without are `ice_wall`, `iron_grate`, `rock_wall`, `rubble_ice`, `trees`, `vines` |
 
 `security_doors()` still returns **0 faults**, re-run on 2026-11-03.
-**`README.md` says "1312 tests" in two places and has not been
-corrected** - it is the one document in the clone whose numbers are
-now wrong, and the test count is the first thing anybody checks on a
-fresh machine.
+**`README.md` said "1312 tests" in two places and both are now
+corrected** - 294 went through that file and `NEW-MACHINE.md` and put
+every figure in this table back where it is claimed, which is the
+whole point of that cycle: a correction kept only here is a correction
+the next reader never sees.
 
 **One thing that looks like a fault and is not**, checked the same
 day so nobody spends an afternoon on it: `authenticated` has `execute`

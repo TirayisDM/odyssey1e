@@ -70,7 +70,7 @@ Then confirm the checkout is sound:
 .\run.ps1 -Test
 ```
 
-**1436 tests, about a second.** If that number is lower, you are on an
+**1443 tests, about a second.** If that number is lower, you are on an
 older commit; if tests *fail* on a clean clone, something is wrong with
 the toolchain rather than the code.
 
@@ -227,15 +227,20 @@ Run these in order. Each one fails differently, which is the point.
 
 | check | passing answer |
 |---|---|
-| `.\run.ps1 -Test` | 1436 tests, 0 failed |
-| `npm test` | the map smoke test completes |
-| `.\run.ps1`, then sign in | the eight tabs load |
+| `.\run.ps1 -Test` | 1443 tests, 0 failed |
+| `npm test` | the map smoke test and the tour name check both complete |
+| `.\run.ps1`, then sign in | it makes you pick a game, then the three tabs load |
 | open a map, break a wall | a heap of rubble lands on the square |
 | click **Lift what is underfoot** | it lifts, *given a shovel, spade or mattock in the pack* - otherwise it tells you what it wants |
 | `select * from public.security_doors()` in the Supabase SQL editor | **an empty result is the pass.** Run it after any migration |
 
 Then read the end of `STATUS.md`. **"Pick up here" is the end of the
 log** and says what the next cycle is.
+
+**And if you want to see what the application actually does**, walk
+`TOUR.md` - one ordered path through every feature, with what proves
+each step. The checks above prove the toolchain; the tour proves the
+app.
 
 ---
 
@@ -297,6 +302,18 @@ else* - they need nothing secret, they sign up in the app with their
 own email and get their own game. The three things that must be granted
 rather than self-served are a GitHub collaborator invite, an invite to
 the `Odyssey RPG` Supabase org, and a game's join code.
+
+**Send them `TOUR.md` and nothing else.** Sections 1 and 2 of this
+file get them building; the tour is the only document that tells them
+what the application does, in an order where each step's dependencies
+already exist. It also names the element id and the Tauri command
+behind every step, so it doubles as the index into the code that a new
+reader of `main.js` otherwise has to build for themselves.
+
+**The first person to walk it will find something.** Nobody has walked
+it end to end - `tests/tour.smoke.mjs` checks that every control and
+command it names still exists, which is not the same as checking that
+the steps are right. Correcting it is part of walking it.
 
 Note that **nothing in this application can read or reset a password.**
 A collaborator locked out of their app account needs a reset from the

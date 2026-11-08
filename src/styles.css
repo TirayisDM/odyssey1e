@@ -1494,14 +1494,60 @@ button.wide{width:100%}
                                   outline-offset:6px}
 .portrait > .portrait-err{max-width:11rem;text-align:center}
 
-/* 289. AN EMPTY ROOM WITH ITS NAME ON THE DOOR. A reserved area that
-   looked like nothing would read as a rendering fault; a dashed one
-   with a label reads as unfinished, which is what it is. The whole
-   block goes when the pad is built. */
-.dicepad{min-height:14rem;border:1px dashed var(--line);border-radius:6px;
-         display:flex;align-items:center;justify-content:center;
-         color:var(--muted);font-size:12px;letter-spacing:.06em;
-         text-transform:uppercase}
+/* 290. THE DICE PAD. 289 left this room empty with its name on the
+   door; this is what went in it. The arithmetic, and the reason the
+   die cannot roll, are in main.js beside the geometry. */
+.dicepad{min-height:14rem;border:1px solid var(--line);border-radius:6px;
+         display:flex;flex-direction:column;align-items:center;
+         justify-content:center;gap:.7rem;padding:.9rem}
+
+.die-stage{position:relative;width:160px;height:160px;perspective:620px;
+           display:flex;align-items:center;justify-content:center}
+
+/* A LIGHT THAT DOES NOT TURN WITH THE DIE. Every face is the same
+   colour, so a solid lit from nowhere reads as a flat hexagon with
+   numbers on it. Shading the faces themselves would be wrong - the
+   shading would spin with them - so the sheen sits in front, in the
+   screen's own frame, where a light actually is. */
+.die-stage::after{content:"";position:absolute;inset:0;pointer-events:none;
+                  background:radial-gradient(120px 120px at 32% 24%,
+                             rgba(255,255,255,.14),rgba(255,255,255,0) 64%)}
+
+/* THE WHOLE THROW IS ONE TRANSITION. No render loop, no physics and
+   nothing to tidy up afterwards: the solid turns to the face the
+   engine chose, with whole turns in front of it so it tumbles on the
+   way. The two lists have to agree in SHAPE - both `rotateX rotateY
+   matrix3d` - or the browser interpolates the matrices alone, takes
+   the short way round, and the die arrives without spinning. */
+.d20{position:relative;width:0;height:0;transform-style:preserve-3d;
+     transition:transform 900ms cubic-bezier(.2,.8,.25,1)}
+
+/* CSS 3D HAS NO DEPTH BUFFER, and it does not need one here.
+   `backface-visibility` culls the ten faces turned away, and the ten
+   left over cannot overlap each other because the solid is convex -
+   so there is no order for the painter to get wrong. */
+.d20 .face{position:absolute;backface-visibility:hidden;
+           clip-path:polygon(50% 0,0 100%,100% 100%);
+           background:#2a303a;
+           display:flex;align-items:flex-end;justify-content:center}
+.d20 .face span{line-height:1;font-weight:700;padding-bottom:18%;
+                color:#aab3c0;font-variant-numeric:tabular-nums}
+
+/* The face you landed on, and the engine's verdict about it. GREEN
+   AND RED ARE `face_outcome`, not a comparison against 20: a crit
+   range of 19+ is a thing a weapon can have, and the screen is in no
+   position to know. */
+.d20 .face.lit{background:#36506f}
+.d20 .face.lit span{color:#cfe3ff}
+.d20 .face.lit.crit{background:#2f5a36}
+.d20 .face.lit.crit span{color:#bfe8c2}
+.d20 .face.lit.fumble{background:#5e2f2b}
+.d20 .face.lit.fumble span{color:#ffc8c0}
+
+.die-say{font-size:12px;color:var(--muted);text-align:center;max-width:16rem}
+
+/* The tumble is decoration. The number is not, and it is text. */
+@media (prefers-reduced-motion:reduce){.d20{transition:none}}
 
 /* ===================================================================
    289. SHOW THE BOXES - TEMPORARY.

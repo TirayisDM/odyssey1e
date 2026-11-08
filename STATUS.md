@@ -14216,6 +14216,114 @@ no overlap at any of them. `npm test` passes.
 - **The dice pad is next**, and it is a feature with a layout already
   waiting for it.
 
+## 290. The die shows a number it did not choose
+
+**2026-11-07.** Dave: *"how can we build a 3d dice roller 20 sided
+die"*.
+
+**IT DOES NOT ROLL, AND THAT IS THE WHOLE DESIGN.** Rust rolled the
+die. `RollResult.natural` is the face that came up - the lone d20's,
+or the one **kept** out of an advantage pair - and it has been written
+to `rolls.natural_roll` and selected by the feed's own query since
+long before today. The pad reads that column off the newest roll and
+turns the solid until that face is the one you see. A die that made up
+its own number would be a second answer to a question the engine has
+already answered: the scar `skill_mods` left, and the reason nothing
+on a screen in this application decides anything.
+
+So this cycle is **no Rust, no new command and no migration**. The
+number was already arriving; nothing was drawing it.
+
+**WHAT IS RANDOM IS THE SPIN.** Two to four whole turns on each axis,
+so no two throws look alike on the way to a number that was never in
+doubt. Randomising the result would be a lie. Randomising the route is
+theatre, and theatre is the entire job of a die.
+
+**THE GEOMETRY IS DERIVED, NOT A TABLE OF ANGLES.** The twelve
+vertices of an icosahedron are the cyclic permutations of
+(0, +-1, +-PHI); a face is any three of them one edge apart, which is
+the same test as for an edge done three times; a face's normal is the
+direction of its centroid, free because the solid is centred on the
+origin. Twenty rotations copied off a web page would have been twenty
+chances to typo a die that looks very nearly right.
+
+**ONE MATRIX, USED TWICE.** Each face gets an orthonormal basis whose
+z is its outward normal and whose -y points at one of its corners -
+which is what stands the triangle on its base with a point at the top.
+That basis **places** the face on the solid. Its **transpose**, which
+for a rotation is its inverse, turns the solid until that face is
+square to the viewer with that corner up, and the number lands
+upright. No `acos`, no axis to normalise, no degenerate case at the
+poles, and no sign to get backwards. The basis is right-handed by
+construction, so the digits are never mirrored.
+
+**NO DEPENDENCIES AND NO BUILD STEP.** Twenty divs clipped to
+triangles, one CSS transition, and about fifty lines of arithmetic.
+three.js would light it better and this project has no bundler, so it
+would have meant vendoring a few hundred kilobytes into a desktop
+application for one die.
+
+**CSS 3D HAS NO DEPTH BUFFER, AND IT DOES NOT NEED ONE HERE.**
+`backface-visibility` culls the ten faces turned away, and the ten
+left over cannot overlap one another because the solid is convex - so
+there is no order for the painter to get wrong. That was the risk
+worth naming before starting, and the convexity retires it.
+
+**THE LIGHT DOES NOT TURN WITH THE DIE.** Every face is the same
+colour, so a solid lit from nowhere reads as a flat hexagon with
+numbers on it. Shading the faces themselves would spin with them, so
+the sheen is a radial gradient in front of the stage, in the screen's
+own frame, where a light actually is.
+
+**IT SHOWS THE GAME'S NEWEST d20, NOT THE OPEN CHARACTER'S.** Same
+list the feed beside it is painting, from the same read, so the pad
+and the feed cannot disagree - and `paintEncLog` had already written
+down why filtering that list is a trap: it is the newest fifty rolls
+in the **game**, so a filter empties itself the moment the rolls you
+wanted scroll off the end. The line under the die names whose roll it
+is, so the number is never ambiguous, and that line is also the only
+thing a screen reader is offered: the solid is `aria-hidden`, because
+it carries nothing the sentence does not.
+
+**THE SAME ROLL REPAINTED IS NOT A NEW THROW.** `loadRolls` runs after
+a dozen different things, and a die that tumbled every time the feed
+refreshed would be lying about what just happened - so the throw is
+keyed on the roll's id. The first face of a session is **placed**
+rather than thrown, because opening the application should not tumble
+a die over a roll from yesterday.
+
+**GREEN AND RED ARE `face_outcome`,** not a comparison against 20. A
+crit range of 19+ is a thing a weapon can have and the screen is in no
+position to know; 009 wrote the verdict into the row for exactly this.
+
+Verified against the rig with stubbed rolls: the first roll placed at
+rest on 17 with no spin, a second roll adding three whole turns on
+each axis and landing on a 1 marked `fumble`, the caption and the
+feed's verdict agreeing, and the pad filling the area 289 reserved at
+1500px and stacking under the portrait below the 1060px container
+query.
+
+1443 tests - unchanged, since nothing in Rust moved.
+
+### Carried forward
+
+- **Advantage still shows one die.** The engine hands back only the
+  face it kept; the pair exists only inside `detail`'s markdown
+  (`2d20kh1 [14, 3]`), and parsing prose for numbers is the fault this
+  codebase keeps paying for. The clean fix is `faces: Vec<i64>` on
+  `RollResult` - small, and Rust, so its own cycle.
+- **The pad is a display and not yet a control.** There is no button
+  on it that rolls anything; the roll controls are still where 287
+  left them, and moving them here is the obvious next move.
+- **The damage dice are this same code with a different net** - except
+  the d10, which is a trapezohedron and not a Platonic solid at all.
+- **Nothing tests any of it.** The geometry is twenty faces, all
+  numbered once, opposites summing to 21, every basis right-handed -
+  four assertions that would catch a typo instantly, and the harness
+  for frontend code is still a browser and a pair of eyes.
+- **289's note about the stretched right-hand area** stands, but the
+  room now has something in it.
+
 ---
 
 ## Pick up here

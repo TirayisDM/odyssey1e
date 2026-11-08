@@ -603,6 +603,7 @@ function clearData() {
   // `amDM` reads `state.games`, which is cleared above.
   paintTabOffer();
   state.rolls = [];
+  resetDie();
   document.querySelector("#games").innerHTML = "";
   // 280. The roster, where the strip's character list used to be named.
   document.querySelector("#pc-list").innerHTML = "";
@@ -10506,6 +10507,233 @@ async function updatePreview() {
   }
 }
 
+/* ===================================================================
+   290. A DIE THAT CANNOT ROLL.
+
+   Dave: *"how can we build a 3d dice roller 20 sided die"*.
+
+   IT DOES NOT ROLL, AND THAT IS THE DESIGN. Rust rolled the die.
+   `RollResult.natural` is the face that came up - the lone d20's, or
+   the one KEPT out of an advantage pair - and it has been written to
+   `rolls.natural_roll` and selected by the feed's own query since
+   long before this cycle. The pad reads that column off the newest
+   roll and turns the solid until that face is the one you see. A die
+   that made up its own number would be a second answer to a question
+   the engine has already answered, which is the scar `skill_mods`
+   left and the reason nothing on a screen in this app decides
+   anything.
+
+   WHAT IS RANDOM IS THE SPIN. Two to four whole turns on each axis,
+   so no two throws look alike on the way to a number that was never
+   in doubt. Randomising the result would be a lie. Randomising the
+   route is theatre, and theatre is the entire job of a die.
+
+   IT SHOWS THE GAME'S NEWEST d20, not this character's. That is the
+   same list the feed beside it is painting, from the same read, so
+   the pad and the feed cannot disagree - and `paintEncLog` already
+   wrote down why filtering this list is a trap: it is the newest
+   fifty rolls in the GAME, so a filter empties itself the moment the
+   rolls you wanted scroll off the end. The line under the die names
+   whose roll it is, so the number is never ambiguous.
+
+   THE GEOMETRY IS DERIVED, NOT A TABLE OF ANGLES. The twelve
+   vertices of an icosahedron are the cyclic permutations of
+   (0, +-1, +-PHI); a face is any three of them one edge apart; a
+   face's normal is the direction of its centroid. Twenty rotations
+   copied off a web page would be twenty chances to typo a die that
+   looks very nearly right.
+
+   ONE MATRIX, USED TWICE. Each face gets an orthonormal basis whose
+   z is its outward normal and whose -y points at one of its corners.
+   That basis PLACES the face on the solid. Its TRANSPOSE - which for
+   a rotation is its inverse - turns the solid until that face is
+   square to the viewer with that corner up, which is how the number
+   lands upright. No `acos`, no axis to normalise, no degenerate case
+   at the poles and no sign to get backwards.
+
+   NO DEPENDENCIES AND NO BUILD STEP. Twenty divs, one transition and
+   about fifty lines of arithmetic. three.js would light it better,
+   and this project has no bundler, so it would mean vendoring a few
+   hundred kilobytes into a desktop application for one die.
+
+   WHAT IT DOES NOT DO. Advantage rolls two dice and the engine hands
+   back only the one it kept; showing both means `faces` on
+   `RollResult`, which is Rust and its own cycle. The damage dice are
+   this same code with a different net - except the d10, which is a
+   trapezohedron and not a Platonic solid at all.
+   =================================================================== */
+
+const D20 = (() => {
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1],
+                           a[2] * b[0] - a[0] * b[2],
+                           a[0] * b[1] - a[1] * b[0]];
+  const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const unit = (a) => mul(a, 1 / Math.hypot(a[0], a[1], a[2]));
+  const d2 = (a, b) => { const d = sub(a, b); return dot(d, d); };
+
+  // TWELVE VERTICES: every cyclic permutation of (0, +-1, +-PHI).
+  // The edge is 2 units long in these coordinates.
+  const verts = [];
+  for (const s of [1, -1]) for (const t of [1, -1]) {
+    verts.push([0, s, t * PHI]);
+    verts.push([s, t * PHI, 0]);
+    verts.push([t * PHI, 0, s]);
+  }
+
+  // TWENTY FACES: every triple of vertices that are mutually one edge
+  // apart. Nothing else in the solid is 2 units away, so the test for
+  // a face is the same test as for an edge, three times.
+  const faces = [];
+  for (let i = 0; i < 12; i++)
+  for (let j = i + 1; j < 12; j++)
+  for (let k = j + 1; k < 12; k++) {
+    if (Math.abs(d2(verts[i], verts[j]) - 4) > 1e-9) continue;
+    if (Math.abs(d2(verts[j], verts[k]) - 4) > 1e-9) continue;
+    if (Math.abs(d2(verts[i], verts[k]) - 4) > 1e-9) continue;
+    const v0 = verts[i], v1 = verts[j], v2 = verts[k];
+    const c = mul([v0[0] + v1[0] + v2[0],
+                   v0[1] + v1[1] + v2[1],
+                   v0[2] + v1[2] + v2[2]], 1 / 3);
+    // The centroid points out of the face because the solid is
+    // centred on the origin, so the outward normal is free.
+    const n = unit(c);
+    // Local -y is screen up, and it is aimed at a corner: that is
+    // what makes the triangle stand on its base with a point at the
+    // top. `mx` is then forced, and the basis is right-handed by the
+    // identity (b x a) x b = a for unit perpendicular a, b - so the
+    // digits are never mirrored.
+    const my = mul(unit(sub(v0, c)), -1);
+    const mx = unit(cross(my, n));
+    faces.push({ n, mx, my, num: 0 });
+  }
+
+  // OPPOSITE FACES SUM TO 21, as they do on a die you can hold.
+  let next = 1;
+  for (const a of faces) {
+    if (a.num) continue;
+    const b = faces.find((f) => !f.num && f !== a && dot(a.n, f.n) < -0.999);
+    a.num = next;
+    b.num = 21 - next;
+    next += 1;
+  }
+
+  const EDGE = 2;
+  const CIRCUM = Math.sqrt(1 + PHI * PHI);
+  const INRAD = PHI * PHI * EDGE / (2 * Math.sqrt(3));
+
+  // CSS matrix3d is column-major, and the columns are where the local
+  // axes end up.
+  const m3 = (cx, cy, cz) => "matrix3d(" +
+    [cx[0], cx[1], cx[2], 0, cy[0], cy[1], cy[2], 0,
+     cz[0], cz[1], cz[2], 0, 0, 0, 0, 1]
+      .map((x) => x.toFixed(6)).join(",") + ")";
+
+  return {
+    faces, EDGE, CIRCUM, INRAD,
+    // Put this face on the solid.
+    place: (f) => m3(f.mx, f.my, f.n),
+    // Turn the solid until this face is the one you are looking at.
+    // The transpose, written out as its rows.
+    show: (f) => m3([f.mx[0], f.my[0], f.n[0]],
+                    [f.mx[1], f.my[1], f.n[1]],
+                    [f.mx[2], f.my[2], f.n[2]]),
+  };
+})();
+
+// The die's size is the diameter of the sphere the corners sit on, so
+// it fits the stage whichever way it is facing.
+const DIE_SIZE = 140;
+
+function buildDie() {
+  const el = document.querySelector("#d20");
+  if (!el || el.children.length) return;
+  const scale = DIE_SIZE / (2 * D20.CIRCUM);
+  const w = D20.EDGE * scale;              // the triangle's side
+  const h = w * Math.sqrt(3) / 2;          // and its height
+  const tz = D20.INRAD * scale;            // centre to face, straight out
+  // A triangle's centroid is a sixth of its height below the middle of
+  // the box it is clipped from, and the centroid is the point the
+  // normal passes through - so the box has to sit that much high.
+  const ty = -h / 6;
+  for (const f of D20.faces) {
+    const d = document.createElement("div");
+    d.className = "face";
+    d.dataset.num = f.num;
+    d.style.width = w.toFixed(2) + "px";
+    d.style.height = h.toFixed(2) + "px";
+    d.style.left = (-w / 2).toFixed(2) + "px";
+    d.style.top = (-h / 2).toFixed(2) + "px";
+    d.style.fontSize = (w * 0.26).toFixed(1) + "px";
+    d.style.transform = D20.place(f) +
+      " translateZ(" + tz.toFixed(2) + "px)" +
+      " translateY(" + ty.toFixed(2) + "px)";
+    const s = document.createElement("span");
+    s.textContent = f.num;
+    d.append(s);
+    el.append(d);
+  }
+}
+
+let dieSpinX = 0;
+let dieSpinY = 0;
+
+// `spin` is false for the first face of a session: opening the app
+// should not throw a die over a roll that happened yesterday.
+function turnDieTo(el, num, outcome, spin) {
+  const f = D20.faces.find((x) => x.num === num);
+  if (!f) return;
+  if (spin) {
+    dieSpinX += 360 * (2 + Math.floor(Math.random() * 3));
+    dieSpinY += 360 * (2 + Math.floor(Math.random() * 3));
+  }
+  el.style.transform = "rotateX(" + dieSpinX + "deg) rotateY(" +
+    dieSpinY + "deg) " + D20.show(f);
+  for (const d of el.children) {
+    const on = Number(d.dataset.num) === num;
+    d.classList.toggle("lit", on);
+    d.classList.toggle("crit", on && outcome === "crit");
+    d.classList.toggle("fumble", on && outcome === "fumble");
+  }
+}
+
+// THE NEWEST d20 IN THE GAME, or nothing. An untargeted roll, a roll
+// of damage and a roll of anything that was not a single d20 all have
+// no `natural_roll`, and a die has nothing to say about them.
+function paintDie() {
+  const el = document.querySelector("#d20");
+  const say = document.querySelector("#die-say");
+  if (!el || !say) return;
+  buildDie();
+  const r = (state.rolls || []).find(
+    (x) => x.natural_roll !== null && x.natural_roll !== undefined
+  );
+  if (!r) {
+    say.textContent = "no d20 rolled yet";
+    return;
+  }
+  // The same roll repainted is not a new throw. `loadRolls` runs after
+  // a dozen different things, and a die that tumbled every time the
+  // feed was refreshed would be lying about what just happened.
+  if (el.dataset.rollId === r.id) return;
+  const first = !el.dataset.rollId;
+  el.dataset.rollId = r.id;
+  turnDieTo(el, Number(r.natural_roll), r.face_outcome, !first);
+  say.textContent = (r.character_name || "Someone") + " \u00b7 " +
+    (r.label || r.request) + " \u2014 natural " + r.natural_roll;
+}
+
+// Signing out is not a roll. Forget which one was showing so the next
+// sign-in places its die rather than throwing one.
+function resetDie() {
+  const el = document.querySelector("#d20");
+  const say = document.querySelector("#die-say");
+  if (el) delete el.dataset.rollId;
+  if (say) say.textContent = "no d20 rolled yet";
+}
+
 async function loadRolls() {
   const ul = document.querySelector("#rolls");
   ul.innerHTML = "";
@@ -10540,6 +10768,8 @@ async function loadRolls() {
     g.sort((a, b) => (order[a.role] ?? 0) - (order[b.role] ?? 0));
     ul.append(rollCard(g));
   }
+
+  paintDie();
 }
 
 /* ---------- wiring ---------- */
@@ -10547,6 +10777,8 @@ async function loadRolls() {
 const val = (id) => document.querySelector(id).value.trim();
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // The pad has a die in it before anything has been rolled.
+  buildDie();
   state.user = await call("me");
   paintUser();
   // Decide which door to show before anything else is drawn.

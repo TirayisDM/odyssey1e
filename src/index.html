@@ -860,14 +860,18 @@
                  looks deliberate rather than broken. -->
             <div id="portrait" class="portrait"></div>
 
-            <!-- 289. THE DICE ROLLING PAD GOES HERE. Dave drew this
-                 box on his own screenshot and said what it is for;
-                 the pad itself is the next cycle. The AREA is
-                 declared now because where it sits is a layout
-                 decision and what it does is a feature - building
-                 the pad should not be the day the sheet changes
-                 shape. Empty and labelled until then. -->
-            <div id="dicepad" class="dicepad">dice pad &mdash; next</div>
+            <!-- 290. THE DICE PAD, in the area 289 reserved for it.
+                 The solid is DECORATION - twenty faces built and
+                 turned by `buildDie`, carrying no information a
+                 screen reader could not get from the line under it,
+                 which is why that line and not the die carries the
+                 number. -->
+            <div id="dicepad" class="dicepad">
+              <div class="die-stage">
+                <div id="d20" class="d20" aria-hidden="true"></div>
+              </div>
+              <div id="die-say" class="die-say">no d20 rolled yet</div>
+            </div>
             </div>
           </div>
 

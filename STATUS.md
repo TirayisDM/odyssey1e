@@ -14584,6 +14584,128 @@ because nothing in this cycle touched a rule.
   not a control, the damage dice want the same code with a different
   net.
 
+## 295. The order was never the protection
+
+**2026-11-08.** Dave: *"Build it."*
+
+**THE SHEET ENDED IN SIX AWAITS IN A ROW AND ONE THROW CUT THE QUEUE.**
+`loadPortrait`, `updatePreview`, `loadInventory`, `loadFeatures`,
+`loadPrayers`, `loadCastable` - six regions of one screen, each
+independent of the others, run as though they were steps of one
+calculation. A fault in the fifth skipped the sixth and rejected
+`loadSheet`, which rejected `selectCharacter`, which rejected
+`openSheetFor`.
+
+**AND IT WAS NOT A FAILED COMMAND.** `call` has turned a refusal into
+`null` and logged it since the beginning, so nothing here throws
+because the database said no. These throw on a `querySelector` that
+found nothing or a field that was not on the row shape - the fault
+that arrives with a new column, in a region nobody has read for
+twenty cycles.
+
+**THE TELL IS THAT IT HAD BEEN FIXED TWICE BY REORDERING.** 211
+hoisted `paintTabOffer` to the top because one throw in `loadPrayers`
+left the Spells tab hidden for a wizard. 283 moved the portrait to the
+front of the six and wrote it down: *"the face goes in front of the
+four that can take each other down rather than behind them."* Both
+were right about the symptom in front of them. Both left whoever adds
+the seventh loader at the back of a queue that can still be cut. **A
+QUEUE ORDERED BY WHO DESERVES TO SURVIVE IS NOT A FIX, it is a
+ranking,** and the next cycle inherits it without being told.
+
+So the six became a named list run through one helper, each step
+isolated, each failure reported to the log with the name of the region
+that failed. Six loaders are six failures.
+
+**THE NAMED CASUALTY WAS OUTSIDE THE FUNCTION AND IT WAS WORSE THAN
+THE NOTE SAID.** 282 carried *"`paintChosen` included"*, and that was
+the line after `await loadSheet()` in `selectCharacter`. But the roster
+calls `openSheetFor`, and THREE more lines sit after its own await:
+`showTab("active", "chars")`, `showSub` to the Stats pane, and the
+scroll to the panel. So one broken region meant you clicked a
+character and got a half-drawn sheet, on whatever tab you were already
+on, not scrolled to, with the roster still open as though you had
+chosen nobody.
+
+`paintChosen` reads `state.folk` and `state.characterId` and never
+touches `state.sheet`, so it never needed the sheet at all. It moved
+ABOVE the await. **Removing the dependency beats guarding it** - the
+other three lines needed nothing, because the helper no longer lets
+the rejection out.
+
+**WHAT IS DELIBERATELY NOT WRAPPED: the synchronous paint above it.**
+The abilities, the skills, `paintClasses`, `paintResistances`,
+`paintPerform`, `paintDescription`, `paintTalents` - those draw the
+sheet ITSELF, and if one of them throws the sheet is wrong and should
+look wrong. The six at the foot draw independent regions around it,
+which is the whole reason it is honest to isolate those and not these.
+A try/catch over the body would be a way of hiding a broken sheet
+behind a quiet log line, which is the opposite of what 207 built the
+log for.
+
+**AND THE ORDER DID NOT CHANGE.** A cycle about robustness that also
+moves behaviour cannot tell you which half did what. 283's order
+stands; its comment now says the order is no longer a defence, and
+211's says the hoist stays because `sheet.caster` is known there, not
+because anything downstream depends on it. **A comment explaining a
+defence that is no longer in the code is worse than no comment.**
+
+**IT WAS DRIVEN IN THE RIG, BEFORE AND AFTER, with one variable.**
+`list_casting` was made to answer with a row shape missing
+`casting_ability`, which is what `loadPrayers` dereferences with
+`.toUpperCase()` - the real fault class, not a thrown command, which
+`call` would have swallowed and proved nothing.
+
+| | at `30ebd25` | with 295 |
+|---|---|---|
+| roster folds to the name picked | **no** | yes |
+| red line in the log | **none, badge empty** | `loadSheet / prayers`, badge 2 |
+| the TypeError's own message | nowhere on screen | in the entry |
+| commands after the break | **stops at `list_casting`** | runs on |
+| `openSheetFor`'s three lines | **skipped** | run |
+| purse, burden, the handaxe | painted | painted |
+
+The before run is the one worth looking at twice: **the failure was
+completely silent.** Zero error entries, an empty badge, and an
+unhandled rejection in a console nobody has open. 207 built the log so
+a refused roll could not be a button that did nothing, and this
+slipped past it, because an unhandled rejection never reaches `log`.
+
+1443 Rust tests and two Node checks, all unchanged - nothing in this
+cycle went near a rule, a command or a migration. `src/main.js` only:
+one helper, one list, one moved line, two corrected comments.
+
+### Carried forward
+
+- **`profiles` ASKING `auth.uid()` IS STRUCK, AND IT WAS NEVER TRUE.**
+  Live, all three of its policies read `(SELECT current_profile())`.
+  197 rewrote 42 policies through a loop over `pg_catalog.pg_policy`
+  that names no tables, so grepping the migration files for the
+  rewrite finds nothing and reads as though `profiles` was missed.
+  **Reading the files was the wrong instrument; the catalogue was the
+  right one.** The item is wrong in 292's list and in 294's; both
+  stand as written, because a log is a record.
+- **NOTHING ASKS THE POLICIES WHAT THEY SAY.** That is what the item
+  above is really about: two cycles carried a security fault that did
+  not exist because the only way to check was to read prose and
+  guess. A test that reads `pg_policy` and asserts on it is the next
+  cycle.
+- **ABOUT 160 OF THE 168 POLICIES ARE `to public` AND `anon` HOLDS
+  CRUD ON 42 OF 44 TABLES, AND NOTHING LEAKS.** This looks like a hole
+  and is not one. Tested against the live REST API with the
+  publishable key and no bearer token, every table answers `42501
+  permission denied for function is_game_member` with HTTP 401. The
+  wall is 193/194/196's `revoke execute` on the functions the policies
+  call, not the roles on the policies. Worth knowing before somebody
+  "fixes" the roles and thinks they have done something.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **292's contact sheet was never re-photographed.** The glyph stroke
+  resolves to 0.6px by computed style and has not been seen by eye.
+- 290's notes stand: advantage shows one die, the pad is a display and
+  not a control, the damage dice want the same code with a different
+  net.
+
 ---
 
 ## Pick up here

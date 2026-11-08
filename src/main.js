@@ -344,6 +344,37 @@ async function call(cmd, args) {
   return r.ok ? r.value : null;
 }
 
+// 295. SIX LOADERS ARE SIX FAILURES, NOT ONE.
+//
+// A panel that paints itself out of several independent regions runs
+// them one after another, and a throw in the second skips the rest.
+// NOTE THAT A FAILED COMMAND IS NOT WHAT THROWS HERE: `call` above
+// turns a refusal into `null` and logs it, so everything that reaches
+// this is a fault in the paint - a `querySelector` that found nothing,
+// a field that was not on the row shape. Which is precisely the kind
+// of fault that arrives with a new column, long after the region that
+// breaks was last read.
+//
+// THE ORDER WAS THE PROTECTION TWICE AND IT IS NOT A PROTECTION. 211
+// hoisted the tab strip above the loaders; 283 put the portrait at the
+// front of them. Both were right about the symptom in front of them
+// and both left whoever adds the next loader at the back of a queue
+// that can still be cut.
+//
+// EACH STEP IS NAMED SO THE LOG CAN SAY WHICH ONE. `log` already
+// draws a red entry and counts it on the shut drawer (207), so a
+// broken region reports itself without taking the other five down and
+// without stealing the screen.
+async function paintEach(who, steps) {
+  for (const [name, fn] of steps) {
+    try {
+      await fn();
+    } catch (e) {
+      log(who + " / " + name, String((e && e.message) || e), true);
+    }
+  }
+}
+
 /* ---------- session ---------- */
 
 // Fast login.
@@ -3630,8 +3661,16 @@ async function selectCharacter(id) {
   // 280. The strip's list was repainted here to move its selected
   // mark. There is no strip list; paintChosen folds the roster to the
   // name just picked, which is the whole of what the mark was for.
-  await loadSheet();
+  //
+  // 295. AND IT FOLDS BEFORE THE SHEET IS READ, not after. This was
+  // the named casualty of a throw inside `loadSheet`: you clicked
+  // somebody, the sheet half-drew, and the roster never folded to the
+  // name you picked - so the app looked as though you had not chosen
+  // anybody. `paintChosen` reads `state.folk` and `state.characterId`
+  // and never touches `state.sheet`, so it never needed the sheet at
+  // all. REMOVING THE DEPENDENCY BEATS GUARDING IT.
   paintChosen();
+  await loadSheet();
 }
 
 async function loadSheet() {
@@ -3642,11 +3681,16 @@ async function loadSheet() {
   if (!sheet) { panel.hidden = true; return; }
   state.sheet = sheet;
   // 211. AS SOON AS THE FACT ARRIVES, not at the end of this function.
-  // The Spells tab turns on `sheet.caster` and that is known now;
-  // putting it last made the tab strip depend on `loadInventory`,
-  // `loadFeatures`, `loadPrayers` and `loadCastable` all succeeding,
-  // and the rig proved it - one throw in `loadPrayers` and the
-  // catalogue stayed hidden for a wizard with no explanation.
+  // The Spells tab turns on `sheet.caster` and that is known now, so
+  // this is where it belongs on its own merits.
+  //
+  // 295. IT IS NO LONGER LOAD-BEARING. 211 moved it because putting it
+  // last made the tab strip depend on `loadInventory`, `loadFeatures`,
+  // `loadPrayers` and `loadCastable` all succeeding - one throw in
+  // `loadPrayers` and the catalogue stayed hidden for a wizard with no
+  // explanation. The loaders at the foot of this function can no
+  // longer take each other down, so this line stays where it is
+  // because the fact is known here, not because the order defends it.
   paintTabOffer();
   panel.hidden = false;
 
@@ -3982,17 +4026,30 @@ async function loadSheet() {
     list.append(el);
   }
 
-  // 283. FIRST OF THE ASYNC LOADERS, and after everything synchronous
-  // above has already painted. A throw in `loadInventory` skips what
-  // follows it - the fault 211 half-fixed and 282's carried note still
-  // names - so the face goes in front of the four that can take each
-  // other down rather than behind them.
-  await loadPortrait();
-  await updatePreview();
-  await loadInventory();
-  await loadFeatures();
-  await loadPrayers(sheet);
-  await loadCastable();
+  // 283/295. THE ASYNC LOADERS, after everything synchronous above has
+  // already painted. 283 put the portrait at the front of these
+  // because a throw in `loadInventory` skipped what followed it, and
+  // said so: "the face goes in front of the four that can take each
+  // other down." THAT IS NO LONGER TRUE OF THEM - `paintEach` runs
+  // each one isolated, so a throw in any of the six costs that one
+  // region and names itself in the log. The order below is unchanged
+  // and still reads best this way; it is no longer a defence.
+  //
+  // THE SYNCHRONOUS PAINT ABOVE IS DELIBERATELY NOT WRAPPED. Those
+  // lines draw the sheet ITSELF - the abilities, the skills, the
+  // classes, the resistances - and if one of them throws the sheet is
+  // wrong and should look wrong. These six draw independent regions
+  // around it, which is the whole reason it is honest to isolate them
+  // rather than a way of hiding a broken sheet behind a quiet log
+  // line.
+  await paintEach("loadSheet", [
+    ["portrait", loadPortrait],
+    ["preview", updatePreview],
+    ["inventory", loadInventory],
+    ["features", loadFeatures],
+    ["prayers", () => loadPrayers(sheet)],
+    ["castable", loadCastable],
+  ]);
 }
 
 // 119. HOW HARD WAS IT?

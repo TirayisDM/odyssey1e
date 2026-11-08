@@ -14324,6 +14324,46 @@ query.
 - **289's note about the stretched right-hand area** stands, but the
   room now has something in it.
 
+## 291. The light was behind the die, not on it
+
+**2026-11-07.** Dave, on 290: *"looks good, but i don't want the
+shadow behind the dice"*.
+
+**IT WAS A LIGHT, AND IT READ AS A SHADOW,** which is the same thing
+as being wrong. 290 put a radial gradient across `.die-stage` to keep
+the solid from reading as a flat hexagon with numbers on it, and the
+reasoning - shade the faces and the shading spins with them, so the
+light belongs in the screen's frame - still holds. What it missed is
+that **the gradient is round and the die is not.** A 160px overlay
+over a solid about 140px across spills past the silhouette on every
+side, so most of what it painted landed on the panel rather than on
+the die: a soft patch around it, which is a glow behind an object,
+not a light on one.
+
+**THE RULE THIS LEAVES.** Anything that lights this solid has to stay
+inside its outline, and an overlay in the screen's frame cannot - the
+outline it would have to respect is a hexagon that changes shape as
+the die turns. That rules the approach out rather than needing it
+tuned, so the gradient came out and nothing replaced it.
+
+**AND IT WAS INSURING AGAINST A PROBLEM THAT IS SMALLER THAN IT
+LOOKED.** The clipped triangles leave hairline seams where they meet,
+so the facets are visible without any shading at all, and the lit
+face carries the eye. Checked with the rule removed: the solid still
+reads as a solid.
+
+One rule deleted. 1443 tests - nothing in Rust moved, again.
+
+### Carried forward
+
+- **The die has no lighting**, and the way to give it some is a
+  hairline edge on each triangle, drawn as part of the face's own
+  background so it turns with the face and never leaves the outline.
+  Not built; nobody has asked for it.
+- 290's carried notes stand: advantage still shows one die, the pad
+  is a display and not a control, the damage dice want the same code
+  with a different net, and nothing tests the geometry.
+
 ---
 
 ## Pick up here

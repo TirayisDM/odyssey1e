@@ -1501,17 +1501,15 @@ button.wide{width:100%}
          display:flex;flex-direction:column;align-items:center;
          justify-content:center;gap:.7rem;padding:.9rem}
 
-.die-stage{position:relative;width:160px;height:160px;perspective:620px;
+/* 291. NO LIGHT. 290 put a radial gradient over this box to stop the
+   solid reading as a flat hexagon, and the gradient is round while
+   the die is not: it spilled past the silhouette onto the panel and
+   read as a glow behind the die rather than a light on it. Dave:
+   *"i don't want the shadow behind the dice"*. Anything that lights
+   this solid has to stay INSIDE its outline, and an overlay in the
+   screen's frame cannot. */
+.die-stage{width:160px;height:160px;perspective:620px;
            display:flex;align-items:center;justify-content:center}
-
-/* A LIGHT THAT DOES NOT TURN WITH THE DIE. Every face is the same
-   colour, so a solid lit from nowhere reads as a flat hexagon with
-   numbers on it. Shading the faces themselves would be wrong - the
-   shading would spin with them - so the sheen sits in front, in the
-   screen's own frame, where a light actually is. */
-.die-stage::after{content:"";position:absolute;inset:0;pointer-events:none;
-                  background:radial-gradient(120px 120px at 32% 24%,
-                             rgba(255,255,255,.14),rgba(255,255,255,0) 64%)}
 
 /* THE WHOLE THROW IS ONE TRANSITION. No render loop, no physics and
    nothing to tidy up afterwards: the solid turns to the face the

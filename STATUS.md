@@ -15464,6 +15464,136 @@ destroyed.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 302. The fixtures cannot be generated, and that is the finding
+
+**2026-11-09.** Dave: *"fix #2 - proposal 1st."*
+
+**FOUR CYCLES CARRIED "NOTHING KEEPS THE FIXTURES IN STEP WITH THE
+RUST STRUCTS", AND 298 SAID WHAT THE FIX WAS:** *"generating them from
+the structs is the only real fix and it is a much bigger piece of work
+than this was."* Measured before building anything:
+
+```
+165 commands.  119 of them return serde_json::Value.
+```
+
+**OF THE 36 ANSWERS THE STUB GIVES, NINE HAVE A RUST STRUCT.** The
+rest pass PostgREST rows straight through, so their shape lives in the
+DATABASE and not in Rust. The fix four cycles deferred as too big would
+have covered a quarter of the surface - and would still have missed
+`list_skill_keys` and `dice_prefs`, two of the four faults that
+prompted the note. **There is no generator here. There is a check.**
+
+**IT READS TWO SOURCES AND SAYS SO.**
+
+| source | covers | example |
+|---|---|---|
+| a Rust struct | 9 of 36 | `list_locations` → `Vec<Placed>` |
+| a `("select", "...")` in the command body | 9 of 36 | `list_skill_keys` → `key,name,ability` |
+| neither - untyped `Value` | 18 of 36 | `dice_prefs`, `wallet`, `encumbrance` |
+
+The select string is the exact column list PostgREST returns, sitting
+in the command's own body. `list_skill_keys` carries
+`("select", "key,name,ability")` - **the three keys 298's fixture got
+wrong.** An untyped command may also ADD keys after the read -
+`who_is_where` inserts `creature`, because 140 decided that one word
+belongs in Rust - so the allowed set is the select PLUS every bare
+string literal in the body. Deliberately permissive: a check that
+accuses a fixture which is RIGHT is a check that gets deleted.
+
+**THE STUB IS RUN, NOT READ.** `node:vm` with a five-line shim, a fresh
+context per command because `rename_location` writes to the world
+fixture. Half these fixtures are built by functions and spreads, and
+the literal in the file is not the answer the app receives.
+
+**ONLY ONE DIRECTION IS ASSERTED, AND MEASURING IS WHAT DECIDED IT.**
+The first draft asserted both. **72 fields would have been flagged as
+missing.** `Item` has thirty fields and the rig's catalogue entry
+carries five ON PURPOSE - the thinness is the design. A 72-entry
+allowlist is not a list anybody reads. So an INVENTED key fails with no
+allowlist at all, because production can never send one and there is no
+judgement to make; a MISSING key is printed as a worklist, the way 294
+taught about floors.
+
+**SIX WRONG FIXTURES, FOUND THE DAY THE CHECK WAS WRITTEN.** The
+running total was four in four cycles.
+
+| fixture | said | engine sends | what it did |
+|---|---|---|---|
+| `list_objects` | `qty` | `quantity` | **no stack ever showed its count** - `objectRow` reads `o.quantity` |
+| `list_species` | `prose` | `summary` | **the species card's prose line was always blank** |
+| `terrain_words` | *(no `raisable`)* | `raisable` | **268's build picker was EMPTY in every rig session ever opened** |
+| `list_characters` | the whole `CHAR` | seven columns | `hp`, `ac`, `caster`, `abilities`, `classes`… none of which that call returns |
+| `who_is_where` | `location_name`, `type` | neither | and `token_name` and `dead`, which ARE read, were missing |
+| `list_catalogue` | `cost_cp` | `price`, `denom` | nothing read it - a lie in the file rather than on screen |
+
+`list_characters` is **297 again, inside the rig**: one fixture object
+serving two different shapes. `list_individuals` three lines below it
+already had its own narrower copy and a comment saying why.
+
+**AND THREE MORE IN A NEST, FOUND BY EYE.** The check reads the top
+level of a row only, so `HANDAXE.item` is checked by nobody - and it
+carried `cost_cp`, `weight_lb` (which is `Body`'s field, borrowed onto
+an `Item`) and no `description`, which `.item.description` reads. The
+documented limit, demonstrating itself within the hour.
+
+**FOUR FAULTS PLANTED, FOUR CAUGHT BY THE RIGHT ASSERTION.** A renamed
+key (`quantity` → `qty`); bare strings where the engine sends objects,
+which is 298's fault exactly and fails as *"rows are strings, but the
+engine sends objects"*; **the ENGINE renaming a field with the fixture
+untouched**, which is the drift this whole cycle is about; and a
+`#[serde(rename = ...)]` appearing in the Rust, which would make the
+parser quietly wrong rather than loudly wrong - it refuses to run at
+all and says why.
+
+**THE CHECK'S OWN FIRST BUG WAS CAUGHT BY 301.** The return type is
+sliced from the closing paren, so it opens with a space and `^->` never
+matched - which sent every typed command down the select path and
+reported four faults that were not there. The one that gave it away was
+`list_locations` being accused of `depth` and `path`, which 301 had
+proved correct the hour before. **A green check and a check that is
+measuring the wrong thing look identical; a recent, known-good answer
+is what tells them apart.**
+
+**AND A NAME IS NOT UNIQUE.** There are three `Placed` in this tree -
+`locations.rs`, `slots.rs` and a private one in `commands/tiles.rs`.
+Resolving a struct by name alone would have read the wrong one's
+fields, so it prefers the module the return type names and DECLINES
+when it is still ambiguous.
+
+All three broken panes were then opened in the rig: the build picker
+offers `rock` and `wall`, `list_objects` carries `quantity`, and the
+species card opens with *"The many."*
+
+1444 Rust tests. Five Node checks.
+
+### Carried forward
+
+- **HALF THE FIXTURES STILL HAVE NO SHAPE TO BE HELD TO**, and the
+  number is printed every run. Those 18 return an untyped `Value` with
+  no select - `dice_prefs`, `wallet`, `encumbrance`, `game_clock`. The
+  only source of truth for them is the database.
+- **NESTING IS UNCHECKED.** `Owned.item` is an `Item` and nothing
+  looks inside it; three inventions were found in that one nest by eye
+  today. One level of recursion is a small cycle and would need the
+  field's own type resolved.
+- **A VALUE IN THE WRONG DOMAIN IS STILL INVISIBLE**, which is 299's
+  `dice_prefs` sending `#f5f5f5` where the app wanted `slate`. No
+  shape check catches that, this one included.
+- **The thinness worklist is nine lines long and nobody has walked
+  it.** Most of it is correct - `fight_strip` omits `id` and `status`
+  because its fixture is an idle strip. It is somewhere to look, never
+  a verdict.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **FOUR FEATURES ARE ONE BUTTON SHORT**, from 301: `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`.
+- **Two trigger functions have a mutable `search_path`**, from 296,
+  last verified then - the database was not reachable this session.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

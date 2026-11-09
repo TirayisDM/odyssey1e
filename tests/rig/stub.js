@@ -6,9 +6,27 @@
 // nothing behind it. No database, no sign-in, no Rust.
 //
 // **IT IS A FAKE AND IT SHOULD LOOK LIKE ONE.** Every shape in here was
-// copied off a Rust struct by hand and nothing keeps them in step. A row
-// the app paints wrongly in the rig may be the rig's fault, and that is
-// the cost of being able to drive the thing at all.
+// copied off a Rust struct by hand. A row the app paints wrongly in the
+// rig may be the rig's fault, and that is the cost of being able to
+// drive the thing at all.
+//
+// 302. HALF OF THEM ARE NOW HELD TO A SHAPE. `rig.smoke.mjs` runs this
+// file in a vm, calls every answer, and fails if a fixture carries a key
+// the engine cannot send - against the Rust struct where there is one
+// (9 of 36) and against the command's own `("select", "...")` where
+// there is not (9 more). It found six wrong fixtures the day it was
+// written, three of which were painting a wrong screen.
+//
+// **A FIXTURE MAY BE THIN AND USUALLY SHOULD BE.** `Item` has thirty
+// fields and the catalogue entry below carries five. Missing fields are
+// PRINTED by that check, never asserted - the first draft asserted them
+// and flagged 72.
+//
+// **WHAT IS STILL ON TRUST:** the VALUES (299's `dice_prefs` sent
+// `#f5f5f5` where the app wanted `slate`, which is a valid String in a
+// correct shape), anything NESTED (`item` below is checked by nobody -
+// three inventions were found in it by eye), and the 18 answers whose
+// command returns an untyped `Value` with no select to read.
 //
 // WHAT IT BUYS, in cycles that have actually used it: 211 proved a throw
 // in `loadPrayers` hid a wizard's spell tab; 290 drew the die; 295 proved
@@ -142,7 +160,14 @@ const HANDAXE = {
     range_reach: 5, range_value: 20, range_long: 60,
     armor_category: null, base_ac: null, dex_cap: null,
     size: "medium", holds_size: null, spell_levels: null,
-    cost_cp: 500, weight_lb: 2,
+    // 302. FOUND BY EYE, NOT BY THE CHECK, which is the cost of only
+    // looking at the top level of a row. `cost_cp` is invented and
+    // `weight_lb` is `Body`'s field borrowed onto an `Item`; the real
+    // pair is `price`/`denom` and the real weight is a string, because
+    // `numeric` arrives as one. `description` was missing and
+    // `.item.description` is read.
+    weight: "2", price: 5, denom: "gp",
+    description: "A light axe, made for throwing.",
   },
 };
 
@@ -200,7 +225,17 @@ const ANSWERS = {
 
   // the sheet and the regions around it
   get_sheet: () => SHEET,
-  list_characters: () => [CHAR],
+  // 302. THE SELECT'S SEVEN COLUMNS AND NOT THE WHOLE CHARACTER. This
+  // was `[CHAR]`, which handed the roster `hp`, `hp_max`, `ac`,
+  // `caster`, `species_key`, `classes` and `abilities` - seven fields
+  // `select=id,name,token_name,owner_uid,is_active,class_key,level` does
+  // not return. Anything written against them would have worked here and
+  // come back blank in the app. 297's fault, inside the rig, and the one
+  // `list_individuals` below already knew to avoid.
+  list_characters: () => [
+    { id: CHAR.id, name: CHAR.name, token_name: null, owner_uid: "dm-1",
+      is_active: true, class_key: "cleric", level: CHAR.level },
+  ],
   // Who the DM can enrol in a fight: the `characters` rows with
   // `is_template` false, which is a narrower select than
   // `list_characters` returns and so gets its own fixture.
@@ -223,8 +258,11 @@ const ANSWERS = {
   // the reference shelves
   list_classes: () => [{ key: "cleric", name: "Cleric", hit_die: 8 }],
   list_species: () => [
+    // `summary` is the field; `prose` was invented here, so the species
+    // card's prose line has always been blank in the rig. `sp.summary`
+    // is what main.js reads.
     { key: "human", name: "Human", playable: true, size: "medium",
-      speed: 30, ability_bonuses: {}, prose: "The many." },
+      speed: 30, ability_bonuses: {}, summary: "The many." },
   ],
   // `{key, name, ability}`, which is what `select=key,name,ability`
   // returns - NOT bare strings, whatever the command's name suggests.
@@ -240,8 +278,13 @@ const ANSWERS = {
       school: "evocation", classes: ["cleric"], text: "A touch." },
   ],
   list_catalogue: () => [
-    { key: "handaxe", name: "Handaxe", kind: "weapon", cost_cp: 500, weight: 2 },
-    { key: "torch", name: "Torch", kind: "gear", cost_cp: 1, weight: 1 },
+    // `price` and `denom`, which is 5e's coin ladder and what `Item`
+    // carries - "10 gp" rather than a normalised copper count.
+    // `cost_cp` was invented here and appears nowhere in `src/`.
+    { key: "handaxe", name: "Handaxe", kind: "weapon",
+      price: 5, denom: "gp", weight: 2 },
+    { key: "torch", name: "Torch", kind: "gear",
+      price: 1, denom: "cp", weight: 1 },
   ],
   list_creatures: () => [],
   list_audiences: () => [],
@@ -293,22 +336,43 @@ const ANSWERS = {
     return {};
   },
 
+  // 302. `quantity`, NOT `qty`. `objectRow` renders
+  // `o.quantity > 1 ? " x" + o.quantity : ""`, so with `qty` here every
+  // object in the Things manager read as a single one and no stack ever
+  // showed its count. A key that is one letter short of right, in a
+  // fixture that looked complete.
   list_objects: () => [
-    { id: "o1", item_key: "handaxe", name: "Handaxe",
-      holder_kind: "character", holder_id: "c1", holder_name: "Luci", qty: 1 },
+    { id: "o1", item_key: "handaxe", name: "Handaxe", quantity: 1,
+      equipped: false, is_container: false, size: "small",
+      holder_kind: "character", holder_id: "c1", holder_name: "Luci" },
   ],
+  // 302. `location_name` and `type` were invented; neither is in the
+  // select and neither is read. What IS read and was missing:
+  // `token_name` and `dead`, both of which `paintPeople` paints with.
+  // `creature` is the one key the command ADDS after the read - 140
+  // decides it in Rust so the screen cannot - which is why this check's
+  // allowed set is the select plus the body's own literals.
   who_is_where: () => [
-    { id: "c1", name: "Luci", is_npc: false, location_id: "l1",
-      location_name: "Tavern", type: "humanoid" },
+    { id: "c1", name: "Luci", token_name: null, is_npc: false,
+      creature_type: null, creature: false, dead: false, is_active: true,
+      location_id: "l1", entity_id: "e-c1" },
   ],
-  list_npcs: () => [{ id: "n1", key: "goblin", name: "Goblin", game_id: null }],
+  // A statblock is keyed by `key` - `select=key,game_id,name,...` has no
+  // `id` at all, and the picker builds its options from `n.key`.
+  list_npcs: () => [{ key: "goblin", name: "Goblin", game_id: null,
+                      species: "goblinoid", class: null, class_key: null,
+                      ac: 15, hp_max: 7, size: "small", notes: null }],
   // 237/240's one round trip for six pickers. Answered here because it
   // runs on startup, so without it every rig session opens with a red
   // line that has nothing to do with whatever is being tested.
+  // 302. `raisable` WAS MISSING and it is not decoration: 268's build
+  // picker is `fill("#mv-buildword", (w) => w.raisable)`, so without it
+  // the filter kept nothing and the control was EMPTY in every rig
+  // session anyone has ever opened.
   terrain_words: () => [
-    { key: "rock", sub: true, surface: true, cover: false },
-    { key: "grass", sub: false, surface: true, cover: false },
-    { key: "wall", sub: false, surface: false, cover: true },
+    { key: "rock", sub: true, surface: true, cover: false, raisable: true },
+    { key: "grass", sub: false, surface: true, cover: false, raisable: false },
+    { key: "wall", sub: false, surface: false, cover: true, raisable: true },
   ],
   // There is no `list_tiles` answer. The command is registered in
   // `lib.rs` and called from nowhere in `src/` - the map paints through

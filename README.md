@@ -82,8 +82,21 @@ stale entry before the cycle was finished - an exception that has
 served its purpose is how a list like this stops meaning anything.
 
 The fifth checks the rig - that every command its stub answers is a
-command that exists and that the app actually asks for. See
-`tests/rig.smoke.mjs`.
+command that exists, that the app actually asks for it, and **that the
+fixture still has the engine's shape**. See `tests/rig.smoke.mjs`.
+
+That last part is half the fixtures, and the half is the point. **119
+of the 165 commands return `serde_json::Value`**, so there is no struct
+to generate from - 298's carried note had it backwards. The check reads
+a Rust struct where one exists and the command's own
+`("select", "...")` where one does not, runs `stub.js` in a vm, and
+fails on any key the engine cannot send. It found six wrong fixtures
+the day it was written; three were painting a wrong screen.
+
+**Only inventions fail.** A fixture may be thin - `Item` has thirty
+fields and the rig's catalogue entry carries five - so missing fields
+are printed as a worklist and never asserted. The first draft asserted
+them too and flagged 72.
 
 **A map tab that shows nothing is the first thing to check after a
 pull.** `npm test` answers it in a second and does not need the app,

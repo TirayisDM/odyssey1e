@@ -238,7 +238,7 @@ Run these in order. Each one fails differently, which is the point.
 | check | passing answer |
 |---|---|
 | `.\run.ps1 -Test` | 1443 tests, 0 failed |
-| `npm test` | three checks complete: the renderer, `TOUR.md`'s names, the rig's stub |
+| `npm test` | four checks complete: the renderer, the die's geometry, `TOUR.md`'s names, the rig's stub |
 | `npm run rig`, then open http://127.0.0.1:8790 | the app, in a browser, with no database behind it. Walk the tabs: **no red lines in the Log drawer** |
 | `.\run.ps1`, then sign in | it makes you pick a game, then the three tabs load |
 | open a map, break a wall | a heap of rubble lands on the square |

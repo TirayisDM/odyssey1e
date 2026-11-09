@@ -176,7 +176,18 @@ const ANSWERS = {
   list_members: () => [
     { profile_id: ME.profile_id, display_name: "Rig", email: ME.email },
   ],
-  dice_prefs: () => ({ die_colour: "#f5f5f5", pip_colour: "#1a1a1a" }),
+  // 292's colours are NAMES, not hex. `paintDieColours` builds a class
+  // out of the value - `die-` plus it - and `styles.css` has
+  // `.d20.die-red`, `.die-yellow`, `.die-white`. A hex here produced
+  // the class `die-#f5f5f5`, which is not a valid selector, matched
+  // nothing, and fell through to the base rule - so the die still
+  // looked right. The fourth fixture this pair of cycles has caught
+  // being wrong, and the fourth to look very nearly correct.
+  // `?die=` and `?pip=` pick them.
+  dice_prefs: () => ({
+    die_colour: RIG.get("die") || "white",
+    pip_colour: RIG.get("pip") || "black",
+  }),
 
   // the sheet and the regions around it
   get_sheet: () => SHEET,
@@ -281,11 +292,24 @@ const ANSWERS = {
     { id: "e1", name: "Bar brawl", status: "ready", location_id: "l1" },
   ],
   fight_strip: () => ({ name: "", round: 0, order: [] }),
-  list_rolls: () => [
-    { id: "r1", request: "insight", total: 14,
-      narrative: "She reads the room.",
-      created_at: new Date().toISOString() },
-  ],
+  // 299. `natural_roll` IS WHAT THE DICE PAD NEEDS. Without it
+  // `paintDie` says "no d20 rolled yet" and the whole pane - twenty
+  // faces, the spin, 292's colours - is unreachable in the rig, which
+  // is the one pane nothing but eyes can check.
+  //
+  // `?nat=` picks the face so a particular one can be looked at, and
+  // `face_outcome` is what paints crit green and fumble dark.
+  list_rolls: () => {
+    const nat = Number(RIG.get("nat")) || 14;
+    return [
+      { id: "r1", request: "insight", label: "Insight", total: nat + 5,
+        natural_roll: nat,
+        face_outcome: nat === 20 ? "crit" : nat === 1 ? "fumble" : null,
+        character_name: "Luci",
+        narrative: "She reads the room.",
+        created_at: new Date().toISOString() },
+    ];
+  },
 };
 
 /* ---------- the bridge ---------- */

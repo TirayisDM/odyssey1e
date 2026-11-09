@@ -15087,6 +15087,135 @@ path opened with two of them.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 299. The die's geometry, under test
+
+**2026-11-09.** Dave: *"Propose 299."*
+
+**FIVE CYCLES WROTE "NOTHING TESTS ANY OF IT" ABOUT THE FRONTEND.** 290
+also wrote down exactly what the test should be: *"twenty faces, all
+numbered once, opposites summing to 21, every basis right-handed - four
+assertions that would catch a typo instantly."* 298 committed the
+browser. This is the other half, and it is 290's own list.
+
+**THE OBSTACLE WAS NEVER THE ASSERTIONS. IT WAS THE SHAPE OF THE
+FILE.** `D20` was an IIFE in the middle of `main.js` and nothing could
+import it. So it moved to `src/die.js`, which is 235's precedent
+exactly - that cycle pulled the renderer into `map.js` because it was
+"the one part that knows what things LOOK like". This is the one part
+that knows what shape the solid is. **Arithmetic buried inside a
+painter is arithmetic nothing can ask a question of.**
+
+**AND IT NEEDS NO STUBS AT ALL.** `map.smoke.mjs` wants a fake canvas
+and a fake `Image` before it can ask anything. `die.js` touches no DOM,
+reads no state and imports nothing: `Math`, arrays, and the twelve
+coordinates an icosahedron is made of. That is what made it the right
+first subject rather than the most interesting one.
+
+**THE BOX ARITHMETIC MOVED WITH IT**, and that was the point rather
+than tidiness. `ty = -h / 6` is the single trickiest number in the
+whole die - a triangle's centroid sits a sixth of its height below the
+middle of its bounding box, and the centroid is where the normal comes
+through, so the box has to ride that much high. Leaving it behind in a
+DOM function would have defeated the extraction.
+
+**THEN EIGHT FAULTS WERE PLANTED IN IT ONE AT A TIME,** because a test
+that has never failed is indistinguishable from a test that cannot -
+196's lesson, and 298 ran it too.
+
+| planted | caught by |
+|---|---|
+| `cross(n, my)` instead of `cross(my, n)` | left-handed basis: the digit is MIRRORED |
+| `b.num = 20 - next` | the numbering is no longer 1-20 once each |
+| `ty = -h / 5` | the centroid offset |
+| a transposed index in `show` | `show(f) . place(f)` is not the identity |
+| a vertex permuted wrong | **the solid has 4 faces, expected 20** |
+| an edge test at the wrong length | the numbering loop finds no opposite |
+| **every normal negated** | **missed at first** - see below |
+| `my` without its `-1` | **missed at first** - see below |
+
+**THE TWO MISSES WERE THE WHOLE VALUE OF DOING THIS.** Both are
+invisible to every property the first draft checked, and both render a
+die that is *very nearly right*, which is the failure a picture hides
+best and the exact thing `die.js` exists to avoid.
+
+**NEGATE EVERY NORMAL** and the bases stay orthonormal and stay
+right-handed - `mx` flips with `n`, so the triple product is unchanged
+- while `backface-visibility` culls the ten faces you wanted and the
+die renders INSIDE OUT. Nothing in the first draft noticed. The fix is
+that `die.js` now carries each face's vertex indices and centroid, so
+a test can ask `dot(n, c) > 0` - the face can be asked what it IS and
+not only how it is turned.
+
+**DROP THE `-1` ON `my`** and the basis is orthonormal, right-handed
+AND outward, while every digit on the die is upside down over a
+triangle standing on its point. The assertion is that screen-up points
+at a corner, which is what stands the triangle on its base.
+
+Carrying the vertices also bought two statements that say
+"icosahedron" rather than "twenty triangles": **every vertex in exactly
+five faces** (12 x 5 / 3 = 20), and **every edge in exactly two** -
+thirty of them, a closed solid rather than a sheet.
+
+**A NINTH MUTATION WAS MISSED AND THAT IS CORRECT.** Aiming `my` at
+the second vertex instead of the first changes nothing a reader could
+see: an equilateral triangle's three corners are interchangeable, so
+any of them being up is equally right. The test says so rather than
+tightening until it bites.
+
+**THE TOLERANCE ON THE IDENTITY IS 1e-5 AND IT IS NOT FLOATING
+POINT.** `m3` writes six decimal places because it is building a CSS
+string, so the round trip through `matrix3d(...)` is where the
+precision goes. Measured deviation, 9.3e-7. A test whose tolerance is
+set by a string format should say so, or the next person tightens it
+and wonders why.
+
+**IT FOUND NO BUG IN THE DIE.** Every assertion passed the first time
+it was run, and the test file says that out loud. The value is the
+NEXT edit to that file, and the pattern: pull the arithmetic into its
+own module, import it under Node, assert the properties. There is a
+great deal more pure arithmetic in `main.js` and now there is a visible
+precedent for all of it.
+
+**THE RIG EARNED ITS COMMIT IMMEDIATELY.** The extraction was checked
+in a browser, not argued for: the die builds twenty face divs numbered
+1-20, turns to the rolled face, lights crit and fumble, and the
+composition of the die's transform with the lit face's own came back
+**the identity to 1e-5** - the test's central claim, confirmed where it
+actually matters. `?nat=` was added to the stub to make that possible
+at all, because without `natural_roll` the pad says *"no d20 rolled
+yet"* and the one pane only eyes can check was unreachable.
+
+**AND IT CAUGHT A FOURTH WRONG FIXTURE.** `dice_prefs` returned hex
+where 292's code wants NAMES - `paintDieColours` builds a class out of
+the value, and `die-#f5f5f5` is not a valid selector, so it matched
+nothing and fell through to the base rule. **The die still looked
+right.** Fourth fixture in two cycles, fourth one that looked very
+nearly correct.
+
+1443 Rust tests. Four Node checks now: the renderer, the die, the
+tour, the rig.
+
+### Carried forward
+
+- **THE PATTERN IS ESTABLISHED AND USED ONCE.** `main.js` is still
+  ~10k lines with a great deal of pure arithmetic in it - encumbrance
+  display, the slot ladder, `withSign`, the skill lines. Each is the
+  same move: lift it, import it, assert it. Nothing says which is
+  worth doing next, and doing them all at once would be a refactor
+  rather than a cycle.
+- **The fixtures are still hand-copied off the Rust structs**, from
+  298. Four have been wrong so far and the rest are unverified.
+- **`list_tiles` is registered and reachable from nowhere**, from 298.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **Two trigger functions have a mutable `search_path`**, from 296.
+- **292's contact sheet was never re-photographed** - though the die
+  has now been looked at twice, white on a 20 and red on a 1, and both
+  were right.
+- 290's remaining notes stand and are NEW MATERIAL rather than
+  cleanup: advantage shows one die, the pad is a display and not a
+  control, the damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

@@ -42,7 +42,7 @@ cargo test           # 1443 tests, about a second
 inside it**, not from the repo root.
 
 ```powershell
-npm test             # the renderer, the tour and the rig's names
+npm test             # the renderer, the die, the tour and the rig
 ```
 
 ```powershell
@@ -55,11 +55,17 @@ deleted five functions out of the middle of that file and both of
 those checks passed for two commits while the map drew nothing. See
 `tests/map.smoke.mjs`.
 
-The second part checks `TOUR.md` against the app: every control and
-command the tour names must still exist. See `tests/tour.smoke.mjs`,
-which is explicit about what that does and does not prove.
+The second checks the die's geometry - twenty faces, each number
+once, opposites summing to 21, every basis right-handed and pointing
+outward, and `show(f)` really the inverse of `place(f)`. See
+`tests/die.smoke.mjs`, and `src/die.js` for why the solid is derived
+rather than typed out as twenty rotations.
 
-The third checks the rig - that every command its stub answers is a
+The third checks `TOUR.md` against the app: every control and command
+the tour names must still exist. See `tests/tour.smoke.mjs`, which is
+explicit about what that does and does not prove.
+
+The fourth checks the rig - that every command its stub answers is a
 command that exists and that the app actually asks for. See
 `tests/rig.smoke.mjs`.
 
@@ -148,6 +154,7 @@ src/                     frontend. Vanilla JS, no framework, no build step.
   index.html             every pane, including the ones that start hidden
   main.js                ~10k lines. All of it.
   map.js                 the ONLY thing that knows what the map looks like
+  die.js                 and the only thing that knows the d20's shape
   styles.css
   assets/tiles/*.png     32x32 tile art. See ART.md.
 src-tauri/src/
@@ -157,6 +164,7 @@ src-tauri/src/
   lib.rs                 the command registry, and the roll path
 supabase/migrations/     schema, applied in order. Read the comments.
 tests/map.smoke.mjs      `npm test`. The renderer, which cargo cannot see.
+tests/die.smoke.mjs      the die's geometry, which needs no stubs at all.
 tests/tour.smoke.mjs     TOUR.md's names, which nothing else checks.
 tests/rig.smoke.mjs      and the rig's stub, same reason.
 tests/rig/               `npm run rig`. The frontend in a browser with

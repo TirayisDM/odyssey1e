@@ -18,6 +18,11 @@ import {
   drawSquareInto,
 } from "./map.js";
 
+// 299. THE SHAPE OF THE SOLID, in its own file for the same reason the
+// renderer is: arithmetic buried inside a painter is arithmetic nothing
+// can ask a question of. `tests/die.smoke.mjs` imports it under Node.
+import * as D20 from "./die.js";
+
 // TWO ENCOUNTER IDS, ON PURPOSE.
 //
 // `encounterId` is the ACTIVE encounter, owned by loadTargets: what the
@@ -10680,20 +10685,17 @@ async function updatePreview() {
    rolls you wanted scroll off the end. The line under the die names
    whose roll it is, so the number is never ambiguous.
 
-   THE GEOMETRY IS DERIVED, NOT A TABLE OF ANGLES. The twelve
-   vertices of an icosahedron are the cyclic permutations of
-   (0, +-1, +-PHI); a face is any three of them one edge apart; a
-   face's normal is the direction of its centroid. Twenty rotations
-   copied off a web page would be twenty chances to typo a die that
-   looks very nearly right.
+   THE GEOMETRY IS DERIVED, NOT A TABLE OF ANGLES, and 299 moved it
+   to `src/die.js` so that something could assert it. Twelve vertices,
+   twenty faces found by asking which triples are mutually one edge
+   apart, one orthonormal basis per face used both to place it and -
+   transposed - to turn the solid to it. That file explains itself and
+   `tests/die.smoke.mjs` checks it: twenty faces, each number once,
+   opposites summing to 21, every basis right-handed, and
+   `show(f) . place(f)` the identity.
 
-   ONE MATRIX, USED TWICE. Each face gets an orthonormal basis whose
-   z is its outward normal and whose -y points at one of its corners.
-   That basis PLACES the face on the solid. Its TRANSPOSE - which for
-   a rotation is its inverse - turns the solid until that face is
-   square to the viewer with that corner up, which is how the number
-   lands upright. No `acos`, no axis to normalise, no degenerate case
-   at the poles and no sign to get backwards.
+   WHAT IS LEFT HERE is the part that makes divs out of it, which
+   needs a document and cannot be tested the same way.
 
    NO DEPENDENCIES AND NO BUILD STEP. Twenty divs, one transition and
    about fifty lines of arithmetic. three.js would light it better,
@@ -10705,87 +10707,14 @@ async function updatePreview() {
    `RollResult`, which is Rust and its own cycle. The damage dice are
    this same code with a different net - except the d10, which is a
    trapezohedron and not a Platonic solid at all.
+
+   AND NOTHING HERE SAYS THE DIE LOOKS RIGHT. The lighting, the spin,
+   292's colours, whether the number is legible at 140px - that is
+   eyes, and `npm run rig` is one command away.
    =================================================================== */
 
-const D20 = (() => {
-  const PHI = (1 + Math.sqrt(5)) / 2;
-  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1],
-                           a[2] * b[0] - a[0] * b[2],
-                           a[0] * b[1] - a[1] * b[0]];
-  const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
-  const unit = (a) => mul(a, 1 / Math.hypot(a[0], a[1], a[2]));
-  const d2 = (a, b) => { const d = sub(a, b); return dot(d, d); };
-
-  // TWELVE VERTICES: every cyclic permutation of (0, +-1, +-PHI).
-  // The edge is 2 units long in these coordinates.
-  const verts = [];
-  for (const s of [1, -1]) for (const t of [1, -1]) {
-    verts.push([0, s, t * PHI]);
-    verts.push([s, t * PHI, 0]);
-    verts.push([t * PHI, 0, s]);
-  }
-
-  // TWENTY FACES: every triple of vertices that are mutually one edge
-  // apart. Nothing else in the solid is 2 units away, so the test for
-  // a face is the same test as for an edge, three times.
-  const faces = [];
-  for (let i = 0; i < 12; i++)
-  for (let j = i + 1; j < 12; j++)
-  for (let k = j + 1; k < 12; k++) {
-    if (Math.abs(d2(verts[i], verts[j]) - 4) > 1e-9) continue;
-    if (Math.abs(d2(verts[j], verts[k]) - 4) > 1e-9) continue;
-    if (Math.abs(d2(verts[i], verts[k]) - 4) > 1e-9) continue;
-    const v0 = verts[i], v1 = verts[j], v2 = verts[k];
-    const c = mul([v0[0] + v1[0] + v2[0],
-                   v0[1] + v1[1] + v2[1],
-                   v0[2] + v1[2] + v2[2]], 1 / 3);
-    // The centroid points out of the face because the solid is
-    // centred on the origin, so the outward normal is free.
-    const n = unit(c);
-    // Local -y is screen up, and it is aimed at a corner: that is
-    // what makes the triangle stand on its base with a point at the
-    // top. `mx` is then forced, and the basis is right-handed by the
-    // identity (b x a) x b = a for unit perpendicular a, b - so the
-    // digits are never mirrored.
-    const my = mul(unit(sub(v0, c)), -1);
-    const mx = unit(cross(my, n));
-    faces.push({ n, mx, my, num: 0 });
-  }
-
-  // OPPOSITE FACES SUM TO 21, as they do on a die you can hold.
-  let next = 1;
-  for (const a of faces) {
-    if (a.num) continue;
-    const b = faces.find((f) => !f.num && f !== a && dot(a.n, f.n) < -0.999);
-    a.num = next;
-    b.num = 21 - next;
-    next += 1;
-  }
-
-  const EDGE = 2;
-  const CIRCUM = Math.sqrt(1 + PHI * PHI);
-  const INRAD = PHI * PHI * EDGE / (2 * Math.sqrt(3));
-
-  // CSS matrix3d is column-major, and the columns are where the local
-  // axes end up.
-  const m3 = (cx, cy, cz) => "matrix3d(" +
-    [cx[0], cx[1], cx[2], 0, cy[0], cy[1], cy[2], 0,
-     cz[0], cz[1], cz[2], 0, 0, 0, 0, 1]
-      .map((x) => x.toFixed(6)).join(",") + ")";
-
-  return {
-    faces, EDGE, CIRCUM, INRAD,
-    // Put this face on the solid.
-    place: (f) => m3(f.mx, f.my, f.n),
-    // Turn the solid until this face is the one you are looking at.
-    // The transpose, written out as its rows.
-    show: (f) => m3([f.mx[0], f.my[0], f.n[0]],
-                    [f.mx[1], f.my[1], f.n[1]],
-                    [f.mx[2], f.my[2], f.n[2]]),
-  };
-})();
+// 299. The geometry moved to `src/die.js`. What is left here is
+// the part that makes divs out of it.
 
 // The die's size is the diameter of the sphere the corners sit on, so
 // it fits the stage whichever way it is facing.
@@ -10794,14 +10723,10 @@ const DIE_SIZE = 140;
 function buildDie() {
   const el = document.querySelector("#d20");
   if (!el || el.children.length) return;
-  const scale = DIE_SIZE / (2 * D20.CIRCUM);
-  const w = D20.EDGE * scale;              // the triangle's side
-  const h = w * Math.sqrt(3) / 2;          // and its height
-  const tz = D20.INRAD * scale;            // centre to face, straight out
-  // A triangle's centroid is a sixth of its height below the middle of
-  // the box it is clipped from, and the centroid is the point the
-  // normal passes through - so the box has to sit that much high.
-  const ty = -h / 6;
+  // 299. The box is the geometry's arithmetic, so it lives with the
+  // geometry - `ty` especially, which is the one number here a typo
+  // would make very nearly right.
+  const { w, h, tz, ty, fontPx } = D20.boxFor(DIE_SIZE);
   for (const f of D20.faces) {
     const d = document.createElement("div");
     d.className = "face";
@@ -10810,7 +10735,7 @@ function buildDie() {
     d.style.height = h.toFixed(2) + "px";
     d.style.left = (-w / 2).toFixed(2) + "px";
     d.style.top = (-h / 2).toFixed(2) + "px";
-    d.style.fontSize = (w * 0.26).toFixed(1) + "px";
+    d.style.fontSize = fontPx.toFixed(1) + "px";
     d.style.transform = D20.place(f) +
       " translateZ(" + tz.toFixed(2) + "px)" +
       " translateY(" + ty.toFixed(2) + "px)";

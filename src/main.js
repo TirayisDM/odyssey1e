@@ -120,6 +120,24 @@ let state = {
   games: [], encounterId: null, dmEncounterId: null, dmTargets: [],
 };
 
+// 298. THE RIG'S ONE SEAM INTO THIS FILE.
+//
+// `tests/rig/stub.js` defines `window.__RIG__` before this module runs,
+// so in the rig this hands the harness the live state object. In the app
+// `window.__RIG__` is undefined and this line does nothing.
+//
+// A TEST SEAM IN SHIPPING CODE IS A COST and it is being paid on
+// purpose. 295 and 297 both had to read `state` to prove anything, and
+// both got it by monkeypatching a COPY of this file that lived in a
+// scratchpad - which is most of why that copy existed, and why it went
+// stale between every cycle. One line here is cheaper than a patch
+// somebody has to remember to reapply.
+//
+// It is READ-ONLY by convention and nothing enforces that. Writing to
+// `window.__RIG__.state` from a harness would be testing a state this
+// app never reaches.
+if (window.__RIG__) window.__RIG__.state = state;
+
 /* ---------- logging ---------- */
 
 const logEl = () => document.querySelector("#log");

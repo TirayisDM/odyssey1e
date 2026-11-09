@@ -14963,6 +14963,130 @@ only, no migration, no Rust, no command, no behaviour.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 298. The rig has never been in the repo
+
+**2026-11-09.** Dave: *"yes - Propose 298 - commit the rig."*
+
+**FOUR CYCLES BUILT IT BY HAND BECAUSE THE README TOLD THEM TO.** That
+section said, in as many words: *"Copy `src/` somewhere, inject a
+`stub.js` that defines `window.__TAURI__.core.invoke`, and serve it
+with `python -m http.server`."* So 211, 290, 295 and 297 each did
+exactly that, into a scratchpad that dies with the session, out of
+copies that went stale between every one of them. **A documented
+manual procedure is a cycle tax written down and agreed to.**
+
+**NOTHING IS COPIED NOW.** `tests/rig/serve.py` serves `src/` as the
+document root, which is what Tauri does - `tauri.conf.json` says
+`"frontendDist": "../src"` - and injects the stub as one script tag
+ahead of the module. The rig exercises the REAL `index.html`,
+`main.js`, `map.js` and stylesheet, always. That single decision is
+what makes it worth committing: a copy would have rotted by 299.
+
+```
+npm run rig      then http://127.0.0.1:8790
+?role=player     ?caster=0     ?break=prayers
+```
+
+**AND IT IS NOT `python -m http.server`, for a reason worth writing
+down.** That reset the connection partway through the 515KB `main.js`,
+repeatedly, on three different ports - `ERR_CONNECTION_RESET`, a blank
+page, no clue why. Reading each file into memory and sending it with a
+`Content-Length` fixed it outright. `no-store` is the other half; a
+cached `index.html` pointing at a stale module cost 297 several
+attempts and nearly cost it a wrong conclusion.
+
+**THE STUB WAS LYING ABOUT WRITES, AND THAT IS THE REAL BUG IN HERE.**
+`main.js` calls 156 distinct commands and the stub answers 35. The
+other 121 returned `null` **without throwing**, so `tryCall` logged
+`✓ give_item` with a null value - **A GREEN TICK FOR A WRITE THAT DID
+NOTHING.** Now they throw, `call` returns null, the log draws a red
+line naming the command, and 207's badge counts it. *"Not in the rig"*
+is a truthful answer about coverage; a silent success is a lie that
+sends you hunting a frontend bug that was never there.
+
+**TWO OF THE 35 ANSWERS WERE FOR COMMANDS THAT DO NOT EXIST.**
+`get_character` and `list_trade_sides` are in no `generate_handler!`
+and called from nowhere in `src/`. Dead fixtures for renamed or
+deleted commands, found by writing the check rather than by reading
+the stub. `list_tiles` was the mirror image: registered in `lib.rs`,
+answered here, and **called from nowhere in `src/`** - the map paints
+through `paint_tiles` and `erase_tiles`. Its answer is gone and the
+dead command is a note below.
+
+`tests/rig.smoke.mjs` asserts both directions, which is the part that
+keeps this honest:
+
+| | |
+|---|---|
+| every answer is registered | a renamed command fails here |
+| every answer is actually called | an answer for a conversation the app never has is dead weight that reads like coverage |
+| `serve.py`'s `MODULE_TAG` is in `index.html` | otherwise the rig serves the app with NO BRIDGE, which looks like a hung page rather than a fault |
+| the `__RIG__` seam is in both files | otherwise a harness is reading nothing |
+
+**COVERAGE IS PRINTED, NOT ASSERTED.** *"answers 35 of the 156
+commands main.js calls."* 294 already learned what a floor becomes: a
+number somebody pads to.
+
+**THE SEAM, AND IT IS A COST.** `src/main.js` now carries one line -
+`if (window.__RIG__) window.__RIG__.state = state;` - because 295 and
+297 both had to read `state` to prove anything, and both got it by
+monkeypatching the scratchpad COPY. That is most of why the copy
+existed. **A test seam in shipping code is a real cost and it is being
+paid on purpose**, because one documented line beats a patch somebody
+has to remember to reapply. In the app `window.__RIG__` is undefined
+and the line does nothing.
+
+**THEN THE SCRATCHPAD RIG WAS DELETED AND BOTH PROOFS REDRIVEN FROM
+`npm run rig` ALONE.** 297's: one shape, no stray key, `[0, 0, 0]`
+requests across three sheet paints. 295's: `✗ loadSheet / prayers`
+twice, the roster folded to Luci, purse and burden and the handaxe all
+painted. Identical to the originals, with no setup.
+
+**AND COMMITTING IT FOUND THREE FIXTURES THAT WERE WRONG**, every one
+of which had looked like an app fault:
+
+| the fixture | what it did |
+|---|---|
+| `list_locations` with no `path` | `loadDM` does `at.path.join(" > ")`. Took the DM's whole Encounter refresh down - I blamed the app for most of a cycle |
+| `list_skill_keys` as bare strings | it is `{key, name, ability}`. `loadSkillPicker` does `s.ability.toUpperCase()`. Same red line, different cause |
+| `list_inventory` not nested in `item` | 297 hit this one: `paintSlotLadder` reads `it.item.kind` |
+
+The skills fixture now reuses `SHEET.skills` rather than restating it.
+**The stub has its own one-source-of-truth problem to avoid,** and
+288 does not stop applying because a file is a fake.
+
+**THE BASELINE IS ZERO.** A DM can sign in and walk all ten subtabs
+and a full character sheet with **no red lines and an empty badge** -
+108 green reads. A player, 41 green reads, also none. So a red line in
+a future cycle now means something, which it did not when the startup
+path opened with two of them.
+
+1443 Rust tests. Three Node checks now, and `npm run rig` beside them.
+
+### Carried forward
+
+- **`list_tiles` IS REGISTERED AND REACHABLE FROM NOWHERE.** Found by
+  writing the rig's check. Neither `security_doors()` nor
+  `policy_faults()` covers "a command nothing calls" - that is a third
+  kind of dead thing, and there may be more of them. A sweep of
+  `generate_handler!` against `src/` is small and is its own cycle.
+- **The fixtures are still hand-copied off the Rust structs** and
+  nothing keeps them in step. Three were wrong today; the rest are
+  unverified. Generating them from the structs is the only real fix
+  and it is a much bigger piece of work than this was.
+- **This is still not a frontend test suite.** It is a browser and a
+  pair of eyes with the scaffolding committed. The harness five
+  cycles have now asked for is next, and the die's geometry - twenty
+  faces, each number once, opposites summing to 21, every basis
+  right-handed - is the obvious first subject.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **Two trigger functions have a mutable `search_path`**, from 296.
+- **292's contact sheet was never re-photographed.**
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

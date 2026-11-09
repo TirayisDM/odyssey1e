@@ -42,7 +42,11 @@ cargo test           # 1443 tests, about a second
 inside it**, not from the repo root.
 
 ```powershell
-npm test             # the renderer and the tour, from the repo root
+npm test             # the renderer, the tour and the rig's names
+```
+
+```powershell
+npm run rig          # the frontend in a browser, no database, no sign-in
 ```
 
 **That is a second suite and it is tiny on purpose.** `cargo test`
@@ -51,10 +55,13 @@ deleted five functions out of the middle of that file and both of
 those checks passed for two commits while the map drew nothing. See
 `tests/map.smoke.mjs`.
 
-The second half of it checks `TOUR.md` against the app: every control
-and command the tour names must still exist. See
-`tests/tour.smoke.mjs`, which is explicit about what that does and
-does not prove.
+The second part checks `TOUR.md` against the app: every control and
+command the tour names must still exist. See `tests/tour.smoke.mjs`,
+which is explicit about what that does and does not prove.
+
+The third checks the rig - that every command its stub answers is a
+command that exists and that the app actually asks for. See
+`tests/rig.smoke.mjs`.
 
 **A map tab that shows nothing is the first thing to check after a
 pull.** `npm test` answers it in a second and does not need the app,
@@ -150,7 +157,10 @@ src-tauri/src/
   lib.rs                 the command registry, and the roll path
 supabase/migrations/     schema, applied in order. Read the comments.
 tests/map.smoke.mjs      `npm test`. The renderer, which cargo cannot see.
-tests/tour.smoke.mjs     and TOUR.md's names, which nothing else checks.
+tests/tour.smoke.mjs     TOUR.md's names, which nothing else checks.
+tests/rig.smoke.mjs      and the rig's stub, same reason.
+tests/rig/               `npm run rig`. The frontend in a browser with
+                         no database behind it. serve.py + stub.js.
 tools/recover_migrations.py
 TOUR.md                  one ordered path through every feature. START HERE
                          if you have it running and want to see what it does.
@@ -208,12 +218,55 @@ all registered in `lib.rs`.
 
 ### Testing the frontend without the app
 
-`main.js` is loaded by a stub that fakes `window.__TAURI__`, so the real
-frontend can be driven in an ordinary browser against fixtures. Copy
-`src/` somewhere, inject a `stub.js` that defines
-`window.__TAURI__.core.invoke`, and serve it with `python -m http.server`.
-This is how the layout work gets checked at several widths without
-clicking through a Tauri window.
+```powershell
+npm run rig
+```
+
+Then open **http://127.0.0.1:8790**. That is the real frontend, in an
+ordinary browser, with no database, no sign-in and no Rust - the Tauri
+bridge is replaced by `tests/rig/stub.js`, which answers reads out of
+fixtures.
+
+**It serves `src/` as the document root**, which is exactly what Tauri
+does (`"frontendDist": "../src"`), and injects the stub as one script
+tag ahead of the module. **Nothing is copied.** Until 298 this section
+said to copy `src/` somewhere and serve it with `python -m
+http.server`, and four cycles did exactly that - 211, 290, 295 and 297
+each rebuilt the thing by hand, out of files that went stale between
+every one of them.
+
+Flags on the URL:
+
+| | |
+|---|---|
+| `?role=player` | you are not the DM of this game |
+| `?caster=0` | the character cannot cast |
+| `?break=prayers` | make `loadPrayers` fail on a missing field |
+
+**`?break=` is how 295 was proved.** A thrown COMMAND proves nothing
+about the paint - `call` catches it and returns null - so the breaks
+hand back a row shape with a field missing, which is the fault a new
+column actually causes.
+
+**Every command the stub does not answer throws**, so the app's own
+log draws a red line naming it. It used to return `null`, which showed
+as `✓ give_item` with a null value: a green tick for a write that did
+nothing. A harness that lies about writes is worse than no harness.
+Today a DM can sign in and walk all ten subtabs and a full character
+sheet with **no red lines at all**, so a red line means something.
+
+**It is not a frontend test suite.** It is still a browser and a pair
+of eyes; what changed is that the scaffolding is in the repo. The stub
+answers about 35 of the 156 commands `main.js` calls - the reads that
+get screens painted - and `npm test` prints that ratio rather than
+asserting a floor, because a floor is a number somebody pads to.
+
+**And the fixtures were copied off the Rust structs by hand.** Nothing
+keeps them in step, so a row the rig paints wrongly may be the rig's
+fault. 298 found three of those while committing it: a location with
+no `path`, a skill list of bare strings where `{key, name, ability}`
+was wanted, and an inventory row that was not nested in an `item`.
+Each one looked like an app bug first.
 
 **`npm test` is the cheaper half of this.** `tests/map.smoke.mjs`
 imports `src/map.js` under Node with a stub canvas and a stub `Image`

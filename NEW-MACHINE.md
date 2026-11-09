@@ -82,6 +82,16 @@ The renderer smoke test, from the repo root. It needs no database and
 no sign-in, and **a map tab that draws nothing is the first thing to
 check after any pull** - this answers it in a second.
 
+```powershell
+npm run rig
+```
+
+**And this is the frontend in a browser with nothing behind it** -
+http://127.0.0.1:8790, no database, no sign-in, no Rust. It serves
+`src/` the way Tauri does and fakes the bridge, so it is the fastest
+way to see whether a change paints. `?role=player` makes you not the
+DM. The README's *Testing the frontend without the app* has the rest.
+
 `make-shortcut.ps1` puts a desktop shortcut in place if you want one.
 
 ---
@@ -228,7 +238,8 @@ Run these in order. Each one fails differently, which is the point.
 | check | passing answer |
 |---|---|
 | `.\run.ps1 -Test` | 1443 tests, 0 failed |
-| `npm test` | the map smoke test and the tour name check both complete |
+| `npm test` | three checks complete: the renderer, `TOUR.md`'s names, the rig's stub |
+| `npm run rig`, then open http://127.0.0.1:8790 | the app, in a browser, with no database behind it. Walk the tabs: **no red lines in the Log drawer** |
 | `.\run.ps1`, then sign in | it makes you pick a game, then the three tabs load |
 | open a map, break a wall | a heap of rubble lands on the square |
 | click **Lift what is underfoot** | it lifts, *given a shovel, spade or mattock in the pack* - otherwise it tells you what it wants |

@@ -60,12 +60,19 @@ const read = (...p) => readFileSync(join(root, ...p), "utf8");
    `security_doors()`' allowlist, for the same reason: a bare name on a
    list like this is an exception nobody can judge later.
 
-   **NONE OF THESE IS DEAD CODE.** Seven of the eight 300 found were
-   finished engine work with no button, which is a different thing from
-   rot and wants a different answer. Two were not, and they are gone:
-   `list_tiles` is deleted (superseded by `map_at`) and `standing_in`
-   is unregistered (an internal helper with two Rust callers that never
+   **NONE OF THESE IS DEAD CODE.** Of the eight 300 found, FIVE were
+   finished engine work with no button and one (`roll_dice`) is
+   deliberate - which is a different thing from rot and wants a
+   different answer. Two were neither, and they are gone: `list_tiles`
+   is deleted (superseded by `map_at`) and `standing_in` is
+   unregistered (an internal helper with two Rust callers that never
    needed to be a command).
+
+   301 WIRED THE FIRST OF THE FIVE and this test is what made it
+   unavoidable: `rename_location`'s entry went stale the moment `src/`
+   named it, and the check below failed before the cycle was finished.
+   An allowlist that is only read in one direction is a list that grows.
+   Four left.
 
    Adding a name here is saying "built, and nothing can reach it, and
    that is correct for now". If that is not true, wire it up instead. */
@@ -75,12 +82,6 @@ const ALLOWED = {
     "its own comment calls it the fastest way to eyeball a formula by " +
     "hand. A developer's command, and giving it a button would put a " +
     "second roller in front of players beside the one that records.",
-
-  rename_location:
-    "BUILT, NOT WIRED. Renames a room or rewrites its description. " +
-    "A character, an object, an encounter and an actor can all be " +
-    "renamed; a room cannot. The most user-visible of these and the " +
-    "one worth doing first.",
 
   move_location:
     "BUILT, NOT WIRED. Re-parents a room. Postgres refuses putting " +

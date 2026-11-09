@@ -1229,6 +1229,26 @@
                actually want takes up the column. -->
           <div id="scene" hidden>
             <div class="sub" id="scene-where"></div>
+            <!-- 301. THE ROOM ITSELF, between the breadcrumb and the
+                 three lists because it is about the place rather than
+                 about what is in it.
+
+                 HERE AND NOT ON EVERY ROW. `remove` is already on each
+                 row in the tree, and twenty rooms would be twenty name
+                 boxes; selecting a place is already how you open it, and
+                 this panel is already what appears when you do.
+
+                 THE DESCRIPTION IS NOT AN EXTRA. `rename_location`
+                 writes `name` and `description` in ONE statement, so a
+                 form that sends only a name sends a null description and
+                 ERASES the prose. The box is what makes the button
+                 safe. -->
+            <div class="row">
+              <input id="place-name" placeholder="name" />
+              <button id="rename-place" class="ghost">Rename</button>
+            </div>
+            <textarea id="place-desc" rows="2"
+              placeholder="what this place is like — the engine never touches this"></textarea>
             <nav class="tabs mini" id="scene-tabs">
               <button class="tab on" data-scene="people">
                 People <span class="count" id="n-people"></span>

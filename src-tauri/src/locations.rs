@@ -32,6 +32,14 @@ pub struct Place {
     pub parent_id: Option<String>,
     pub name: String,
     pub kind: String,
+    /// 301. THE ONE FIELD THAT IS NOT ABOUT THE TREE, and it is here
+    /// because `rename_location` writes `name` and `description` in one
+    /// statement. A caller that cannot READ the description cannot send
+    /// it back, and the command's `null` erases it. `list_locations`
+    /// asked for this column from the day it was written; this struct
+    /// dropped it on the floor, so every room's prose was a column with
+    /// no door in either direction.
+    pub description: Option<String>,
 }
 
 /// A location as a screen wants it: in order, with its depth and the
@@ -42,6 +50,8 @@ pub struct Placed {
     pub parent_id: Option<String>,
     pub name: String,
     pub kind: String,
+    /// Carried through, not derived. See `Place`.
+    pub description: Option<String>,
     /// Zero at the top of its own tree. Derived, never stored.
     pub depth: i64,
     /// Breadcrumb, root first, including this one.
@@ -124,6 +134,7 @@ fn placed(p: &Place, depth: i64, trail: &[String]) -> Placed {
         parent_id: p.parent_id.clone(),
         name: p.name.clone(),
         kind: p.kind.clone(),
+        description: p.description.clone(),
         depth,
         path,
     }
@@ -163,6 +174,7 @@ mod tests {
             parent_id: parent.map(str::to_string),
             name: name.into(),
             kind: "structure".into(),
+            description: None,
         }
     }
 
@@ -189,6 +201,23 @@ mod tests {
         let out = arrange(&world());
         assert_eq!(out[4].trail(), "Tirayis > Dunstgja > Frostvalley Inn > Pub Floor > Broom Cupboard");
         assert_eq!(out[0].trail(), "Tirayis");
+    }
+
+    /// 301. THE WHOLE FAULT WAS A FIELD GOING MISSING BETWEEN TWO
+    /// SHAPES, so this is the assertion that says it arrived. Every
+    /// other test here is about the tree; a derived shape silently
+    /// dropping something it was handed is a different kind of bug and
+    /// the one that actually happened.
+    #[test]
+    fn the_description_is_carried_through() {
+        let mut rows = world();
+        rows[2].description = Some("Warm. Smells of woodsmoke.".into());
+        let out = arrange(&rows);
+        let inn = out.iter().find(|p| p.id == "i").expect("the Inn is in the tree");
+        assert_eq!(inn.description.as_deref(), Some("Warm. Smells of woodsmoke."));
+        // And a room without prose says so rather than saying "".
+        let root = out.iter().find(|p| p.id == "r").expect("the root is in the tree");
+        assert_eq!(root.description, None);
     }
 
     #[test]

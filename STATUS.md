@@ -15332,6 +15332,138 @@ the rig.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 301. A room can be renamed, and the reason it could not
+
+**2026-11-09.** Dave: *"Propose it."*
+
+**300 LISTED FIVE FEATURES ONE BUTTON SHORT AND CALLED THIS THE ONE A
+PERSON WOULD ACTUALLY HIT.** A character, an object, an encounter and
+an actor could all be renamed; a room could not, and
+`rename_location` had been sitting in `generate_handler!` since 033
+with nothing able to reach it.
+
+**THE BUTTON WAS NOT THE WHOLE OF IT, AND READING THE COMMAND FIRST IS
+WHAT SAVED THE CYCLE.**
+
+```
+&json!({ "name": name.trim(), "description": description }),
+```
+
+Both columns, one statement, every time. **A rename with no
+description sends `null` and ERASES the prose.** Its own doc comment
+always said "Rename a place, *or rewrite its description*" - it was two
+jobs in one door, and a caller has to carry both or destroy one. The
+obvious cycle, a name box beside `remove`, ships a data-loss bug. Not
+today, because every description is NULL; on the first evening somebody
+writes one.
+
+**AND HERE IS WHY THEY ARE ALL NULL.**
+
+```
+create_location(..., description: null)           the form sends null
+select id,parent_id,name,kind,description         the query asks for it
+pub struct Place { id, parent_id, name, kind }    the struct drops it
+```
+
+`list_locations` has selected that column since the day it was written
+and `Place` never deserialised it. **A room's prose was a column with no
+door in either direction** - nothing wrote it, nothing read it, and the
+command that exists to rewrite it could only blank it. The frontend
+could not have sent the right value if it wanted to, because it had
+never been told what the value was.
+
+**SO THE DESCRIPTION IS NOT AN EXTRA I SMUGGLED IN.** It is the half of
+`rename_location` that makes the other half safe. Wiring the name alone
+would have left the command half-reachable, which is the fault 300 just
+spent a cycle finding.
+
+**WHAT LANDED.** `description: Option<String>` onto `Place` and
+`Placed`; `placed()` carries it; the scene panel gained a name box, a
+description box and a `rename` button, under the breadcrumb and above
+the three lists. Not a box per row - `remove` is already on every row
+and twenty rooms would be twenty inputs - and selecting a place is
+already how you open it. The write goes back through `loadWorld()`,
+because a name appears in **five places at once**: the tree, the
+breadcrumb and three place pickers that all read `state.locations`.
+
+**I PROPOSED ONE THING I THEN DID NOT BUILD.** The proposal said
+`create_location` would send the description too, on the grounds that a
+hardcoded `null` is a parameter the UI cannot reach. On reading it
+again: `null` is the TRUTH about a room nobody has described yet, the
+scene panel is the only place prose can be CHANGED, and a second box on
+the create form would be two doors onto one column. The comment at that
+call site now says so instead.
+
+**THE ALLOWLIST FAILED THE BUILD, WHICH IS WHAT IT IS FOR.** 300 made
+`reach.smoke.mjs` check its exceptions BOTH ways. The moment `src/`
+named `rename_location`, its entry went stale and `npm test` stopped:
+
+```
+ALLOWED names commands that ... src/ now reaches. Delete those
+entries - the exception has served its purpose. Found: rename_location
+```
+
+**A stale-exception assertion firing on its first real use, two cycles
+after it was written, with nothing planted.** An allowlist read in one
+direction only is a list that grows.
+
+**TWO FAULTS PLANTED, BOTH CAUGHT BY THE RIGHT ASSERTION.**
+
+`placed()` returning `description: None` - the exact bug that had been
+there all along - failed `the_description_is_carried_through` and
+NOTHING ELSE. Eleven tests about the tree, and only the new one sees a
+field go missing between two shapes. That is the whole argument for
+writing it.
+
+Then the one that matters, proved live in the rig rather than argued
+for: a name-only call, which is what a one-box form would have sent.
+
+```
+before  { name: "Wine Cellar", desc: "Damp. Someone has been at the barrels." }
+after   { name: "Wine Cellar", desc: null }
+```
+
+**The button I nearly built, doing the thing I said it would do.**
+
+**THE RIG DROVE ALL OF IT.** Renaming the Cellar put "Wine Cellar" in
+the tree, the breadcrumb and all four pickers, left the prose intact,
+and said *"Cellar is now Wine Cellar"*; a blank name came back red with
+*"a place needs a name"* and wrote nothing. `rename_location` is the
+36th answer in the stub and **the first that can be written to** - a
+read-only fixture can only show that a click did not throw.
+
+**AND THE CELLAR CARRIES PROSE ON PURPOSE.** Every description in that
+fixture was null, because every description in the real database still
+is. A fixture where the field is always empty cannot see it being
+destroyed.
+
+1444 Rust tests, up one. Five Node checks. 165 of 170 commands reached.
+**Four features one button short, down from five.**
+
+### Carried forward
+
+- **FOUR LEFT, and none of them is cleanup.** `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`. Each is its own
+  small cycle. `move_location` is the one with a trap in it worth
+  reading for first: it writes only `parent_id`, so it has the opposite
+  shape to this one.
+- **DESCRIPTIONS ARE NOW WRITABLE AND STILL NOT SHOWN TO PLAYERS.**
+  The DM can write what a room is like; nothing renders it anywhere but
+  in the box it was typed into. That is a feature and not a fault, but
+  it is the obvious next question about this column.
+- **The allowlist is a judgement, kept by hand**, from 300. Four
+  reasons to reread now rather than six.
+- **The fixtures are still hand-copied off the Rust structs**, from
+  298. Four have been wrong so far; `list_locations` was nearly a
+  fifth, and only escaped because it was copied off the SELECT rather
+  than off the struct.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **Two trigger functions have a mutable `search_path`**, from 296.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

@@ -57,6 +57,15 @@ window.__RIG__ = {};
 
 /* ---------- the fixtures ---------- */
 
+// 301. THE WORLD, AND IT IS A `let` SHAPE. See `list_locations`.
+const PLACES = [
+  { id: "l1", parent_id: null, name: "Tavern", kind: "room",
+    description: null, depth: 0, path: ["Tavern"] },
+  { id: "l2", parent_id: "l1", name: "Cellar", kind: "room",
+    description: "Damp. Someone has been at the barrels.",
+    depth: 1, path: ["Tavern", "Cellar"] },
+];
+
 const ABIL = (score) => ({ score, base: score, bonus: 0 });
 const SAVE = (n, prof) => ({ natural: n, proficient: !!prof, mods: [], total: n + (prof ? 2 : 0) });
 
@@ -249,12 +258,41 @@ const ANSWERS = {
   // LIMIT THIS FILE'S HEADER WARNS ABOUT**: nothing keeps these shapes
   // in step with the Rust structs, and a field the rig forgot reads
   // exactly like a field the engine lost.
-  list_locations: () => [
-    { id: "l1", parent_id: null, name: "Tavern", kind: "room",
-      description: null, depth: 0, path: ["Tavern"] },
-    { id: "l2", parent_id: "l1", name: "Cellar", kind: "room",
-      description: null, depth: 1, path: ["Tavern", "Cellar"] },
-  ],
+  //
+  // 301. THESE TWO ARE THE ONLY FIXTURE THAT CAN BE WRITTEN TO, and
+  // they have to be: the whole question `rename_location` raises is
+  // whether the new name comes back on the next read, in the tree, the
+  // breadcrumb and three pickers at once. A read-only fixture can only
+  // show that the click did not throw.
+  //
+  // The Cellar carries prose on purpose. The fault 301 fixed destroys a
+  // description, and a fixture where every description is null cannot
+  // see it happen - which is also why every description WAS null here,
+  // because every description in the real database still is.
+  list_locations: () => PLACES.map((p) => ({ ...p })),
+  // 301. A WRITE THAT ACTUALLY WRITES, and one of very few in here.
+  //
+  // BOTH FIELDS, BECAUSE THE COMMAND WRITES BOTH. Rust does
+  // `json!({ "name": ..., "description": description })` in one
+  // statement, so this assigns both unconditionally too. A stub that
+  // helpfully kept the old description when none was sent would hide
+  // the exact fault the cycle exists to fix.
+  //
+  // `path` is rebuilt because the breadcrumb is derived in Rust, not
+  // stored, and a renamed room appears in its children's trails.
+  rename_location: ({ locationId, name, description }) => {
+    const p = PLACES.find((x) => x.id === locationId);
+    if (!p) throw "no such place: " + locationId;
+    if (!String(name || "").trim()) throw "a place needs a name";
+    const was = p.name;
+    p.name = String(name).trim();
+    p.description = description === undefined ? null : description;
+    for (const q of PLACES) {
+      q.path = q.path.map((seg) => (seg === was ? p.name : seg));
+    }
+    return {};
+  },
+
   list_objects: () => [
     { id: "o1", item_key: "handaxe", name: "Handaxe",
       holder_kind: "character", holder_id: "c1", holder_name: "Luci", qty: 1 },

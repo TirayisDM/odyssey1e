@@ -68,13 +68,18 @@ explicit about what that does and does not prove.
 The fourth asks whether the app can REACH every command it registers.
 A name in `generate_handler!` that nothing in `src/` calls is a command
 that compiles, passes its tests and cannot be got at from the running
-application - and until 300 nothing said which ones those were. Six are
-allowed, each with the reason written beside it in
-`tests/reach.smoke.mjs`; five of those six are **finished engine work
+application - and until 300 nothing said which ones those were. Five
+are allowed, each with the reason written beside it in
+`tests/reach.smoke.mjs`; four of those five are **finished engine work
 with no button**, which is a different thing from dead code and wants a
 different answer. It also checks the cheaper direction: a command
 `src/` calls that is not registered throws the first time that code
 path runs.
+
+**The allowlist is read BOTH ways**, and that is the half that earns
+its keep. 301 wired `rename_location` up and `npm test` failed on the
+stale entry before the cycle was finished - an exception that has
+served its purpose is how a list like this stops meaning anything.
 
 The fifth checks the rig - that every command its stub answers is a
 command that exists and that the app actually asks for. See

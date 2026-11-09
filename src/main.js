@@ -5935,6 +5935,22 @@ async function loadScene() {
   wrap.hidden = false;
   document.querySelector("#scene-where").textContent = here.path.join(" > ");
 
+  // 301. THE PLACE'S OWN TWO FIELDS, read off the tree rather than
+  // asked for again - `list_locations` carries both, and until this
+  // cycle the Rust struct threw the description away.
+  //
+  // THE PAINT OWNS THESE BOXES, which is why a successful rename goes
+  // back through loadWorld rather than leaving what was typed where it
+  // was typed: the value on screen should be the value that was stored,
+  // trimmed as the command trimmed it.
+  //
+  // A REFUSED write deliberately does NOT repaint. What they typed is
+  // what they have to fix, the reason is in dm-msg beside it, and
+  // throwing the attempt away to show them the old name again would be
+  // the panel arguing with them.
+  document.querySelector("#place-name").value = here.name || "";
+  document.querySelector("#place-desc").value = here.description || "";
+
   const [roster, fights, things] = await Promise.all([
     call("who_is_where", { gameId: state.gameId }),
     call("encounters_here", { locationId: id }),
@@ -12502,6 +12518,44 @@ window.addEventListener("DOMContentLoaded", async () => {
     await loadTargets();
   });
 
+  // 301. THE FIFTH THING IN THIS GAME THAT CAN BE RENAMED. A character,
+  // an object, an encounter and an actor could already; a room could
+  // not, and `rename_location` had been sitting in the handler list
+  // since 033 with nothing able to reach it. 300 is what found it.
+  //
+  // BOTH FIELDS, ALWAYS. The command writes
+  // `{ name, description }` in one statement, so sending a name alone
+  // sends a null description with it and wipes the prose. There is no
+  // "just the name" call to make.
+  //
+  // BLANK IS NULL AND NOT "". `val` trims, and an empty string stored in
+  // that column is a description that exists and says nothing - the same
+  // distinction create_location already draws, and the one
+  // `here.description || ""` on the way in depends on.
+  //
+  // tryCall and dmSay, like every other write on this tab: an empty
+  // name and a player pretending to be the DM both come back as
+  // sentences the command already writes, and 5790's comment is explicit
+  // that a refused click must not look like a click that did nothing.
+  guarded("#rename-place", async () => {
+    if (!state.placeId) return dmSay("select a place first", true);
+    dmSay("");
+    const was = (state.locations || []).find((l) => l.id === state.placeId);
+    const r = await tryCall("rename_location", {
+      locationId: state.placeId,
+      name: val("#place-name"),
+      description: val("#place-desc") || null,
+    });
+    if (!r.ok) return dmSay(r.error, true);
+    // THROUGH loadWorld, because the name is in five places at once -
+    // the tree, the breadcrumb, and three place pickers that all read
+    // state.locations. Repainting the scene alone would leave the old
+    // name in the list above it.
+    await loadWorld();
+    const now = val("#place-name");
+    dmSay(was && was.name !== now ? was.name + " is now " + now : "saved");
+  });
+
   guarded("#create-location", async () => {
     if (!state.gameId) return log("create_location", "select a game first", true);
     dmSay("");
@@ -12511,6 +12565,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       kind: document.querySelector("#loc-kind").value,
       // Blank is the top of the world, not a missing answer.
       parentId: document.querySelector("#loc-parent").value || null,
+      // 301. STILL NULL, AND THAT IS THE TRUTH ABOUT A NEW ROOM rather
+      // than a field nothing can reach. The prose is written in the
+      // scene panel, on the place once it is open - which is also the
+      // only place it can be CHANGED, so putting a second box on this
+      // form would be two doors onto one column.
       description: null,
     });
     if (r.ok) {

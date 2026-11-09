@@ -318,17 +318,47 @@ Where the 10 callable ones stand:
 
 #### Do not run this check by eye
 
-**`select * from public.security_doors()` — an empty result is the
-passing answer.** Run it after any migration that adds a function or a
-table. It reports three things no constraint can: a function `PUBLIC` or
-`anon` may execute, a definer function `authenticated` can reach that
-never looks at the caller, and a table with RLS off or with no policy.
-It is not granted to `authenticated` on purpose — the output is a map of
-which functions bypass RLS, which is reconnaissance.
+**`select * from public.wall_faults()` — an empty result is the passing
+answer.** Run it after any migration that adds a function, a table or a
+policy. One name, two audits:
 
-It has already earned this paragraph twice. It caught a false claim in
-193's own header (196), and it **refused 197 outright** because the two
-functions that migration creates were born `anon`-executable.
+| audit | what it reports |
+|---|---|
+| `security_doors()` (194/195) | a function `PUBLIC` or `anon` may execute, a definer function `authenticated` can reach that never looks at the caller, and a table with RLS off or with no policy |
+| `policy_faults()` (296) | a policy that asks `auth.uid()` where it means `current_profile()`, a policy that names no identity function at all and is therefore simply open, and a policy with no expression in it |
+
+Neither is granted to `authenticated`, on purpose — between them the
+output is a map of where the wall is thin, which is reconnaissance.
+
+**`security_doors()` has earned its place three times.** It caught a
+false claim in 193's own header (196), it **refused 197 outright**
+because the two functions that migration creates were born
+`anon`-executable, and 195 found a bug in the check itself — it had
+been passing by luck of the query plan.
+
+**`policy_faults()` earned its place on its first run,** which is the
+reason 296 exists at all. 292 recorded that `profiles` still asks
+`auth.uid()`; 294 carried it; both were wrong, because 197 rewrote 42
+policies through a loop over `pg_catalog.pg_policy` that names no
+table, so grepping the migration files for the rewrite finds nothing
+and reads exactly like a miss. Asking the catalogue instead found
+three policies that really do ask a sign-in who the person is — on
+`character_images`, created by 283, *after* 197's loop had run. **The
+note was right about the disease and wrong about the patient, and two
+cycles of carried worry went to the wrong table.**
+
+**Where the wall actually is, because this looks wrong and is not.**
+About 160 of the 168 policies are `to public`, and `anon` holds select,
+insert, update and delete on 42 of 44 tables. What stops an
+unauthenticated caller is not the roles on the policies — it is that
+193/194/196 revoked execute on the functions the policies *call*, so
+the policy is reached, calls `is_game_member`, and the statement dies
+with `42501 permission denied for function is_game_member`. Verified
+against the live REST API with the publishable key and no bearer token.
+**Which means a policy naming no such function is protected by none of
+that**, and that is `policy_faults()`' second check. Somebody will
+eventually tidy up the `to public` roles and believe they have done
+something; they will not have.
 
 #### Functions are born closed, mechanically
 
@@ -385,9 +415,9 @@ That is the only record of them.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why **180 files run from 001 to 293.**
+file here, which is why **181 files run from 001 to 296.**
 
-The 113 gaps are all of that kind, and the comments say so in as many
+The 115 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
 099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
 `species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust;
@@ -397,27 +427,30 @@ words: 070 "taught the sheet to show it" where 071 filled the column;
 lost five functions, none of which is a schema change.
 
 ```
-066-070  072  079-083  090-091  099  108-112  119-120  125  133-134
-138  140-141  153-154  169  173-174  176  178-182  184  188-192
-199-207  209-216  219-225  229  231  233-237  239-242  245-247
-250-252  255-262  264  266-269  271-272  275-282  286-287  289-291
+066-070  072  079-083  090-091  099  108-112  119-120  125
+133-134  138  140-141  153-154  169  173-174  176  178-182  184
+188-192  199-207  209-216  219-225  229  231  233-237  239-242
+245-247  250-252  255-262  264  266-269  271-272  275-282  286-287
+289-291  294-295
 ```
 
 **That list and the count above are computed from the directory**, not
-maintained by hand - 113 missing numbers in 34 runs. Hand-editing them
+maintained by hand - 115 missing numbers in 35 runs. Hand-editing them
 is how they came to disagree with `STATUS.md` in the first place.
 
 **The chain is complete**, re-verified 2026-11-08: every one of the
-**192 ledger rows** maps to one of the **180 files**, and no file is
+**193 ledger rows** maps to one of the **181 files**, and no file is
 unapplied. The difference of twelve is **eight** migrations the
 database recorded in parts and the repo committed as one file each -
 026 (2 rows), 027 (3), 028 (3), 031 (4), 032 (2), 043 (2), 273 (2),
 274 (2) - not a gap.
 
 **THE MAPPING IS BY NAME, AND THE LEDGER CHANGED ITS MIND ABOUT
-NAMES.** 70 rows are recorded as `NNN_description` and 122 as bare
+NAMES.** 71 rows are recorded as `NNN_description` and 122 as bare
 `description`, so neither a numeric sort nor a count alone reconciles
-them. 031, 032 and 043 went in as `031a_`, `031b_` and so on; 273 and
+them. **296 is the 71st and went in numbered on purpose** - the bare
+names are what makes this paragraph necessary, so every apply from
+here carries its number. 031, 032 and 043 went in as `031a_`, `031b_` and so on; 273 and
 274 as a name and the same name with a suffix. That is why the
 re-verification is dated rather than continuous, and why
 `tools/recover_migrations.py` exists.
@@ -467,7 +500,7 @@ could not do.
 
 About 53.4k lines of Rust - 36.1k of rules across 51 modules, 15.4k of
 plumbing across 20 command files, and 1.9k of crate root - with 1,443
-tests, 44 tables, 168 policies and 49 functions, against a frontend of
+tests, 44 tables, 168 policies and 51 functions, against a frontend of
 13.4k lines of plain JS, 1.7k of markup and 1.6k of CSS. **Every table
 in `public` has row level security on**, counted 2026-11-08 against
 the live project, not assumed. `STATUS.md` is the detailed handoff;

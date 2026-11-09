@@ -232,7 +232,7 @@ Run these in order. Each one fails differently, which is the point.
 | `.\run.ps1`, then sign in | it makes you pick a game, then the three tabs load |
 | open a map, break a wall | a heap of rubble lands on the square |
 | click **Lift what is underfoot** | it lifts, *given a shovel, spade or mattock in the pack* - otherwise it tells you what it wants |
-| `select * from public.security_doors()` in the Supabase SQL editor | **an empty result is the pass.** Run it after any migration |
+| `select * from public.wall_faults()` in the Supabase SQL editor | **an empty result is the pass.** It asks both audits - the functions and the policies. Run it after any migration |
 
 Then read the end of `STATUS.md`. **"Pick up here" is the end of the
 log** and says what the next cycle is.

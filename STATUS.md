@@ -14706,6 +14706,136 @@ one helper, one list, one moved line, two corrected comments.
   not a control, the damage dice want the same code with a different
   net.
 
+## 296. Ask the policies. Do not read the files.
+
+**2026-11-09.** Dave: *"Build it."*
+
+**THE CHECK FOUND A REAL FAULT ON ITS FIRST RUN, and it was not where
+two cycles had been looking.** 292 recorded that `profiles` still asks
+`auth.uid()` in its own policies. 294 carried it. 295 struck it,
+because live all three of those policies read
+`(select current_profile())` - 197 rewrote 42 policies through a loop
+over `pg_catalog.pg_policy` that names no table, so grepping the
+migration files for the rewrite finds nothing and reads exactly like a
+table that was missed.
+
+Asking the catalogue instead found three policies that really do
+compare `owner_uid` to `auth.uid()`. They are on `character_images`,
+which **283 created after 197's loop had already run**, so nothing has
+ever looked at them.
+
+```
+characters:       owner_uid   = (select current_profile())
+character_images: c.owner_uid = auth.uid()
+```
+
+**THE SAME COLUMN, COMPARED TO TWO DIFFERENT THINGS, IN TWO TABLES
+THAT JOIN ON EACH OTHER.** That is 288 one level up again, and here it
+had already disagreed: a person signed in through a second identity
+could not add, replace or delete a picture of their own character. The
+read policy was always right - it defers to `is_game_member` on the
+parent, which is 005's pattern.
+
+**THE NOTE WAS RIGHT ABOUT THE DISEASE AND WRONG ABOUT THE PATIENT,**
+and that is the whole argument for this cycle. Nobody was careless.
+The only instrument anybody had was reading prose and guessing, and
+reading prose is what produced both the false alarm and the real miss.
+
+**SO THE ASSERTIONS GO WHERE THE THING BEING ASSERTED LIVES.**
+`cargo test` is 1443 tests in 0.08 seconds and touches no network;
+`npm test` reads files off disk. Neither can ask this database
+anything without becoming slow and needing a credential, and a
+credential is the one thing that must never enter this repo. So
+`policy_faults()` is a function, phrased exactly the way 193/194/195
+phrased `security_doors()`: an empty result is the pass, revoked from
+`public`, `anon` and `authenticated`, and a `do` block that refuses to
+apply the migration if the answer is not empty.
+
+Three checks, and the second is the one worth reading twice:
+
+| check | what it catches |
+|---|---|
+| asks `auth.uid()` | the fault above. **No allowlist, deliberately** - an empty exception list is a stronger statement than a list with one unexplained entry |
+| names no identity function | a policy that is simply open |
+| has no expression at all | `for all` with neither USING nor WITH CHECK, which Postgres accepts and check two is blind to |
+
+**WHERE THE WALL ACTUALLY IS, which looks wrong and is not.** About
+160 of the 168 policies are `to public`, and `anon` holds select,
+insert, update and delete on 42 of 44 tables. What stops an
+unauthenticated caller is NOT the roles on the policies - it is that
+193/194/196 revoked execute on the functions the policies *call*. The
+policy is reached, calls `is_game_member`, and the statement dies with
+`42501 permission denied for function is_game_member`. Confirmed
+against the live REST API with the publishable key and no bearer
+token.
+
+**WHICH MEANS A POLICY NAMING NO SUCH FUNCTION IS PROTECTED BY NONE OF
+IT.** `scribe_schools`, whose read policy is literally `true`, answers
+200 to a request carrying nothing but the publishable key. That is
+correct - five columns, no `game_id`, no owner, no row that belongs to
+anybody, a rules reference of the kind a printed book holds - so it is
+the one name on check two's allowlist, with that reason written beside
+it. **Somebody will eventually tidy up the `to public` roles and
+believe they have done something. They will not have.** This check is
+that paragraph in a form that fails rather than one that is read.
+
+**AND A LIVE PROBE CANNOT TELL AN EMPTY TABLE FROM A WALLED ONE,**
+which is why curl was tried first and is not the answer.
+`scribed_spells` also answered 200 with an empty array, and its policy
+is correct: the EXISTS over `objects` finds nothing, so
+`is_game_member` is never reached to refuse. The catalogue reads the
+RULE; a probe reads the CONSEQUENCE, and a consequence needs data to
+exist before it says anything.
+
+**THE CHECK PROVES IT CAN FAIL.** A check that has never reported
+anything is indistinguishable from a check that cannot, and 195 only
+found its own bug because somebody happened to write the same query by
+hand and watched it throw. So each of the three is fired at a planted
+fault on a scratch table created and dropped inside the migration -
+and the baseline is asserted clean first, because "it saw one fault"
+means nothing if it was already seeing one. All three fire. Nothing is
+left behind.
+
+**ONE NAME TO RUN, because a second function to remember is a second
+thing to forget.** `wall_faults()` asks `security_doors()` and
+`policy_faults()` and labels which answered. `README.md`'s check
+section and `NEW-MACHINE.md`'s first-day table both now run that
+instead, and the README's own numbering block is recomputed from the
+directory - 181 files, 115 gaps in 35 runs, 193 ledger rows.
+
+**296 WENT INTO THE LEDGER WITH ITS NUMBER ON IT.** The last three
+cycles recorded as bare `description`, which is exactly what makes the
+README's naming paragraph necessary - 71 numbered rows against 122
+bare. Every apply from here carries the number.
+
+181 migration files, 193 ledger rows, 168 policies, 44 tables, 51
+functions. `wall_faults()` 0 faults, both halves. 1443 Rust tests and
+two Node checks, all unchanged - nothing in this cycle touched a rule.
+
+### Carried forward
+
+- **TWO TRIGGER FUNCTIONS HAVE A MUTABLE `search_path`** -
+  `a_position_belongs_to_one_map` and `a_square_is_inside_its_map`.
+  Supabase's own linter flags them and `security_doors()` does not,
+  because it excludes trigger functions on the grounds that a grant on
+  one buys nothing - which is true about GRANTS and says nothing about
+  `search_path`. A real gap between the two audits, found by reading
+  the advisors rather than by either check. Small and worth its own
+  cycle.
+- **THE ADVISOR AND `security_doors()` DISAGREE ABOUT 14 FUNCTIONS,
+  BY DESIGN.** Supabase flags every SECURITY DEFINER function
+  `authenticated` can execute; `security_doors()` excludes the ones
+  that resolve the caller, which is 193's rule and the reason the
+  README has a table of where the ten callable ones stand. Nobody
+  should "fix" the advisor warnings without reading that table first.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **292's contact sheet was never re-photographed.** The glyph stroke
+  resolves to 0.6px by computed style and has not been seen by eye.
+- 290's notes stand: advantage shows one die, the pad is a display and
+  not a control, the damage dice want the same code with a different
+  net.
+
 ---
 
 ## Pick up here

@@ -929,6 +929,11 @@ function paintTabOffer() {
 async function selectGame(id) {
   state.gameId = id;
   state.dmEncounterId = null;
+  // 297. The previous game's items are not this game's. `ensureCatalogue`
+  // would notice on its own - it compares the game - but a stale array
+  // sitting in the slot in the meantime is a thing a painter could reach,
+  // and clearing it is one line against having to reason about that.
+  setCatalogue(null, null);
   // 282. AND THE LIST COMES BACK OPEN. A fold is a choice somebody
   // made about one game's roster; carrying it into the next one
   // would let the strip's auto-pick fold a list nobody has touched,
@@ -960,7 +965,7 @@ async function selectGame(id) {
   await loadClock();
   await loadEffects();
   await loadConditions();
-  await loadCatalogue();
+  await loadSpellCatalogue();
   await loadSpecies();
   await loadRolls();
   await loadTargets();
@@ -2449,7 +2454,12 @@ const SCHOOLS = ["abjuration","conjuration","divination","enchantment",
 // asked where that is known, and `casting::may_reach` is still the
 // authority - the screen only avoids offering what the engine would
 // refuse.
-async function loadCatalogue() {
+// 297. NAMED FOR WHAT IT READS. This was `loadCatalogue`, sitting a
+// few hundred lines from the item-catalogue helpers above - and it is
+// about SPELLS. One word meaning two nouns in
+// one file is the same fault as one slot holding two shapes, in the
+// names instead of the data.
+async function loadSpellCatalogue() {
   if (!state.gameId) return;
   const rows = await call("list_spells", { gameId: state.gameId, classKey: "" });
   if (!rows) return;
@@ -2495,7 +2505,7 @@ function fillOnce(sel, pairs) {
 // spell seeded from the other machine stops being invisible until
 // sign-out.
 async function loadSpells() {
-  await loadCatalogue();
+  await loadSpellCatalogue();
 }
 
 function paintSpells() {
@@ -4555,17 +4565,66 @@ function containerChoices(it) {
   return (state.inventory || []).filter((c) => isContainer(c) && c.id !== it.id);
 }
 
-// The catalogue, read once per campaign.
+// 297. THE CATALOGUE IS ONE SHAPE: the current game's items, as an
+// array.
 //
-// It is ~50 global rows plus whatever the game overrides, and it does
-// not change while the app is open. Re-reading it on every inventory
-// paint would put a request on the wire for a list nobody edited.
-async function catalogueFor(gameId) {
-  state.catalogue = state.catalogue || {};
-  if (!state.catalogue[gameId]) {
-    state.catalogue[gameId] = (await call("list_catalogue", { gameId })) || [];
+// IT USED TO BE TWO. This function kept `state.catalogue` as a map from
+// game id to rows, while `loadItems` and `loadObjects` assigned a flat
+// array to the same slot and `paintCatalogue`, `fillDetail` and
+// `fillEditor` all read it as one. Measured in the rig, what a DM
+// actually ended up with was an ARRAY OF ROWS CARRYING A UUID-NAMED
+// PROPERTY HOLDING A SECOND COPY OF THE SAME ROWS - two copies of one
+// list in one slot, because `state.catalogue[gameId]` on an array sets
+// a named property and leaves the elements alone.
+//
+// AND THE KEY BOUGHT NOTHING. A map from game id to catalogue can only
+// ever hold one live entry: there is one `state.gameId`, and
+// `selectGame` reloads the whole world when it changes. The cache was
+// keyed against a problem this app does not have.
+//
+// NOTHING WAS CRASHING, and that is worth saying rather than dressing
+// up. `paintCatalogue` reads `.length` and `.filter`, so the map form
+// would throw in it - but every route to that pane runs `loadItems` or
+// `loadObjects` first, and those assign the array. The order of the
+// calls was the only thing keeping the two shapes apart, which is 295's
+// fault one layer down: in the state instead of the paint.
+//
+// `#cat-find` is why it would not have stayed latent. Its `input`
+// handler is `paintCatalogue` itself (12814), so that painter already
+// runs with no loader in front of it - the one wiring anybody would add
+// without thinking about which shape is in the slot.
+
+// Which game the array in `state.catalogue` belongs to. Not in `state`
+// because it is bookkeeping about the cache rather than a fact about
+// the game, and putting it there would invite somebody to paint from
+// it.
+let catalogueGame = null;
+
+// THE ONE PLACE `state.catalogue` IS WRITTEN. Every loader that reads
+// the catalogue for its own reasons comes through here, so the shape
+// cannot disagree with itself again.
+function setCatalogue(gameId, rows) {
+  state.catalogue = rows || [];
+  catalogueGame = gameId;
+}
+
+// Read once per campaign, which is what the old comment claimed and
+// what this now does: ~50 global rows plus the game's overrides, and
+// it does not change while the app is open unless somebody edits it -
+// and the loaders that can edit it refetch through `setCatalogue`.
+async function ensureCatalogue(gameId) {
+  // NO GAME, NO READ. Two of the three `fillCatalogue` callers pass a
+  // sheet's `game_id` and one of those does not check it first, so a
+  // monster with no game would have asked for the catalogue of
+  // nothing - and then stored the answer over a good one. The old map
+  // form filed that under the key `undefined` and was equally wrong,
+  // quietly. Returning what is already there is the honest answer: an
+  // empty picker beats a picker filled from the wrong game.
+  if (!gameId) return state.catalogue || [];
+  if (catalogueGame !== gameId) {
+    setCatalogue(gameId, await call("list_catalogue", { gameId }));
   }
-  return state.catalogue[gameId];
+  return state.catalogue;
 }
 
 // Fill a <select> with what can be added, grouped by kind.
@@ -4574,7 +4633,7 @@ async function catalogueFor(gameId) {
 // invented here — the same value the engine branches on when it decides
 // whether the one-armor rule applies.
 async function fillCatalogue(sel, gameId) {
-  const items = await catalogueFor(gameId);
+  const items = await ensureCatalogue(gameId);
   sel.innerHTML = "";
   const kinds = [];
   for (const it of items) if (!kinds.includes(it.kind)) kinds.push(it.kind);
@@ -6951,7 +7010,10 @@ async function loadItems() {
     log("list_catalogue", cat.error, true);
     return;
   }
-  state.catalogue = cat.value || [];
+  // 297. Through the setter, so this read also tells the cache which
+  // game the rows are for. Assigning the slot directly is what let two
+  // shapes into it.
+  setCatalogue(state.gameId, cat.value);
   paintCatalogue();
 }
 
@@ -6987,7 +7049,10 @@ async function loadObjects() {
     return;
   }
 
-  state.catalogue = cat.value || [];
+  // 297. Same setter. This one keeps its own `tryCall` because it
+  // needs the REASON a refusal came back, which `ensureCatalogue` -
+  // like every `call` - throws away.
+  setCatalogue(state.gameId, cat.value);
   state.objects = objs.value || [];
   // Who could take something back out of a container. Cheap, and the
   // alternative is the mover asking per row.

@@ -14836,6 +14836,133 @@ two Node checks, all unchanged - nothing in this cycle touched a rule.
   not a control, the damage dice want the same code with a different
   net.
 
+## 297. One slot, two shapes
+
+**2026-11-09.** Dave: *"quit throwing so many different issues at me
+at once - what is the most system and order of operation issues to
+address 1st - propose that one."*
+
+**FAIR, AND THE ORDER I HAD GIVEN WAS WRONG.** 297 through 299 as
+proposed - advantage showing two dice, the pad becoming a control, the
+damage dice - are all new behaviour. They are not cleanup and they do
+not belong inside it.
+
+**`state.catalogue` WAS WRITTEN IN THREE PLACES THAT DID NOT AGREE
+WHAT IT WAS.** `catalogueFor` kept a map from game id to rows;
+`loadItems` and `loadObjects` assigned a flat array to the same slot;
+`paintCatalogue`, `fillDetail` and `fillEditor` all read it as an
+array. 285 carried it as *"a landmine either way and wants one
+owner"* and it survived four cycles untouched.
+
+**WHAT A DM ACTUALLY ENDED UP WITH, measured in the rig rather than
+reasoned about:** an array of the catalogue's rows **carrying a
+uuid-named property holding a second copy of the same rows.** Two
+copies of one list in one slot. `state.catalogue[gameId]` on an array
+sets a named property and leaves the elements alone, so both forms sat
+there at once and neither reader noticed.
+
+```
+1 after sign-in     isArray: true   length: 2   extraKeys: []
+2 after Rules>Items isArray: true   length: 2   extraKeys: []
+3 after a sheet     isArray: true   length: 2   extraKeys: ["game-1"]
+```
+
+**AND THE KEY BOUGHT NOTHING.** A map from game id to catalogue can
+hold one live entry: there is one `state.gameId`, and `selectGame`
+reloads the whole world when it changes. The cache was keyed against a
+problem this app does not have.
+
+**I OVERSTATED ONE THING IN THE PROPOSAL AND IT IS WORTH CORRECTING.**
+I said the cache was permanently defeated once an array landed in the
+slot. It is not. The lookup misses once, writes the stray property,
+and hits that property from then on - `[1, 0, 0]` requests across
+three sheet paints, not three. The waste was one request and one
+duplicate list, not a request every paint.
+
+**NOTHING WAS CRASHING EITHER, and that is the honest state.**
+`paintCatalogue` reads `.length` and `.filter`, so the map form throws
+in it - but every route to that pane runs `loadItems` or `loadObjects`
+first, and those assign the array. **The order of the calls was the
+only thing keeping the two shapes apart,** which is 295's fault one
+layer down: in the state instead of the paint. 295 said the order was
+never the protection; here it was the protection, and nothing said so.
+
+**`#cat-find` IS WHY IT WOULD NOT HAVE STAYED LATENT.** Its `input`
+handler is `paintCatalogue` itself - `addEventListener("input",
+paintCatalogue)` at 12814 - so that painter already runs with no
+loader in front of it. The wiring that reaches the wrong shape is
+already in the file; it just happens to fire on a pane whose loader
+ran a moment earlier.
+
+**AND THE TWO FORMS WERE SPLIT BY WHO YOU ARE.** `loadObjects` returns
+early for a non-DM, so the array never landed for a player at all -
+their slot was `undefined` until a sheet paint made it the map form.
+**A DM's catalogue was an array and a player's was an object.** Any
+future code reading it as an array would work for whoever wrote it and
+throw for everybody else, which is the worst way for this to fail.
+
+Now there is one shape and one writer:
+
+| | |
+|---|---|
+| `setCatalogue(gameId, rows)` | **the one place the slot is written.** Both loaders go through it, so it also records which game the rows are for |
+| `ensureCatalogue(gameId)` | read once per campaign, which is what the old comment claimed and now what it does |
+| `catalogueGame` | module-level, not in `state` - it is bookkeeping about the cache, not a fact about the game, and in `state` somebody would paint from it |
+| `selectGame` | clears it, so the previous game's items are never briefly reachable |
+
+**NO GAME, NO READ.** `ensureCatalogue` returns what is there rather
+than asking for the catalogue of nothing. Two of the three
+`fillCatalogue` callers pass a sheet's `game_id` and one does not
+check it first, so a monster with no game would have fetched garbage
+and stored it over a good list. The map form filed that under the key
+`undefined` and was equally wrong, quietly.
+
+**`loadCatalogue` WAS ABOUT SPELLS.** It writes `state.spells`, and it
+sat a few hundred lines from `catalogueFor`, `fillCatalogue` and
+`loadItems`. One word meaning two nouns in one file is the same fault
+as one slot holding two shapes, in the names instead of the data, so
+it is `loadSpellCatalogue` now.
+
+The rig, after, on both routes:
+
+| | before | after |
+|---|---|---|
+| stray key on the array | `["game-1"]` | none |
+| `list_catalogue` per sheet paint | 1, 0, 0 | 0, 0, 0 |
+| a player's slot after sign-in | `undefined` | an empty array |
+| typing in `#cat-find` | repaints | repaints, no errors |
+| catalogue rows, `#add-what`, `(n)` | 2, 2, (2) | 2, 2, (2) |
+
+Nothing on screen changed, which is the point: **the screens paint
+exactly what they painted before, out of one shape instead of two.**
+
+1443 Rust tests and two Node checks, all unchanged - `src/main.js`
+only, no migration, no Rust, no command, no behaviour.
+
+### Carried forward
+
+- **THE RIG'S SERVER NEEDED REPLACING AND THAT IS NOT IN THE REPO.**
+  `python -m http.server` reset the connection partway through a
+  515KB module often enough to waste a quarter of this cycle;
+  `scratchpad/rigserve.py` reads each file into memory and sends it
+  with a `Content-Length`, which fixed it. **The rig itself has never
+  been committed** - it is a copy of `src/` plus a `stub.js` living in
+  a scratchpad that does not survive the session. Three cycles have
+  now rebuilt it by hand. It belongs in `tests/rig/` with the stub
+  and the server, and that is a cleanup cycle of its own.
+- **One shape is now asserted nowhere.** The whole fault was two
+  writers disagreeing, and nothing stops a third. A frontend harness
+  is still the gap four cycles have named.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **Two trigger functions have a mutable `search_path`** -
+  `a_position_belongs_to_one_map` and `a_square_is_inside_its_map`,
+  from 296.
+- **292's contact sheet was never re-photographed.**
+- 290's notes stand, and they are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

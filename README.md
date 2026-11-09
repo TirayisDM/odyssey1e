@@ -42,7 +42,7 @@ cargo test           # 1443 tests, about a second
 inside it**, not from the repo root.
 
 ```powershell
-npm test             # the renderer, the die, the tour and the rig
+npm test             # the renderer, the die, the tour, reach and the rig
 ```
 
 ```powershell
@@ -65,7 +65,18 @@ The third checks `TOUR.md` against the app: every control and command
 the tour names must still exist. See `tests/tour.smoke.mjs`, which is
 explicit about what that does and does not prove.
 
-The fourth checks the rig - that every command its stub answers is a
+The fourth asks whether the app can REACH every command it registers.
+A name in `generate_handler!` that nothing in `src/` calls is a command
+that compiles, passes its tests and cannot be got at from the running
+application - and until 300 nothing said which ones those were. Six are
+allowed, each with the reason written beside it in
+`tests/reach.smoke.mjs`; five of those six are **finished engine work
+with no button**, which is a different thing from dead code and wants a
+different answer. It also checks the cheaper direction: a command
+`src/` calls that is not registered throws the first time that code
+path runs.
+
+The fifth checks the rig - that every command its stub answers is a
 command that exists and that the app actually asks for. See
 `tests/rig.smoke.mjs`.
 
@@ -166,6 +177,8 @@ supabase/migrations/     schema, applied in order. Read the comments.
 tests/map.smoke.mjs      `npm test`. The renderer, which cargo cannot see.
 tests/die.smoke.mjs      the die's geometry, which needs no stubs at all.
 tests/tour.smoke.mjs     TOUR.md's names, which nothing else checks.
+tests/reach.smoke.mjs    every registered command, and whether anything
+                         in src/ can actually reach it.
 tests/rig.smoke.mjs      and the rig's stub, same reason.
 tests/rig/               `npm run rig`. The frontend in a browser with
                          no database behind it. serve.py + stub.js.
@@ -221,8 +234,9 @@ slots and feature uses both go through it.
 
 A `#[tauri::command]` becomes callable from the frontend. Arguments are
 `snake_case` in Rust and `camelCase` in JS; Tauri converts. Getting that
-backwards is the standard first-day confusion. There are 144 of them,
-all registered in `lib.rs`.
+backwards is the standard first-day confusion. There are **170** of
+them, all registered in `lib.rs` - counted from that list, and
+`npm test` fails if one of them is unreachable without a reason.
 
 ### Testing the frontend without the app
 

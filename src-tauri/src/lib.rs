@@ -1713,11 +1713,9 @@ pub fn run() {
             sign_out,
             // A path registers exactly like a bare name, and the command
             // is still "me" on the wire. See commands/mod.rs.
-            commands::tiles::list_tiles,
             commands::tiles::paint_tiles,
             commands::tiles::erase_tiles,
             commands::tiles::place_character,
-            commands::tiles::standing_in,
             commands::tiles::walk_to,
             commands::tiles::set_map,
             commands::tiles::map_at,

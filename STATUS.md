@@ -15216,6 +15216,122 @@ tour, the rig.
   cleanup: advantage shows one die, the pad is a display and not a
   control, the damage dice want the same code with a different net.
 
+## 300. Eight commands the app cannot reach
+
+**2026-11-09.** Dave: *"propose 300."*
+
+**298 FOUND `list_tiles` BY ACCIDENT AND I CARRIED A NOTE SAYING THERE
+WERE PROBABLY MORE.** There were seven more. 172 commands were
+registered; 156 are reached from `src/`.
+
+**AND NONE OF THEM IS ROT.** That is the finding, and it was not the
+one I expected:
+
+| | |
+|---|---|
+| `rename_location` | renames a room or rewrites its description. **A character, an object, an encounter and an actor can all be renamed; a room cannot** |
+| `move_location` | re-parents a room. Postgres already refuses the Inn inside its own cupboard, so the hard half is done |
+| `remove_class` | undoes a multiclass. 073 gave the sheet a way to add a class and never one to take it off |
+| `copy_from_scroll` | scribes from a scroll and destroys it. `scribe_options` and `scribe_spell` are both reachable, so this is one button short |
+| `quote_object` | a merchant's price for ONE object. `quote_trade` does a basket |
+| `roll_dice` | resolves a formula without the database - **deliberate**, a developer's command |
+| `standing_in` | **called twice from Rust.** Not dead: an internal helper that was also registered |
+| `list_tiles` | no caller anywhere. Superseded by `map_at` |
+
+**FIVE OF THE EIGHT ARE FINISHED ENGINE WORK WITH NO BUTTON,** which
+is a different thing from dead code and wants a different answer.
+Nobody had a list of it. Deleting them because nothing calls them yet
+would have destroyed working engine work on the strength of a grep.
+
+**TWO WERE NOT, AND THEY ARE GONE.** `list_tiles` read every raw
+`tiles` row and handed them to a renderer to resolve; `map_at` replaced
+that, returning one level ALREADY RESOLVED, squares and standing
+together, so the picture and `stride::step` cannot disagree about a
+wall. It was a piece of the old way to draw a map kept alive by the
+handler list alone. **`standing_in` is unregistered rather than
+deleted** - the function is fine and has two callers; what was wrong
+is that it was also a command, which made it a second, unresolved way
+to ask what `map_at` answers. That is the shape `map_at` exists to
+prevent.
+
+**THE INSTRUMENT IS THE OPPOSITE OF 294'S AND THAT IS THE PART WORTH
+WRITING DOWN.** A scan of `call("...")` call sites reports SIXTEEN
+unreachable commands and is wrong about half of them, because a name
+reaches Rust three ways:
+
+```
+tryCall(held ? "drop_here" : "place_object", ...)   a ternary
+slotMove("spend_spell_slot", lvl)                   a helper's argument
+onSquare("damage_square", { amount }, ...)          the same
+```
+
+`clear_slot`, `spend_slot`, `drop_here`, `place_object`,
+`spend_spell_slot`, `restore_spell_slot`, `damage_square` and
+`set_square_hp` are all live and all invisible to a call-site check.
+
+**So a WIDER pattern plus a short named list beats a precise pattern
+plus eight wrong answers.** 294 narrowed to one table column because
+its false positives were in prose it did not own; this widens to the
+whole of `src/` because its false positives would be accusations
+against working code. The two look like they disagree about method and
+do not, so the test says which way round it is and why.
+
+It costs one thing, said plainly in the test: a command whose name
+appears only in a comment would pass. Cheap to notice by eye, and the
+alternative is accusing working code.
+
+**EVERY EXCEPTION CARRIES ITS REASON** - 195's rule for
+`security_doors()`, for the same reason: a bare name on an allowlist
+is an exception nobody can judge later. The test refuses a reason
+under forty characters.
+
+**AND THE ALLOWLIST IS CHECKED BOTH WAYS.** An entry for a command
+that has since been wired up, renamed or deleted is a stale exception,
+and a stale exception is how a list like this stops meaning anything.
+
+**THE CHEAPER DIRECTION HAS THE TEETH, THOUGH.** A name in `src/` that
+is not registered throws the first time its code path runs, which may
+be months after it was written. Nothing is wrong today, and now
+nothing can be.
+
+**FIVE FAULTS WERE PLANTED AND ALL FIVE CAUGHT** - and one of them was
+caught by the WRONG assertion, which is worth recording. Renaming
+`get_sheet` to `get_sheet_v2` in `main.js` tripped the unreachable
+check first, because the old name stopped being mentioned. So the
+last assertion had not actually been proven to fire. Adding a call to
+a command that does not exist, without removing anything, proved it
+properly. **A planted fault that fails for the wrong reason is a test
+you have not tested.**
+
+**AND IT TURNED UP TWO MORE STALE COUNTS.** `README.md` said 144
+commands and `NEW-MACHINE.md` said 166; there are 170. Exactly what
+294 was about, found this time by having a number to check against.
+
+The app was launched and is running on the changed binary. 1443 Rust
+tests, unchanged - nothing deleted had a test, because nothing could
+reach it. Five Node checks now: the renderer, the die, the tour, reach,
+the rig.
+
+### Carried forward
+
+- **FIVE FEATURES ARE ONE BUTTON SHORT EACH**, and now there is a list
+  of them. `rename_location` is the one a person would actually hit:
+  you can make a room and never rename it. Each is its own small
+  cycle and none of them is cleanup, so none should be smuggled into
+  one.
+- **The allowlist is a judgement, kept by hand.** The test enforces
+  that a reason exists, not that it is still true. Somebody has to
+  reread those six occasionally, which is the honest cost of the only
+  design that does not accuse working code.
+- **The fixtures are still hand-copied off the Rust structs**, from
+  298. Four have been wrong so far.
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **Two trigger functions have a mutable `search_path`**, from 296.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

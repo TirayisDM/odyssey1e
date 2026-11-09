@@ -323,29 +323,18 @@ fn denied(e: String, what: &str) -> String {
     }
 }
 
-/// Every square of one map, in the order a grid wants them.
-///
-/// `order=z,y,x` IS THE INDEX `one_square_one_row` ALREADY BUILT, so
-/// this walks it without a sort - and it is the order a row-major
-/// `Vec` per layer is reconstituted in.
-///
-/// THE WHOLE LOCATION, not a window. Phase 1 is a DM rendering one
-/// place; a bounding box is what fog will want, and adding the
-/// parameter now would be one nothing passes.
-#[tauri::command]
-pub fn list_tiles(state: State<AppState>, location_id: String) -> Result<Vec<Tile>, String> {
-    let token = state.token()?;
-    let rows = supabase::rest_get(
-        &token,
-        "tiles",
-        &[
-            ("select", COLUMNS),
-            ("location_id", &format!("eq.{}", location_id)),
-            ("order", "z.asc,y.asc,x.asc"),
-        ],
-    )?;
-    serde_json::from_value(rows).map_err(|e| format!("could not read the map: {}", e))
-}
+// 300. `list_tiles` WAS HERE AND IS GONE. It read every raw `tiles`
+// row of one location and handed them to a renderer to resolve. `map_at`
+// replaced that - it returns one level ALREADY RESOLVED, squares and
+// standing together, so the picture and `stride::step` cannot disagree
+// about a wall - and nothing has called `list_tiles` since, in Rust or
+// in `src/`.
+//
+// It was still registered, so it was still a reachable command: a piece
+// of the old way to draw a map, kept alive by the handler list alone.
+// `tests/reach.smoke.mjs` is what found it.
+//
+// 115 applies to MIGRATIONS, which are a record. This is source.
 
 /// Write squares, replacing whatever was there.
 ///
@@ -490,7 +479,13 @@ pub fn place_character(
 /// ONLY THE PLACED. A character in the room without coordinates is in
 /// the room and not on the map, and a renderer asking "what do I draw"
 /// should not have to filter them out itself.
-#[tauri::command]
+///
+/// 300. NOT A COMMAND, AND IT NEVER NEEDED TO BE. `map_at` and
+/// `load_map_version` call this; the frontend never has, because what
+/// it wants is `map_at`'s resolved answer rather than this list on its
+/// own. Being in `generate_handler!` only made it a second, unresolved
+/// way to ask the same question - the shape `map_at` exists to prevent.
+/// The function is unchanged and its two callers are untouched.
 pub fn standing_in(state: State<AppState>, location_id: String) -> Result<Vec<Standing>, String> {
     let token = state.token()?;
     let rows = supabase::rest_get(

@@ -417,7 +417,7 @@ policy. One name, two audits:
 
 | audit | what it reports |
 |---|---|
-| `security_doors()` (194/195) | a function `PUBLIC` or `anon` may execute, a definer function `authenticated` can reach that never looks at the caller, and a table with RLS off or with no policy |
+| `security_doors()` (194/195) | a function `PUBLIC` or `anon` may execute, a definer function `authenticated` can reach that never looks at the caller, a table with RLS off or with no policy, and - since 303 - a function whose `search_path` is not pinned to the empty string |
 | `policy_faults()` (296) | a policy that asks `auth.uid()` where it means `current_profile()`, a policy that names no identity function at all and is therefore simply open, and a policy with no expression in it |
 
 Neither is granted to `authenticated`, on purpose — between them the
@@ -472,6 +472,45 @@ strips PUBLIC and `anon` from any new function in `public` as the DDL
 completes. **A new definer function still needs a caller check** — the
 trigger closes the grant, not the logic.
 
+**AND SINCE 303 THE SAME TRIGGER REFUSES AN UNPINNED `search_path`.**
+Every function in `public` pins it to the empty string, so a name that
+is not schema-qualified fails at creation rather than resolving to
+whatever the caller had in scope. A function born without the pin does
+not get to exist; the error names it and the clause to add. It catches
+the quiet one too: **`CREATE OR REPLACE` resets a function's
+settings**, so a careless replacement unpins a pinned function and
+nothing else would notice.
+
+`ALTER FUNCTION ... RESET search_path` is not a CREATE and walks past
+the gate, which is why `security_doors()` class 4 exists as well. The
+gate and the audit ask the same predicate, `search_path_is_pinned(oid)`,
+because a rule written twice disagrees eventually (288).
+
+**IT TOOK THREE READINGS TO FIND OUT HOW MANY WERE WRONG.** Supabase's
+advisor said two. The migration files said eight. `pg_proc`, asked
+directly, said seven, and that is the answer.
+
+| read | said | why it was wrong |
+|---|---|---|
+| the advisor (296) | 2 | **silent about a function pinned to `public`** - a setting is present, so `function_search_path_mutable` is satisfied. That is five of the seven, every one SECURITY DEFINER, with `pg_temp` still searched ahead of `public` for tables (077's reason) |
+| the migration files | 8 | missed `unheld_is_unequipped`, because 089 declares it with **no schema** and a scan looks for `function public.<name>`; and wrongly accused two |
+| `pg_proc` | 7 | - |
+
+**The two it wrongly accused are the interesting ones.**
+`touch_updated_at` and `freeze_roll_identity` are pinned in the
+database and **no migration pins them** - somebody did it from the SQL
+editor or the advisor's own fix button. A rebuild from these files
+would not have matched this database. 303 writes those two `ALTER`s
+down, so now it would: they are a no-op here and load-bearing on a
+fresh build.
+
+Five of the seven were then exercised against real rows with the empty
+search_path in place - `objects`, `encounter_actors`, `tiles`,
+`characters` and `rolls`, each update rolled back - because a name that
+stops resolving fails at CALL time and not at apply time.
+`instantiate_character`, `instantiate_npc` and `copy_kit` refuse
+without a DM's token, so those three are checked in the app.
+
 **The remaining advisor note cannot be cleared on this plan.**
 Leaked-password protection - HaveIBeenPwned checking on sign-up and
 password change - is **Pro and above**, and the console says so on the
@@ -508,9 +547,9 @@ That is the only record of them.
 number is the change, and it is cited from wherever the work landed —
 `-- 116.` at the top of a migration, `// 112.` in `main.js`, `/// 119.`
 on a Rust method. A change that touched no schema has a number and no
-file here, which is why **181 files run from 001 to 296.**
+file here, which is why **182 files run from 001 to 303.**
 
-The 115 gaps are all of that kind, and the comments say so in as many
+The 121 gaps are all of that kind, and the comments say so in as many
 words: 070 "taught the sheet to show it" where 071 filled the column;
 099 "stopped a Ny'ook writing a Strength above 13", which is a rule in
 `species.rs`; 111 and 112 gave casting a target, in JavaScript and Rust;
@@ -520,28 +559,29 @@ words: 070 "taught the sheet to show it" where 071 filled the column;
 lost five functions, none of which is a schema change.
 
 ```
-066-070  072  079-083  090-091  099  108-112  119-120  125
-133-134  138  140-141  153-154  169  173-174  176  178-182  184
-188-192  199-207  209-216  219-225  229  231  233-237  239-242
-245-247  250-252  255-262  264  266-269  271-272  275-282  286-287
-289-291  294-295
+066-070  072  079-083  090-091  099  108-112  119-120  125  133-134
+138  140-141  153-154  169  173-174  176  178-182  184  188-192
+199-207  209-216  219-225  229  231  233-237  239-242  245-247
+250-252  255-262  264  266-269  271-272  275-282  286-287  289-291
+294-295  297-302
 ```
 
 **That list and the count above are computed from the directory**, not
-maintained by hand - 115 missing numbers in 35 runs. Hand-editing them
+maintained by hand - 121 missing numbers in 36 runs. Hand-editing them
 is how they came to disagree with `STATUS.md` in the first place.
 
-**The chain is complete**, re-verified 2026-11-08: every one of the
-**193 ledger rows** maps to one of the **181 files**, and no file is
+**The chain is complete**, re-verified 2026-11-09: every one of the
+**194 ledger rows** maps to one of the **182 files**, and no file is
 unapplied. The difference of twelve is **eight** migrations the
 database recorded in parts and the repo committed as one file each -
 026 (2 rows), 027 (3), 028 (3), 031 (4), 032 (2), 043 (2), 273 (2),
 274 (2) - not a gap.
 
 **THE MAPPING IS BY NAME, AND THE LEDGER CHANGED ITS MIND ABOUT
-NAMES.** 71 rows are recorded as `NNN_description` and 122 as bare
+NAMES.** 72 rows are recorded as `NNN_description` and 122 as bare
 `description`, so neither a numeric sort nor a count alone reconciles
-them. **296 is the 71st and went in numbered on purpose** - the bare
+them. **303 is the 72nd and went in numbered, as 296 promised
+every apply from then on would** - the bare
 names are what makes this paragraph necessary, so every apply from
 here carries its number. 031, 032 and 043 went in as `031a_`, `031b_` and so on; 273 and
 274 as a name and the same name with a suffix. That is why the

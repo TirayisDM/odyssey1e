@@ -15594,6 +15594,146 @@ species card opens with *"The many."*
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 303. A gate so there is never an eighth
+
+**2026-11-09.** Dave: *"fix it. hopefully in a way that does not
+resurface."*
+
+**296 CARRIED TWO NAMES. THE DATABASE SAYS SEVEN.** It took three
+readings to get there, and each one was wrong in its own way:
+
+| read | said | why |
+|---|---|---|
+| Supabase's advisor, in 296 | 2 | **silent about a function pinned to `public`** - a setting is present, so `function_search_path_mutable` is satisfied |
+| the migration files | 8 | missed one, wrongly accused two |
+| `pg_proc`, asked directly | 7 | - |
+
+The five the advisor says nothing about are the dangerous ones. All
+five are SECURITY DEFINER, and `pg_temp` is still searched ahead of
+`public` for tables - 077's reason, written down about three different
+functions three hundred migrations ago. The two the advisor DOES name
+are SECURITY INVOKER trigger functions whose bodies name no table at
+all or name it in full: the lint is formally right and the exposure is
+nil.
+
+**THE FILE SCAN WAS WRONG TWICE, IN OPPOSITE DIRECTIONS.** First it
+reported eight unpinned because the pattern matched `search_path = ''`
+and `search_path = public` but not `search_path to 'public'`, so every
+quoted pin read as absent. Corrected, it still missed
+`unheld_is_unequipped` - **089 declares it with no schema at all**,
+`create or replace function unheld_is_unequipped()`, and a scan
+looking for `function public.<name>` cannot see the one definition
+that counts. It is SECURITY DEFINER pinned to `public`, which is the
+most exposed shape on the list.
+
+What found it was the migration refusing to apply. 302's lesson
+arriving one cycle later: a green check and a check measuring the
+wrong thing look identical, and the only thing that tells them apart
+is asking the thing itself.
+
+**AND TWO OF THEM WERE ALREADY FIXED BY A HAND NOBODY RECORDED.**
+`touch_updated_at` and `freeze_roll_identity` are pinned in the
+database and **no migration pins them.** 001 creates them bare,
+nothing in 182 files alters them, and `pg_proc` has them pinned.
+Somebody did it from the SQL editor or from the advisor's own fix
+button. **A database rebuilt from these migrations would not have
+matched this one**, and nothing would have said so. 115 runs the
+other way round here: an applied migration is the record, and a change
+applied without one is a change with no record at all. Both `alter`s
+are written down now - no-ops against this database, load-bearing
+against a fresh one.
+
+**THE FIX IS A GATE AND AN AUDIT, AND THE REASON FOR BOTH IS A HOLE
+IN THE GATE.** 196 stopped the GRANT half of this drifting ever again
+with an event trigger that strips PUBLIC and `anon` as the DDL
+completes, and the grant half has not drifted since. The search_path
+half got a convention, and 002 -> 017 -> 077 -> 296 is what a
+convention produces.
+
+| | |
+|---|---|
+| the gate | `close_a_new_function` refuses a function BORN in `public` without `search_path` pinned to the empty string, naming it and the clause to add. It also catches the quiet one: **`create or replace` resets a function's settings**, so a careless replacement unpins a pinned function |
+| the audit | `security_doors()` class 4, because `alter function ... reset search_path` is not a CREATE and walks straight past the gate |
+
+**ONE PREDICATE, NOT TWO.** Both ask `search_path_is_pinned(oid)`.
+288's rule is that a rule written twice disagrees eventually, and this
+one would have been written in a SQL audit and a plpgsql event
+trigger - the two places most likely to drift apart.
+
+**CLASS 4 IS DELIBERATELY STRICTER THAN THE ADVISOR**, and reports two
+faults rather than one: `search_path is whatever the caller says` and
+`search_path is pinned, but not to the empty string`. The second is
+the one Supabase never mentions and five of seven were sitting in.
+It also does NOT exclude trigger functions - class 2 excludes them
+because a GRANT on one buys nothing, which is true about grants and
+says nothing about search_path. That is the gap 296 named, closed.
+
+**FOUR PLANTED FAULTS, ALL FOUR CAUGHT, BASELINE ASSERTED CLEAN
+FIRST.** A probe is created pinned, then unpinned by `alter` - which
+the gate never sees, and that is the demonstration of why the audit
+exists - then pinned to `public`; then an unpinned `create` must be
+refused with 303 in the message; then a correctly pinned one must be
+ADMITTED, because a gate that refuses everything passes the first
+three and is useless. Nothing is left behind, and that is asked rather
+than assumed.
+
+**A `raise notice` IS INVISIBLE THROUGH `apply_migration`.** The first
+version refused with *"wall_faults() reports 1 fault(s) - see the
+notices above"* and **there were no notices above** - the management
+API returns the error and discards the rest. 296's pattern works in
+the SQL editor and nowhere else, so the names are aggregated into the
+message that does come back. A diagnostic that only prints where
+nobody is looking is 294 wearing a different hat.
+
+**AND FIVE OF THE SEVEN WERE EXERCISED AGAINST REAL ROWS**, because a
+name that stops resolving fails at CALL time and not at apply time. An
+update to one row each of `objects`, `encounter_actors`, `tiles`,
+`characters` and `rolls`, every one rolled back: five triggers fired
+and resolved every name with the empty search_path in place.
+`touch_updated_at` rode along on all five.
+
+52 functions in `public`, **all 52 pinned**. `wall_faults()` 0 faults,
+both halves. 182 migration files, 194 ledger rows - and the four
+failed attempts of this cycle left no row at all, which is worth
+knowing about `apply_migration`. Nothing in this cycle touched Rust or
+JavaScript.
+
+### Carried forward
+
+- **THREE FUNCTIONS ARE STILL UNEXERCISED.**
+  `instantiate_character`, `instantiate_npc` and `copy_kit` refuse
+  without a DM's token - `is_game_dm` reads `auth.uid()`, which is
+  null for the owner role - so the only way to prove their names
+  still resolve is to place a creature and copy a template IN THE
+  APP. Every body was read line by line first and every table, type
+  and function in them is written out in full, which is the reason to
+  expect it works rather than evidence that it does.
+- **NOTHING NOTICES A CHANGE MADE OUTSIDE A MIGRATION.** Two were
+  found this cycle by accident, while counting something else. The
+  repo cannot tell you what else has been done to this database from
+  the console, and a diff of the live schema against the files is a
+  cycle of its own.
+- **A FILE SCAN OF THE MIGRATIONS IS NOT AN INSTRUMENT.** 089 proves
+  it: one unqualified `create function` and a whole class of question
+  cannot be answered from the directory. Nothing greps for that shape
+  today.
+- **HALF THE RIG'S FIXTURES STILL HAVE NO SHAPE TO BE HELD TO**, from
+  302, and the number is printed every run - 18 of 36 return an
+  untyped `Value` with no select.
+- **NESTING IS UNCHECKED**, from 302. `Owned.item` is an `Item` and
+  nothing looks inside it.
+- **A VALUE IN THE WRONG DOMAIN IS STILL INVISIBLE**, which is 299's
+  `dice_prefs` sending `#f5f5f5` where the app wanted `slate`.
+- **The thinness worklist is nine lines long and nobody has walked
+  it.**
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **FOUR FEATURES ARE ONE BUTTON SHORT**, from 301: `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

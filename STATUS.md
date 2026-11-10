@@ -16196,6 +16196,138 @@ selectors, and two fixes to the rig.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 307. The picture was fetched again when nothing had changed
+
+**2026-11-10.** Dave: *"Image - token is reloading when ability score
+edit buttons are pressed and at other times - need to look at what
+prompts their redraw."*
+
+**THERE IS EXACTLY ONE `<img>` IN THE WHOLE FRONTEND** - the portrait
+circle - and it was guaranteed to download again every time, by
+construction rather than by accident. Three layers of one mistake, and
+each alone would have been enough to make it flicker.
+
+| | |
+|---|---|
+| the address was new every call | `list_character_images` returns no stored address for an uploaded picture. The bucket is private, so Rust asks Storage to SIGN one per picture per call - and a fresh signature is a different URL string, which is a cache miss by definition. The webview had no way to know it was the same picture |
+| the sheet asked when nothing had changed | `loadPortrait` sat in `loadSheet`'s `paintEach` list, and **21 places call `loadSheet`** - every ability commit, every skill dropdown, every class change, every tab refresh |
+| the element was thrown away | `paintPortrait` began `host.innerHTML = ""` and built a new `<img>`. A fresh element starts a fresh load, so even an identical cached address costs a frame of empty circle |
+
+So pressing *edit scores* and then *done editing* was two reads, two
+signings and two downloads of a picture nobody had touched. That is the
+"and at other times": it is nearly every time.
+
+**THE GUARD WAS ALREADY HALF THERE, WRITTEN FOR SOMETHING ELSE.**
+`loadPortrait` tracked `state.portraitFor` so it could close an edit
+panel left standing open on somebody else's row. That same field
+answers *has anything about the pictures changed* - so the read now
+happens on a character switch, or when a caller passes `force`. Three
+callers mean it and say so: a picture uploaded, a picture removed, the
+panel saved.
+
+**THE FIRST ADDRESS A PICTURE IS GIVEN IS THE ONE IT KEEPS.**
+`state.portraitUrls`, keyed by picture id, which is safe for a session
+because `storage_path` is written once at insert and **never updated** -
+an id's bytes cannot change under its address, and `SIGNED_FOR` is a
+day. Without this the paths that legitimately re-read would undo the
+whole cycle: ticking "default" on the picture already on the screen
+re-reads the list, and taking the newly-signed URL would reload the
+face.
+
+**AND THE `<img>` IS MOVED RATHER THAN REBUILT.** A node that moves
+keeps its decoded image; a node that is replaced starts again. The live
+element is detached before the ring is emptied and handed back to the
+new ring when it is still the same picture - 305's thought at the scale
+of one element.
+
+Measured in the rig across four full sheet repaints - lock open,
+commit, skill change, tab refresh:
+
+```
+fixed     sig=1, sig=1, sig=1, sig=1   same node every time, 0 re-reads
+planted   sig=2, sig=3, sig=4, sig=5   a new node every time, 3 re-reads
+```
+
+The plant is all three layers put back. And the case that could have
+undone it quietly - the panel's save, which re-reads because the ring,
+the title or the default may have moved:
+
+```
+save_character_image 1, list_character_images 1
+the address on screen: still sig=1, and the same node
+the ring: changed, which is what the write was for
+```
+
+**THE RIG HAD NEVER DRAWN A PORTRAIT.** `list_character_images: () =>
+[]`. No picture, no `<img>`, nothing that could have noticed any of
+this - **THE FOURTH CYCLE RUNNING** where the instrument agreed with the
+bug because its fixture was thinner than the engine. 304's one row was
+a player character, 305 answered in the same tick, 306 carried no
+`save_prof`. It now holds a picture by its STORAGE PATH, signs an
+address at the moment of asking with a counter in it, and performs
+`save_character_image` so the forced re-read has something to have
+changed.
+
+Six Node checks, all green; the rig answers 39 commands now. No Rust,
+no migration, no new command.
+
+### Carried forward
+
+- **THE CHARACTER-SWITCH BRANCH IS UNEXERCISED.** `switched` clears
+  `portraitUrls` and re-reads, which is the branch that would show the
+  previous person's face if it were wrong. The rig has ONE person with
+  a sheet, so there is nobody to switch to - `get_sheet` is a single
+  constant and a second roster row would be a fixture that lies, which
+  is the thing 302 exists to stop. A second character with a sheet of
+  their own closes it, and that is a fixture cycle rather than a line.
+- **`list_character_images` STILL HAS NO SHAPE TO BE HELD TO**, and the
+  reason is instructive: `rig.smoke.mjs` finds a command's shape by the
+  `select` in the command function, and this one delegates to
+  `character.rs` where the select actually lives. A scan that follows
+  one call deeper would gain several of the 21 untyped ones. Same
+  family as 303's *a file scan of the migrations is not an instrument*.
+- **INITIATIVE IS THE OTHER FIELD THAT SAVES AS YOU TYPE IN IT**, from
+  306. `byHand` answers `change` with `set_initiative` and then
+  `selectEncounter`, reloading the whole panel. It wants `coalesce`,
+  which is one line.
+- **TEN SEQUENTIAL ROUND TRIPS FOR ONE CLICK ON THE ENCOUNTER TAB**,
+  from 305. The rig's call counter says it out loud on a cold open:
+  `who_is_where` 3, `list_encounters` 2, `list_locations` 2,
+  `list_skill_keys` 2, `list_individuals` 2, `list_npcs` 2. 307 took
+  one item OUT of that chain for the sheet, which is the first time
+  anything has got shorter rather than smoother.
+- **`paintFightCard`'s NEW ORDERING IS STILL UNEXERCISED**, from 305 -
+  the rig's encounter fixture is `ready` rather than `active`.
+- **`paintFightCard` THROWS ON AN ACTIVE ENCOUNTER WITH NOBODY IN IT.**
+  Pre-existing, one line, nothing says so on screen.
+- **A PANE THAT GROWS IS STILL UNFIXED.** `fillDetail` changes height
+  three times; closing it means `fillMoves` not taking the host to
+  hand on to `reopenDetail`.
+- **THE PAINT CHECK IS A RATCHET, NOT A PROOF**, from 305: text rather
+  than an AST, three known shapes, branches read by indentation.
+- **THREE FUNCTIONS FROM 303 ARE STILL UNEXERCISED.**
+  `instantiate_npc` is an encounter's **enrol** with a *statblock*
+  picked; `instantiate_character` with `copy_kit` behind it is the
+  Creatures tab's **place in world**. Both refuse without a DM's token.
+- **NOTHING NOTICES A CHANGE MADE OUTSIDE A MIGRATION**, from 303.
+- **NOTHING CHECKS THAT A CONTROL OFFERS WHAT ITS LABEL SAYS**, from
+  304. Four cycles running, the thing that found the fault was somebody
+  trying to play.
+- **HALF THE RIG'S FIXTURES STILL HAVE NO SHAPE TO BE HELD TO**, from
+  302 - 21 of 39 now.
+- **NESTING IS UNCHECKED**, from 302. `Owned.item` is an `Item`.
+- **A VALUE IN THE WRONG DOMAIN IS STILL INVISIBLE**, which is 299's
+  `dice_prefs` sending `#f5f5f5` where the app wanted `slate`.
+- **The thinness worklist is nine lines long and nobody has walked
+  it.**
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **FOUR FEATURES ARE ONE BUTTON SHORT**, from 301: `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

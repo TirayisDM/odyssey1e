@@ -510,6 +510,72 @@ reloads its whole panel. An edit MODE is the wrong shape for a single
 field with no group to open; it wants `coalesce`, which is one line.
 Carried rather than folded in.
 
+### The picture was fetched again when nothing about it changed (307)
+
+Dave: *"Image - token is reloading when ability score edit buttons are
+pressed and at other times - need to look at what prompts their
+redraw."*
+
+**THERE IS EXACTLY ONE `<img>` IN THE FRONTEND** - the portrait circle -
+and it was guaranteed to download again every time, by construction.
+Three layers of the same mistake:
+
+| | |
+|---|---|
+| the address was new every call | `list_character_images` returns no stored address for an uploaded picture. The bucket is private, so Rust asks Storage to **sign** one per picture per call (`character.rs` -> `storage::signed_url`), and a fresh signature is a different URL string - a cache miss by definition |
+| the sheet asked when nothing had changed | `loadPortrait` sat in `loadSheet`'s `paintEach` list, and **21 places call `loadSheet`**: every ability commit, every skill dropdown, every class change, every tab refresh |
+| the element was thrown away | `paintPortrait` began `host.innerHTML = ""` and built a new `<img>`. A fresh element starts a fresh load, so even an identical cached address costs a frame of empty circle |
+
+**THE GUARD WAS ALREADY HALF THERE.** `loadPortrait` tracked
+`state.portraitFor` so it could close an edit panel left open on
+somebody else's row. That same field answers "has anything about the
+pictures changed" - so the read now happens on a character switch or
+when a caller passes `force`, which the three that mean it do: a picture
+uploaded, a picture removed, the panel saved.
+
+**THE FIRST ADDRESS A PICTURE IS GIVEN IS THE ONE IT KEEPS.**
+`state.portraitUrls` is keyed by picture id, which is safe for a
+session: `storage_path` is written once at insert and never updated, so
+an id's bytes cannot change under its address. `SIGNED_FOR` is a day.
+Without this, the paths that legitimately re-read - ticking "default" on
+the picture already on the screen - would undo the whole cycle.
+
+**AND THE `<img>` IS MOVED, NOT REBUILT.** A node that moves keeps its
+decoded image; a node that is replaced starts again. So the live element
+is detached before the ring is emptied and handed back to the new ring
+if it is still the same picture.
+
+Measured in the rig across four full sheet repaints - lock open, commit,
+skill change, tab refresh:
+
+```
+fixed     sig=1, sig=1, sig=1, sig=1   same node every time, 0 re-reads
+planted   sig=2, sig=3, sig=4, sig=5   a new node every time, 3 re-reads
+```
+
+And the case that could have undone it quietly - the panel's save,
+which re-reads the list because the ring, the title or the default may
+have moved:
+
+```
+save_character_image 1, list_character_images 1
+the address on screen: still sig=1, and the same node
+```
+
+**THE RIG HAD NEVER DRAWN A PORTRAIT.** `list_character_images: () =>
+[]`. No picture, no `<img>`, nothing to notice - **the fourth cycle
+running** where the instrument agreed with the bug because its fixture
+was thinner than the engine (304's one row was a player character, 305
+answered in the same tick, 306 carried no `save_prof`). It now holds a
+picture by its STORAGE PATH, signs an address at the moment of asking
+with a counter in it, and performs `save_character_image` so the forced
+re-read has something to have changed.
+
+**WHAT 307 DID NOT TOUCH.** The two serialized round trips per picture
+are Rust's shape, not the frontend's, and `characters.rs` already argues
+for them - *"A character has one picture or three; this is not the place
+to batch."* This cycle's claim is only that we should stop asking.
+
 ---
 
 ## Supabase

@@ -110,6 +110,15 @@ let state = {
   portraitEditId: null,
   portraitFor: null,
   images: [],
+  // 307. THE ADDRESS OF EACH PICTURE, KEPT. `list_character_images`
+  // does not return a stored address: the bucket is private, so Rust
+  // asks Supabase Storage to SIGN one per picture per call, and a fresh
+  // signature is a different URL string - which is a cache miss by
+  // definition, so the webview downloaded the bytes again every time.
+  // Keyed by picture id, which is safe for the session: `storage_path`
+  // is written once at insert and never updated, so an id's bytes
+  // cannot change under its address. Good for `SIGNED_FOR`, a day.
+  portraitUrls: {},
   // 284. A drop or a paste in flight, and what went wrong with the
   // last one. The error lives here rather than in the panel because a
   // drop happens with the panel shut.
@@ -836,6 +845,12 @@ function clearData() {
   state.gameId = null;
   state.characterId = null;
   state.sheet = null;
+  // 307. AND THE PICTURES, which were left behind here before. The
+  // addresses are signed for a day, so the next person to sign in on
+  // this machine must not inherit a pocketful of them.
+  state.images = [];
+  state.portraitUrls = {};
+  state.portraitFor = null;
   state.games = [];
   state.encounterId = null;
   state.dmEncounterId = null;
@@ -1562,7 +1577,25 @@ function paintTalents(sheet) {
 // character who has a face shows the face and an `edit` button, and
 // nothing repaints while the panel is open - so a half-filled form
 // cannot fold under somebody mid-entry.
-async function loadPortrait() {
+// 307. THE SHEET STOPS ASKING FOR THE PICTURE.
+//
+// Dave: *"Image - token is reloading when ability score edit buttons
+// are pressed and at other times - need to look at what prompts their
+// redraw."*
+//
+// TWENTY-ONE PLACES CALL `loadSheet`, and this sat in its `paintEach`
+// list, so every ability commit, every skill dropdown, every class
+// change and every tab refresh re-read the list AND made Rust sign a
+// fresh URL for each picture - two network round trips to be told
+// something that had not changed, followed by a download the new
+// address guaranteed could not come from cache.
+//
+// `force` IS FOR THE CALLERS THAT MEAN IT: a picture uploaded, removed,
+// or the panel saved. A character switch forces itself, because
+// `portraitFor` is how this function already knew to close a panel left
+// open on somebody else's row - the guard was half here before 307 and
+// only ever used for that.
+async function loadPortrait(force) {
   const host = document.querySelector("#portrait");
   if (!host) return;
   if (!state.characterId) {
@@ -1575,22 +1608,54 @@ async function loadPortrait() {
   // list that is about to be replaced, and a panel left open across a
   // character switch would offer to edit a picture that is no longer
   // on the screen.
-  if (state.portraitFor !== state.characterId) {
+  const switched = state.portraitFor !== state.characterId;
+  if (switched) {
     state.portraitEditing = false;
     state.portraitEditId = null;
     state.portraitFor = state.characterId;
+    // ANOTHER PERSON'S ADDRESSES ARE NOT THIS PERSON'S. They are keyed
+    // by picture and a picture belongs to one character, so a stale
+    // entry could never be read by mistake - but it would sit in memory
+    // for the life of the session, and reading somebody else's sheet is
+    // the commonest thing a DM does.
+    state.portraitUrls = {};
   }
+
+  // NOTHING ABOUT THE PICTURES CHANGED, SO NOTHING IS ASKED. Repainting
+  // is still right - the ring, the panel and the caption all live in
+  // `state` and the host was emptied by whatever called us.
+  if (!force && !switched) return paintPortrait();
 
   const got = await call("list_character_images", {
     characterId: state.characterId,
   });
   state.images = Array.isArray(got) ? got : [];
+  // THE FIRST ADDRESS A PICTURE IS GIVEN IS THE ONE IT KEEPS. Later
+  // calls hand back a differently-signed URL for the same bytes, and
+  // taking it would undo the whole of this cycle on the paths that do
+  // legitimately re-read - ticking "default" on the picture already on
+  // the screen, say.
+  for (const im of state.images) {
+    if (im && im.url && !state.portraitUrls[im.id]) {
+      state.portraitUrls[im.id] = im.url;
+    }
+  }
   paintPortrait();
 }
 
 function paintPortrait() {
   const host = document.querySelector("#portrait");
   if (!host) return;
+
+  // 307. THE PICTURE IS TAKEN OFF THE RING BEFORE THE RING GOES.
+  //
+  // A node that MOVES keeps its decoded image; a node that is replaced
+  // starts a fresh load, which is a blank circle for at least a frame
+  // even when the address is identical and cached. So the live <img> is
+  // detached first and handed back to the new ring below if it is still
+  // the same picture. Everything else here is cheap and rebuilt.
+  const had = host.querySelector("img.portrait-img");
+  if (had) had.remove();
   host.innerHTML = "";
 
   const images = state.images || [];
@@ -1612,17 +1677,26 @@ function paintPortrait() {
 
   if (state.portraitBusy) {
     ring.append(portraitEmpty("uploading\u2026"));
-  } else if (shown && shown.url) {
-    const img = sEl("img", "portrait-img");
-    img.src = shown.url;
+  } else if (shown && (state.portraitUrls[shown.id] || shown.url)) {
+    // 307. THE ADDRESS IN HAND, not the one that just arrived.
+    const url = state.portraitUrls[shown.id] || shown.url;
+    let img = had && had.dataset.image === shown.id ? had : null;
+    if (!img) {
+      img = sEl("img", "portrait-img");
+      img.dataset.image = shown.id;
+      img.src = url;
+      // A DEAD ADDRESS SAYS SO. A failed <img> renders as nothing, and
+      // nothing inside a 10px ring reads as a broken application rather
+      // than as a wrong address somebody can go and fix.
+      img.addEventListener("error", () => {
+        img.replaceWith(portraitEmpty("that address did not load"));
+      });
+    }
+    // THE CAPTION CAN CHANGE WITHOUT THE PICTURE CHANGING, and neither
+    // of these restarts a load.
     img.alt = shown.title || (state.sheet ? state.sheet.name : "portrait");
     if (shown.title) img.title = shown.title;
-    // A DEAD ADDRESS SAYS SO. A failed <img> renders as nothing, and
-    // nothing inside a 10px ring reads as a broken application rather
-    // than as a wrong address somebody can go and fix.
-    img.addEventListener("error", () => {
-      img.replaceWith(portraitEmpty("that address did not load"));
-    });
+    else img.removeAttribute("title");
     ring.append(img);
   } else {
     // 284. A picture WITH a row and WITHOUT an address is an upload
@@ -1799,7 +1873,8 @@ async function portraitTakeFile(file) {
     state.portraitEditing = false;
     state.portraitEditId = null;
   }
-  await loadPortrait();
+  // 307. A PICTURE ARRIVED, so this one asks.
+  await loadPortrait(true);
 }
 
 // A RING AROUND THE INITIALS when nobody has given them a face. An
@@ -1887,7 +1962,8 @@ function portraitPanel() {
           return paintPortrait();
         }
         if (state.portraitEditId === im.id) state.portraitEditId = null;
-        await loadPortrait();
+        // 307. A PICTURE WENT, so this one asks.
+        await loadPortrait(true);
       });
       r.append(gone);
       list.append(r);
@@ -2007,7 +2083,10 @@ function portraitPanel() {
     // closes to just display image with border."
     state.portraitEditing = false;
     state.portraitEditId = null;
-    await loadPortrait();
+    // 307. The ring, the title, the default - any of them may have
+    // moved, so the LIST is re-read. The picture on the screen keeps
+    // the address it already has.
+    await loadPortrait(true);
   });
 
   const cancel = sEl("button", "ghost", "cancel");

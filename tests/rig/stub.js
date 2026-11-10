@@ -108,6 +108,19 @@ const PLACES = [
 // off here and the prof tick writes it. Without it the tick's half of
 // `set_ability` could be sent and nothing on the screen would ever
 // disagree - which is the green tick this file's header warns about.
+// 307. HOW MANY TIMES STORAGE HAS BEEN ASKED TO SIGN. Read off the
+// `<img src>` on the screen: if the number in it moved, the picture
+// was downloaded again.
+let signings = 0;
+
+// The pictures themselves, with their STORAGE PATH rather than an
+// address - because that is the shape the engine stores. The address is
+// made at the moment of asking, above.
+const IMAGES = [
+  { id: "im1", path: "assets/tiles/grass.png", uploaded: true,
+    title: "Luci", rank: 0, is_default: true, ring: 1 },
+];
+
 const ABIL = (score, prof) => ({ score, base: score, bonus: 0, save_prof: !!prof });
 const SAVE = (n, prof) => ({ natural: n, proficient: !!prof, mods: [], total: n + (prof ? 2 : 0) });
 
@@ -298,7 +311,45 @@ const ANSWERS = {
       is_active: true, level: null, class_key: null,
       npc_key: "zombie", creature_type: "undead" },
   ],
-  list_character_images: () => [],
+  // 307. A PICTURE WHOSE ADDRESS CHANGES EVERY TIME IT IS ASKED FOR.
+  //
+  // This was `() => []`, so no portrait had ever been drawn in the rig
+  // and nothing in it could notice the reload Dave was watching. The
+  // engine does not return a stored address for an uploaded picture -
+  // the bucket is private, so Rust asks Storage to SIGN one per
+  // picture per call - and the counter here is what makes that
+  // visible: same bytes, different URL, every call.
+  //
+  // THE FOURTH CYCLE RUNNING where the rig agreed with the bug because
+  // its fixture was thinner than the engine. 304's one row was a
+  // player character, 305 answered in the same tick, 306 carried no
+  // `save_prof`, and this held no picture at all.
+  list_character_images: () => IMAGES.map((im) => ({
+    id: im.id,
+    // A FRESH SIGNATURE EVERY CALL, which is what Storage does and what
+    // makes a needless re-read visible on the screen.
+    url: im.path + "?sig=" + ++signings,
+    uploaded: im.uploaded,
+    title: im.title,
+    rank: im.rank,
+    is_default: im.is_default,
+    ring: im.ring,
+  })),
+
+  // 307. A WRITE THE RIG PERFORMS, so the forced re-read has something
+  // to have changed. The ring, the title and the default all move
+  // without the BYTES moving, which is the case that proves the kept
+  // address is kept: the list is read again and the picture on the
+  // screen keeps the signature it already had.
+  save_character_image: (a) => {
+    const im = IMAGES.find((x) => x.id === a.imageId);
+    if (!im) return null;
+    im.title = a.title || null;
+    im.rank = a.rank || 0;
+    im.is_default = !!a.isDefault;
+    im.ring = a.ring || 1;
+    return null;
+  },
   list_inventory: () => [HANDAXE],
   wallet: () => ({ said: "12 gp", worth: "1200 cp", cp: 0, sp: 0, gp: 12, pp: 0 }),
   encumbrance: () => ({ carried: 2, capacity: 150, burden: "unencumbered" }),

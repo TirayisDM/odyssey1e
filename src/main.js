@@ -546,6 +546,25 @@ function coalesce(key, fn, ms) {
   };
 }
 
+// 306. REGISTERED, AND NOTHING ELSE.
+//
+// An edit MODE wants the opposite of a timer: nothing should go out
+// while the mode is open, and the write belongs to the act of leaving
+// it. But an edit nobody has registered is an edit the guards cannot
+// save, so it goes into the same map - `flushSaves` runs it on the way
+// out of a tab, a character and a game, and `dropSaves` names it on
+// sign-out. ONE REGISTRY, because a second one would disagree with this
+// one eventually (288).
+//
+// AND IT MAKES THAT FLUSH LOAD-BEARING. 305 planted a fault by taking
+// `await flushSaves()` out of `refreshTab` and it did not fail - the
+// 350ms timer fired on its own and the write landed anyway, so the
+// honest claim was that the line was a guard rather than a load-bearing
+// one. With no timer there is nothing else to save it.
+function hold(key, fn) {
+  pending.set(key, { fn, timer: 0 });
+}
+
 // Thrown away rather than run, and never quietly.
 //
 // Signing out takes the token with it, so a queued save would fail on
@@ -3902,6 +3921,94 @@ async function fillCreaturePicker() {
 
 const ABILS = ["str", "dex", "con", "int", "wis", "cha"];
 
+// 306. CLOSING THE LOCK IS THE SAVE.
+//
+// Dave: *"the buttons work but it seems to freeze - lock up and then
+// change for some clicks after it locked. Maybe ditch the buttons so
+// the user just enters a value."*
+//
+// THREE FAULTS WERE STACKED IN ONE BOX. One click of a stepper arrow
+// ran `set_ability` and then a whole `loadSheet` - `get_sheet`,
+// `loadRolls` twice and six more loaders behind `paintEach` - which is
+// the freeze. 305 coalesced that to one save per burst and left the
+// worse half untouched: the queued closure held `num` ITSELF, and
+// `loadSheet` destroys that element, so a click landing during the
+// reload re-armed the timer against a dead box and 350ms later wrote
+// its value and reloaded again. THAT is the change arriving after the
+// lock-up. And nothing in this app handles `wheel`, so a focused
+// number box inside a scrolling column took the wheel and moved a
+// score with nothing on the screen saying so.
+//
+// SO THE STEPPER IS GONE and 066's lock becomes what it always looked
+// like: editing is a MODE, and leaving the mode is the write.
+//
+// READ OFF THE SCREEN, NOT OUT OF A CLOSURE. This takes the six boxes
+// by their `data-keep` names at the moment it runs, which is why the
+// race cannot come back - there is no captured element left to go
+// stale.
+//
+// NOTHING IS WRITTEN UNLESS ALL SIX PARSE. A typo in one box must not
+// half-save the other five, so an unreadable value stops the whole
+// commit, names itself in the log, and leaves the lock open with what
+// you typed still on the screen to correct.
+//
+// THE RANGE STAYS THE ENGINE'S. 1 to 30 lived on the input's `min` and
+// `max` and is deliberately not re-stated here - 288: a rule written
+// twice disagrees eventually. A 99 goes out and comes back refused by
+// name.
+//
+// Returns false ONLY when a box could not be read, which is the one
+// case where the lock has to stay open.
+async function commitAbilities() {
+  const sheet = state.sheet;
+  if (!sheet || !state.characterId) return true;
+
+  const rows = [];
+  const unreadable = [];
+  for (const code of ABILS) {
+    const num = document.querySelector('#abilities [data-keep="abil-' + code + '"]');
+    const chk = document.querySelector('#abilities [data-keep="abil-prof-' + code + '"]');
+    if (!num || !chk) continue;
+    const a = sheet.abilities[code] || { score: 10, save_prof: false };
+    // THE BASE, not the effective score - 056's split, and the same
+    // number the box was filled with. Comparing against `a.score`
+    // would write the species bonus back in on every commit.
+    const was = a.base ?? a.score;
+    const raw = String(num.value).trim();
+    if (!/^[0-9]{1,2}$/.test(raw)) {
+      unreadable.push(code.toUpperCase() + ' "' + raw + '"');
+      continue;
+    }
+    rows.push({
+      code,
+      score: Number(raw),
+      prof: chk.checked,
+      was,
+      wasProf: !!a.save_prof,
+    });
+  }
+
+  if (unreadable.length) {
+    log("set_ability", "not a score: " + unreadable.join(", ") +
+        " - nothing was saved", true);
+    return false;
+  }
+
+  // ONLY WHAT MOVED. Six writes for one changed score would be five
+  // round trips spent saying nothing, and every one of them is a
+  // chance for the engine to refuse a number nobody touched.
+  for (const r of rows) {
+    if (r.score === r.was && r.prof === r.wasProf) continue;
+    await tryCall("set_ability", {
+      characterId: state.characterId,
+      ability: r.code,
+      score: r.score,
+      saveProf: r.prof,
+    });
+  }
+  return true;
+}
+
 async function selectCharacter(id) {
   // 305. BEFORE `state.characterId` MOVES. A queued save reads the
   // character out of state when it runs, so flushing after this line
@@ -4044,6 +4151,17 @@ async function loadSheet() {
     ? "put the scores back under the lock"
     : "open all six - they are read-only so a stray keystroke cannot move one";
   toggle.addEventListener("click", async () => {
+    // 306. THE BUTTON IS THE WRITE. Nothing goes to the network while
+    // the lock is open, so this is the only place the six scores land.
+    // The queue entry is dropped FIRST: this is the commit, and a
+    // second one firing later out of `flushSaves` would write the same
+    // row again.
+    if (state.abilitiesOpen) {
+      pending.delete("abilities");
+      // A box that is not a score leaves the lock open and the panel
+      // untouched, so the thing to correct is still on the screen.
+      if (!(await commitAbilities())) return;
+    }
     state.abilitiesOpen = !state.abilitiesOpen;
     await loadSheet();
   });
@@ -4067,7 +4185,20 @@ async function loadSheet() {
   // species bonus in it, and showing that here would write it back on
   // the next save and add the bonus a second time. 056 keeps the two
   // apart precisely so this box can hold the number somebody rolled.
-  num.type = "number"; num.min = 1; num.max = 30;
+  // 306. A FIELD YOU TYPE IN, NOT A STEPPER. `type=number` brought
+  // three ways to move a score that nobody asked for - the arrows, the
+  // wheel over a focused box inside a scrolling column, and the arrow
+  // keys - and each one fired `change` and a whole sheet reload.
+  // `inputmode` keeps the numeric keypad on a phone without any of it,
+  // and two digits is the domain: the engine's ceiling is 30.
+  num.type = "text";
+  num.inputMode = "numeric";
+  num.autocomplete = "off";
+  num.maxLength = 2;
+  // THE CLASS CARRIES THE LAYOUT NOW. Four CSS rules selected this box
+  // by `input[type=number]`, one of them the rule that puts it in its
+  // grid column, so changing the type without this collapses the row.
+  num.className = "abil-score";
   num.value = a.base ?? a.score;
   // 066. READ-ONLY BY DEFAULT. Scores are rolled at creation and then
   // mostly left alone; an editable box invites a stray keystroke into
@@ -4195,15 +4326,6 @@ async function loadSheet() {
       : code.toUpperCase() + " save";
     roll.addEventListener("click", () => askSaveDC(code, line));
 
-    const save = async () => {
-      await call("set_ability", {
-        characterId: state.characterId,
-        ability: code,
-        score: Number(num.value),
-        saveProf: chk.checked,
-      });
-      await loadSheet();
-    };
     // 305. ONE SAVE FOR A BURST OF CLICKS.
     //
     // Dave: *"when filling fields like number scalers it seems to want
@@ -4218,12 +4340,38 @@ async function loadSheet() {
     // THE TICK SHARES THE KEY because it shares the save: one write
     // carries the score and the proficiency together, so queueing them
     // apart would be two writes racing over one row.
-    const queue = coalesce("ability:" + code, save);
-    num.addEventListener("change", queue);
-    chk.addEventListener("change", queue);
-    // AND THE FIELD COMES BACK AFTER THE REPAINT. `keepPlace` finds it
-    // by this, which is why it is a name and not an index - a row added
-    // above would move an index onto the wrong ability.
+    // 306. TYPING SENDS NOTHING. It registers the commit in 305's queue
+    // and that is the whole of what a keystroke does, so the panel
+    // stands still while you are working in it. `input` rather than
+    // `change` so a number typed and never blurred is registered too -
+    // the guards are what make deferring safe, and they can only run
+    // what they have been told about.
+    num.addEventListener("input", () => hold("abilities", commitAbilities));
+
+    // THE TICK IS LIVE WHETHER THE LOCK IS OPEN OR SHUT, so it follows
+    // whichever rule is in force. One `set_ability` carries the score
+    // and the proficiency together - deliberately, so the two halves of
+    // one row cannot race - which means a tick saving on its own
+    // mid-edit would reload the sheet and take the other five unwritten
+    // numbers with it.
+    const queue = coalesce("ability:" + code, async () => {
+      await call("set_ability", {
+        characterId: state.characterId,
+        ability: code,
+        score: Number(num.value),
+        saveProf: chk.checked,
+      });
+      await loadSheet();
+    });
+    chk.addEventListener("change", () => {
+      if (state.abilitiesOpen) hold("abilities", commitAbilities);
+      else queue();
+    });
+    // 306. THE NAMES ARE HOW BOTH BOXES ARE FOUND - by
+    // `commitAbilities` when the lock closes, and by `keepPlace` when
+    // the repaint puts the person back where they were standing. A name
+    // and not an index, because a row added above would move an index
+    // onto the wrong ability.
     num.dataset.keep = "abil-" + code;
     chk.dataset.keep = "abil-prof-" + code;
 

@@ -104,7 +104,11 @@ const PLACES = [
     depth: 1, path: ["Tavern", "Cellar"] },
 ];
 
-const ABIL = (score) => ({ score, base: score, bonus: 0 });
+// 306. `save_prof` TRAVELS WITH THE ABILITY, because the sheet reads it
+// off here and the prof tick writes it. Without it the tick's half of
+// `set_ability` could be sent and nothing on the screen would ever
+// disagree - which is the green tick this file's header warns about.
+const ABIL = (score, prof) => ({ score, base: score, bonus: 0, save_prof: !!prof });
 const SAVE = (n, prof) => ({ natural: n, proficient: !!prof, mods: [], total: n + (prof ? 2 : 0) });
 
 const CHAR = {
@@ -254,7 +258,7 @@ const ANSWERS = {
   // moves the fixture the way 301 moved `PLACES` - a stub that answers
   // "ok" and changes nothing is the green tick this header warns about.
   set_ability: (a) => {
-    SHEET.abilities[a.ability] = ABIL(a.score);
+    SHEET.abilities[a.ability] = ABIL(a.score, a.saveProf);
     SHEET.save_lines[a.ability] = SAVE(
       Math.floor((a.score - 10) / 2), a.saveProf
     );

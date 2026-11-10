@@ -91,7 +91,12 @@ class Rig(BaseHTTPRequestHandler):
             with open(STUB_FILE, "rb") as f:
                 return self.send(200, f.read(), TYPES[".js"])
 
-        if path in ("", "/"):
+        # 306. "/index.html" IS THE SAME PAGE. Asking for it by name served
+        # the file straight off disk with no stub in front of it, and
+        # `main.js` then threw on `window.__TAURI__.core` at import - the
+        # empty shell with one console line that `index` below exists to
+        # prevent, reached by the one path that walked around it.
+        if path in ("", "/", "/index.html"):
             return self.send(200, self.index(), TYPES[".html"])
 
         full = os.path.normpath(os.path.join(WEB, path.lstrip("/")))

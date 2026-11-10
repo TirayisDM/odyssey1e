@@ -305,7 +305,7 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
       align-items:center;gap:.3rem .45rem;border:1px solid var(--line);
       border-radius:4px;padding:.4rem .6rem}
 .abil > b{grid-area:code}
-.abil > input[type=number]{grid-area:score}
+.abil > input.abil-score{grid-area:score}
 .abil > .abil-fas{grid-area:fas}
 .abil > .mod{grid-area:mod}
 .abil > .abil-sources{grid-area:src;min-width:0}
@@ -324,7 +324,7 @@ select{width:100%;margin-bottom:.4rem;padding:.4rem .5rem;background:#0f1114;
 /* THE CODE IS A HEADING NOW, not a cramped label. A full-width row can
    afford to say which ability it is at a size somebody can scan. */
 .abil b{width:3rem;font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--fg)}
-.abil input[type=number]{width:3.2rem;margin:0;padding:.18rem .3rem;text-align:center}
+.abil input.abil-score{width:3.2rem;margin:0;padding:.18rem .3rem;text-align:center}
 .abil .mod{width:2rem;text-align:center;font:600 12px ui-monospace,Menlo,monospace}
 .abil label{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:.15rem}
 .abil input[type=checkbox]{margin:0;width:auto}
@@ -869,8 +869,8 @@ button.wide{width:100%}
 /* THE BASE GIVES UP ITS WEIGHT when a final score sits beside it. Two
    bold numbers in a row would make the reader pick, and the one that
    matters is the one every roll uses. */
-.abil input[type=number]{font-weight:700}
-.abil input[type=number].outranked{font-weight:400;color:var(--muted)}
+.abil input.abil-score{font-weight:700}
+.abil input.abil-score.outranked{font-weight:400;color:var(--muted)}
 .abil-sources{display:inline-flex;gap:.35rem;flex-wrap:wrap;margin-left:.35rem}
 .abil-source{font:11px ui-monospace,Menlo,monospace;white-space:nowrap}
 

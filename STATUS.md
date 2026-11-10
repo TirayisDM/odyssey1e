@@ -16022,6 +16022,180 @@ tick its own header warns about. No Rust, no migration, no new command.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 306. Editing is a mode, and leaving it is the write
+
+**2026-11-10.** Dave: *"the buttons work but it seems to freeze - lock
+up and then change for some clicks after it locked. Maybe ditch the
+buttons so the user just enters a value. Again just the ability scores
+- keep edit mode and exit edit mode."*
+
+**THE FEATURE WAS HALF-BUILT AND THE HALF THAT EXISTED WAS THE HARD
+HALF.** 066 already put an edit state on the six scores: a button
+reading *"edit scores"* / *"done editing"*, all six opening at once,
+`readOnly` and greyed otherwise, with its reason written beside it -
+*"an editable box invites a stray keystroke into the one number every
+modifier on the sheet derives from."* What it never did was hold the
+SAVE. The lock decided whether you could type; it had nothing to do
+with when the app wrote.
+
+**TWELVE NUMBER FIELDS, AND ONLY TWO EVER SAVED AS YOU SCROLLED.** Ten
+of them already behave the way Dave asked for - the save DC, the drop
+quantity, the markup, the class level, the grant value, the split
+amount, the actor level - they sit there and are read when the button
+beside them is pressed. So this is one field and one group, not a
+sweep, and that is why it is a cycle rather than a project.
+
+**THREE FAULTS WERE STACKED IN THAT ONE BOX, AND 305 ONLY SOFTENED THE
+FIRST.**
+
+| | |
+|---|---|
+| the freeze | one arrow click ran `set_ability` and then a whole `loadSheet` - `get_sheet`, `loadRolls` twice and six loaders behind `paintEach`. Nine round trips to move a number by one |
+| the late change | the queued save was a closure HOLDING THE INPUT ELEMENT, and `loadSheet` destroys it. A click landing during the reload re-armed the timer against a dead box and 350ms later wrote its value and reloaded again |
+| the sensitivity | nothing in this app handles `wheel`, so a focused `type=number` box inside a scrolling column took the wheel and moved a score with nothing on screen saying so |
+
+**AND THE SECOND ONE WAS 305'S OWN DOING.** Coalescing a burst into one
+save is right; keeping the element in the closure is what made the
+burst come back to life after the screen had moved on. Planted back and
+driven at `?slow=200`, three arrow clicks:
+
+```
+set_ability x2, get_sheet x2, 18 round trips, 7.5 seconds
+the element the second save wrote:  detached from the document
+```
+
+That is the finding, not a guess. `orig.isConnected` was false and the
+box still held `13`.
+
+**SO THE STEPPER IS GONE.** `type=text`, `inputmode=numeric`, two
+digits: no arrows, no wheel, no arrow-key stepping, one way to change a
+score. Four CSS rules selected that box by `input[type=number]`,
+including the one that puts it in its grid column, so `.abil-score`
+carries the layout now - changing the type without that collapses the
+row. Checked in the browser rather than by eye: `grid-area: score`,
+`51.19px`, centred, weight 700.
+
+**`commitAbilities` READS THE SCREEN, NOT A CLOSURE.** The six boxes are
+found by their `data-keep` names at the moment it runs, which is why
+the dead-element race cannot come back: there is nothing captured left
+to go stale. Measured in the rig, two scores typed and the lock closed:
+
+```
+while typing      {}                      600ms, nothing sent at all
+on done editing   set_ability x2          only the two that moved
+                  get_sheet x1 + loaders  one repaint
+```
+
+**`hold` IS `coalesce` WITH NO TIMER**, and it is ten lines. An edit
+mode wants the opposite of a trailing save - nothing out while the mode
+is open, the write belonging to the act of leaving it - but an edit
+nobody registered is an edit the guards cannot save. So it goes in the
+same `pending` map: `flushSaves` on the way out of a tab, a character
+or a game, `dropSaves` naming it on sign-out. ONE REGISTRY, because a
+second one would disagree with this one eventually (288).
+
+**AND THAT CLOSES 305'S HONEST FAILURE.** 305 planted a fault by taking
+`await flushSaves()` out of `refreshTab` and reported that IT DID NOT
+FAIL - the 350ms timer fired on its own and the write landed anyway, so
+the only claim available was that the line was a guard rather than a
+load-bearing one. With no timer there is nothing else. Same plant, same
+page:
+
+```
+with the flush      tab switch -> set_ability x3, the numbers stick
+without it          tab switch -> set_ability x0, and the next
+                    refresh painted 10 back over the typed 3
+```
+
+A line that has been both reasoned about and measured is a different
+line from the one 305 left behind.
+
+**NOTHING IS WRITTEN UNLESS ALL SIX PARSE.** A typo in one box must not
+half-save the other five, so an unreadable value stops the whole
+commit, names itself in the log, and leaves the lock OPEN with what you
+typed still on screen. Driven: `""` in DEX and `20` in STR sent
+nothing, the lock still read *"done editing"*, and both values were
+still in their boxes. Correcting DEX and pressing it again wrote two.
+
+**THE RANGE STAYS THE ENGINE'S.** 1 to 30 lived on the input's `min`
+and `max` and is deliberately not restated in the browser - 288 again.
+A 99 goes out and comes back refused by name.
+
+**THE TICK FOLLOWS WHICHEVER RULE IS IN FORCE.** One `set_ability`
+carries the score and the proficiency together, deliberately, so the
+two halves of one row cannot race - which means a tick saving on its
+own mid-edit would reload the sheet and take the other five unwritten
+numbers with it. Shut, it coalesces as it did. Open, it holds. Proved
+by ticking CON's prof with two scores typed, leaving by the tab, and
+finding all three in the fixture on the way back.
+
+**TWO FIXES TO THE INSTRUMENT, BOTH OF WHICH COST TIME BEFORE THEY WERE
+MADE.** `/index.html` asked for by name was served straight off disk
+with no stub in front of it, so `main.js` threw on
+`window.__TAURI__.core` at import and the page was an empty shell with
+one console line - **the exact trap `serve.py`'s own comment exists to
+prevent**, reached by the one path that walked around it. And the
+sheet's abilities carried no `save_prof`, so the tick's half of the
+write could be sent and nothing on the screen would ever disagree -
+302's green tick in its purest form.
+
+Six Node checks, all green. No Rust, no migration, no new command: one
+input's type, one button's job, ten lines of helper, four CSS
+selectors, and two fixes to the rig.
+
+### Carried forward
+
+- **INITIATIVE IS THE OTHER FIELD THAT SAVES AS YOU TYPE IN IT.**
+  `byHand` on the encounter tab answers `change` with `set_initiative`
+  and then `selectEncounter`, which reloads the whole panel. An edit
+  MODE is the wrong shape for a single field with no group to open; it
+  wants 305's `coalesce`, which is one line. Carried rather than
+  folded in, because one cycle is one issue.
+- **TEN SEQUENTIAL ROUND TRIPS FOR ONE CLICK ON THE ENCOUNTER TAB**,
+  from 305 and untouched again. The rig's call counter now says it out
+  loud on a cold open: `who_is_where` 3, `list_encounters` 2,
+  `list_locations` 2, `list_skill_keys` 2, `list_individuals` 2,
+  `list_npcs` 2. The order is deliberate - parallelising while panes
+  blanked first would have blanked all of them at once - and `loadDM`
+  awaits `loadWorld` and `loadChars` because it reads the state they
+  set. That untangling is its own cycle and `?slow` is the number to
+  beat.
+- **`paintFightCard`'s NEW ORDERING IS STILL UNEXERCISED**, from 305.
+  The rig's encounter fixture is `ready` rather than `active`, so the
+  card returns early. An active encounter in the rig closes it.
+- **`paintFightCard` THROWS ON AN ACTIVE ENCOUNTER WITH NOBODY IN IT.**
+  Pre-existing, one line, nothing says so on screen.
+- **A PANE THAT GROWS IS STILL UNFIXED.** `fillDetail` changes height
+  three times. Closing it means `fillMoves` not taking the host to
+  hand on to `reopenDetail`: three functions, and not an ordering
+  change.
+- **THE PAINT CHECK IS A RATCHET, NOT A PROOF**, from 305, and says so
+  beside itself: text rather than an AST, three known shapes, branches
+  read by indentation, first match on a line only.
+- **THREE FUNCTIONS FROM 303 ARE STILL UNEXERCISED.**
+  `instantiate_npc` is an encounter's **enrol** with a *statblock*
+  picked; `instantiate_character` with `copy_kit` behind it is the
+  Creatures tab's **place in world**. Both refuse without a DM's token.
+- **NOTHING NOTICES A CHANGE MADE OUTSIDE A MIGRATION**, from 303.
+- **A FILE SCAN OF THE MIGRATIONS IS NOT AN INSTRUMENT**, from 303.
+- **NOTHING CHECKS THAT A CONTROL OFFERS WHAT ITS LABEL SAYS**, from
+  304. Three cycles running, the thing that found the bug was somebody
+  trying to play.
+- **HALF THE RIG'S FIXTURES STILL HAVE NO SHAPE TO BE HELD TO**, from
+  302 - 20 of 38.
+- **NESTING IS UNCHECKED**, from 302. `Owned.item` is an `Item`.
+- **A VALUE IN THE WRONG DOMAIN IS STILL INVISIBLE**, which is 299's
+  `dice_prefs` sending `#f5f5f5` where the app wanted `slate`.
+- **The thinness worklist is nine lines long and nobody has walked
+  it.**
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **FOUR FEATURES ARE ONE BUTTON SHORT**, from 301: `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

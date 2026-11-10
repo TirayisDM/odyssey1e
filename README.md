@@ -413,6 +413,103 @@ every pane at once**, and the chain is not serial by accident -
 `loadDM` awaits `loadWorld` and `loadChars` because it reads the state
 they set. That is its own cycle, and `?slow` is the number to beat.
 
+### Editing is a mode (306)
+
+Dave: *"the buttons work but it seems to freeze - lock up and then
+change for some clicks after it locked. Maybe ditch the buttons so the
+user just enters a value."*
+
+**THREE FAULTS WERE STACKED IN ONE BOX, AND 305 ONLY SOFTENED THE
+FIRST.**
+
+| | |
+|---|---|
+| the freeze | one arrow click ran `set_ability` **and then a whole `loadSheet`** - `get_sheet`, `loadRolls` twice, and six more loaders behind `paintEach`. Nine round trips to move a number by one |
+| the late change | the queued save was a closure **holding the input element itself**, and `loadSheet` destroys that element. A click landing during the reload re-armed the timer against a dead box, and 350ms later wrote its value and reloaded again |
+| the sensitivity | nothing in this app handles `wheel`, so a focused `type=number` box inside a scrolling column took the wheel and moved a score with nothing on the screen saying so |
+
+**THE STEPPER IS GONE.** The box is `type=text` with
+`inputmode=numeric`: no arrows, no wheel, no arrow-key stepping, two
+digits, one way to change a score and that is to type it. Four CSS
+rules selected that box by `input[type=number]` - including the one
+that puts it in its grid column - so the class `.abil-score` carries
+the layout now. Changing the type without that collapses the row.
+
+**AND 066'S LOCK BECOMES WHAT IT ALWAYS LOOKED LIKE.** It already said
+*"edit scores"* and *"done editing"*; it only ever controlled whether
+you could TYPE. Now leaving the mode is the write. Nothing goes to the
+network while it is open, and `commitAbilities` reads the six boxes
+**off the screen** by their `data-keep` names at the moment it runs -
+which is why the dead-element race cannot come back. There is no
+captured element left to go stale.
+
+Measured in the rig, two scores typed and the lock closed:
+
+```
+while typing      {}                      600ms, nothing sent at all
+on done editing   set_ability x2          only the two that moved
+                  get_sheet x1 + loaders  one repaint
+```
+
+Against the shape 305 left behind, planted back and driven at
+`?slow=200` - three arrow clicks:
+
+```
+set_ability x2, get_sheet x2, 18 round trips, 7.5 seconds
+the element the second save wrote:  detached from the document
+```
+
+**`hold` IS `coalesce` WITH NO TIMER.** An edit mode wants the opposite
+of a trailing save: nothing out while the mode is open, and the write
+belongs to the act of leaving it. But an edit nobody registered is an
+edit the guards cannot save, so it goes in the same `pending` map -
+`flushSaves` on the way out of a tab, a character or a game, and
+`dropSaves` naming it on sign-out. **One registry**, because a second
+would disagree with this one eventually (288).
+
+**WHICH FINALLY MAKES THAT FLUSH LOAD-BEARING.** 305 planted a fault by
+taking `await flushSaves()` out of `refreshTab` and reported honestly
+that **it did not fail** - the 350ms timer fired on its own and the
+write landed anyway. With no timer there is nothing else. Same plant,
+same page:
+
+```
+with the flush      tab switch -> set_ability x3, the numbers stick
+without it          tab switch -> set_ability x0, and the next
+                    refresh paints 10 back over the typed 3
+```
+
+**NOTHING IS WRITTEN UNLESS ALL SIX PARSE.** A typo in one box must not
+half-save the other five, so an unreadable value stops the whole
+commit, names itself in the log, and **leaves the lock open with what
+you typed still on the screen**. Measured: `""` in DEX and `20` in STR
+sent nothing, and both were still in their boxes afterwards.
+
+**THE RANGE STAYS THE ENGINE'S.** 1 to 30 lived on the input's `min`
+and `max` and is deliberately not restated in `commitAbilities` - 288
+again. A 99 goes out and comes back refused by name.
+
+**THE TICK FOLLOWS WHICHEVER RULE IS IN FORCE**, because one
+`set_ability` carries the score and the proficiency together so the two
+halves of one row cannot race. Shut, it coalesces as it did. Open, it
+holds - otherwise a tick saving on its own mid-edit would reload the
+sheet and take the other five unwritten numbers with it.
+
+**TWO FIXES TO THE INSTRUMENT, both of which cost time before they were
+made.** `/index.html` asked for by name was served straight off disk
+with no stub in front of it, so `main.js` threw on
+`window.__TAURI__.core` at import and the page was an empty shell with
+one console line - **the exact trap `serve.py`'s own comment exists to
+prevent**, reached by the one path that walked around it. And the
+sheet's abilities carried no `save_prof`, so the tick's half of the
+write could be sent and nothing on the screen would ever disagree.
+
+**WHAT 306 DID NOT TOUCH.** Initiative, typed by hand on the encounter
+tab, is the other field in the app that saves on `change` and then
+reloads its whole panel. An edit MODE is the wrong shape for a single
+field with no group to open; it wants `coalesce`, which is one line.
+Carried rather than folded in.
+
 ---
 
 ## Supabase

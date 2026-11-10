@@ -3640,27 +3640,62 @@ function lockedAbilities() {
 // Characters is the one list there is. The two jobs were only ever
 // together because both happened to want `list_characters`.
 //
-// WHICH IS THE WRONG SOURCE FOR THIS ONE, and was before this cycle
-// touched it. `list_characters` is PCs only - `is_npc` is `false` in
-// the query - so the control labelled "pick a creature" has never
-// offered a creature. 241's own comment says what it wanted: "EVERY
-// character, not only your own - placing a monster is the commonest
-// reason to use it." Left exactly as it was, because fixing the map's
-// picker inside a layout cycle is how a layout cycle breaks the map.
+// 304. AND THIS ONE WANTED THE OTHER LIST. `list_characters` is PCs
+// only - `("is_npc", "is.false")` in the query, deliberately since 022,
+// because a PLAYER'S list filling with goblins is its own bug - so the
+// control labelled "pick a creature" had never offered a creature.
+// `#mv-who` is the only source of WHO for all eight square modes, so
+// nothing could be placed, moved, lifted or hauled unless it was a
+// player character. 241 wrote down what it wanted and 288 wrote down
+// why it was still wrong; neither changed the line.
+//
+// `list_individuals` (138) IS THE LIST, and it exists because of this
+// same failure one screen over: "an NPC who already existed could not
+// be enrolled at all: not a creature placed from the Creatures tab,
+// not one left over from a previous fight, not Pete. A DM could make a
+// creature and then never find it again." Templates excluded, because
+// 123 means it, and ordered `is_npc.asc,name.asc`.
+//
+// GROUPED RATHER THAN FLAT, which is what makes one list safe for both
+// jobs. Thirty goblins in a flat list bury the four people, and that
+// is the whole reason `list_characters` filters at all - so the filter
+// is replaced by a heading rather than simply dropped. 138's own
+// words: "`is_npc` TRAVELS WITH THE ROW rather than being split into
+// two lists ... the screen groups on it and nothing else has to care."
+//
+// LABELLED `token_name || name`, because that is what `paintPeople`
+// draws on the square. A picker saying "Zombie" for a token drawn
+// "Z1" is 297's shape - two names for one creature.
 async function fillCreaturePicker() {
   const who = document.querySelector("#mv-who");
   if (!who) return;
   if (!state.gameId) return;
-  const chars = await call("list_characters", { gameId: state.gameId });
-  if (!Array.isArray(chars)) return;
+  const rows = await call("list_individuals", { gameId: state.gameId });
+  if (!Array.isArray(rows)) return;
   const had = who.value;
   who.innerHTML = '<option value="">— pick a creature —</option>';
-  for (const c of chars) {
+
+  const players = document.createElement("optgroup");
+  players.label = "players";
+  const creatures = document.createElement("optgroup");
+  creatures.label = "creatures";
+  for (const c of rows) {
     const o = document.createElement("option");
     o.value = c.id;
-    o.textContent = c.name;
-    who.append(o);
+    o.textContent = c.token_name || c.name;
+    (c.is_npc ? creatures : players).append(o);
   }
+
+  // AN EMPTY optgroup DRAWS AS A HEADING FOR NOTHING, so one is only
+  // appended if it has somebody in it. Players first whatever order
+  // the server sent, because somebody looking for a person should not
+  // have to scroll past the monsters to find them.
+  for (const g of [players, creatures]) {
+    if (g.children.length) who.append(g);
+  }
+
+  // Still the id, so the eight square modes are untouched. A selection
+  // that is now inside an optgroup is still found by value.
   who.value = had;
 }
 
@@ -4400,6 +4435,11 @@ function creatureRow(c) {
     await loadWorld();
     // It is an individual now, so it moves groups in the enrol picker.
     await loadStatblockPicker();
+    // 304. AND IT CAN BE STOOD ON A SQUARE, so the map's picker has to
+    // learn about it here as well. This was 138's "made a creature and
+    // then never found it again", one screen further on: the creature
+    // existed, the map simply never asked again.
+    await fillCreaturePicker();
   });
 
   const gone = sEl("button", "ghost tiny", "delete");
@@ -6974,10 +7014,13 @@ function paintFolk(listSel, countSel, folk) {
       const r = await tryCall("set_is_npc", { characterId: c.id, isNpc: !c.is_npc });
       if (!r.ok) return dmSay(r.error, true);
       dmSay((c.token_name || c.name) + (c.is_npc ? " is a player character" : " is an NPC"));
-      // A character that just became an NPC leaves list_characters, so
-      // the map's creature picker has to be repainted or it keeps
-      // offering one that is no longer there. The roster reads from
-      // who_is_where, which keeps them - on a different list.
+      // 304. STILL REPAINTED, FOR A DIFFERENT REASON THAN IT WAS.
+      // This used to be because a character who became an NPC LEFT
+      // `list_characters` and the picker kept offering somebody who
+      // was no longer there. It reads `list_individuals` now, which
+      // keeps them, so what changes is their GROUP - players to
+      // creatures or back - and the heading is wrong on screen until
+      // this runs. Same one call, and the reason is not the old one.
       await fillCreaturePicker();
       await loadChars();
     });

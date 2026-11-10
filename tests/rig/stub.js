@@ -239,10 +239,21 @@ const ANSWERS = {
   // Who the DM can enrol in a fight: the `characters` rows with
   // `is_template` false, which is a narrower select than
   // `list_characters` returns and so gets its own fixture.
+  //
+  // 304. AND THE SECOND ROW IS A CREATURE, because one player could
+  // not show what this list is FOR. The map's picker read
+  // `list_characters` until 304 and so offered no creature at all;
+  // with one row here the rig agreed with the bug and had nothing to
+  // say. The row also carries a `token_name` where the player's is
+  // null, which is the other half of 304 - the picker labels an option
+  // `token_name || name`, so this one must read "Z1" and not "Zombie".
   list_individuals: () => [
     { id: "c1", name: "Luci", token_name: null, is_npc: false,
       is_active: true, level: 3, class_key: "cleric",
       npc_key: null, creature_type: null },
+    { id: "n1", name: "Zombie", token_name: "Z1", is_npc: true,
+      is_active: true, level: null, class_key: null,
+      npc_key: "zombie", creature_type: "undead" },
   ],
   list_character_images: () => [],
   list_inventory: () => [HANDAXE],

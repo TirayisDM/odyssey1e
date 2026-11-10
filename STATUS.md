@@ -15734,6 +15734,125 @@ JavaScript.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 304. The picker labelled "pick a creature" had never offered one
+
+**2026-11-09.** Dave: *"I can't seem to pick creatures other than
+characters to place on the encounter map."*
+
+**THE CAUSE WAS WRITTEN ABOVE THE FUNCTION, BY THE CYCLE THAT DECIDED
+NOT TO FIX IT.** 288 left this in `main.js`, in as many words:
+
+> *"WHICH IS THE WRONG SOURCE FOR THIS ONE, and was before this cycle
+> touched it. `list_characters` is PCs only - `is_npc` is `false` in
+> the query - so the control labelled 'pick a creature' has never
+> offered a creature. 241's own comment says what it wanted: 'EVERY
+> character, not only your own - placing a monster is the commonest
+> reason to use it.' Left exactly as it was, because fixing the map's
+> picker inside a layout cycle is how a layout cycle breaks the map."*
+
+241 wanted it. 288 wrote down why it was wrong. Neither changed the
+line, and **the filter is not a bug where it lives** - a player's list
+filling with goblins is its own fault, which is why 022 put
+`("is_npc", "is.false")` in that query on purpose.
+
+**IT IS NOT ONE CONTROL, IT IS EIGHT.** `#mv-who` is the only source of
+WHO on the map: stand, walk, build, dig and tip modes, plus lift and
+haul-lift. No monster could be placed, moved, lifted or hauled from
+the map at all - only a player character could.
+
+**AND THE RIGHT LIST ALREADY EXISTED.** `list_individuals`, from 138,
+which exists because of this same failure one screen over:
+
+> *"THE GAP THE ENROL PICKER FELL THROUGH ... an NPC who already
+> existed could not be enrolled at all: not a creature placed from the
+> Creatures tab, not one left over from a previous fight, not Pete. A
+> DM could make a creature and then never find it again."*
+
+Templates excluded because 123 means it, ordered `is_npc.asc,name.asc`,
+and carrying `is_npc`, `token_name`, `npc_key`, `creature_type`. **The
+map was asking the wrong one of two lists that both already existed**,
+which is why this is a one-line change and three decisions.
+
+| | |
+|---|---|
+| the source | `list_individuals`, not `list_characters` |
+| grouped, not flat | `players` and `creatures` optgroups. Thirty goblins in a flat list bury the four people, and **that is the whole reason `list_characters` filters at all** - so the filter is replaced by a heading rather than simply dropped. 138: *"`is_npc` TRAVELS WITH THE ROW ... the screen groups on it and nothing else has to care"* |
+| labelled `token_name \|\| name` | because that is what `paintPeople` draws on the square. A picker saying "Zombie" for a token drawn "Z1" is 297's shape: two names for one creature |
+| repainted after "place in world" | the fourth change, and the one nobody asked about |
+
+**THE FOURTH IS 138'S BUG AGAIN, ONE SCREEN FURTHER ON.** The picker
+is repainted at game open, on the PC/NPC toggle and after a character
+is created - **not** after `place_creature`. So a creature placed from
+the Creatures tab could not be stood on a square until the next
+reload: the creature existed, the map simply never asked again.
+
+**AND ONE COMMENT WAS TRUE AND BECAME FALSE.** The toggle's note said
+the picker must be repainted because a character who became an NPC
+*left* `list_characters`. It reads `list_individuals` now, which keeps
+them - what changes is their GROUP. The call stays and the reason is
+rewritten, because a comment that contradicts its code is what 301 got
+pulled up for.
+
+**THE RIG COULD NOT SHOW ANY OF IT.** `list_individuals`' fixture held
+one row and it was a player character, so the rig agreed with the bug
+and had nothing to say. A creature row was added - **with a
+`token_name` where the player's is null**, so one row proves two of
+the four changes. 302's fixture-shape check passed it without
+complaint, which is that check earning its place on a row written two
+cycles after it.
+
+Driven in the rig, the picker now reads:
+
+```html
+<option value="">- pick a creature -</option>
+<optgroup label="players"><option value="c1">Luci</option></optgroup>
+<optgroup label="creatures"><option value="n1">Z1</option></optgroup>
+```
+
+**AND THE FAULT WAS PLANTED.** Pointed back at `list_characters`,
+reloaded: the creatures group vanishes and only Luci remains. So the
+fix is what made the difference and not the reload.
+
+Five Node checks. No Rust, no migration, no command - the whole cycle
+is one source change and three decisions about one `<select>`.
+
+### Carried forward
+
+- **THREE FUNCTIONS FROM 303 ARE STILL UNEXERCISED, AND THE BUTTONS
+  ARE NOW KNOWN.** `instantiate_npc` is an encounter's **enrol** with
+  a *statblock* picked rather than a character - which also fires
+  `no_templates_in_encounters` - and `instantiate_character` with
+  `copy_kit` behind it is the Creatures tab's **place in world**. Both
+  refuse without a DM's token, so neither a probe nor the rig can
+  reach them. Two clicks close it.
+- **NOTHING NOTICES A CHANGE MADE OUTSIDE A MIGRATION**, from 303.
+  Two were found by accident while counting something else.
+- **A FILE SCAN OF THE MIGRATIONS IS NOT AN INSTRUMENT**, from 303.
+  089 declares a function with no schema and a scan cannot see it.
+- **NOTHING CHECKS THAT A CONTROL OFFERS WHAT ITS LABEL SAYS.** "pick
+  a creature" offered no creature for sixty-odd cycles, past two
+  cycles that read the line and wrote about it. The reach check proves
+  a command exists; the rig proves a fixture has the engine's shape;
+  **neither asks whether the right question is being asked.** This one
+  was found by somebody trying to play.
+- **HALF THE RIG'S FIXTURES STILL HAVE NO SHAPE TO BE HELD TO**, from
+  302 - 18 of 36 return an untyped `Value` with no select.
+- **NESTING IS UNCHECKED**, from 302. `Owned.item` is an `Item` and
+  nothing looks inside it.
+- **A VALUE IN THE WRONG DOMAIN IS STILL INVISIBLE**, which is 299's
+  `dice_prefs` sending `#f5f5f5` where the app wanted `slate`.
+- **The thinness worklist is nine lines long and nobody has walked
+  it.**
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **FOUR FEATURES ARE ONE BUTTON SHORT**, from 301: `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`. 304 was a fifth
+  of that family, and the thing that found it was somebody trying to
+  play rather than anybody reading the registry.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

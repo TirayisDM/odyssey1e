@@ -398,6 +398,184 @@ async function paintEach(who, steps) {
   }
 }
 
+/* ---------- 305. gather, then draw ---------- */
+
+// THE ONLY THING ALLOWED TO EMPTY A PANE.
+//
+// Dave: *"the screens seem really jumpy and glitchy when I am trying to
+// do things."* It was not the renderer and it was not the machine. It
+// was the order: thirteen paints emptied their pane and THEN went to
+// the network, so the pane sat at zero height for the whole round trip.
+// The left column is `overflow-y:auto`, so a pane collapsing inside it
+// reflows the column - everything below slides up, then slides back
+// down when the content lands. That is the jump, and it happens twice
+// per action in opposite directions.
+//
+// `innerHTML = ""` IS NOT THE BUG. Emptying a pane you are about to
+// fill in the same tick is free. Emptying one and then awaiting is what
+// costs, and the two read identically at the call site - which is why
+// this is one function rather than a rule in a comment. 288: a rule
+// written twice disagrees eventually, and this one would have been
+// written thirteen times.
+//
+// THE OLD CONTENT STAYS UP until the new content is ready. It is stale
+// for as long as the network takes, which is the honest trade: a stale
+// number you can read beats a hole where it was.
+async function swapInto(host, build) {
+  if (!host) return null;
+  const keep = keepPlace(host);
+  const into = document.createDocumentFragment();
+  // The builder appends to the fragment, which is not in the document -
+  // so nothing it does costs a reflow, however many nodes it makes.
+  const said = await build(into);
+  // ONE WRITE. `replaceChildren` clears and fills in a single mutation,
+  // so the browser lays the pane out once instead of twice.
+  host.replaceChildren(into);
+  keep();
+  return said === undefined ? null : said;
+}
+
+// Where the person was, across a repaint.
+//
+// A pane that is rebuilt destroys the field you are typing in - 305's
+// other half, and the reason an ability stepper could not be clicked
+// twice: `loadSheet` emptied `#abilities` and the arrow you were on
+// stopped existing mid-click.
+//
+// IDENTITY BY `data-keep`, NOT BY POSITION. An index into the children
+// is right until a row is added above, and then focus silently moves
+// to the wrong field - which is worse than losing it. A field that
+// wants to survive says so.
+function keepPlace(host) {
+  const scroller = host.closest(".left, .feedpane") || null;
+  const top = host.scrollTop;
+  const outer = scroller ? scroller.scrollTop : 0;
+  // A DROPDOWN'S CHOICE IS PART OF ITS PLACE. 304 wrote this by hand
+  // in `fillCreaturePicker` - "a selection that is now inside an
+  // optgroup is still found by value" - and every other select fill
+  // dropped the choice on the floor. It lives here now, so the next
+  // one gets it without knowing it needed it.
+  const chose = host.tagName === "SELECT" ? host.value : null;
+
+  const live = document.activeElement;
+  const mine = live && host.contains(live) ? live : null;
+  const key = mine ? mine.dataset.keep || mine.id || "" : null;
+  // A `number` input has no selection to read - Chrome returns null and
+  // `setSelectionRange` throws on one - so the caret is only carried
+  // for the types that have one.
+  const CARET = ["text", "search", "tel", "url", "password", "textarea"];
+  const caret =
+    mine && CARET.includes((mine.type || "").toLowerCase())
+      ? [mine.selectionStart, mine.selectionEnd]
+      : null;
+
+  return () => {
+    host.scrollTop = top;
+    if (scroller) scroller.scrollTop = outer;
+    // Assigning a value no option carries leaves the select on its
+    // first option, which is the old behaviour and the right one.
+    if (chose) host.value = chose;
+    if (!key) return;
+    const back = host.querySelector(
+      '[data-keep="' + key.replace(/"/g, '\\"') + '"]'
+    ) || (mine && mine.id ? host.querySelector("#" + mine.id) : null);
+    if (!back) return;
+    try {
+      back.focus({ preventScroll: true });
+      if (caret && caret[0] != null) {
+        back.setSelectionRange(caret[0], caret[1]);
+      }
+    } catch (e) {
+      // A field that cannot take focus is not a fault worth a red line
+      // in the log - the repaint itself succeeded.
+    }
+  };
+}
+
+// 305. ONE REPAINT PER FRAME.
+//
+// The search boxes - `#obj-find`, `#cat-find`, `#prep-find` and the
+// spell filter - rebuilt their whole list on `input`, which is once per
+// letter typed. No network, so it never showed up as slowness; it
+// showed up as a list flickering under the cursor.
+//
+// COALESCED, NOT DEBOUNCED, and 260 already made this argument about
+// the canvas: *"every arrival still causes a redraw, it is just the
+// same redraw. Nothing is dropped and nothing is delayed past the next
+// frame."* A debounce would make the list lag behind the letters.
+function perFrame(fn) {
+  let waiting = 0;
+  return (...args) => {
+    if (waiting) return;
+    waiting = requestAnimationFrame(() => {
+      waiting = 0;
+      fn(...args);
+    });
+  };
+}
+
+// 305. ONE SAVE FOR A BURST OF CLICKS, AND IT ALWAYS LANDS.
+//
+// A number stepper fires `change` on every click of its arrow, and the
+// ability field answered each one with `set_ability` followed by a
+// whole `loadSheet` - eight round trips per click, with the field you
+// were clicking destroyed in the middle of it. Five clicks of the arrow
+// were forty round trips and five lost focuses.
+//
+// THE DANGER IS THE OPPOSITE ONE. A save that has not happened yet is a
+// number that does not stick, which is worse than slow. So every
+// pending save is registered here and `flushSaves` runs them now -
+// called on the way out of a tab, a character and a game, and awaited
+// so the read that follows cannot overtake the write.
+const pending = new Map();
+
+function coalesce(key, fn, ms) {
+  return () => {
+    const had = pending.get(key);
+    if (had) clearTimeout(had.timer);
+    const entry = {
+      fn,
+      timer: setTimeout(() => {
+        pending.delete(key);
+        // Not awaited: a timer has nobody to report to. `fn` is a
+        // guarded save and logs its own refusal.
+        fn();
+      }, ms == null ? 350 : ms),
+    };
+    pending.set(key, entry);
+  };
+}
+
+// Thrown away rather than run, and never quietly.
+//
+// Signing out takes the token with it, so a queued save would fail on
+// arrival - but a number that does not stick is the thing this whole
+// mechanism is supposed to prevent, so the drop is said out loud in the
+// log rather than being the one case nobody is told about.
+function dropSaves(why) {
+  if (!pending.size) return;
+  const n = pending.size;
+  for (const e of pending.values()) clearTimeout(e.timer);
+  pending.clear();
+  log("save", n + " unsaved edit(s) dropped: " + why, true);
+}
+
+async function flushSaves() {
+  if (!pending.size) return;
+  // Taken out of the map FIRST. A save that queues another one must not
+  // be able to keep this loop alive.
+  const due = [...pending.values()];
+  pending.clear();
+  for (const e of due) {
+    clearTimeout(e.timer);
+    try {
+      await e.fn();
+    } catch (err) {
+      log("save", String((err && err.message) || err), true);
+    }
+  }
+}
+
 /* ---------- session ---------- */
 
 // Fast login.
@@ -633,6 +811,9 @@ function paintUser() {
 }
 
 function clearData() {
+  // 305. See `dropSaves`. The session is going, so a queued save
+  // cannot land - and is reported instead of vanishing.
+  dropSaves("signed out");
   state.gameId = null;
   state.characterId = null;
   state.sheet = null;
@@ -950,6 +1131,8 @@ function paintTabOffer() {
 }
 
 async function selectGame(id) {
+  // 305. Same reason as `selectCharacter`, one level up.
+  await flushSaves();
   state.gameId = id;
   state.dmEncounterId = null;
   // 297. The previous game's items are not this game's. `ensureCatalogue`
@@ -1029,77 +1212,95 @@ async function loadPlaces() {
 // half-filled target is impossible.
 async function loadTargets() {
   const pick = document.querySelector("#target-pick");
-  // Refreshing after a roll rebuilds this list so the hit points move,
-  // which would otherwise drop the selection and make the player
-  // re-pick the goblin between every swing.
-  const wasPicked = pick.value;
   state.targets = [];
   state.encounterId = null;
-  pick.innerHTML =
-    '<option value="">no target</option><option value="manual">type a number…</option>';
-  // Repopulating resets the selection to "no target", so the hand-typed
-  // fields have to go back into hiding with it — otherwise switching
-  // game leaves them on screen next to a select that says no target.
-  document.querySelector("#manual-target").hidden = true;
-  if (!state.gameId) return;
+
+  // 305. GATHERED FIRST, THEN DRAWN ONCE. This emptied the dropdown
+  // down to its two fixed options and then made TWO round trips -
+  // `list_encounters`, then `list_targets` - so between a swing and
+  // the list coming back there was nothing to aim at. Mid-fight, that
+  // is the single worst pane in the app to blank.
+  const base = () => {
+    const f = document.createDocumentFragment();
+    for (const [v, t] of [["", "no target"], ["manual", "type a number…"]]) {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = t;
+      f.append(o);
+    }
+    return f;
+  };
+  if (!state.gameId) {
+    pick.replaceChildren(base());
+    document.querySelector("#manual-target").hidden = true;
+    return;
+  }
 
   const encounters = await call("list_encounters", { gameId: state.gameId });
   const active = (encounters || []).find((e) => e.status === "active");
   state.encounterId = active ? active.id : null;
-  if (!active) return;
-
-  const targets = await call("list_targets", { encounterId: active.id });
+  const targets = active
+    ? await call("list_targets", { encounterId: active.id })
+    : [];
   state.targets = targets || [];
-  if (!state.targets.length) return;
 
-  for (const kind of ["actor", "challenge"]) {
-    const group = state.targets.filter((t) => t.row === kind);
-    if (!group.length) continue;
-    const og = document.createElement("optgroup");
-    og.label = kind === "actor" ? active.name : "Challenges";
-    for (const t of group) {
-      const o = document.createElement("option");
-      o.value = t.id;
-      // Hit points where the thing has any, so the goblin visibly drops
-      // as it takes damage. A lock has none and says nothing.
-      // Down, stable or dead reads on the name, where it belongs —
-      // "Goblin 1 — down". Hit points only while they are still worth
-      // counting: the event log keeps the honest total, but a dropdown
-      // reading -7/7 hp is nonsense.
-      const cond =
-        t.condition && t.condition !== "conscious" ? " — " + t.condition : "";
-      const hp =
-        t.hp_current === null || t.hp_current === undefined || t.hp_current <= 0
-          ? ""
-          : " · " + t.hp_current + "/" + t.hp_max + " hp";
-      // The tally, so a player can see how close it is either way.
-      const saves =
-        t.condition === "down" && (t.death_successes || t.death_failures)
-          ? " · " + t.death_successes + "✓ " + t.death_failures + "✗"
-          : "";
-      // 206. THE NUMBER ONLY WHEN THIS ACCOUNT IS ALLOWED IT. A player
-      // gets `value: null` for anything that is not theirs, so the
-      // option reads "Lich 0001" where the DM's reads
-      // "Lich 0001 · AC 17". The decision is the engine's - see
-      // `reveal::hide_other_numbers` - and this prints what it is sent
-      // rather than asking `amDM()` a second time.
-      const beat =
-        t.value === null || t.value === undefined
-          ? ""
-          : " · " + t.target_kind.toUpperCase() + " " + t.value;
-      o.textContent = t.label + cond + beat + hp + saves;
-      // Why this number is this number, on hover. Same instinct as the
-      // proficiency badges: never show a figure with no account of it.
-      o.title = t.source;
-      og.append(o);
+  await swapInto(pick, (into) => {
+    into.append(base());
+    if (!active || !state.targets.length) return;
+    for (const kind of ["actor", "challenge"]) {
+      const group = state.targets.filter((t) => t.row === kind);
+      if (!group.length) continue;
+      const og = document.createElement("optgroup");
+      og.label = kind === "actor" ? active.name : "Challenges";
+      for (const t of group) {
+        const o = document.createElement("option");
+        o.value = t.id;
+        // Hit points where the thing has any, so the goblin visibly drops
+        // as it takes damage. A lock has none and says nothing.
+        // Down, stable or dead reads on the name, where it belongs —
+        // "Goblin 1 — down". Hit points only while they are still worth
+        // counting: the event log keeps the honest total, but a dropdown
+        // reading -7/7 hp is nonsense.
+        const cond =
+          t.condition && t.condition !== "conscious" ? " — " + t.condition : "";
+        const hp =
+          t.hp_current === null || t.hp_current === undefined || t.hp_current <= 0
+            ? ""
+            : " · " + t.hp_current + "/" + t.hp_max + " hp";
+        // The tally, so a player can see how close it is either way.
+        const saves =
+          t.condition === "down" && (t.death_successes || t.death_failures)
+            ? " · " + t.death_successes + "✓ " + t.death_failures + "✗"
+            : "";
+        // 206. THE NUMBER ONLY WHEN THIS ACCOUNT IS ALLOWED IT. A player
+        // gets `value: null` for anything that is not theirs, so the
+        // option reads "Lich 0001" where the DM's reads
+        // "Lich 0001 · AC 17". The decision is the engine's - see
+        // `reveal::hide_other_numbers` - and this prints what it is sent
+        // rather than asking `amDM()` a second time.
+        const beat =
+          t.value === null || t.value === undefined
+            ? ""
+            : " · " + t.target_kind.toUpperCase() + " " + t.value;
+        o.textContent = t.label + cond + beat + hp + saves;
+        // Why this number is this number, on hover. Same instinct as the
+        // proficiency badges: never show a figure with no account of it.
+        o.title = t.source;
+        og.append(o);
+      }
+      into.append(og);
     }
-    pick.append(og);
-  }
+  });
 
-  // Back to whatever was aimed at, if it is still in the encounter.
-  if (wasPicked && [...pick.options].some((o) => o.value === wasPicked)) {
-    pick.value = wasPicked;
-  }
+  // 305. THE SELECTION COMES BACK FROM `keepPlace`, which is why the
+  // hand-rolled restore that used to sit here is gone: it was the
+  // same rule in a second place, and 288 is about exactly that.
+  //
+  // AND THE HAND-TYPED FIELDS FOLLOW IT. They were hidden on every
+  // repaint because repopulating USED to drop the choice. It does not
+  // any more, so hiding them would leave a select reading "type a
+  // number" above nowhere to type one.
+  document.querySelector("#manual-target").hidden = pick.value !== "manual";
   paintDeathSave();
 }
 
@@ -3702,6 +3903,10 @@ async function fillCreaturePicker() {
 const ABILS = ["str", "dex", "con", "int", "wis", "cha"];
 
 async function selectCharacter(id) {
+  // 305. BEFORE `state.characterId` MOVES. A queued save reads the
+  // character out of state when it runs, so flushing after this line
+  // would write the previous character's number onto this one.
+  await flushSaves();
   state.characterId = id;
   // 282. THE FOLD IS NOT THIS FUNCTION'S BUSINESS. 068 folded here
   // because there were TWO lists: the picker above the strip folded
@@ -3748,6 +3953,18 @@ async function loadSheet() {
   const sheet = await call("get_sheet", { characterId: state.characterId });
   if (!sheet) { panel.hidden = true; return; }
   state.sheet = sheet;
+  // 305. WHERE THE PERSON WAS, ACROSS THE WHOLE SHEET.
+  //
+  // The abilities box and the skills list are emptied and refilled in
+  // the same tick - no hole, so `paint.smoke.mjs` says nothing about
+  // them - but the field you are standing in is still destroyed and
+  // rebuilt. That is what made a stepper impossible to click twice.
+  //
+  // TAKEN AFTER THE READ, because `document.activeElement` has to be
+  // read while the old field is still the one on screen. Restored at
+  // the foot of this function, after everything below has rebuilt.
+  // One call for the panel covers both lists and `.left`'s scroll.
+  const keep = keepPlace(panel);
   // 211. AS SOON AS THE FACT ARRIVES, not at the end of this function.
   // The Spells tab turns on `sheet.caster` and that is known now, so
   // this is where it belongs on its own merits.
@@ -3987,8 +4204,28 @@ async function loadSheet() {
       });
       await loadSheet();
     };
-    num.addEventListener("change", save);
-    chk.addEventListener("change", save);
+    // 305. ONE SAVE FOR A BURST OF CLICKS.
+    //
+    // Dave: *"when filling fields like number scalers it seems to want
+    // to reload every number."* It did. A stepper fires `change` on
+    // every click of its arrow, and each one answered with
+    // `set_ability` and then a whole `loadSheet` - `get_sheet`, the
+    // portrait, the inventory three times over, the features and the
+    // prayers. Eight round trips per click, and `#abilities` was
+    // emptied in the middle of them, so the arrow you were holding
+    // stopped existing. Five clicks were forty round trips.
+    //
+    // THE TICK SHARES THE KEY because it shares the save: one write
+    // carries the score and the proficiency together, so queueing them
+    // apart would be two writes racing over one row.
+    const queue = coalesce("ability:" + code, save);
+    num.addEventListener("change", queue);
+    chk.addEventListener("change", queue);
+    // AND THE FIELD COMES BACK AFTER THE REPAINT. `keepPlace` finds it
+    // by this, which is why it is a name and not an index - a row added
+    // above would move an index onto the wrong ability.
+    num.dataset.keep = "abil-" + code;
+    chk.dataset.keep = "abil-prof-" + code;
 
     // ONE CELL FOR THE WHOLE SAVE HALF, so it can drop to its own line
     // intact when the panel is too narrow to carry it beside the
@@ -4035,14 +4272,20 @@ async function loadSheet() {
       o.value = v; o.textContent = t; o.selected = Number(prof) === v;
       sel.append(o);
     }
-    sel.addEventListener("change", async () => {
-      await call("set_skill_prof", {
-        characterId: state.characterId,
-        skillKey: sk.key,
-        prof: Number(sel.value),
-      });
-      await loadSheet();
-    });
+    // 305. The same as the abilities above: one save per skill, and the
+    // dropdown is found again by name after the repaint.
+    sel.dataset.keep = "skill-" + sk.key;
+    sel.addEventListener(
+      "change",
+      coalesce("skill:" + sk.key, async () => {
+        await call("set_skill_prof", {
+          characterId: state.characterId,
+          skillKey: sk.key,
+          prof: Number(sel.value),
+        });
+        await loadSheet();
+      })
+    );
 
     // WHAT THEY ARE WORTH UNAIDED, always in the same column so a
     // list of skills still reads down the page.
@@ -4110,6 +4353,10 @@ async function loadSheet() {
   // around it, which is the whole reason it is honest to isolate them
   // rather than a way of hiding a broken sheet behind a quiet log
   // line.
+  // BEFORE THE SATELLITES, not after. The panel's own fields exist by
+  // now; the six below paint other panes and can take their time.
+  keep();
+
   await paintEach("loadSheet", [
     ["portrait", loadPortrait],
     ["preview", updatePreview],
@@ -4530,9 +4777,19 @@ const INV_DIVISIONS = [
 ];
 
 async function loadInventory() {
-  const lists = INV_DIVISIONS.map(([sel]) => document.querySelector(sel));
-  for (const l of lists) if (l) l.innerHTML = "";
-  if (!state.characterId) return;
+  // 305. FOUR ROUND TRIPS USED TO HAPPEN OVER AN EMPTY LIST. Every
+  // division was emptied here, and then this asked for the inventory,
+  // the catalogue, the wallet and the encumbrance one after another -
+  // so what you were carrying was a blank space for the whole chain.
+  // The divisions are swapped at the bottom now, when there is
+  // something to put in them.
+  if (!state.characterId) {
+    for (const [sel] of INV_DIVISIONS) {
+      const l = document.querySelector(sel);
+      if (l) l.replaceChildren();
+    }
+    return;
+  }
 
   const items = await call("list_inventory", { characterId: state.characterId });
 
@@ -4596,14 +4853,16 @@ async function loadInventory() {
     const list = document.querySelector(sel);
     if (!list) continue;
     const mine = items.filter(belongs);
-    if (!mine.length) {
-      const li = document.createElement("li");
-      li.className = "flat muted";
-      li.textContent = empty;
-      list.append(li);
-      continue;
-    }
-    for (const it of mine) list.append(inventoryRow(it));
+    await swapInto(list, (into) => {
+      if (!mine.length) {
+        const li = document.createElement("li");
+        li.className = "flat muted";
+        li.textContent = empty;
+        into.append(li);
+        return;
+      }
+      for (const it of mine) into.append(inventoryRow(it));
+    });
   }
 }
 
@@ -5455,33 +5714,35 @@ function inventoryRow(it) {
 // nesting here: opening a purse inside a backpack is the purse's own
 // row's job, and a rig does not need a tree.
 async function paintContents(host, container) {
-  host.innerHTML = "";
-  const rows = await call("list_contents", { containerId: container.id });
-  if (!Array.isArray(rows) || rows.length === 0) {
-    host.append(chip("empty", "cls"));
-    return;
-  }
-  for (const r of rows) {
-    const line = document.createElement("div");
-    line.className = "row inside-row";
-    const label = document.createElement("span");
-    label.className = "tags";
-    label.append(chip((r.name || r.item.name) +
-                      (r.quantity > 1 ? " ×" + r.quantity : ""), "mode"));
-    const out = document.createElement("button");
-    out.className = "tiny ghost";
-    out.textContent = "take out";
-    out.addEventListener("click", async () => {
-      const res = await tryCall("take_from_container", {
-        objectId: r.id,
-        characterId: state.characterId,
+  // 305. A list the DM reads down, so it keeps its scroll.
+  return swapInto(host, async (into) => {
+    const rows = await call("list_contents", { containerId: container.id });
+    if (!Array.isArray(rows) || rows.length === 0) {
+      into.append(chip("empty", "cls"));
+      return;
+    }
+    for (const r of rows) {
+      const line = document.createElement("div");
+      line.className = "row inside-row";
+      const label = document.createElement("span");
+      label.className = "tags";
+      label.append(chip((r.name || r.item.name) +
+                        (r.quantity > 1 ? " ×" + r.quantity : ""), "mode"));
+      const out = document.createElement("button");
+      out.className = "tiny ghost";
+      out.textContent = "take out";
+      out.addEventListener("click", async () => {
+        const res = await tryCall("take_from_container", {
+          objectId: r.id,
+          characterId: state.characterId,
+        });
+        if (!res.ok) { alert(res.error); return; }
+        await loadSheet();
       });
-      if (!res.ok) { alert(res.error); return; }
-      await loadSheet();
-    });
-    line.append(label, out);
-    host.append(line);
-  }
+      line.append(label, out);
+      into.append(line);
+    }
+  });
 }
 
 function chip(text, kind) {
@@ -5541,44 +5802,46 @@ async function loadTrade() {
 // is the whole reason a shop needed almost no new schema.
 async function paintTradeSide(listId, characterId) {
   const host = document.querySelector(listId);
-  host.innerHTML = "";
-  if (!characterId) return;
-  const items = (await call("list_inventory", { characterId })) || [];
-  if (!items.length) {
-    const li = document.createElement("li");
-    li.className = "flat muted";
-    li.textContent = "carrying nothing";
-    host.append(li);
-    return;
-  }
-  for (const it of items) {
-    const li = document.createElement("li");
-    li.className = "flat offer";
+  // 305. Two of these paint at once - see paintTrade.
+  return swapInto(host, async (into) => {
+    if (!characterId) return;
+    const items = (await call("list_inventory", { characterId })) || [];
+    if (!items.length) {
+      const li = document.createElement("li");
+      li.className = "flat muted";
+      li.textContent = "carrying nothing";
+      into.append(li);
+      return;
+    }
+    for (const it of items) {
+      const li = document.createElement("li");
+      li.className = "flat offer";
 
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.dataset.object = it.id;
-    box.addEventListener("change", refreshBalance);
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.object = it.id;
+      box.addEventListener("change", refreshBalance);
 
-    const name = document.createElement("span");
-    name.className = "nm";
-    name.textContent = it.name || it.item.name;
+      const name = document.createElement("span");
+      name.className = "nm";
+      name.textContent = it.name || it.item.name;
 
-    // A stack can be offered in part - eight of twenty arrows, six of
-    // eighteen gold. A sword cannot, and does not get the box.
-    const qty = document.createElement("input");
-    qty.type = "number";
-    qty.min = "1";
-    qty.max = String(it.quantity);
-    qty.value = String(it.quantity);
-    qty.className = "narrow";
-    qty.hidden = it.quantity <= 1;
-    qty.dataset.count = "1";
-    qty.addEventListener("change", refreshBalance);
+      // A stack can be offered in part - eight of twenty arrows, six of
+      // eighteen gold. A sword cannot, and does not get the box.
+      const qty = document.createElement("input");
+      qty.type = "number";
+      qty.min = "1";
+      qty.max = String(it.quantity);
+      qty.value = String(it.quantity);
+      qty.className = "narrow";
+      qty.hidden = it.quantity <= 1;
+      qty.dataset.count = "1";
+      qty.addEventListener("change", refreshBalance);
 
-    li.append(box, name, qty);
-    host.append(li);
-  }
+      li.append(box, name, qty);
+      into.append(li);
+    }
+  });
 }
 
 // What each side has ticked.
@@ -5760,6 +6023,15 @@ function showStrip(zone, name) {
 // arrival is to be able to count them in one place.
 async function refreshTab(zone) {
   if (!state.gameId) return;
+  // 305. A PENDING SAVE GOES BEFORE THE READ THAT WOULD OVERWRITE IT.
+  // The number steppers coalesce a burst of clicks into one save (see
+  // `coalesce`), which means there is a window where the value on
+  // screen has not reached Rust yet. A refresh landing inside that
+  // window would paint the OLD number back over the new one and the
+  // save would then write what the screen no longer shows. This is the
+  // one place every tab switch and every manual refresh goes through,
+  // so it is the one place the flush belongs.
+  await flushSaves();
   const where = zone + "/" + (state.sub[zone] || ZONES[zone]);
   try {
     if (where === "active/encounter") {
@@ -5854,13 +6126,29 @@ function dmSay(text, isError) {
 async function loadWorld() {
   const ul = document.querySelector("#locations");
   const parent = document.querySelector("#loc-parent");
-  ul.innerHTML = "";
-  state.locations = [];
-  parent.innerHTML = '<option value="">— top of the world —</option>';
-  if (!state.gameId) return;
+  const top = () => {
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = "— top of the world —";
+    return o;
+  };
+  if (!state.gameId) {
+    state.locations = [];
+    ul.replaceChildren();
+    parent.replaceChildren(top());
+    return;
+  }
 
+  // 305. ONE WALK OF THE TREE, TWO PANES, NO HOLE IN EITHER. The list
+  // and the parent picker are the same places in two shapes, so they
+  // are built together into two fragments and swapped in afterwards -
+  // walking `state.locations` twice would be a second place that can
+  // disagree with the first about what the world contains.
   const places = await call("list_locations", { gameId: state.gameId });
   state.locations = places || [];
+  const tree = document.createDocumentFragment();
+  const opts = document.createDocumentFragment();
+  opts.append(top());
 
   for (const l of state.locations) {
     // Two spaces a level. The list is already depth-first, so an indent
@@ -5885,13 +6173,18 @@ async function loadWorld() {
       }
     });
     li.append(del);
-    ul.append(li);
+    tree.append(li);
 
     const o = document.createElement("option");
     o.value = l.id;
     o.textContent = "\u00a0\u00a0".repeat(l.depth) + l.name;
-    parent.append(o);
+    opts.append(o);
   }
+
+  // The builders only adopt what the walk above already made, so each
+  // pane is still one write and still keeps its scroll and its choice.
+  await swapInto(ul, (into) => into.append(tree));
+  await swapInto(parent, (into) => into.append(opts));
 
   fillPlaces(document.querySelector("#enc-where"), "— nowhere in particular —");
   // 229. The dev hook's picker. Same tree, same call.
@@ -6184,25 +6477,27 @@ function paintThings(things) {
 
 // What is inside a crate, with a way to take each of it.
 async function fillFixture(host, fixture) {
-  host.innerHTML = "";
-  const got = await tryCall("list_contents", { containerId: fixture.id });
-  if (!got.ok) {
-    host.append(row(got.error, "", null));
-    return;
-  }
-  if (!got.value.length) {
-    host.append(row("empty", "", null));
-    return;
-  }
-  for (const it of got.value) {
-    const li = row(
-      it.name || (it.item && it.item.name) || it.item_key,
-      it.quantity > 1 ? "x" + it.quantity : "",
-      null
-    );
-    li.append(takeButton(it, () => fillFixture(host, fixture)));
-    host.append(li);
-  }
+  // 305. The shelf, repainted by its own take button.
+  return swapInto(host, async (into) => {
+    const got = await tryCall("list_contents", { containerId: fixture.id });
+    if (!got.ok) {
+      into.append(row(got.error, "", null));
+      return;
+    }
+    if (!got.value.length) {
+      into.append(row("empty", "", null));
+      return;
+    }
+    for (const it of got.value) {
+      const li = row(
+        it.name || (it.item && it.item.name) || it.item_key,
+        it.quantity > 1 ? "x" + it.quantity : "",
+        null
+      );
+      li.append(takeButton(it, () => fillFixture(host, fixture)));
+      into.append(li);
+    }
+  });
 }
 
 // Pick it up, into whoever is selected.
@@ -6624,12 +6919,24 @@ async function loadFeatures() {
   const owedHost = document.querySelector("#feat-owed");
   const owedBlock = document.querySelector("#feat-owed-block");
   if (!host) return;
-  host.innerHTML = "";
-  owedHost.innerHTML = "";
-  owedBlock.hidden = true;
-  if (!state.characterId) return;
-
+  // 305. TWO PANES, ONE READ, AND NEITHER GOES BLANK FIRST. This is
+  // the shape `swapInto` cannot take on its own: the features list and
+  // the decisions-waiting list are filled from one answer, so the read
+  // is hoisted above both swaps rather than sitting inside either.
+  //
+  // NO CHARACTER STILL EMPTIES BOTH, and empties them straight away.
+  // The rule is about clearing a pane and then WAITING; clearing one
+  // because there is nothing to put in it owes nobody a round trip.
+  if (!state.characterId) {
+    owedBlock.hidden = true;
+    owedHost.replaceChildren();
+    host.replaceChildren();
+    return;
+  }
   const got = await call("list_features", { characterId: state.characterId });
+  // A READ THAT FAILED LEAVES THE LAST GOOD ONE UP, which is what
+  // `refreshTab` already says about itself: "the pane is already
+  // showing the last good read". It used to leave a hole.
   if (!got) return;
   const rows = got.features || [];
 
@@ -6639,10 +6946,12 @@ async function loadFeatures() {
   owedBlock.hidden = !got.waiting;
   document.querySelector("#feat-owed-head").textContent =
     "Decisions waiting · " + got.waiting;
-  for (const f of rows) {
-    if (f.owed > 0) owedHost.append(featureRow(f, true));
-    host.append(featureRow(f, false));
-  }
+  await swapInto(owedHost, (into) => {
+    for (const f of rows) if (f.owed > 0) into.append(featureRow(f, true));
+  });
+  await swapInto(host, (into) => {
+    for (const f of rows) into.append(featureRow(f, false));
+  });
 }
 
 function featureRow(f, asking) {
@@ -7944,21 +8253,23 @@ function paintTargets(encounterId) {
 async function fillEncounterObjects(encounterId) {
   const sel = document.querySelector("#chal-object");
   if (!sel) return;
-  sel.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "\u2014 nothing in particular \u2014";
-  sel.append(none);
+  // 305. A dropdown that emptied itself and then waited.
+  return swapInto(sel, async (into) => {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "\u2014 nothing in particular \u2014";
+    into.append(none);
 
-  const things = await call("encounter_objects", { encounterId });
-  for (const o of things || []) {
-    const opt = document.createElement("option");
-    opt.value = o.id;
-    opt.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
-    sel.append(opt);
-  }
-  sel.disabled = !(things || []).length;
-  if (!(things || []).length) none.textContent = "nothing lying here";
+    const things = await call("encounter_objects", { encounterId });
+    for (const o of things || []) {
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = (o.name || o.item_key) + (o.quantity > 1 ? " x" + o.quantity : "");
+      into.append(opt);
+    }
+    sel.disabled = !(things || []).length;
+    if (!(things || []).length) none.textContent = "nothing lying here";
+  });
 }
 
 // Looking at a fight and changing one are different jobs. One screen
@@ -8258,6 +8569,14 @@ async function paintFightCard(id, turns, enc) {
   if (!focus) focus = current || order.find((a) => a.takes_turns) || order[0];
   state.fightFocus = focus ? focus.id : null;
 
+  // 305. THE TWO ASKED-FOR ROWS ARE FETCHED HERE, BEFORE ANYTHING IS
+  // EMPTIED. They used to be the last two lines of this function, two
+  // round trips after `#fight-options` had already been cleared - so
+  // mid-fight the attack and cast rows were a blank strip for the
+  // length of both. Nothing below this line waits on the network, which
+  // is what makes the card repaint in one go.
+  const rows = [await attackRow(focus, id), await castRow(focus, id)];
+
   /* ---------------- top right: where the fight is ---------------- */
 
   const pos = document.querySelector("#fight-round");
@@ -8542,10 +8861,10 @@ async function paintFightCard(id, turns, enc) {
     who.append(why);
   }
 
-  opts.append(await attackRow(focus, id));
   // 179. AND WHAT THEY CAN CAST, beside what they can swing. Both rows
-  // key off the actor, so a PC and a monster get the same two.
-  opts.append(await castRow(focus, id));
+  // key off the actor, so a PC and a monster get the same two. Asked
+  // for at the top of this function since 305, and only placed here.
+  opts.append(rows[0], rows[1]);
 
   paintFightResult(focus);
 }
@@ -9852,172 +10171,174 @@ async function selectEncounter(id) {
 // and nothing in here moves on its own. A rename reloads the roster,
 // which rebuilds it.
 async function paintActorView(host, actor, encounterId) {
-  host.innerHTML = "";
-  const data = await call("view_actor", { actorId: actor.id });
-  if (!data || !data.sheet) {
-    host.append(chip("could not read this one", "no"));
-    return;
-  }
-  const sh = data.sheet;
-
-  // --- name ---
-  const nameRow = document.createElement("div");
-  nameRow.className = "row";
-  const nameBox = document.createElement("input");
-  nameBox.value = actor.label;
-  nameBox.placeholder = "name";
-  const save = document.createElement("button");
-  save.className = "tiny";
-  save.textContent = "rename";
-  let busy = false;
-  save.addEventListener("click", async () => {
-    if (busy) return;
-    busy = true; save.disabled = true;
-    try {
-      dmSay("");
-      const r = await tryCall("rename_actor", { actorId: actor.id, name: nameBox.value });
-      if (!r.ok) { dmSay(r.error, true); return; }
-      dmSay(actor.label + " is now " + nameBox.value.trim());
-      // The roster and the target list both carry the old name.
-      await selectEncounter(encounterId);
-      await loadTargets();
-    } finally { busy = false; save.disabled = false; }
-  });
-  nameRow.append(nameBox, save);
-  host.append(nameRow);
-
-  // --- level, which is HIT DICE ---
-  //
-  // Not an annotation. A goblin at 2 is 2d6 and a goblin at 6 is 6d6,
-  // so moving this rewrites what the creature is - its hit points and
-  // its proficiency bonus both fall out of it. The command says what it
-  // did rather than the panel guessing, because the hit dice are the
-  // fact the other two come from and the one nothing stores.
-  //
-  // WOUNDS SURVIVE IT. Hit points are a log, so raising the maximum by
-  // seven leaves a creature at 3 of 7 sitting at 10 of 14 - still down
-  // by four, which is what levelling up means.
-  const lvlRow = document.createElement("div");
-  lvlRow.className = "row";
-  const lvlBox = document.createElement("input");
-  lvlBox.type = "number";
-  lvlBox.min = "1";
-  lvlBox.value = sh.level;
-  lvlBox.className = "narrow";
-  lvlBox.title = "level is hit dice";
-  const setLvl = document.createElement("button");
-  setLvl.className = "tiny";
-  setLvl.textContent = "set level";
-  let lvlBusy = false;
-  setLvl.addEventListener("click", async () => {
-    if (lvlBusy) return;
-    lvlBusy = true; setLvl.disabled = true;
-    try {
-      dmSay("");
-      const r = await tryCall("set_actor_level", {
-        actorId: actor.id,
-        level: Number(lvlBox.value) || 0,
-      });
-      if (!r.ok) { dmSay(r.error, true); return; }
-      const v = r.value || {};
-      dmSay(actor.label + " is level " + v.level + " · " + v.hit_dice +
-            " · " + v.hp_max + " hp · PB +" + v.prof_bonus);
-      await paintActorView(host, actor, encounterId);
-      // The target list prints hit points, so it is now stale.
-      await loadTargets();
-    } finally { lvlBusy = false; setLvl.disabled = false; }
-  });
-  lvlRow.append(lvlBox, setLvl);
-  host.append(lvlRow);
-
-  // --- vitals, and where each number came from ---
-  const pb = sh.prof_bonus !== null && sh.prof_bonus !== undefined
-    ? sh.prof_bonus : Math.floor((sh.level - 1) / 4) + 2;
-  const vitals = document.createElement("div");
-  vitals.className = "tags";
-  vitals.append(chip("level " + sh.level, "cls"));
-  vitals.append(chip("PB +" + pb + (sh.prof_bonus !== null && sh.prof_bonus !== undefined
-    ? " stated" : " from level"), "cls"));
-  vitals.append(chip("AC " + sh.armor_class +
-    (sh.vitals && sh.vitals.ac_mode === "flat" ? " flat" : " from armour"), "cls"));
-  if (data.hp_current !== null && data.hp_current !== undefined) {
-    vitals.append(chip(data.hp_current + "/" + (data.hp_max ?? "?") + " hp",
-                       data.hp_current > 0 ? "use" : "no"));
-  }
-  if (actor.npc_key) vitals.append(chip("from " + actor.npc_key, "cls"));
-  if (actor.name_ordinal) vitals.append(chip("#" + actor.name_ordinal + " of its kind", "cls"));
-  host.append(vitals);
-
-  // --- scores ---
-  const abils = document.createElement("div");
-  abils.className = "abils";
-  for (const code of ABILS) {
-    const score = (sh.abilities[code] || {}).score ?? 10;
-    const mod = Math.floor((score - 10) / 2);
-    const el = document.createElement("div");
-    el.className = "abil";
-    const tag = document.createElement("b");
-    tag.textContent = code.toUpperCase();
-    const num = document.createElement("span");
-    num.textContent = score;
-    const m = document.createElement("span");
-    m.className = "mod";
-    m.textContent = (mod >= 0 ? "+" : "") + mod;
-    el.append(tag, num, m);
-    abils.append(el);
-  }
-  host.append(abils);
-
-  // --- kit, with the engine's verdicts, exactly as the player panel
-  // shows them.
-  //
-  // NO LONGER READ-ONLY. It said equipping a goblin was a different
-  // question without an answer; 026 answered it by making an object an
-  // object, and `give_item` never asked whether the holder was a player
-  // — a goblin has been a characters row since 022, so the same command
-  // arms both. What stops a player arming the goblin is the policy, not
-  // this panel.
-  if (sh.character_id) {
-    const add = document.createElement("div");
-    add.className = "row";
-    const pick = document.createElement("select");
-    const go = document.createElement("button");
-    go.className = "tiny ghost";
-    go.textContent = "give";
-    // 120. WAS ITS OWN CORRECT COPY OF guard(), down to the finally.
-    // One mechanism, so there is one place to get it right.
-    guard(go, async () => {
-      dmSay("");
-      const r = await tryCall("give_item", {
-        characterId: sh.character_id,
-        itemKey: pick.value,
-      });
-      if (!r.ok) { dmSay(r.error, true); return; }
-      // Unequipped on arrival, so the attack list does not change
-      // until somebody says it should.
-      dmSay(actor.label + " now carries " + (pick.selectedOptions[0] || {}).textContent);
-      await paintActorView(host, actor, encounterId);
-    });
-    add.append(pick, go);
-    host.append(add);
-    await fillCatalogue(pick, sh.game_id);
-  }
-
-  // THE WHOLE INVENTORY, not sh.loadout. A sheet's loadout is what is
-  // EQUIPPED, and a DM who has just handed over a longsword would watch
-  // the panel repaint without it: give_item arms nobody, deliberately,
-  // so the new thing has to be visible before it can be equipped.
-  const kit = sh.character_id
-    ? (await call("list_inventory", { characterId: sh.character_id })) || []
-    : sh.loadout || [];
-
-  if (kit.length) {
-    for (const it of kit) {
-      host.append(actorKitRow(it, () => paintActorView(host, actor, encounterId)));
+  // 305. The actor pane carries typed fields, so it keeps focus.
+  return swapInto(host, async (into) => {
+    const data = await call("view_actor", { actorId: actor.id });
+    if (!data || !data.sheet) {
+      into.append(chip("could not read this one", "no"));
+      return;
     }
-  } else {
-    host.append(chip("carrying nothing", "cls"));
-  }
+    const sh = data.sheet;
+
+    // --- name ---
+    const nameRow = document.createElement("div");
+    nameRow.className = "row";
+    const nameBox = document.createElement("input");
+    nameBox.value = actor.label;
+    nameBox.placeholder = "name";
+    const save = document.createElement("button");
+    save.className = "tiny";
+    save.textContent = "rename";
+    let busy = false;
+    save.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true; save.disabled = true;
+      try {
+        dmSay("");
+        const r = await tryCall("rename_actor", { actorId: actor.id, name: nameBox.value });
+        if (!r.ok) { dmSay(r.error, true); return; }
+        dmSay(actor.label + " is now " + nameBox.value.trim());
+        // The roster and the target list both carry the old name.
+        await selectEncounter(encounterId);
+        await loadTargets();
+      } finally { busy = false; save.disabled = false; }
+    });
+    nameRow.append(nameBox, save);
+    into.append(nameRow);
+
+    // --- level, which is HIT DICE ---
+    //
+    // Not an annotation. A goblin at 2 is 2d6 and a goblin at 6 is 6d6,
+    // so moving this rewrites what the creature is - its hit points and
+    // its proficiency bonus both fall out of it. The command says what it
+    // did rather than the panel guessing, because the hit dice are the
+    // fact the other two come from and the one nothing stores.
+    //
+    // WOUNDS SURVIVE IT. Hit points are a log, so raising the maximum by
+    // seven leaves a creature at 3 of 7 sitting at 10 of 14 - still down
+    // by four, which is what levelling up means.
+    const lvlRow = document.createElement("div");
+    lvlRow.className = "row";
+    const lvlBox = document.createElement("input");
+    lvlBox.type = "number";
+    lvlBox.min = "1";
+    lvlBox.value = sh.level;
+    lvlBox.className = "narrow";
+    lvlBox.title = "level is hit dice";
+    const setLvl = document.createElement("button");
+    setLvl.className = "tiny";
+    setLvl.textContent = "set level";
+    let lvlBusy = false;
+    setLvl.addEventListener("click", async () => {
+      if (lvlBusy) return;
+      lvlBusy = true; setLvl.disabled = true;
+      try {
+        dmSay("");
+        const r = await tryCall("set_actor_level", {
+          actorId: actor.id,
+          level: Number(lvlBox.value) || 0,
+        });
+        if (!r.ok) { dmSay(r.error, true); return; }
+        const v = r.value || {};
+        dmSay(actor.label + " is level " + v.level + " · " + v.hit_dice +
+              " · " + v.hp_max + " hp · PB +" + v.prof_bonus);
+        await paintActorView(host, actor, encounterId);
+        // The target list prints hit points, so it is now stale.
+        await loadTargets();
+      } finally { lvlBusy = false; setLvl.disabled = false; }
+    });
+    lvlRow.append(lvlBox, setLvl);
+    into.append(lvlRow);
+
+    // --- vitals, and where each number came from ---
+    const pb = sh.prof_bonus !== null && sh.prof_bonus !== undefined
+      ? sh.prof_bonus : Math.floor((sh.level - 1) / 4) + 2;
+    const vitals = document.createElement("div");
+    vitals.className = "tags";
+    vitals.append(chip("level " + sh.level, "cls"));
+    vitals.append(chip("PB +" + pb + (sh.prof_bonus !== null && sh.prof_bonus !== undefined
+      ? " stated" : " from level"), "cls"));
+    vitals.append(chip("AC " + sh.armor_class +
+      (sh.vitals && sh.vitals.ac_mode === "flat" ? " flat" : " from armour"), "cls"));
+    if (data.hp_current !== null && data.hp_current !== undefined) {
+      vitals.append(chip(data.hp_current + "/" + (data.hp_max ?? "?") + " hp",
+                         data.hp_current > 0 ? "use" : "no"));
+    }
+    if (actor.npc_key) vitals.append(chip("from " + actor.npc_key, "cls"));
+    if (actor.name_ordinal) vitals.append(chip("#" + actor.name_ordinal + " of its kind", "cls"));
+    into.append(vitals);
+
+    // --- scores ---
+    const abils = document.createElement("div");
+    abils.className = "abils";
+    for (const code of ABILS) {
+      const score = (sh.abilities[code] || {}).score ?? 10;
+      const mod = Math.floor((score - 10) / 2);
+      const el = document.createElement("div");
+      el.className = "abil";
+      const tag = document.createElement("b");
+      tag.textContent = code.toUpperCase();
+      const num = document.createElement("span");
+      num.textContent = score;
+      const m = document.createElement("span");
+      m.className = "mod";
+      m.textContent = (mod >= 0 ? "+" : "") + mod;
+      el.append(tag, num, m);
+      abils.append(el);
+    }
+    into.append(abils);
+
+    // --- kit, with the engine's verdicts, exactly as the player panel
+    // shows them.
+    //
+    // NO LONGER READ-ONLY. It said equipping a goblin was a different
+    // question without an answer; 026 answered it by making an object an
+    // object, and `give_item` never asked whether the holder was a player
+    // — a goblin has been a characters row since 022, so the same command
+    // arms both. What stops a player arming the goblin is the policy, not
+    // this panel.
+    if (sh.character_id) {
+      const add = document.createElement("div");
+      add.className = "row";
+      const pick = document.createElement("select");
+      const go = document.createElement("button");
+      go.className = "tiny ghost";
+      go.textContent = "give";
+      // 120. WAS ITS OWN CORRECT COPY OF guard(), down to the finally.
+      // One mechanism, so there is one place to get it right.
+      guard(go, async () => {
+        dmSay("");
+        const r = await tryCall("give_item", {
+          characterId: sh.character_id,
+          itemKey: pick.value,
+        });
+        if (!r.ok) { dmSay(r.error, true); return; }
+        // Unequipped on arrival, so the attack list does not change
+        // until somebody says it should.
+        dmSay(actor.label + " now carries " + (pick.selectedOptions[0] || {}).textContent);
+        await paintActorView(host, actor, encounterId);
+      });
+      add.append(pick, go);
+      into.append(add);
+      await fillCatalogue(pick, sh.game_id);
+    }
+
+    // THE WHOLE INVENTORY, not sh.loadout. A sheet's loadout is what is
+    // EQUIPPED, and a DM who has just handed over a longsword would watch
+    // the panel repaint without it: give_item arms nobody, deliberately,
+    // so the new thing has to be visible before it can be equipped.
+    const kit = sh.character_id
+      ? (await call("list_inventory", { characterId: sh.character_id })) || []
+      : sh.loadout || [];
+
+    if (kit.length) {
+      for (const it of kit) {
+        into.append(actorKitRow(it, () => paintActorView(host, actor, encounterId)));
+      }
+    } else {
+      into.append(chip("carrying nothing", "cls"));
+    }
+  });
 }
 
 // One thing a monster is carrying, with the DM's controls on it.
@@ -10596,18 +10917,20 @@ async function loadStatblockPicker() {
 
 async function loadSkillPicker() {
   const sel = document.querySelector("#chal-skill");
-  sel.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "no suggested skill";
-  sel.append(none);
-  const skills = await call("list_skill_keys", { gameId: state.gameId });
-  for (const s of skills || []) {
-    const o = document.createElement("option");
-    o.value = s.key;
-    o.textContent = s.name + " (" + s.ability.toUpperCase() + ")";
-    sel.append(o);
-  }
+  // 305. Asked twice per encounter refresh - see 306.
+  return swapInto(sel, async (into) => {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "no suggested skill";
+    into.append(none);
+    const skills = await call("list_skill_keys", { gameId: state.gameId });
+    for (const s of skills || []) {
+      const o = document.createElement("option");
+      o.value = s.key;
+      o.textContent = s.name + " (" + s.ability.toUpperCase() + ")";
+      into.append(o);
+    }
+  });
 }
 
 /// Show what the request would roll, before committing to it.
@@ -10917,40 +11240,42 @@ function resetDie() {
 
 async function loadRolls() {
   const ul = document.querySelector("#rolls");
-  ul.innerHTML = "";
-  if (!state.gameId) return;
-  const rolls = await call("list_rolls", { gameId: state.gameId });
-  state.rolls = Array.isArray(rolls) ? rolls : [];
+  // 305. The roll feed, which has its own scroll.
+  return swapInto(ul, async (into) => {
+    if (!state.gameId) return;
+    const rolls = await call("list_rolls", { gameId: state.gameId });
+    state.rolls = Array.isArray(rolls) ? rolls : [];
 
-  // Group by action, preserving the newest-first order the query gave
-  // us. A roll written before 012 has no action_id and stands alone,
-  // which is the third legal state the schema allows for.
-  const groups = [];
-  const byAction = new Map();
-  for (const r of state.rolls) {
-    if (!r.action_id) {
-      groups.push([r]);
-      continue;
+    // Group by action, preserving the newest-first order the query gave
+    // us. A roll written before 012 has no action_id and stands alone,
+    // which is the third legal state the schema allows for.
+    const groups = [];
+    const byAction = new Map();
+    for (const r of state.rolls) {
+      if (!r.action_id) {
+        groups.push([r]);
+        continue;
+      }
+      const seen = byAction.get(r.action_id);
+      if (seen) {
+        seen.push(r);
+      } else {
+        const g = [r];
+        byAction.set(r.action_id, g);
+        groups.push(g);
+      }
     }
-    const seen = byAction.get(r.action_id);
-    if (seen) {
-      seen.push(r);
-    } else {
-      const g = [r];
-      byAction.set(r.action_id, g);
-      groups.push(g);
+
+    // Damage reads under its to-hit, never above it. The two land in the
+    // same insert so created_at cannot be relied on to order them.
+    const order = { to_hit: 0, check: 0, damage: 1 };
+    for (const g of groups) {
+      g.sort((a, b) => (order[a.role] ?? 0) - (order[b.role] ?? 0));
+      into.append(rollCard(g));
     }
-  }
 
-  // Damage reads under its to-hit, never above it. The two land in the
-  // same insert so created_at cannot be relied on to order them.
-  const order = { to_hit: 0, check: 0, damage: 1 };
-  for (const g of groups) {
-    g.sort((a, b) => (order[a.role] ?? 0) - (order[b.role] ?? 0));
-    ul.append(rollCard(g));
-  }
-
-  paintDie();
+    paintDie();
+  });
 }
 
 /* ---------- wiring ---------- */
@@ -12209,7 +12534,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // 169. `input` covers a select as well as a text box.
   for (const sel of ["#spell-find", "#spell-class", "#spell-level", "#spell-school"]) {
     const el = document.querySelector(sel);
-    if (el) el.addEventListener("input", paintSpells);
+    // 305. ONE REPAINT PER FRAME. The whole list was rebuilt on every
+    // letter typed - no network, so it never read as slowness; it read
+    // as a list flickering under the cursor.
+    if (el) el.addEventListener("input", perFrame(paintSpells));
   }
   const addHead = document.querySelector("#add-prayer-head");
   if (addHead) addHead.addEventListener("click", () => {
@@ -12219,9 +12547,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   const prepFind = document.querySelector("#prep-find");
-  if (prepFind) prepFind.addEventListener("input", () => {
+  if (prepFind) prepFind.addEventListener("input", perFrame(() => {
     if (state.prayers) paintPrepList(state.prayers);
-  });
+  }));
 
   document.querySelector("#perform-audience").addEventListener("change", paintOdds);
 
@@ -12303,7 +12631,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Preview updates as you type — the point is to see the modifier
   // before you commit, not after.
-  document.querySelector("#named-request").addEventListener("input", updatePreview);
+  document
+    .querySelector("#named-request")
+    .addEventListener("input", perFrame(updatePreview));
   // 118. The circumstance changes the number, so it changes the
   // preview - the same way the Adv/Dis dropdown does.
   document.querySelector("#vs-spell").addEventListener("change", updatePreview);
@@ -12919,9 +13249,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Filtering is local - the whole list is already here - so it repaints
   // on every keystroke without asking the database anything.
-  document.querySelector("#obj-find").addEventListener("input", paintObjects);
+  document
+    .querySelector("#obj-find")
+    .addEventListener("input", perFrame(paintObjects));
   document.querySelector("#obj-where").addEventListener("change", paintObjects);
-  document.querySelector("#cat-find").addEventListener("input", paintCatalogue);
+  document
+    .querySelector("#cat-find")
+    .addEventListener("input", perFrame(paintCatalogue));
 
   guarded("#bring-here", async () => {
     const who = document.querySelector("#bring-who");

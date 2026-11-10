@@ -29,6 +29,7 @@
 #   ?role=player   not the DM of the game
 #   ?caster=0      the character cannot cast
 #   ?break=<name>  make one loader fail - see stub.js
+#   ?slow=<ms>     every answer takes this long - see 305
 
 import os
 import socketserver
@@ -134,5 +135,6 @@ class Server(socketserver.ThreadingTCPServer):
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8790
     print("rig: serving %s at http://127.0.0.1:%d" % (WEB, port), flush=True)
-    print("     ?role=player  ?caster=0  ?break=prayers", flush=True)
+    print("     ?role=player  ?caster=0  ?break=prayers  ?slow=400",
+          flush=True)
     Server(("127.0.0.1", port), Rig).serve_forever()

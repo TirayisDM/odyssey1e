@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "test": "node tests/map.smoke.mjs && node tests/die.smoke.mjs && node tests/tour.smoke.mjs && node tests/reach.smoke.mjs && node tests/rig.smoke.mjs",
+    "test": "node tests/map.smoke.mjs && node tests/die.smoke.mjs && node tests/tour.smoke.mjs && node tests/reach.smoke.mjs && node tests/paint.smoke.mjs && node tests/rig.smoke.mjs",
     "rig": "python tests/rig/serve.py"
   },
   "devDependencies": {

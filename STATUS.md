@@ -15853,6 +15853,175 @@ is one source change and three decisions about one `<select>`.
   advantage shows one die, the pad is a display and not a control, the
   damage dice want the same code with a different net.
 
+## 305. Gather, then draw
+
+**2026-11-09.** Dave: *"the screens seem really jumpy and glitchy when
+I am trying to do things - is this a performance issue from taxing
+system or just jagged programming - simple answer."*
+
+**NEITHER. IT WAS THE ORDER.** Twelve paints emptied their pane and
+THEN went to the network. `.left` is `overflow-y:auto`, so a pane
+collapsing inside it reflows the column: everything below slides up,
+then slides back down when the content lands. Twice per action, in
+opposite directions. That is the jump.
+
+**WHAT IT WAS NOT, AND EACH ONE IS A CYCLE NOBODY HAS TO SPEND.** One
+geometry read in 13,000 lines, and it is the canvas hit-test. No
+polling timers - two `setTimeout`s, both one-shot. And the renderer was
+already right: 260 coalesces every arrival into one frame and guards
+the canvas resize. Not the machine, not the GPU, not the drawing code.
+
+**THE FIRST COUNT WAS WRONG AND THE SECOND ONE IS THE CYCLE.** A crude
+scan said 25, because it counted the `await`s sitting inside handlers
+that a loader only REGISTERS on its way past - those clear and fill in
+the same tick, which is free. Thirteen survive asking the right
+question, and then TWELVE survive asking it properly: `fillDetail`
+moved the other way. The crude scan called it the worst of them, and
+it is not blank at all. It GROWS,
+which is a different fault needing a different change. 302's lesson
+twice in one cycle - a green check and a check measuring the wrong
+thing look identical.
+
+| | |
+|---|---|
+| the mechanism | `swapInto(host, build)`, the only thing allowed to empty a pane. The builder appends to a `DocumentFragment` outside the document, so nothing it does costs a reflow however long it waits; `replaceChildren` puts it in with one mutation |
+| seven were a straight swap | `paintContents`, `paintTradeSide`, `fillFixture`, `fillEncounterObjects`, `paintActorView`, `loadSkillPicker`, `loadRolls` |
+| five needed the read hoisted | `loadFeatures`, `loadWorld`, `loadTargets`, `loadInventory`, `paintFightCard`. Three of those paint TWO panes out of one answer, which is why twelve functions come to thirteen `swapInto` call sites |
+| the ratchet | `tests/paint.smoke.mjs`, the sixth check |
+
+**`innerHTML = ""` IS NOT THE FAULT.** Emptying a pane you fill in the
+same tick is free; 85 of them remain and most are right. What costs is
+emptying one and then awaiting, and **the two read identically at the
+call site** - which is why this is a function and not a rule in a
+comment. 288: a rule written twice disagrees eventually, and this one
+would have been written a dozen times.
+
+**THE RIG COULD NOT SEE IT, WHICH IS 304 AGAIN.** The stub answers in
+the same tick, so a paint that blanks and then waits looks perfect when
+the network is instant: the rig agreed with the bug and had nothing to
+say. `?slow=<ms>` fixes that, and with it the thing is measurable
+rather than arguable. `#locations`, sampled every 30ms across one
+repaint:
+
+```
+fixed     2,2,2,2,2,2,2,2 ... 2    50 samples, never 0
+planted   0,0,0,0 (20 samples) then 2,2,2 ...
+```
+
+Same page, same `?slow=600`, same script - the planted fault is the old
+order put back, and the hole it opens is 600ms wide, which is exactly
+the round trip. The check names it too: *"loadWorld empties ul at
+main.js:6147"*.
+
+**AND THE SAME BUG POINTS THE OTHER WAY AT THE INPUTS.** Dave, in the
+same breath: *"when filling fields like number scalers it seems to want
+to reload every number."* It did. A stepper fires `change` on every
+click of its arrow, and the ability field answered each one with
+`set_ability` and then a whole `loadSheet` - `get_sheet`, the portrait,
+the inventory three times, the features, the prayers. **Eight round
+trips per click**, with `#abilities` emptied in the middle of them, so
+the arrow you were holding stopped existing. Five clicks were forty
+round trips and five lost focuses.
+
+Measured in the rig, five clicks of one arrow:
+
+```
+before   5 x set_ability, 5 x get_sheet, focus lost each time
+after    1 x set_ability, 1 x get_sheet, value 15, focus kept
+```
+
+Nothing at all is called during the clicks themselves. The field is
+rebuilt - `fieldWasRebuilt: true` - and `document.activeElement` is the
+new one, found by `data-keep` rather than by position, because an index
+moves onto the wrong ability the moment a row is added above it.
+
+**THE DANGER IS THE OPPOSITE ONE AND IT IS NAMED.** A save that has not
+happened yet is a number that does not stick, which is worse than slow.
+Every queued save is registered, and `flushSaves` runs it now: at the
+top of `refreshTab`, which every tab switch and manual refresh goes
+through, and before `state.characterId` or `state.gameId` moves, since
+a queued save reads those when it fires. Changing a score and leaving
+the pane 60ms later still saves, and coming back shows the new number.
+On sign-out it cannot land at all, so `dropSaves` throws it away AND
+SAYS SO IN THE LOG - the one case nobody may be left to guess about.
+
+**BUT THE PLANTED FAULT FOR THE FLUSH DID NOT FAIL, AND THAT IS
+REPORTED RATHER THAN QUIETLY DROPPED.** With `await flushSaves()` taken
+out of `refreshTab`, the save still landed and the screen still agreed
+with the fixture: the 350ms timer fires on its own, and the refresh
+chain is long enough that the write gets there first. So that flush is
+a GUARD against an ordering race and not a load-bearing line, and the
+honest claim is the smaller one. What it does prevent needs two
+characters with a sheet each to demonstrate, which the rig has not got.
+
+And the search boxes rebuilt their whole list on every letter typed -
+no network, so it never read as slowness; it read as a list flickering
+under the cursor. `perFrame` is 260's argument applied to the DOM:
+*"every arrival still causes a redraw, it is just the same redraw."*
+**Eight keystrokes, one repaint**, measured.
+
+Six Node checks, all green. The rig gained three things: `?slow`, a
+call counter on 298's seam - `main.js` takes its reference to `invoke`
+at import, so a harness cannot wrap the bridge afterwards and the count
+has to be kept on the stub's side - and two writes that MOVE the
+fixture, because a stub answering "ok" and changing nothing is the green
+tick its own header warns about. No Rust, no migration, no new command.
+
+### Carried forward
+
+- **TEN SEQUENTIAL ROUND TRIPS FOR ONE CLICK ON THE ENCOUNTER TAB**,
+  and 305 did not touch it. `refreshTab` awaits five loaders in a row
+  and `loadDM` fans out to five more, with `list_encounters` and
+  `list_skill_keys` each asked TWICE in the one click. The order was
+  deliberate: parallelising while the panes still blanked first would
+  have blanked all of them at once, and the chain is not serial by
+  accident - `loadDM` awaits `loadWorld` and `loadChars` because it
+  reads the state they set. That untangling is the next cycle, and
+  `?slow` is the number to beat.
+- **`paintFightCard`'s NEW ORDERING IS UNEXERCISED.** The two awaited
+  rows are fetched at the top of it now, instead of two round trips
+  after `#fight-options` had been emptied - the worst pane in the app
+  to blank mid-fight - and the rig cannot reach any of it, because its
+  encounter fixture is `ready` rather than `active` and the card
+  returns early. An active encounter in the rig closes this.
+- **`paintFightCard` THROWS ON AN ACTIVE ENCOUNTER WITH NOBODY IN IT.**
+  Found while reordering rather than caused by it: an empty order
+  leaves `focus` undefined and `attackRow` reads `actor.id`.
+  Pre-existing, one line, and nothing says so on screen.
+- **A PANE THAT GROWS IS STILL UNFIXED.** `fillDetail` appends its
+  facts in the same tick, then adds the moves section and the contents
+  over two more round trips, so it changes height three times. Closing
+  it means `fillMoves` not taking the host to hand on to
+  `reopenDetail`: three functions, and not an ordering change.
+- **THE NEW CHECK IS A RATCHET, NOT A PROOF**, and says so beside
+  itself. It reads text, because there is no bundler and so no AST; it
+  knows `innerHTML =`, `replaceChildren()` and `append(`; it reads a
+  branch by its indentation; and it sees only the first match on a
+  line, which is why the planted fault reported `ul` and not `parent`.
+- **THREE FUNCTIONS FROM 303 ARE STILL UNEXERCISED.**
+  `instantiate_npc` is an encounter's **enrol** with a *statblock*
+  picked; `instantiate_character` with `copy_kit` behind it is the
+  Creatures tab's **place in world**. Both refuse without a DM's token.
+- **NOTHING NOTICES A CHANGE MADE OUTSIDE A MIGRATION**, from 303.
+- **A FILE SCAN OF THE MIGRATIONS IS NOT AN INSTRUMENT**, from 303.
+- **NOTHING CHECKS THAT A CONTROL OFFERS WHAT ITS LABEL SAYS**, from
+  304. Both of this week's real bugs were found by somebody trying to
+  play and not by anything in `npm test`.
+- **HALF THE RIG'S FIXTURES STILL HAVE NO SHAPE TO BE HELD TO**, from
+  302 - 20 of 38 now, because 305 added two writes.
+- **NESTING IS UNCHECKED**, from 302. `Owned.item` is an `Item`.
+- **A VALUE IN THE WRONG DOMAIN IS STILL INVISIBLE**, which is 299's
+  `dice_prefs` sending `#f5f5f5` where the app wanted `slate`.
+- **The thinness worklist is nine lines long and nobody has walked
+  it.**
+- **Nobody has walked `TOUR.md`.** Still the only item here that a
+  single evening closes.
+- **FOUR FEATURES ARE ONE BUTTON SHORT**, from 301: `move_location`,
+  `remove_class`, `copy_from_scroll`, `quote_object`.
+- 290's notes stand and are NEW MATERIAL rather than cleanup:
+  advantage shows one die, the pad is a display and not a control, the
+  damage dice want the same code with a different net.
+
 ---
 
 ## Pick up here

@@ -58,12 +58,26 @@
 //   ?role=player     you are not the DM of this game
 //   ?caster=0        the character cannot cast
 //   ?break=<name>    make one loader fail - see BREAKS below
+//   ?slow=<ms>       every answer takes this long to arrive
+//
+// 305. WHY `?slow` EXISTS. The stub answers in the same tick, and a
+// paint that empties its pane and THEN waits on the network looks
+// perfect when the network is instant. The rig agreed with the bug and
+// had nothing to say - the same shape as 304's one-row fixture. With
+// `?slow=400` the empty interval is a thing you can see and a thing a
+// test can measure, which is the difference between fixing this and
+// claiming to have fixed it.
 //
 // `npm run rig`, then http://127.0.0.1:8790
 
 const RIG = new URLSearchParams(location.search);
 const DM = RIG.get("role") !== "player";
 const BREAK = RIG.get("break") || "";
+// Clamped, because a typo of `?slow=400000` is an app that never
+// answers and looks broken rather than slow.
+const SLOW = Math.min(Math.max(Number(RIG.get("slow")) || 0, 0), 5000);
+const waitSlow = () =>
+  SLOW ? new Promise((ok) => setTimeout(ok, SLOW)) : null;
 const GAME = "game-1";
 const ME = { profile_id: DM ? "dm-1" : "pc-1", email: "rig@example.com" };
 
@@ -72,6 +86,12 @@ const ME = { profile_id: DM ? "dm-1" : "pc-1", email: "rig@example.com" };
 // it through the DOM. In the real app `window.__RIG__` is undefined and
 // that line does nothing.
 window.__RIG__ = {};
+// 305. AND WHAT WAS ASKED FOR, COUNTED. `main.js` takes its reference
+// to `invoke` when it imports, so a harness cannot wrap the bridge
+// afterwards - it has to be counted on this side. One save for five
+// clicks of a stepper is a claim about the number of calls, and this is
+// the only place that number can be read.
+window.__RIG__.calls = {};
 
 /* ---------- the fixtures ---------- */
 
@@ -225,6 +245,25 @@ const ANSWERS = {
 
   // the sheet and the regions around it
   get_sheet: () => SHEET,
+  // 305. A WRITE THE RIG ACTUALLY PERFORMS.
+  //
+  // The number steppers coalesce a burst of clicks into one save, and
+  // the danger in that is the opposite of the one it fixes: a save that
+  // has not happened yet is a number that does not stick. Proving the
+  // flush needs a write whose effect can be READ BACK, so this one
+  // moves the fixture the way 301 moved `PLACES` - a stub that answers
+  // "ok" and changes nothing is the green tick this header warns about.
+  set_ability: (a) => {
+    SHEET.abilities[a.ability] = ABIL(a.score);
+    SHEET.save_lines[a.ability] = SAVE(
+      Math.floor((a.score - 10) / 2), a.saveProf
+    );
+    return null;
+  },
+  set_skill_prof: (a) => {
+    SHEET.profs[a.skillKey] = a.prof;
+    return null;
+  },
   // 302. THE SELECT'S SEVEN COLUMNS AND NOT THE WHOLE CHARACTER. This
   // was `[CHAR]`, which handed the roster `hp`, `hp_max`, `ac`,
   // `caster`, `species_key`, `classes` and `abilities` - seven fields
@@ -442,6 +481,12 @@ window.__TAURI__ = {
         // app's own log for a command that did nothing.
         throw "not in the rig: " + cmd;
       }
+      // 305. THE DELAY IS BEFORE THE ANSWER, not after, and it is
+      // awaited whether the command is a read or a write - a save that
+      // returns instantly while the read after it crawls is not a
+      // slow network, it is a fiction.
+      window.__RIG__.calls[cmd] = (window.__RIG__.calls[cmd] || 0) + 1;
+      await waitSlow();
       return fn(args);
     },
   },

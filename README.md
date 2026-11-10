@@ -42,11 +42,13 @@ cargo test           # 1443 tests, about a second
 inside it**, not from the repo root.
 
 ```powershell
-npm test             # the renderer, the die, the tour, reach and the rig
+npm test             # the renderer, the die, the tour, reach, the
+                     # paint order and the rig
 ```
 
 ```powershell
 npm run rig          # the frontend in a browser, no database, no sign-in
+                     # ?slow=400 to see it over a slow network
 ```
 
 **That is a second suite and it is tiny on purpose.** `cargo test`
@@ -97,6 +99,9 @@ the day it was written; three were painting a wrong screen.
 fields and the rig's catalogue entry carries five - so missing fields
 are printed as a worklist and never asserted. The first draft asserted
 them too and flagged 72.
+
+The sixth asks whether any pane goes BLANK while the app waits on the
+network. See `tests/paint.smoke.mjs`, and 305 below.
 
 **A map tab that shows nothing is the first thing to check after a
 pull.** `npm test` answers it in a second and does not need the app,
@@ -197,6 +202,7 @@ tests/die.smoke.mjs      the die's geometry, which needs no stubs at all.
 tests/tour.smoke.mjs     TOUR.md's names, which nothing else checks.
 tests/reach.smoke.mjs    every registered command, and whether anything
                          in src/ can actually reach it.
+tests/paint.smoke.mjs    whether any pane is emptied and THEN waited on.
 tests/rig.smoke.mjs      and the rig's stub, same reason.
 tests/rig/               `npm run rig`. The frontend in a browser with
                          no database behind it. serve.py + stub.js.
@@ -282,6 +288,15 @@ Flags on the URL:
 | `?role=player` | you are not the DM of this game |
 | `?caster=0` | the character cannot cast |
 | `?break=prayers` | make `loadPrayers` fail on a missing field |
+| `?slow=400` | every answer takes 400ms to arrive |
+
+**`?slow=` is how 305 was proved**, and it exists because the rig
+could not see 305's bug at all. The stub answers in the same tick, so a
+paint that empties its pane and then waits on the network looks perfect
+when the network is instant - the rig agreed with the bug and had
+nothing to say, which is the same shape as 304's one-row fixture. With
+`?slow=600` the empty interval is a thing you can watch and a thing a
+script can sample.
 
 **`?break=` is how 295 was proved.** A thrown COMMAND proves nothing
 about the paint - `call` catches it and returns null - so the breaks
@@ -317,6 +332,86 @@ every function the renderer reaches **exists**, and that `squareAt`
 and `draw` still agree about which square a pixel is in, because a
 click that paints the neighbouring square is the kind of fault that
 looks like an ordinary answer.
+
+---
+
+### Gather, then draw
+
+Dave, on 305: *"the screens seem really jumpy and glitchy when I am
+trying to do things - is this a performance issue from taxing system or
+just jagged programming."*
+
+Neither. **It was the order.** Twelve paints emptied their pane and
+THEN went to the network, so the pane sat at zero height for the whole
+round trip. `.left` is `overflow-y:auto`, so a pane collapsing inside
+it reflows the column: everything below slides up, then slides back
+down when the content lands. Twice per action, in opposite directions.
+
+What it was NOT, and each of these is a cycle nobody has to spend:
+
+| suspect | reading |
+|---|---|
+| forced reflow | **one** geometry read in 13,000 lines, and it is the canvas hit-test |
+| polling timers | none. Two `setTimeout`s, both one-shot |
+| the renderer | already right. 260 coalesces every arrival into one `requestAnimationFrame` and guards the canvas resize |
+
+**`swapInto(host, build)` IS THE ONLY THING ALLOWED TO EMPTY A PANE.**
+The builder appends to a `DocumentFragment` that is not in the
+document, so nothing it does costs a reflow however long it waits; the
+old content stays up until the new content is ready, and
+`replaceChildren` puts it in with one mutation. Stale for the length of
+the round trip is the honest trade - **a stale number you can read
+beats a hole where it was.**
+
+`innerHTML = ""` is not itself the fault. Emptying a pane you fill in
+the same tick is free, 85 of them remain, and most are correct. What
+costs is emptying one and then awaiting, and **the two read identically
+at the call site** - which is why this is a function and not a rule in
+a comment. 288: a rule written twice disagrees eventually, and this one
+would have been written a dozen times. (A crude scan said twenty-five
+and then thirteen; both counted a pane that is never blank. The number
+is what survives asking the question properly.)
+
+`keepPlace` carries the rest of what a repaint destroys: the pane's
+scroll, the scroll of the column it sits in, a dropdown's choice - the
+line 304 wrote by hand in `fillCreaturePicker` and nowhere else - and
+**the field you are standing in**, found again by `data-keep` rather
+than by position, because an index moves onto the wrong ability the
+moment a row is added above it.
+
+**THE SAME BUG POINTS THE OTHER WAY AT THE INPUTS.** A number stepper
+fires `change` on every click of its arrow, and the ability field
+answered each one with `set_ability` and then a whole `loadSheet`:
+`get_sheet`, the portrait, the inventory three times, the features,
+the prayers. **Eight round trips per click**, with `#abilities`
+emptied in the middle of them, so the arrow you were holding stopped
+existing. Five clicks were forty round trips and five lost focuses.
+`coalesce` makes a burst one save; measured in the rig, five clicks go
+from five `set_ability` calls to one, and the field keeps focus.
+
+**A SAVE THAT HAS NOT HAPPENED YET IS WORSE THAN A SLOW ONE**, so
+every queued save is registered and `flushSaves` runs it now - at the
+top of `refreshTab`, which every tab switch and manual refresh goes
+through, and before `state.characterId` or `state.gameId` moves, since
+a queued save reads those when it fires. On sign-out it cannot land at
+all, so `dropSaves` throws it away **and says so in the log**: the one
+case nobody may be left to guess about.
+
+And the search boxes rebuilt their whole list on every letter typed -
+no network, so it never read as slowness; it read as a list flickering
+under the cursor. `perFrame` is 260's argument applied to the DOM:
+*"every arrival still causes a redraw, it is just the same redraw."*
+Eight keystrokes, one repaint, measured.
+
+**WHAT 305 DID NOT FIX.** One click on the encounter tab is still at
+least **10 sequential round trips** - `refreshTab` awaits five loaders
+in a row and `loadDM` fans out to five more - with `list_encounters`
+and `list_skill_keys` each asked twice. 305 makes the wait stop moving
+the screen; it does not make it shorter. That ordering is deliberate:
+**parallelising the loaders while they still blank first would blank
+every pane at once**, and the chain is not serial by accident -
+`loadDM` awaits `loadWorld` and `loadChars` because it reads the state
+they set. That is its own cycle, and `?slow` is the number to beat.
 
 ---
 
